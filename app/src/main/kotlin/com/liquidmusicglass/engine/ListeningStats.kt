@@ -42,7 +42,7 @@ object ListeningStats {
 
     // ── Data classes ──
     data class TrackStat(
-        val trackId: Long,
+        val trackId: String,
         val title: String,
         val artist: String,
         val playCount: Int,
@@ -91,7 +91,7 @@ object ListeningStats {
      * Записать прослушивание трека.
      * Вызывать когда трек проигран >= 30 секунд.
      */
-    fun recordPlay(trackId: Long, title: String, artist: String, durationMs: Long) {
+    fun recordPlay(trackId: String, title: String, artist: String, durationMs: Long) {
         val data = trackStatsMap.getOrPut(trackId) {
             TrackPlayData(title, artist, 0, 0L)
         }
@@ -111,7 +111,7 @@ object ListeningStats {
     /**
      * Добавить время прослушивания (для незавершённых треков).
      */
-    fun addListenTime(trackId: Long, title: String, artist: String, timeMs: Long) {
+    fun addListenTime(trackId: String, title: String, artist: String, timeMs: Long) {
         if (timeMs <= 0) return
         val data = trackStatsMap.getOrPut(trackId) {
             TrackPlayData(title, artist, 0, 0L)
@@ -129,7 +129,7 @@ object ListeningStats {
     /**
      * Получить количество прослушиваний трека.
      */
-    fun getPlayCount(trackId: Long): Int {
+    fun getPlayCount(trackId: String): Int {
         return trackStatsMap[trackId]?.playCount ?: 0
     }
 

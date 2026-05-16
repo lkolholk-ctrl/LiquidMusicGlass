@@ -185,7 +185,7 @@ private fun NavigationCapsule(
                 onDragStopped = {
                     val targetIndex = targetValue
                         .fastRoundToInt()
-                        .fastCoerceIn(0, tabsCount - 1)
+                        .coerceIn(0, tabsCount - 1)
                     currentIndex = targetIndex
                     animateToValue(targetIndex.toFloat())
                     animationScope.launch {
@@ -315,7 +315,7 @@ private fun NavigationCapsule(
                     .height(56f.dp)
                     .fillMaxWidth()
                     .padding(horizontal = 4f.dp)
-                    .graphicsLayer(colorFilter = ColorFilter.tint(accentColor)),
+                    .graphicsLayer { this.colorFilter = ColorFilter.tint(accentColor) },
                 verticalAlignment = Alignment.CenterVertically,
                 content = content
             )
@@ -330,7 +330,7 @@ private fun NavigationCapsule(
                     detectTapGestures { offset ->
                         val tappedIndex = ((offset.x) / (size.width.toFloat() / tabsCount))
                             .toInt()
-                            .fastCoerceIn(0, tabsCount - 1)
+                            .coerceIn(0, tabsCount - 1)
                         currentIndex = tappedIndex
                     }
                 }
