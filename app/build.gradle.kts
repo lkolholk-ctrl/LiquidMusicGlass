@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
+    kotlin("plugin.serialization") version "2.1.0"
 }
 
 android {
@@ -117,4 +118,11 @@ dependencies {
     implementation("com.google.ai.edge.litert:litert:1.0.1")
 
     implementation("com.github.wendykierp:JTransforms:3.2")
+
+    // Kotlinx Serialization (ICM Partner API)
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.0")
+
+    // OkHttp (ICM Partner API — более надёжный чем HttpURLConnection)
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
 }

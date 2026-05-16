@@ -38,6 +38,7 @@ import kotlin.math.sin
 @Composable
 fun AnimatedPlayerBackground(
     albumArtUri: Uri?,
+    coverUrl: String? = null,
     audioFileUri: Uri? = null,
     albumId: Long = -1L,
     albumColors: AlbumColors,
@@ -79,6 +80,7 @@ fun AnimatedPlayerBackground(
         // ── Layer 1: 125% — базовый слой, заполняет всё ──
         AlbumArtImage(
             uri = albumArtUri,
+            coverUrl = coverUrl,
             audioFileUri = audioFileUri,
             albumId = albumId,
             contentDescription = null,
@@ -97,6 +99,7 @@ fun AnimatedPlayerBackground(
         // ── Layer 2: 80% — средний слой ──
         AlbumArtImage(
             uri = albumArtUri,
+            coverUrl = coverUrl,
             audioFileUri = audioFileUri,
             albumId = albumId,
             contentDescription = null,
@@ -117,6 +120,7 @@ fun AnimatedPlayerBackground(
         // ── Layer 3: 50% — яркий акцент ──
         AlbumArtImage(
             uri = albumArtUri,
+            coverUrl = coverUrl,
             audioFileUri = audioFileUri,
             albumId = albumId,
             contentDescription = null,

@@ -76,15 +76,15 @@ object PlayerController {
     private val _repeatMode = MutableStateFlow(0) // 0=off, 1=all, 2=one
     val repeatMode: StateFlow<Int> = _repeatMode
 
-    // Favorites
-    private val _favoriteIds = MutableStateFlow<Set<Long>>(emptySet())
-    val favoriteIds: StateFlow<Set<Long>> = _favoriteIds
+    // Favorites (String IDs — поддержка локальных Long и ICM API String)
+    private val _favoriteIds = MutableStateFlow<Set<String>>(emptySet())
+    val favoriteIds: StateFlow<Set<String>> = _favoriteIds
 
     // Playlists (persisted in SharedPreferences)
     data class Playlist(
         val id: Long,
         val name: String,
-        val trackIds: List<Long>
+        val trackIds: List<String>
     )
 
     private var nextPlaylistId = 1L
@@ -108,9 +108,9 @@ object PlayerController {
                 val obj = arr.getJSONObject(i)
                 val id = obj.getLong("id")
                 if (id > maxId) maxId = id
-                val ids = mutableListOf<Long>()
+                val ids = mutableListOf<String>()
                 val tArr = obj.getJSONArray("t")
-                for (j in 0 until tArr.length()) ids.add(tArr.getLong(j))
+                for (j in 0 until tArr.length()) ids.add(tArr.getString(j))
                 list.add(Playlist(id, obj.getString("n"), ids))
             }
             nextPlaylistId = maxId + 1
@@ -161,7 +161,7 @@ object PlayerController {
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             val mediaId = mediaItem?.mediaId ?: return
-            val index = queue.indexOfFirst { it.id.toString() == mediaId }
+            val index = queue.indexOfFirst { it.id == mediaId }
             if (index in queue.indices) {
                 currentIndex = index
                 val track = queue[index]
@@ -306,7 +306,7 @@ object PlayerController {
             val dataCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
 
             while (cursor.moveToNext()) {
-                val id = cursor.getLong(idCol)
+                val mediaStoreId = cursor.getLong(idCol)
                 val title = cursor.getString(titleCol) ?: "Unknown"
                 val artist = cursor.getString(artistCol) ?: "Unknown"
                 val albumName = cursor.getString(albumCol) ?: "Unknown"
@@ -325,12 +325,12 @@ object PlayerController {
 
                 val contentUri = ContentUris.withAppendedId(
                     MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
-                    id
+                    mediaStoreId
                 )
 
                 tracks.add(
                     Track(
-                        id = id,
+                        id = mediaStoreId.toString(),
                         title = title,
                         artist = artist,
                         albumName = albumName,
@@ -509,14 +509,14 @@ object PlayerController {
     }
 
     // ── Favorites ──
-    fun toggleFavorite(trackId: Long) {
+    fun toggleFavorite(trackId: String) {
         val current = _favoriteIds.value.toMutableSet()
         if (current.contains(trackId)) current.remove(trackId)
         else current.add(trackId)
         _favoriteIds.value = current
     }
 
-    fun isFavorite(trackId: Long): Boolean = _favoriteIds.value.contains(trackId)
+    fun isFavorite(trackId: String): Boolean = _favoriteIds.value.contains(trackId)
 
     fun getFavoriteTracks(): List<Track> {
         val ids = _favoriteIds.value
@@ -531,7 +531,7 @@ object PlayerController {
         return playlist
     }
 
-    fun addToPlaylist(playlistId: Long, trackId: Long) {
+    fun addToPlaylist(playlistId: Long, trackId: String) {
         _playlists.value = _playlists.value.map { pl ->
             if (pl.id == playlistId && trackId !in pl.trackIds) {
                 pl.copy(trackIds = pl.trackIds + trackId)
@@ -540,7 +540,7 @@ object PlayerController {
         savePlaylists()
     }
 
-    fun removeFromPlaylist(playlistId: Long, trackId: Long) {
+    fun removeFromPlaylist(playlistId: Long, trackId: String) {
         _playlists.value = _playlists.value.map { pl ->
             if (pl.id == playlistId) {
                 pl.copy(trackIds = pl.trackIds.filter { it != trackId })
@@ -563,7 +563,7 @@ object PlayerController {
 
     fun getPlaylistTracks(playlistId: Long): List<Track> {
         val pl = _playlists.value.firstOrNull { it.id == playlistId } ?: return emptyList()
-        return pl.trackIds.mapNotNull { id -> queue.firstOrNull { it.id == id } }
+        return pl.trackIds.mapNotNull { trackId -> queue.firstOrNull { it.id == trackId } }
     }
 
     fun playPlaylist(context: Context, playlistId: Long) {

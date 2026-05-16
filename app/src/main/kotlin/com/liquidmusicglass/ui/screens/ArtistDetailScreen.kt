@@ -391,6 +391,7 @@ fun ArtistDetailScreen(
                             uri = track.albumArtUri,
                             audioFileUri = track.uri,
                             albumId = track.albumId,
+                coverUrl = track.coverUrl,
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Crop
                         )

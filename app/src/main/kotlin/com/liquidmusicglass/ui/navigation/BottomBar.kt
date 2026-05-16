@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.Search
@@ -102,8 +103,9 @@ fun BottomBar(
     val items = listOf(
         BottomNavItem(Icons.Rounded.Home, "Home"),
         BottomNavItem(Icons.Rounded.LibraryMusic, "Library"),
-        BottomNavItem(Icons.Rounded.Settings, "Settings"),
-        BottomNavItem(Icons.Rounded.Search, "Search")
+        BottomNavItem(Icons.Rounded.Cloud, "Online"),
+        BottomNavItem(Icons.Rounded.Search, "Search"),
+        BottomNavItem(Icons.Rounded.Settings, "Settings")
     )
 
     NavigationCapsule(

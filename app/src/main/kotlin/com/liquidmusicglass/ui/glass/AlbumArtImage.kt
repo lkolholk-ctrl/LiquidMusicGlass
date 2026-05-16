@@ -29,12 +29,20 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /** Минимальный размер стороны чтобы считать обложку HQ */
 private const val MIN_HQ_SIZE = 500
 
+/**
+ * Универсальный компонент для отображения обложки альбома.
+ * Поддерживает:
+ * - Локальные треки (MediaStore album art, embedded art)
+ * - Онлайн треки (coverUrl из ICM API через Coil)
+ */
 @Composable
 fun AlbumArtImage(
     uri: Uri?,
@@ -42,8 +50,26 @@ fun AlbumArtImage(
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Crop,
     audioFileUri: Uri? = null,
-    albumId: Long = -1L
+    albumId: Long = -1L,
+    coverUrl: String? = null
 ) {
+    // Онлайн-обложка: используем Coil AsyncImage
+    if (!coverUrl.isNullOrBlank()) {
+        AsyncImage(
+            model = ImageRequest.Builder(LocalContext.current)
+                .data(coverUrl)
+                .crossfade(true)
+                .build(),
+            contentDescription = contentDescription,
+            modifier = modifier,
+            contentScale = contentScale,
+            error = { PlaceholderArt(modifier = Modifier.fillMaxSize()) },
+            fallback = { PlaceholderArt(modifier = Modifier.fillMaxSize()) }
+        )
+        return
+    }
+
+
     val context = LocalContext.current
     var bitmap by remember(uri, audioFileUri, albumId) { mutableStateOf<ImageBitmap?>(null) }
     var loadFailed by remember(uri, audioFileUri, albumId) { mutableStateOf(false) }
@@ -139,25 +165,30 @@ fun AlbumArtImage(
             filterQuality = FilterQuality.High
         )
     } else if (loadFailed) {
-        Box(
-            modifier = modifier
-                .background(
-                    Brush.linearGradient(
-                        colors = listOf(
-                            Color(0xFF2A2A3E),
-                            Color(0xFF1A1A2E),
-                            Color(0xFF0F0F1A)
-                        )
+        PlaceholderArt(modifier = modifier)
+    }
+}
+
+@Composable
+private fun PlaceholderArt(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .background(
+                Brush.linearGradient(
+                    colors = listOf(
+                        Color(0xFF2A2A3E),
+                        Color(0xFF1A1A2E),
+                        Color(0xFF0F0F1A)
                     )
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.MusicNote,
-                contentDescription = null,
-                tint = Color.White.copy(alpha = 0.30f),
-                modifier = Modifier.fillMaxSize(0.4f)
-            )
-        }
+                )
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.MusicNote,
+            contentDescription = null,
+            tint = Color.White.copy(alpha = 0.30f),
+            modifier = Modifier.fillMaxSize(0.4f)
+        )
     }
 }

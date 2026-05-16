@@ -1,0 +1,232 @@
+package com.liquidmusicglass.api.icm
+
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.util.concurrent.TimeUnit
+
+/**
+ * ICM Music Partner API клиент.
+ * Документация: https://byicloud.online/partners/api-docs
+ *
+ * Использует API-ключ (X-Partner-Key) или session token (Authorization: Bearer).
+ *
+ * Для получения ключа: https://byicloud.online/partners
+ */
+class IcmApi private constructor() {
+
+    companion object {
+        const val BASE_URL = "https://byicloud.online/api/partner"
+
+        @Volatile
+        private var instance: IcmApi? = null
+
+        fun getInstance(): IcmApi {
+            return instance ?: synchronized(this) {
+                instance ?: IcmApi().also { instance = it }
+            }
+        }
+
+        fun resetInstance() {
+            instance = null
+        }
+    }
+
+    private val json = Json {
+        ignoreUnknownKeys = true
+        coerceInputValues = true
+        isLenient = true
+    }
+
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .writeTimeout(15, TimeUnit.SECONDS)
+        .build()
+
+    private val mediaTypeJson = "application/json; charset=utf-8".toMediaType()
+
+    /** API-ключ партнера (pk_<id>_<random>) */
+    var apiKey: String? = null
+
+    /** Session token (JWT) — альтернатива apiKey для клиентских запросов */
+    var sessionToken: String? = null
+
+    /** Регион по умолчанию для поиска */
+    var defaultRegion: String = "us"
+
+    /** Качество стрима: "256K", "128K" или null для дефолта */
+    var streamQuality: String? = "256K"
+
+    private inline fun <reified T> parseResponse(body: okhttp3.ResponseBody?): T {
+        val text = body?.string() ?: throw IcmApiException(0, "Empty response body")
+        return json.decodeFromString(text)
+    }
+
+    private fun buildRequest(endpoint: String, method: String = "GET", body: String? = null): Request {
+        val builder = Request.Builder()
+            .url("$BASE_URL$endpoint")
+            .header("User-Agent", "LiquidMusicGlass/1.0")
+            .header("Accept", "application/json")
+
+        // Авторизация: приоритет у session token
+        sessionToken?.let {
+            builder.header("Authorization", "Bearer $it")
+        } ?: apiKey?.let {
+            builder.header("X-Partner-Key", it)
+        }
+
+        if (body != null) {
+            val requestBody = body.toRequestBody(mediaTypeJson)
+            builder.method(method, requestBody)
+        } else if (method != "GET") {
+            builder.method(method, "".toRequestBody(null))
+        }
+
+        return builder.build()
+    }
+
+    private suspend inline fun <reified T> execute(endpoint: String, method: String = "GET", body: String? = null): Result<T> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val request = buildRequest(endpoint, method, body)
+                val response = client.newCall(request).execute()
+                if (response.isSuccessful) {
+                    Result.success(parseResponse<T>(response.body))
+                } else {
+                    val errorText = response.body?.string() ?: "HTTP ${response.code}"
+                    Result.failure(IcmApiException(response.code, errorText))
+                }
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  Public API
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * Проверка здоровья API и конфигурации ключа.
+     */
+    suspend fun health(): Result<IcmHealthResponse> = execute("/health")
+
+    /**
+     * Выпуск session token для клиентских запросов.
+     * Требует apiKey.
+     */
+    suspend fun issueSession(
+        partnerUserId: String,
+        hideExplicit: Boolean = false
+    ): Result<IcmSessionResponse> {
+        val body = json.encodeToString(
+            IcmSessionRequest(partnerUserId = partnerUserId, hideExplicit = hideExplicit)
+        )
+        return execute("/session/issue", method = "POST", body = body)
+    }
+
+    /**
+     * Поиск треков, альбомов и артистов.
+     * @param query Строка поиска (до 200 символов)
+     * @param region Регион (us/ru/nz), null — используется defaultRegion
+     */
+    suspend fun search(
+        query: String,
+        region: String? = null
+    ): Result<IcmSearchResponse> {
+        val r = region ?: defaultRegion
+        val encQuery = java.net.URLEncoder.encode(query, "UTF-8")
+        return execute("/search?q=$encQuery&region=$r")
+    }
+
+    /**
+     * Получить подписанный URL для проигрывания трека.
+     * @param trackId ID трека из поиска/альбома
+     * @param region Регион
+     * @param quality Качество: "256K", "128K" или null
+     * @return IcmTrackResponse с полем url для стрима
+     */
+    suspend fun getTrack(
+        trackId: String,
+        region: String? = null,
+        quality: String? = streamQuality
+    ): Result<IcmTrackResponse> {
+        val body = json.encodeToString(
+            IcmTrackRequest(
+                trackId = trackId,
+                region = region ?: defaultRegion,
+                quality = quality
+            )
+        )
+        return execute("/track", method = "POST", body = body)
+    }
+
+    /**
+     * Информация об альбоме + список треков.
+     */
+    suspend fun getAlbum(
+        albumId: String,
+        region: String? = null
+    ): Result<IcmAlbumResponse> {
+        val r = region ?: defaultRegion
+        return execute("/album/$albumId?region=$r")
+    }
+
+    /**
+     * Информация об артисте: топ-треки, альбомы, похожие.
+     */
+    suspend fun getArtist(
+        artistId: String,
+        region: String? = null
+    ): Result<IcmArtistResponse> {
+        val r = region ?: defaultRegion
+        return execute("/artist/$artistId?region=$r")
+    }
+
+    /**
+     * Метаданные трека (без получения URL).
+     */
+    suspend fun getTrackMeta(trackId: String): Result<IcmTrackMeta> =
+        execute("/track/$trackId/meta")
+
+    /**
+     * Плейлист редакционный (Today Hits, etc).
+     */
+    suspend fun getPlaylist(
+        playlistId: String,
+        region: String? = null
+    ): Result<IcmPlaylist> {
+        val r = region ?: defaultRegion
+        return execute("/playlist/$playlistId?region=$r")
+    }
+
+    /**
+     * Подписать URL обложки (для custom-обложек).
+     * Для Apple Music обложек подпись не нужна — cover URL можно использовать напрямую.
+     */
+    suspend fun signCover(fileId: String): Result<IcmCoverSignResponse> {
+        val encFileId = java.net.URLEncoder.encode(fileId, "UTF-8")
+        return execute("/cover-sign?file_id=$encFileId")
+    }
+
+    /**
+     * Текст песни.
+     */
+    suspend fun getLyrics(trackId: String): Result<IcmLyricsResponse> =
+        execute("/lyrics?trackId=$trackId")
+}
+
+/**
+ * Исключение API с HTTP-кодом.
+ */
+class IcmApiException(
+    val code: Int,
+    override val message: String
+) : Exception("HTTP $code: $message")
