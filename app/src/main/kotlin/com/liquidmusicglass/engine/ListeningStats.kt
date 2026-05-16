@@ -64,7 +64,7 @@ object ListeningStats {
 
     // ── Track play data (in-memory map backed by SharedPrefs) ──
     // Key: trackId → JSON: {title, artist, playCount, totalTimeMs}
-    private val trackStatsMap = mutableMapOf<Long, TrackPlayData>()
+    private val trackStatsMap = mutableMapOf<String, TrackPlayData>()
 
     private data class TrackPlayData(
         val title: String,
@@ -215,7 +215,7 @@ object ListeningStats {
             val tracksJson = JSONObject(tracksStr)
             tracksJson.keys().forEach { key ->
                 val obj = tracksJson.getJSONObject(key)
-                trackStatsMap[key.toLong()] = TrackPlayData(
+                trackStatsMap[key] = TrackPlayData(
                     title = obj.optString("t", ""),
                     artist = obj.optString("a", ""),
                     playCount = obj.optInt("p", 0),
