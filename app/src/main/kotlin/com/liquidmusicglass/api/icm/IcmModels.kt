@@ -261,29 +261,27 @@ data class IcmBatchTrackMetaResponse(
     val items: List<IcmBatchTrackMetaItem>
 )
 
+/**
+ * Batch item — может быть либо успешным результатом, либо ошибкой.
+ * API не использует дискриминатор; отличай по наличию поля `error`.
+ */
 @Serializable
-sealed class IcmBatchTrackMetaItem {
-    abstract val id: String
-}
-
-@Serializable
-@SerialName("success")
-data class IcmBatchTrackMetaSuccess(
-    override val id: String,
-    val title: String,
-    val artist: String,
-    val cover: String,
-    val duration: Long,
-    @SerialName("collectionId") val collectionId: String? = null
-) : IcmBatchTrackMetaItem()
-
-@Serializable
-@SerialName("error")
-data class IcmBatchTrackMetaError(
-    override val id: String,
+data class IcmBatchTrackMetaItem(
+    val id: String,
+    val title: String? = null,
+    val artist: String? = null,
+    val cover: String? = null,
+    val duration: Long? = null,
+    @SerialName("collectionId") val collectionId: String? = null,
     @SerialName("track_id") val trackId: String? = null,
-    val error: String
-) : IcmBatchTrackMetaItem()
+    val error: String? = null
+) {
+    val isSuccess: Boolean
+        get() = error == null && title != null
+
+    val isError: Boolean
+        get() = error != null
+}
 
 // ─── Async Track ───
 
