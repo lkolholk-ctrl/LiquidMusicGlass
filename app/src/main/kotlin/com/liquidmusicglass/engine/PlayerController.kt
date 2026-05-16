@@ -1,10 +1,8 @@
 package com.liquidmusicglass.engine
 
 import android.content.ComponentName
-import android.content.ContentUris
 import android.content.Context
 import android.media.AudioManager
-import android.provider.MediaStore
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
@@ -188,18 +186,6 @@ object PlayerController {
         scope.launch {
             obtainController(context)
         }
-
-        scope.launch(Dispatchers.IO) {
-            val tracks = scanMusic(context)
-            queue = tracks
-            _queue.value = tracks
-
-            if (tracks.isNotEmpty()) {
-                currentIndex = 0
-                _currentTrack.value = tracks[0]
-                _durationMs.value = tracks[0].durationMs
-            }
-        }
     }
 
     private suspend fun obtainController(context: Context): MediaController? {
@@ -254,107 +240,28 @@ object PlayerController {
     }
 
     /**
-     * Пересканировать музыку на устройстве.
+     * Установить очередь треков из ICM API.
      */
-    fun rescanMusic(context: Context) {
-        scope.launch(Dispatchers.IO) {
-            val tracks = scanMusic(context)
-            queue = tracks
-            _queue.value = tracks
-
-            if (tracks.isNotEmpty() && currentIndex < 0) {
-                currentIndex = 0
-                _currentTrack.value = tracks[0]
-                _durationMs.value = tracks[0].durationMs
-            }
+    fun setQueue(tracks: List<Track>, startIndex: Int = 0) {
+        queue = tracks
+        _queue.value = tracks
+        if (tracks.isNotEmpty() && startIndex in tracks.indices) {
+            currentIndex = startIndex
+            _currentTrack.value = tracks[startIndex]
+            _durationMs.value = tracks[startIndex].durationMs
         }
-    }
-
-    private fun addToRecent(track: Track) {
-        recentHistory.removeAll { it.id == track.id }
-        recentHistory.add(0, track)
-        if (recentHistory.size > 30) recentHistory.removeLast()
-        _recentlyPlayed.value = recentHistory.toList()
-    }
-
-    private fun scanMusic(context: Context): List<Track> {
-        val tracks = mutableListOf<Track>()
-        val uri = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
-        val projection = arrayOf(
-            MediaStore.Audio.Media._ID,
-            MediaStore.Audio.Media.TITLE,
-            MediaStore.Audio.Media.ARTIST,
-            MediaStore.Audio.Media.ALBUM,
-            MediaStore.Audio.Media.ALBUM_ID,
-            MediaStore.Audio.Media.DURATION,
-            MediaStore.Audio.Media.DATA
-        )
-        val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0"
-        val sortOrder = "${MediaStore.Audio.Media.TITLE} ASC"
-
-        val allowedFolders = AppSettings.scanFolders.value
-        val ignoreShort = AppSettings.ignoreShortEnabled.value
-        val ignoreThreshold = (AppSettings.ignoreThresholdSec.value * 1000).toLong()
-
-        context.contentResolver.query(uri, projection, selection, null, sortOrder)?.use { cursor ->
-            val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
-            val titleCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
-            val artistCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
-            val albumCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
-            val albumIdCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
-            val durationCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
-            val dataCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
-
-            while (cursor.moveToNext()) {
-                val mediaStoreId = cursor.getLong(idCol)
-                val title = cursor.getString(titleCol) ?: "Unknown"
-                val artist = cursor.getString(artistCol) ?: "Unknown"
-                val albumName = cursor.getString(albumCol) ?: "Unknown"
-                val albumId = cursor.getLong(albumIdCol)
-                val duration = cursor.getLong(durationCol)
-                val path = cursor.getString(dataCol) ?: ""
-
-                // Filter by folders
-                if (allowedFolders.isNotEmpty()) {
-                    val inAllowed = allowedFolders.any { folder -> path.startsWith(folder) }
-                    if (!inAllowed) continue
-                }
-
-                // Filter short tracks
-                if (ignoreShort && duration < ignoreThreshold) continue
-
-                val contentUri = ContentUris.withAppendedId(
-                    MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
-                    mediaStoreId
-                )
-
-                tracks.add(
-                    Track(
-                        id = mediaStoreId.toString(),
-                        title = title,
-                        artist = artist,
-                        albumName = albumName,
-                        uri = contentUri,
-                        durationMs = duration,
-                        albumId = albumId
-                    )
-                )
-            }
-        }
-
-        return tracks
     }
 
     private fun buildMediaItem(track: Track): MediaItem {
         return MediaItem.Builder()
-            .setMediaId(track.id.toString())
+            .setMediaId(track.id)
             .setUri(track.uri)
             .setMediaMetadata(
                 MediaMetadata.Builder()
                     .setTitle(track.title)
                     .setArtist(track.artist)
                     .setAlbumArtist(track.artist)
-                    .setArtworkUri(track.albumArtUri)
+                    .setArtworkUri(track.displayArtUri)
                     .build()
             )
             .build()
@@ -365,51 +272,14 @@ object PlayerController {
         AudioService.setAutoMixEnabled(enabled)
     }
 
-    fun playTrack(context: Context, index: Int) {
-        if (index !in queue.indices) return
-
-        scope.launch {
-            val playerController = obtainController(context) ?: return@launch
-            val track = queue[index]
-            val mediaItems = queue.map { buildMediaItem(it) }
-
-            currentIndex = index
-            _currentTrack.value = track
-            _durationMs.value = track.durationMs
-            _currentPositionMs.value = 0L
-
-            playerController.setMediaItems(mediaItems, index, 0L)
-            playerController.prepare()
-            playerController.play()
-
-            AudioService.companionService?.notifyManualNavigation()
-        }
-    }
-
     /**
-     * Воспроизвести радио-стрим по URL.
+     * Добавить трек в недавно прослушанные.
      */
-    fun playRadioStream(context: Context, streamUrl: String, stationName: String = "Radio") {
-        scope.launch {
-            val playerController = obtainController(context) ?: return@launch
-
-            val mediaItem = MediaItem.Builder()
-                .setUri(streamUrl)
-                .setMediaMetadata(
-                    androidx.media3.common.MediaMetadata.Builder()
-                        .setTitle(stationName)
-                        .setArtist("Live Radio")
-                        .build()
-                )
-                .build()
-
-            _currentTrack.value = null
-            _isPlaying.value = true
-
-            playerController.setMediaItem(mediaItem)
-            playerController.prepare()
-            playerController.play()
-        }
+    private fun addToRecent(track: Track) {
+        recentHistory.removeAll { it.id == track.id }
+        recentHistory.add(0, track)
+        if (recentHistory.size > 30) recentHistory.removeLast()
+        _recentlyPlayed.value = recentHistory.toList()
     }
 
     fun togglePlayPause(context: Context) {

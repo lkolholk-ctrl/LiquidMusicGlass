@@ -1,10 +1,5 @@
 package com.liquidmusicglass.ui
 
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -45,7 +40,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
@@ -56,17 +50,13 @@ import com.liquidmusicglass.ui.navigation.BottomBar
 import com.liquidmusicglass.ui.player.FullPlayer
 import com.liquidmusicglass.ui.player.MiniPlayer
 import com.liquidmusicglass.ui.screens.HomeScreen
-import com.liquidmusicglass.ui.screens.LibraryScreen
 import com.liquidmusicglass.ui.screens.SearchScreen
-import com.liquidmusicglass.ui.screens.OnlineSearchScreen
 import com.liquidmusicglass.ui.screens.AlbumDetailScreen
 import com.liquidmusicglass.ui.screens.ArtistDetailScreen
 import com.liquidmusicglass.ui.screens.EqualizerScreen
 import com.liquidmusicglass.ui.screens.PlaylistDetailScreen
 import com.liquidmusicglass.ui.screens.PlaylistsScreen
 import com.liquidmusicglass.ui.screens.SettingsScreen
-import com.liquidmusicglass.ui.screens.RadioScreen
-import com.liquidmusicglass.ui.screens.StatsScreen
 import com.liquidmusicglass.ui.theme.LiquidTheme
 import kotlinx.coroutines.launch
 
@@ -96,68 +86,11 @@ fun AppRoot() {
     var detailAlbumId by remember { mutableStateOf<Long?>(null) }
     var detailArtistName by remember { mutableStateOf<String?>(null) }
     var equalizerOpen by remember { mutableStateOf(false) }
-    var statsOpen by remember { mutableStateOf(false) }
-    var radioOpen by remember { mutableStateOf(false) }
-    var currentRadioStationId by remember { mutableStateOf<String?>(null) }
     var playlistsOpen by remember { mutableStateOf(false) }
     var playlistDetailId by remember { mutableStateOf<String?>(null) }
 
-    val hasAudioPermission = remember {
-        mutableStateOf(
-            ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.READ_MEDIA_AUDIO
-            ) == PackageManager.PERMISSION_GRANTED
-        )
-    }
-
-    val hasNotificationPermission = remember {
-        mutableStateOf(
-            Build.VERSION.SDK_INT < 33 ||
-                ContextCompat.checkSelfPermission(
-                    context,
-                    Manifest.permission.POST_NOTIFICATIONS
-                ) == PackageManager.PERMISSION_GRANTED
-        )
-    }
-
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { result ->
-        hasAudioPermission.value = result[Manifest.permission.READ_MEDIA_AUDIO] == true ||
-            ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.READ_MEDIA_AUDIO
-            ) == PackageManager.PERMISSION_GRANTED
-
-        hasNotificationPermission.value =
-            Build.VERSION.SDK_INT < 33 ||
-                result[Manifest.permission.POST_NOTIFICATIONS] == true ||
-                ContextCompat.checkSelfPermission(
-                    context,
-                    Manifest.permission.POST_NOTIFICATIONS
-                ) == PackageManager.PERMISSION_GRANTED
-
-        if (hasAudioPermission.value) {
-            PlayerController.init(context)
-        }
-    }
-
     LaunchedEffect(Unit) {
-        val permissionsToRequest = buildList {
-            if (!hasAudioPermission.value) {
-                add(Manifest.permission.READ_MEDIA_AUDIO)
-            }
-            if (Build.VERSION.SDK_INT >= 33 && !hasNotificationPermission.value) {
-                add(Manifest.permission.POST_NOTIFICATIONS)
-            }
-        }
-
-        if (permissionsToRequest.isEmpty()) {
-            PlayerController.init(context)
-        } else {
-            permissionLauncher.launch(permissionsToRequest.toTypedArray())
-        }
+        PlayerController.init(context)
     }
 
     val currentTrack by PlayerController.currentTrack.collectAsState()
@@ -223,23 +156,21 @@ fun AppRoot() {
             // ── Main screens ──
             when (selectedIndex) {
                 0 -> HomeScreen(
-                    onOpenStats = { statsOpen = true },
-                    onOpenRadio = { radioOpen = true }
-                )
-                1 -> LibraryScreen(
                     onNavigateToAlbum = { detailAlbumId = it },
                     onNavigateToArtist = { detailArtistName = it },
                     onNavigateToPlaylist = { playlistDetailId = it }
                 )
-                2 -> OnlineSearchScreen(
-                    onNavigateToAlbum = { detailAlbumId = it.toLongOrNull() ?: -1L },
-                    onNavigateToArtist = { detailArtistName = it }
-                )
-                3 -> SearchScreen(
+                1 -> SearchScreen(
                     onNavigateToAlbum = { detailAlbumId = it },
                     onNavigateToArtist = { detailArtistName = it }
                 )
-                4 -> SettingsScreen(
+                2 -> PlaylistsScreen(
+                    onBack = { selectedIndex = 0 },
+                    onOpenPlaylist = { id ->
+                        playlistDetailId = id
+                    }
+                )
+                3 -> SettingsScreen(
                     autoMixEnabled = autoMixEnabled,
                     onAutoMixChange = { PlayerController.setAutoMix(it) },
                     onBack = { selectedIndex = 0 },
@@ -247,8 +178,9 @@ fun AppRoot() {
                     backdrop = rootBackdrop
                 )
                 else -> HomeScreen(
-                    onOpenStats = { statsOpen = true },
-                    onOpenRadio = { radioOpen = true }
+                    onNavigateToAlbum = { detailAlbumId = it },
+                    onNavigateToArtist = { detailArtistName = it },
+                    onNavigateToPlaylist = { playlistDetailId = it }
                 )
             }
 
@@ -308,52 +240,6 @@ fun AppRoot() {
                 EqualizerScreen(onBack = { equalizerOpen = false })
             }
 
-            // ── Stats ──
-            AnimatedVisibility(
-                visible = statsOpen,
-                enter = slideInVertically(
-                    initialOffsetY = { it },
-                    animationSpec = spring(dampingRatio = 0.88f, stiffness = 300f)
-                ) + fadeIn(tween(200)),
-                exit = slideOutVertically(
-                    targetOffsetY = { it },
-                    animationSpec = spring(dampingRatio = 0.92f, stiffness = 400f)
-                ) + fadeOut(tween(150))
-            ) {
-                StatsScreen(onBack = { statsOpen = false })
-            }
-
-            // ── Radio ──
-            AnimatedVisibility(
-                visible = radioOpen,
-                enter = slideInVertically(
-                    initialOffsetY = { it },
-                    animationSpec = spring(dampingRatio = 0.88f, stiffness = 300f)
-                ) + fadeIn(tween(200)),
-                exit = slideOutVertically(
-                    targetOffsetY = { it },
-                    animationSpec = spring(dampingRatio = 0.92f, stiffness = 400f)
-                ) + fadeOut(tween(150))
-            ) {
-                RadioScreen(
-                    onBack = {
-                        radioOpen = false
-                        if (currentRadioStationId != null) {
-                            currentRadioStationId = null
-                        }
-                    },
-                    onPlayStation = { station ->
-                        currentRadioStationId = station.id
-                        PlayerController.playRadioStream(
-                            context = context,
-                            streamUrl = station.streamUrl,
-                            stationName = station.name
-                        )
-                    },
-                    currentStationId = currentRadioStationId
-                )
-            }
-
             // ── Playlists ──
             AnimatedVisibility(
                 visible = playlistsOpen,
@@ -395,7 +281,7 @@ fun AppRoot() {
             }
         }
 
-        val barsVisible = !radioOpen && !statsOpen
+        val barsVisible = true
 
         if (barsVisible && expandProgress.value < 0.95f) {
             Column(
