@@ -65,7 +65,11 @@ import com.liquidmusicglass.ui.theme.LiquidTheme
 private val AppleRed = Color(0xFFFC3C44)
 
 @Composable
-fun HomeScreen(onOpenStats: () -> Unit = {}, onOpenRadio: () -> Unit = {}) {
+fun HomeScreen(
+    onNavigateToAlbum: (Long) -> Unit = {},
+    onNavigateToArtist: (String) -> Unit = {},
+    onNavigateToPlaylist: (String) -> Unit = {}
+) {
     val context = LocalContext.current
     val scroll = rememberScrollState()
     val screenBackdrop = rememberLayerBackdrop()
@@ -75,21 +79,8 @@ fun HomeScreen(onOpenStats: () -> Unit = {}, onOpenRadio: () -> Unit = {}) {
     val recentlyPlayed by PlayerController.recentlyPlayed.collectAsState()
     val currentTrack by PlayerController.currentTrack.collectAsState()
 
-    // Рекомендации: треки того же артиста + рандомные, исключая недавние
-    val recommendations = remember(allTracks, recentlyPlayed, currentTrack) {
-        val recentIds = recentlyPlayed.map { it.id }.toSet()
-        val currentArtist = currentTrack?.artist
-
-        val sameArtist = if (currentArtist != null) {
-            allTracks.filter { it.artist == currentArtist && it.id !in recentIds }
-        } else emptyList()
-
-        val others = allTracks.filter { it.id !in recentIds && it !in sameArtist }.shuffled()
-
-        (sameArtist.shuffled().take(8) + others.take(12))
-            .distinctBy { it.id }
-            .take(15)
-    }
+    // TODO: Load ICM featured playlists, top charts, new releases
+    // For now, show recently played and recommendations
 
     Box(modifier = Modifier.fillMaxSize()) {
         // ── Ambient background ──
@@ -141,14 +132,14 @@ fun HomeScreen(onOpenStats: () -> Unit = {}, onOpenRadio: () -> Unit = {}) {
             }
 
             // ─── For You ───
-            if (recommendations.isNotEmpty()) {
+            if (allTracks.isNotEmpty()) {
                 SectionHeader(title = "For You")
                 Spacer(modifier = Modifier.height(12.dp))
                 LazyRow(
                     contentPadding = PaddingValues(horizontal = 20.dp),
                     horizontalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    items(recommendations, key = { "rec_${it.id}" }) { track ->
+                    items(allTracks.shuffled().take(15), key = { "rec_${it.id}" }) { track ->
                         RecommendationCard(
                             track = track,
                             backdrop = screenBackdrop,
@@ -217,106 +208,6 @@ fun HomeScreen(onOpenStats: () -> Unit = {}, onOpenRadio: () -> Unit = {}) {
                             }
                         )
                     }
-                }
-            }
-
-            // ─── Your Stats ───
-            Spacer(modifier = Modifier.height(16.dp))
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp)
-                    .drawBackdrop(
-                        backdrop = screenBackdrop,
-                        shape = { RoundedCornerShape(18.dp) },
-                        effects = {
-                            vibrancy(); blur(4.dp.toPx())
-                            lens(24.dp.toPx(), 34.dp.toPx(), chromaticAberration = true)
-                        },
-                        highlight = { Highlight.Ambient },
-                        shadow = { Shadow(radius = 6.dp, color = Color.Black.copy(alpha = 0.12f)) },
-                        innerShadow = { InnerShadow(radius = 3.dp, alpha = 0.2f) },
-                        onDrawSurface = {
-                            drawRect(Color.White.copy(alpha = 0.03f))
-                            drawRect(Color.White.copy(alpha = 0.22f), style = Stroke(width = 1.dp.toPx()))
-                        }
-                    )
-                    .clip(RoundedCornerShape(18.dp))
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = onOpenStats
-                    )
-                    .padding(horizontal = 20.dp),
-                contentAlignment = Alignment.CenterStart
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Rounded.Equalizer,
-                        contentDescription = null,
-                        tint = AppleRed,
-                        modifier = Modifier.size(22.dp)
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    Text("Your Statistics", color = lc.textPrimary, fontSize = 16.sp,
-                        fontWeight = FontWeight.Medium)
-                    Spacer(Modifier.weight(1f))
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
-                        contentDescription = null,
-                        tint = lc.iconMuted,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
-
-            // ─── Radio ───
-            Spacer(modifier = Modifier.height(10.dp))
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp)
-                    .drawBackdrop(
-                        backdrop = screenBackdrop,
-                        shape = { RoundedCornerShape(18.dp) },
-                        effects = {
-                            vibrancy(); blur(4.dp.toPx())
-                            lens(20.dp.toPx(), 32.dp.toPx(), chromaticAberration = true)
-                        },
-                        highlight = { Highlight.Ambient },
-                        shadow = { Shadow(radius = 6.dp, color = Color.Black.copy(alpha = 0.12f)) },
-                        innerShadow = { InnerShadow(radius = 3.dp, alpha = 0.2f) },
-                        onDrawSurface = {
-                            drawRect(Color.White.copy(alpha = 0.03f))
-                            drawRect(Color.White.copy(alpha = 0.22f), style = Stroke(width = 1.dp.toPx()))
-                        }
-                    )
-                    .clip(RoundedCornerShape(18.dp))
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = onOpenRadio
-                    )
-                    .padding(horizontal = 20.dp),
-                contentAlignment = Alignment.CenterStart
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Rounded.Radio,
-                        contentDescription = null,
-                        tint = AppleRed,
-                        modifier = Modifier.size(22.dp)
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    Text("Online Radio", color = lc.textPrimary, fontSize = 16.sp,
-                        fontWeight = FontWeight.Medium)
-                    Spacer(Modifier.weight(1f))
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
-                        contentDescription = null,
-                        tint = lc.iconMuted,
-                        modifier = Modifier.size(20.dp)
-                    )
                 }
             }
 
