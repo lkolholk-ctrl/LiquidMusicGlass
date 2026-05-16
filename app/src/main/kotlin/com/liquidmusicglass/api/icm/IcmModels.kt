@@ -248,13 +248,80 @@ data class IcmLyricsResponse(
     val synced: Boolean = false
 )
 
-// ─── Errors ───
+// ─── Batch Track Meta ───
 
 @Serializable
-data class IcmError(
-    val error: String,
-    val message: String? = null,
-    @SerialName("required_region") val requiredRegion: String? = null
+data class IcmBatchTrackMetaRequest(
+    @SerialName("track_ids") val trackIds: List<String>
+)
+
+@Serializable
+data class IcmBatchTrackMetaResponse(
+    val count: Int,
+    val items: List<IcmBatchTrackMetaItem>
+)
+
+@Serializable
+sealed class IcmBatchTrackMetaItem {
+    abstract val id: String
+}
+
+@Serializable
+@SerialName("success")
+data class IcmBatchTrackMetaSuccess(
+    override val id: String,
+    val title: String,
+    val artist: String,
+    val cover: String,
+    val duration: Long,
+    @SerialName("collectionId") val collectionId: String? = null
+) : IcmBatchTrackMetaItem()
+
+@Serializable
+@SerialName("error")
+data class IcmBatchTrackMetaError(
+    override val id: String,
+    @SerialName("track_id") val trackId: String? = null,
+    val error: String
+) : IcmBatchTrackMetaItem()
+
+// ─── Async Track ───
+
+@Serializable
+data class IcmAsyncTrackPending(
+    @SerialName("job_id") val jobId: String,
+    val status: String = "pending",
+    @SerialName("poll_url") val pollUrl: String,
+    @SerialName("poll_after") val pollAfterSeconds: Int
+)
+
+@Serializable
+data class IcmAsyncTrackReady(
+    @SerialName("job_id") val jobId: String,
+    val status: String = "ready",
+    @SerialName("track_id") val trackId: String,
+    @SerialName("file_id") val fileId: String,
+    val source: String,
+    val quality: String,
+    @SerialName("artist_id") val artistId: String? = null,
+    val url: String,
+    @SerialName("expires_at") val expiresAt: Long
+)
+
+// ─── Account Linking ───
+
+@Serializable
+data class IcmAccountLinkUrl(
+    val url: String,
+    @SerialName("expires_at") val expiresAt: Long? = null
+)
+
+@Serializable
+data class IcmAccountLinkCallback(
+    val state: String,
+    val linked: Boolean,
+    @SerialName("icm_user_id") val icmUserId: String? = null,
+    val error: String? = null
 )
 
 // ─── Domain Model Conversion ───
@@ -309,4 +376,29 @@ fun IcmPlaylistTrack.toTrack(): com.liquidmusicglass.engine.Track {
         albumId = collectionId.hashCode().toLong(),
         coverUrl = cover.replace("1000x1000", "600x600")
     )
+}
+
+// ─── Error Codes ───
+
+object IcmErrorCodes {
+    const val MISSING_API_KEY = "missing_api_key"
+    const val INVALID_SESSION_TOKEN = "invalid_session_token"
+    const val INVALID_API_KEY = "invalid_api_key"
+    const val PARTNER_SUSPENDED = "partner_suspended"
+    const val SCOPE_NOT_ALLOWED = "scope_not_allowed"
+    const val SOURCE_NOT_ALLOWED = "source_not_allowed"
+    const val INVALID_OR_EXPIRED_SIGNATURE = "invalid_or_expired_signature"
+    const val TRACK_NOT_FOUND = "track_not_found"
+    const val RATE_LIMITED = "rate_limited"
+    const val REGION_UNAVAILABLE = "region_unavailable"
+    const val NOT_FOUND = "not_found"
+}
+
+// ─── Stream Quality ───
+
+object IcmStreamQuality {
+    const val K128 = "128K"
+    const val K256 = "256K"
+    const val K320 = "320K"
+    const val ALAC = "ALAC"
 }

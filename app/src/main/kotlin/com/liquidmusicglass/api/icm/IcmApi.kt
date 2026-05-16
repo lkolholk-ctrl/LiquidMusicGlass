@@ -42,6 +42,7 @@ class IcmApi private constructor() {
         ignoreUnknownKeys = true
         coerceInputValues = true
         isLenient = true
+        classDiscriminator = "status"
     }
 
     private val client = OkHttpClient.Builder()
@@ -61,17 +62,24 @@ class IcmApi private constructor() {
     /** Регион по умолчанию для поиска */
     var defaultRegion: String = "us"
 
-    /** Качество стрима: "256K", "128K" или null для дефолта */
-    var streamQuality: String? = "256K"
+    /** Качество стрима: "128K", "256K", "320K", "ALAC" или null для дефолта */
+    var streamQuality: String? = IcmStreamQuality.K256
+
+    /** Callback для X-Request-Id tracing */
+    var onRequestId: ((String) -> Unit)? = null
 
     private inline fun <reified T> parseResponse(body: okhttp3.ResponseBody?): T {
         val text = body?.string() ?: throw IcmApiException(0, "Empty response body")
         return json.decodeFromString(text)
     }
 
-    private fun buildRequest(endpoint: String, method: String = "GET", body: String? = null): Request {
+    private fun extractRequestId(response: okhttp3.Response): String? {
+        return response.header("X-Request-Id")
+    }
+
+    private fun buildRequest(url: String, method: String = "GET", body: String? = null): Request {
         val builder = Request.Builder()
-            .url("$BASE_URL$endpoint")
+            .url(url)
             .header("User-Agent", "LiquidMusicGlass/1.0")
             .header("Accept", "application/json")
 
@@ -92,16 +100,45 @@ class IcmApi private constructor() {
         return builder.build()
     }
 
-    private suspend inline fun <reified T> execute(endpoint: String, method: String = "GET", body: String? = null): Result<T> {
+    private suspend inline fun <reified T> execute(
+        endpoint: String,
+        method: String = "GET",
+        body: String? = null,
+        async: Boolean = false
+    ): Result<T> {
         return withContext(Dispatchers.IO) {
             try {
-                val request = buildRequest(endpoint, method, body)
+                val url = if (async) "$BASE_URL$endpoint?async=1" else "$BASE_URL$endpoint"
+                val request = buildRequest(url, method, body)
                 val response = client.newCall(request).execute()
-                if (response.isSuccessful) {
-                    Result.success(parseResponse<T>(response.body))
-                } else {
-                    val errorText = response.body?.string() ?: "HTTP ${response.code}"
-                    Result.failure(IcmApiException(response.code, errorText))
+
+                extractRequestId(response)?.let { onRequestId?.invoke(it) }
+
+                when {
+                    response.isSuccessful -> {
+                        Result.success(parseResponse<T>(response.body))
+                    }
+                    response.code == 202 -> {
+                        // Async pending — parse as pending response
+                        val pending = parseResponse<IcmAsyncTrackPending>(response.body)
+                        Result.failure(IcmAsyncPendingException(pending))
+                    }
+                    else -> {
+                        val errorText = response.body?.string() ?: "HTTP ${response.code}"
+                        val error = try {
+                            json.decodeFromString<IcmError>(errorText)
+                        } catch (_: Exception) {
+                            null
+                        }
+                        Result.failure(IcmApiException(
+                            response.code,
+                            errorText,
+                            error?.error,
+                            error?.requiredRegion,
+                            error?.retryAfter,
+                            error?.source
+                        ))
+                    }
                 }
             } catch (e: Exception) {
                 Result.failure(e)
@@ -221,6 +258,85 @@ class IcmApi private constructor() {
      */
     suspend fun getLyrics(trackId: String): Result<IcmLyricsResponse> =
         execute("/lyrics?trackId=$trackId")
+
+    // ═══════════════════════════════════════════════════════════
+    //  Batch & Async
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * Batch метаданные треков — до 50 за запрос.
+     */
+    suspend fun getBatchTrackMeta(trackIds: List<String>): Result<IcmBatchTrackMetaResponse> {
+        if (trackIds.isEmpty()) return Result.failure(IllegalArgumentException("trackIds must not be empty"))
+        if (trackIds.size > 50) return Result.failure(IllegalArgumentException("trackIds max 50, got ${trackIds.size}"))
+        val body = json.encodeToString(IcmBatchTrackMetaRequest(trackIds = trackIds))
+        return execute("/tracks/meta", method = "POST", body = body)
+    }
+
+    /**
+     * Получить трек в async-режиме.
+     * Если трек холодный — вернёт 202 с job_id для polling.
+     */
+    suspend fun getTrackAsync(
+        trackId: String,
+        region: String? = null,
+        quality: String? = streamQuality
+    ): Result<IcmTrackResponse> {
+        val body = json.encodeToString(
+            IcmTrackRequest(
+                trackId = trackId,
+                region = region ?: defaultRegion,
+                quality = quality
+            )
+        )
+        return execute("/track", method = "POST", body = body, async = true)
+    }
+
+    /**
+     * Проверить статус async job.
+     */
+    suspend fun pollAsyncJob(jobId: String): Result<IcmAsyncTrackReady> {
+        return execute("/track/job/$jobId")
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  Account Linking
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * Сгенерировать URL для привязки аккаунта пользователя к ICM.
+     * @param partnerUserId ID пользователя в твоей системе
+     * @param redirectUri URI для callback после авторизации
+     * @param state Случайная строка для защиты от CSRF
+     */
+    fun buildAccountLinkUrl(
+        partnerId: String,
+        partnerUserId: String,
+        redirectUri: String,
+        state: String
+    ): String {
+        val encRedirect = java.net.URLEncoder.encode(redirectUri, "UTF-8")
+        val encState = java.net.URLEncoder.encode(state, "UTF-8")
+        val encUserId = java.net.URLEncoder.encode(partnerUserId, "UTF-8")
+        return "https://byicloud.online/partner/$partnerId/link?partner_user_id=$encUserId&redirect_uri=$encRedirect&state=$encState"
+    }
+
+    /**
+     * Парсить callback от ICM после линковки.
+     */
+    fun parseAccountLinkCallback(
+        state: String,
+        linked: Boolean,
+        icmUserId: String? = null,
+        error: String? = null
+    ): IcmAccountLinkCallback {
+        return IcmAccountLinkCallback(
+            state = state,
+            linked = linked,
+            icmUserId = icmUserId,
+            error = error
+        )
+    }
 }
 
 /**
@@ -228,5 +344,16 @@ class IcmApi private constructor() {
  */
 class IcmApiException(
     val code: Int,
-    override val message: String
+    override val message: String,
+    val errorCode: String? = null,
+    val requiredRegion: String? = null,
+    val retryAfter: Int? = null,
+    val source: String? = null
 ) : Exception("HTTP $code: $message")
+
+/**
+ * Async pending exception — трек ещё готовится.
+ */
+class IcmAsyncPendingException(
+    val pending: IcmAsyncTrackPending
+) : Exception("Track pending: job ${pending.jobId}, poll after ${pending.pollAfterSeconds}s")
