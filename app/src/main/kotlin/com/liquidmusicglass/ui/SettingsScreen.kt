@@ -33,13 +33,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.CheckBox
-import androidx.compose.material.icons.rounded.CheckBoxOutlineBlank
 import androidx.compose.material.icons.rounded.ChevronRight
-import androidx.compose.material.icons.rounded.ClearAll
 import androidx.compose.material.icons.rounded.Equalizer
-import androidx.compose.material.icons.rounded.Folder
-import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Slider
@@ -48,8 +43,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -83,7 +76,6 @@ import com.liquidmusicglass.ui.liquid.LiquidToggle
 import com.liquidmusicglass.ui.theme.LiquidTheme
 import com.liquidmusicglass.ui.theme.DarkSettingsGradient
 import com.liquidmusicglass.ui.theme.LightSettingsGradient
-import kotlin.math.roundToInt
 
 private val AppleRed = Color(0xFFFC3C44)
 private val AppleGreen = Color(0xFF34C759)
@@ -105,8 +97,6 @@ fun SettingsScreen(
     val gaplessEnabled by AppSettings.gaplessEnabled.collectAsState()
     val sleepTimerMinutes by AppSettings.sleepTimerMinutes.collectAsState()
     val sleepOptions = listOf(0, 15, 30, 45, 60, 90)
-    val ignoreShortEnabled by AppSettings.ignoreShortEnabled.collectAsState()
-    val ignoreThresholdSec by AppSettings.ignoreThresholdSec.collectAsState()
 
     val themeMode by com.liquidmusicglass.engine.PlayerController.themeMode.collectAsState()
     val themeLabels = listOf("System", "Dark", "Light")
@@ -238,161 +228,6 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(28.dp))
 
             // ═══════════════════════════════════════════
-            //  LIBRARY
-            // ═══════════════════════════════════════════
-            SectionLabel("LIBRARY")
-
-            GlassCapsuleCard(backdrop = screenBackdrop) {
-                SettingsActionItem(
-                    title = "Scan Music",
-                    subtitle = "Re-scan device for audio files",
-                    icon = Icons.Rounded.FolderOpen,
-                    onClick = {
-                        PlayerController.rescanMusic(context)
-                    }
-                )
-                GlassDivider()
-                SettingsToggleItem(
-                    title = "Ignore Short Tracks",
-                    subtitle = "Hide ringtones & notifications",
-                    checked = ignoreShortEnabled,
-                    onCheckedChange = { AppSettings.setIgnoreShort(it) }
-                )
-                if (ignoreShortEnabled) {
-                    SettingsSliderItem(
-                        label = "Minimum duration",
-                        value = ignoreThresholdSec,
-                        valueRange = 5f..120f,
-                        steps = 22,
-                        valueLabel = "${ignoreThresholdSec.roundToInt()}s",
-                        onValueChange = { AppSettings.setIgnoreThreshold(it) }
-                    )
-                }
-            }
-
-            // ── Music Folders ──
-            Spacer(modifier = Modifier.height(12.dp))
-            SectionLabel("MUSIC FOLDERS")
-
-            val scanFolders by AppSettings.scanFolders.collectAsState()
-            var showFolderPicker by remember { mutableStateOf(false) }
-            var availableFolders by remember { mutableStateOf<List<String>>(emptyList()) }
-
-            GlassCapsuleCard(backdrop = screenBackdrop) {
-                SettingsActionItem(
-                    title = if (scanFolders.isEmpty()) "All Folders" else "${scanFolders.size} folders selected",
-                    subtitle = if (scanFolders.isEmpty()) "Scanning all music on device" else scanFolders.joinToString(", ") { it.substringAfterLast("/") },
-                    icon = Icons.Rounded.Folder,
-                    onClick = {
-                        availableFolders = AppSettings.discoverMusicFolders(context)
-                        showFolderPicker = true
-                    }
-                )
-                if (scanFolders.isNotEmpty()) {
-                    GlassDivider()
-                    SettingsActionItem(
-                        title = "Clear Selection",
-                        subtitle = "Scan all folders again",
-                        icon = Icons.Rounded.ClearAll,
-                        onClick = {
-                            AppSettings.clearScanFolders()
-                            PlayerController.rescanMusic(context)
-                        }
-                    )
-                }
-            }
-
-            // ── Folder picker dialog ──
-            if (showFolderPicker) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 8.dp)
-                ) {
-                    GlassCapsuleCard(backdrop = screenBackdrop) {
-                        Text(
-                            "Select folders to scan:",
-                            color = LiquidTheme.colors.textPrimary,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(bottom = 8.dp)
-                        )
-
-                        availableFolders.forEach { folder ->
-                            val shortName = folder.substringAfterLast("/")
-                            val isSelected = folder in scanFolders
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(44.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null
-                                    ) {
-                                        if (isSelected) AppSettings.removeScanFolder(folder)
-                                        else AppSettings.addScanFolder(folder)
-                                    }
-                                    .padding(horizontal = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = if (isSelected) Icons.Rounded.CheckBox else Icons.Rounded.CheckBoxOutlineBlank,
-                                    contentDescription = null,
-                                    tint = if (isSelected) Color(0xFFFC3C44) else LiquidTheme.colors.iconMuted,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                                Spacer(Modifier.width(10.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(shortName, color = LiquidTheme.colors.textPrimary, fontSize = 14.sp,
-                                        fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    Text(folder, color = LiquidTheme.colors.textTertiary, fontSize = 11.sp,
-                                        maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                }
-                            }
-                        }
-
-                        Spacer(Modifier.height(8.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.End
-                        ) {
-                            Text(
-                                "Done",
-                                color = Color(0xFFFC3C44),
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null
-                                    ) {
-                                        showFolderPicker = false
-                                        PlayerController.rescanMusic(context)
-                                    }
-                                    .padding(horizontal = 16.dp, vertical = 8.dp)
-                            )
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(28.dp))
-
-            // ═══════════════════════════════════════════
-            //  APPEARANCE — hidden until light theme is fully implemented
-            // ═══════════════════════════════════════════
-            // SectionLabel("APPEARANCE")
-            // GlassCapsuleCard(backdrop = screenBackdrop) {
-            //     ThemeCapsuleSelector(
-            //         labels = themeLabels,
-            //         selectedIndex = themeMode,
-            //         onSelect = { com.liquidmusicglass.engine.PlayerController.setThemeMode(it) },
-            //         backdrop = screenBackdrop
-            //     )
-            // }
-
             // ═══════════════════════════════════════════
             //  ICM MUSIC API
             // ═══════════════════════════════════════════
