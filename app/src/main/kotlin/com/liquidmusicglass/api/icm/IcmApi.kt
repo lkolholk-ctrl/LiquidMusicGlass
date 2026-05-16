@@ -42,7 +42,6 @@ class IcmApi private constructor() {
         ignoreUnknownKeys = true
         coerceInputValues = true
         isLenient = true
-        classDiscriminator = "status"
     }
 
     private val client = OkHttpClient.Builder()
