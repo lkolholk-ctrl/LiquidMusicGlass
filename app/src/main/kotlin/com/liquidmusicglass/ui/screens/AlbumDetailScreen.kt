@@ -1,5 +1,3 @@
-package com.liquidmusicglass.ui.screens
-
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -25,12 +23,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Shuffle
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -54,27 +55,45 @@ import com.kyant.backdrop.highlight.Highlight
 import com.kyant.backdrop.shadow.InnerShadow
 import com.kyant.backdrop.shadow.Shadow
 import com.kyant.shapes.Capsule
+import com.liquidmusicglass.api.icm.IcmAlbumResponse
+import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.engine.PlayerController
+import com.liquidmusicglass.engine.Track
 import com.liquidmusicglass.ui.glass.AlbumArtImage
 
 private val AppleRed = Color(0xFFFC3C44)
 
 @Composable
 fun AlbumDetailScreen(
-    albumId: Long,
+    albumId: String,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
-    val allTracks by PlayerController.queueFlow.collectAsState()
     val screenBackdrop = rememberLayerBackdrop()
 
-    val albumTracks = remember(allTracks, albumId) {
-        allTracks.filter { it.albumId == albumId }
+    var album by remember { mutableStateOf<IcmAlbumResponse?>(null) }
+    var isLoading by remember { mutableStateOf(true) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(albumId) {
+        isLoading = true
+        error = null
+        try {
+            album = IcmRepository.getAlbum(albumId)
+        } catch (e: Exception) {
+            error = e.message
+        } finally {
+            isLoading = false
+        }
     }
 
-    val albumName = albumTracks.firstOrNull()?.albumName ?: "Unknown Album"
-    val artistName = albumTracks.firstOrNull()?.artist ?: "Unknown Artist"
-    val coverTrack = albumTracks.firstOrNull()
+    val albumTracks = remember(album) {
+        album?.tracks?.map { it.toTrack() } ?: emptyList()
+    }
+
+    val albumName = album?.title ?: "Unknown Album"
+    val artistName = album?.artist ?: "Unknown Artist"
+    val coverUrl = album?.cover
 
     Box(
         modifier = Modifier
@@ -96,260 +115,291 @@ fun AlbumDetailScreen(
                 .layerBackdrop(screenBackdrop)
         )
 
-        LazyColumn(modifier = Modifier.fillMaxSize()) {
-            item {
-                Spacer(modifier = Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Back button
+        when {
+            isLoading -> {
                 Box(
-                    modifier = Modifier
-                        .padding(horizontal = 20.dp)
-                        .size(40.dp)
-                        .drawBackdrop(
-                            backdrop = screenBackdrop,
-                            shape = { Capsule() },
-                            effects = {
-                                vibrancy()
-                                blur(4.dp.toPx())
-                                lens(18.dp.toPx(), 24.dp.toPx(), chromaticAberration = true)
-                            },
-                            highlight = {
-                                Highlight.Ambient.copy(alpha = 0.5f)
-                            },
-                            shadow = {
-                                Shadow(radius = 4.dp, color = Color.Black.copy(alpha = 0.12f))
-                            },
-                            innerShadow = {
-                                InnerShadow(radius = 3.dp, alpha = 0.2f)
-                            },
-                            onDrawSurface = {
-                                drawRect(Color.White.copy(alpha = 0.04f))
-                                drawRect(
-                                    color = Color.White.copy(alpha = 0.10f),
-                                    style = Stroke(width = 1.dp.toPx())
-                                )
-                            }
-                        )
-                        .clip(CircleShape)
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            onClick = onBack
-                        ),
+                    modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(22.dp)
+                    CircularProgressIndicator(
+                        color = AppleRed,
+                        modifier = Modifier.size(32.dp)
                     )
                 }
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                // Album art
+            }
+            error != null -> {
                 Box(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (coverTrack != null) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            "Error",
+                            color = AppleRed,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            error ?: "Unknown error",
+                            color = Color.White.copy(alpha = 0.5f),
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+            }
+            else -> {
+                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    item {
+                        Spacer(modifier = Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // Back button
                         Box(
                             modifier = Modifier
-                                .size(220.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                        ) {
-                            AlbumArtImage(
-                                uri = coverTrack.albumArtUri,
-                                audioFileUri = coverTrack.uri,
-                                albumId = albumId,
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                // Album info
-                Text(
-                    text = albumName,
-                    color = Color.White,
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp)
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "$artistName · ${albumTracks.size} tracks",
-                    color = Color.White.copy(alpha = 0.50f),
-                    fontSize = 14.sp,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp)
-                )
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                // Play All / Shuffle buttons
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    // Play All
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(44.dp)
-                            .drawBackdrop(
-                                backdrop = screenBackdrop,
-                                shape = { Capsule() },
-                                effects = {
-                                    vibrancy()
-                                    blur(4.dp.toPx())
-                                    lens(16.dp.toPx(), 24.dp.toPx(), chromaticAberration = true)
-                                },
-                                highlight = {
-                                    Highlight.Default.copy(alpha = 0.7f)
-                                },
-                                shadow = {
-                                    Shadow(radius = 6.dp, color = AppleRed.copy(alpha = 0.3f))
-                                },
-                                innerShadow = {
-                                    InnerShadow(radius = 3.dp, alpha = 0.2f)
-                                },
-                                onDrawSurface = { drawRect(AppleRed) }
-                            )
-                            .clip(RoundedCornerShape(50))
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null,
-                                onClick = {
-                                    if (albumTracks.isNotEmpty()) {
-                                        val idx = allTracks.indexOfFirst { it.id == albumTracks.first().id }
-                                        if (idx >= 0) PlayerController.playTrack(context, idx)
+                                .padding(horizontal = 20.dp)
+                                .size(40.dp)
+                                .drawBackdrop(
+                                    backdrop = screenBackdrop,
+                                    shape = { Capsule() },
+                                    effects = {
+                                        vibrancy()
+                                        blur(4.dp.toPx())
+                                        lens(18.dp.toPx(), 24.dp.toPx(), chromaticAberration = true)
+                                    },
+                                    highlight = {
+                                        Highlight.Ambient.copy(alpha = 0.5f)
+                                    },
+                                    shadow = {
+                                        Shadow(radius = 4.dp, color = Color.Black.copy(alpha = 0.12f))
+                                    },
+                                    innerShadow = {
+                                        InnerShadow(radius = 3.dp, alpha = 0.2f)
+                                    },
+                                    onDrawSurface = {
+                                        drawRect(Color.White.copy(alpha = 0.04f))
+                                        drawRect(
+                                            color = Color.White.copy(alpha = 0.10f),
+                                            style = Stroke(width = 1.dp.toPx())
+                                        )
                                     }
-                                }
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                )
+                                .clip(CircleShape)
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null,
+                                    onClick = onBack
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
                             Icon(
-                                Icons.Rounded.PlayArrow, null,
+                                imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                                contentDescription = null,
                                 tint = Color.White,
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(22.dp)
                             )
-                            Spacer(Modifier.width(6.dp))
-                            Text("Play", color = Color.White, fontWeight = FontWeight.SemiBold)
                         }
-                    }
 
-                    // Shuffle
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(44.dp)
-                            .drawBackdrop(
-                                backdrop = screenBackdrop,
-                                shape = { Capsule() },
-                                effects = {
-                                    vibrancy()
-                                    blur(4.dp.toPx())
-                                    lens(16.dp.toPx(), 24.dp.toPx(), chromaticAberration = true)
-                                },
-                                onDrawSurface = {
-                                    drawRect(Color.White.copy(alpha = 0.04f))
-                                    drawRect(
-                                        color = Color.White.copy(alpha = 0.10f),
-                                        style = Stroke(width = 1.dp.toPx())
+                        Spacer(modifier = Modifier.height(20.dp))
+
+                        // Album art
+                        Box(
+                            modifier = Modifier.fillMaxWidth(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(220.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                            ) {
+                                AlbumArtImage(
+                                    uri = null,
+                                    coverUrl = coverUrl?.replace("1000x1000", "600x600"),
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(20.dp))
+
+                        // Album info
+                        Text(
+                            text = albumName,
+                            color = Color.White,
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp)
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "$artistName · ${albumTracks.size} tracks",
+                            color = Color.White.copy(alpha = 0.50f),
+                            fontSize = 14.sp,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp)
+                        )
+
+                        Spacer(modifier = Modifier.height(20.dp))
+
+                        // Play All / Shuffle buttons
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            // Play All
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(44.dp)
+                                    .drawBackdrop(
+                                        backdrop = screenBackdrop,
+                                        shape = { Capsule() },
+                                        effects = {
+                                            vibrancy()
+                                            blur(4.dp.toPx())
+                                            lens(16.dp.toPx(), 24.dp.toPx(), chromaticAberration = true)
+                                        },
+                                        highlight = {
+                                            Highlight.Default.copy(alpha = 0.7f)
+                                        },
+                                        shadow = {
+                                            Shadow(radius = 6.dp, color = AppleRed.copy(alpha = 0.3f))
+                                        },
+                                        innerShadow = {
+                                            InnerShadow(radius = 3.dp, alpha = 0.2f)
+                                        },
+                                        onDrawSurface = { drawRect(AppleRed) }
                                     )
-                                }
-                            )
-                            .clip(RoundedCornerShape(50))
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null,
-                                onClick = {
-                                    if (albumTracks.isNotEmpty()) {
-                                        val random = albumTracks.random()
-                                        val idx = allTracks.indexOfFirst { it.id == random.id }
-                                        if (idx >= 0) {
-                                            PlayerController.playTrack(context, idx)
-                                            if (!PlayerController.shuffleEnabled.value) {
-                                                PlayerController.toggleShuffle()
+                                    .clip(RoundedCornerShape(50))
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null,
+                                        onClick = {
+                                            if (albumTracks.isNotEmpty()) {
+                                                PlayerController.setQueue(albumTracks)
+                                                PlayerController.playTrack(context, 0)
                                             }
                                         }
-                                    }
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        Icons.Rounded.PlayArrow, null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("Play", color = Color.White, fontWeight = FontWeight.SemiBold)
                                 }
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                Icons.Rounded.Shuffle, null,
-                                tint = AppleRed,
-                                modifier = Modifier.size(20.dp)
+                            }
+
+                            // Shuffle
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(44.dp)
+                                    .drawBackdrop(
+                                        backdrop = screenBackdrop,
+                                        shape = { Capsule() },
+                                        effects = {
+                                            vibrancy()
+                                            blur(4.dp.toPx())
+                                            lens(16.dp.toPx(), 24.dp.toPx(), chromaticAberration = true)
+                                        },
+                                        onDrawSurface = {
+                                            drawRect(Color.White.copy(alpha = 0.04f))
+                                            drawRect(
+                                                color = Color.White.copy(alpha = 0.10f),
+                                                style = Stroke(width = 1.dp.toPx())
+                                            )
+                                        }
+                                    )
+                                    .clip(RoundedCornerShape(50))
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null,
+                                        onClick = {
+                                            if (albumTracks.isNotEmpty()) {
+                                                val shuffled = albumTracks.shuffled()
+                                                PlayerController.setQueue(shuffled)
+                                                PlayerController.playTrack(context, 0)
+                                                if (!PlayerController.shuffleEnabled.value) {
+                                                    PlayerController.toggleShuffle()
+                                                }
+                                            }
+                                        }
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        Icons.Rounded.Shuffle, null,
+                                        tint = AppleRed,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("Shuffle", color = Color.White, fontWeight = FontWeight.SemiBold)
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(24.dp))
+                    }
+
+                    // Track list
+                    itemsIndexed(albumTracks, key = { _, t -> t.id }) { index, track ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(52.dp)
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null,
+                                    onClick = {
+                                        PlayerController.setQueue(albumTracks, index)
+                                        PlayerController.playTrack(context, index)
+                                    }
+                                )
+                                .padding(horizontal = 24.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "${index + 1}",
+                                color = Color.White.copy(alpha = 0.30f),
+                                fontSize = 14.sp,
+                                modifier = Modifier.width(28.dp)
                             )
-                            Spacer(Modifier.width(6.dp))
-                            Text("Shuffle", color = Color.White, fontWeight = FontWeight.SemiBold)
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = track.title,
+                                    color = Color.White,
+                                    fontSize = 15.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            val min = (track.durationMs / 1000 / 60).toInt()
+                            val sec = ((track.durationMs / 1000) % 60).toInt()
+                            Text(
+                                text = "$min:${sec.toString().padStart(2, '0')}",
+                                color = Color.White.copy(alpha = 0.30f),
+                                fontSize = 12.sp
+                            )
                         }
                     }
-                }
 
-                Spacer(modifier = Modifier.height(24.dp))
-            }
-
-            // Track list
-            itemsIndexed(albumTracks, key = { _, t -> t.id }) { index, track ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp)
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            onClick = {
-                                val idx = allTracks.indexOfFirst { it.id == track.id }
-                                if (idx >= 0) PlayerController.playTrack(context, idx)
-                            }
-                        )
-                        .padding(horizontal = 24.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "${index + 1}",
-                        color = Color.White.copy(alpha = 0.30f),
-                        fontSize = 14.sp,
-                        modifier = Modifier.width(28.dp)
-                    )
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = track.title,
-                            color = Color.White,
-                            fontSize = 15.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                    val min = (track.durationMs / 1000 / 60).toInt()
-                    val sec = ((track.durationMs / 1000) % 60).toInt()
-                    Text(
-                        text = "$min:${sec.toString().padStart(2, '0')}",
-                        color = Color.White.copy(alpha = 0.30f),
-                        fontSize = 12.sp
-                    )
+                    item { Spacer(modifier = Modifier.height(200.dp)) }
                 }
             }
-
-            item { Spacer(modifier = Modifier.height(200.dp)) }
         }
     }
 }
