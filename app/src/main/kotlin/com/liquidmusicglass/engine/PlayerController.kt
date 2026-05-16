@@ -278,13 +278,56 @@ object PlayerController {
     }
 
     /**
-     * Добавить трек в недавно прослушанные.
+     * Воспроизвести трек из очереди по индексу.
+     * Получает stream URL через ICM API если нужно.
      */
-    private fun addToRecent(track: Track) {
-        recentHistory.removeAll { it.id == track.id }
-        recentHistory.add(0, track)
-        if (recentHistory.size > 30) recentHistory.removeLast()
-        _recentlyPlayed.value = recentHistory.toList()
+    fun playTrack(context: Context, index: Int) {
+        if (index !in queue.indices) return
+
+        scope.launch {
+            val playerController = obtainController(context) ?: return@launch
+            val track = queue[index]
+            
+            // If track has a direct URI (already resolved), play it
+            // Otherwise, fetch stream URL from ICM API
+            val streamUri = if (track.uri.toString().startsWith("http")) {
+                track.uri
+            } else {
+                // Fetch from ICM API
+                val url = com.liquidmusicglass.api.icm.IcmRepository.getStreamUrlAsync(track.id)
+                if (url != null) {
+                    android.net.Uri.parse(url)
+                } else {
+                    track.uri // fallback
+                }
+            }
+            
+            val mediaItem = MediaItem.Builder()
+                .setMediaId(track.id)
+                .setUri(streamUri)
+                .setMediaMetadata(
+                    MediaMetadata.Builder()
+                        .setTitle(track.title)
+                        .setArtist(track.artist)
+                        .setAlbumArtist(track.artist)
+                        .setArtworkUri(track.displayArtUri)
+                        .build()
+                )
+                .build()
+
+            currentIndex = index
+            _currentTrack.value = track
+            _durationMs.value = track.durationMs
+            _currentPositionMs.value = 0L
+
+            playerController.setMediaItem(mediaItem)
+            playerController.prepare()
+            playerController.play()
+            
+            addToRecent(track)
+
+            AudioService.companionService?.notifyManualNavigation()
+        }
     }
 
     fun togglePlayPause(context: Context) {
@@ -324,7 +367,8 @@ object PlayerController {
         }
 
         if (queue.isEmpty()) return
-        playTrack(context, 0)
+        val nextIndex = if (currentIndex + 1 < queue.size) currentIndex + 1 else 0
+        playTrack(context, nextIndex)
     }
 
     fun skipPrevious(context: Context) {
