@@ -62,9 +62,7 @@ fun AlbumArtImage(
                 .build(),
             contentDescription = contentDescription,
             modifier = modifier,
-            contentScale = contentScale,
-            error = { PlaceholderArt(modifier = Modifier.fillMaxSize()) },
-            fallback = { PlaceholderArt(modifier = Modifier.fillMaxSize()) }
+            contentScale = contentScale
         )
         return
     }
