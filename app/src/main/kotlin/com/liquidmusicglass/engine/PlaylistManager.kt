@@ -20,9 +20,9 @@ object PlaylistManager {
     data class Playlist(
         val id: String,
         val name: String,
-        val trackIds: List<Long>,
+        val trackIds: List<String>,
         val createdAt: Long,
-        val coverTrackId: Long? // первый трек для обложки
+        val coverTrackId: String? // первый трек для обложки
     )
 
     private val _playlists = MutableStateFlow<List<Playlist>>(emptyList())
@@ -70,7 +70,7 @@ object PlaylistManager {
     /**
      * Добавить трек в плейлист.
      */
-    fun addTrack(playlistId: String, trackId: Long) {
+    fun addTrack(playlistId: String, trackId: String) {
         val list = _playlists.value.toMutableList()
         val idx = list.indexOfFirst { it.id == playlistId }
         if (idx >= 0) {
@@ -90,7 +90,7 @@ object PlaylistManager {
     /**
      * Убрать трек из плейлиста.
      */
-    fun removeTrack(playlistId: String, trackId: Long) {
+    fun removeTrack(playlistId: String, trackId: String) {
         val list = _playlists.value.toMutableList()
         val idx = list.indexOfFirst { it.id == playlistId }
         if (idx >= 0) {
@@ -166,17 +166,17 @@ object PlaylistManager {
             for (i in 0 until arr.length()) {
                 val obj = arr.getJSONObject(i)
                 val trackArr = obj.getJSONArray("tracks")
-                val trackIds = mutableListOf<Long>()
+                val trackIds = mutableListOf<String>()
                 for (j in 0 until trackArr.length()) {
-                    trackIds.add(trackArr.getLong(j))
+                    trackIds.add(trackArr.getString(j))
                 }
-                val coverId = obj.optLong("cover", -1L)
+                val coverId = obj.optString("cover", "")
                 list.add(Playlist(
                     id = obj.getString("id"),
                     name = obj.getString("name"),
                     trackIds = trackIds,
                     createdAt = obj.optLong("created", 0L),
-                    coverTrackId = if (coverId == -1L) null else coverId
+                    coverTrackId = if (coverId.isEmpty()) null else coverId
                 ))
             }
             _playlists.value = list

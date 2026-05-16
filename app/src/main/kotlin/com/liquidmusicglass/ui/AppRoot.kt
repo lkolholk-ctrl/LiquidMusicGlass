@@ -58,6 +58,7 @@ import com.liquidmusicglass.ui.player.MiniPlayer
 import com.liquidmusicglass.ui.screens.HomeScreen
 import com.liquidmusicglass.ui.screens.LibraryScreen
 import com.liquidmusicglass.ui.screens.SearchScreen
+import com.liquidmusicglass.ui.screens.OnlineSearchScreen
 import com.liquidmusicglass.ui.screens.AlbumDetailScreen
 import com.liquidmusicglass.ui.screens.ArtistDetailScreen
 import com.liquidmusicglass.ui.screens.EqualizerScreen
@@ -230,16 +231,20 @@ fun AppRoot() {
                     onNavigateToArtist = { detailArtistName = it },
                     onNavigateToPlaylist = { playlistDetailId = it }
                 )
-                2 -> SettingsScreen(
+                2 -> OnlineSearchScreen(
+                    onNavigateToAlbum = { detailAlbumId = it.toLongOrNull() ?: -1L },
+                    onNavigateToArtist = { detailArtistName = it }
+                )
+                3 -> SearchScreen(
+                    onNavigateToAlbum = { detailAlbumId = it },
+                    onNavigateToArtist = { detailArtistName = it }
+                )
+                4 -> SettingsScreen(
                     autoMixEnabled = autoMixEnabled,
                     onAutoMixChange = { PlayerController.setAutoMix(it) },
                     onBack = { selectedIndex = 0 },
                     onOpenEqualizer = { equalizerOpen = true },
                     backdrop = rootBackdrop
-                )
-                3 -> SearchScreen(
-                    onNavigateToAlbum = { detailAlbumId = it },
-                    onNavigateToArtist = { detailArtistName = it }
                 )
                 else -> HomeScreen(
                     onOpenStats = { statsOpen = true },
@@ -423,7 +428,8 @@ fun AppRoot() {
                     trackTitle = trackTitle,
                     artistName = artistName,
                     isPlaying = isPlaying,
-                    albumArtUri = currentTrack?.albumArtUri,
+                    albumArtUri = currentTrack?.displayArtUri,
+                    coverUrl = currentTrack?.coverUrl,
                     backdrop = rootBackdrop,
                     onExpand = { animateExpand() },
                     onPlayPause = { PlayerController.togglePlayPause(context) },
@@ -447,7 +453,8 @@ fun AppRoot() {
             trackTitle = trackTitle,
             artistName = artistName,
             isPlaying = isPlaying,
-            albumArtUri = currentTrack?.albumArtUri,
+            albumArtUri = currentTrack?.displayArtUri,
+            coverUrl = currentTrack?.coverUrl,
             audioFileUri = currentTrack?.uri,
             albumId = currentTrack?.albumId ?: -1L,
             currentPositionMs = currentPositionMs,

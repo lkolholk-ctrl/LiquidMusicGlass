@@ -101,6 +101,7 @@ fun FullPlayer(
     artistName: String,
     isPlaying: Boolean,
     albumArtUri: Uri?,
+    coverUrl: String? = null,
     audioFileUri: Uri? = null,
     albumId: Long = -1L,
     currentPositionMs: Long,
@@ -234,6 +235,7 @@ fun FullPlayer(
             // ═══ Apple Music style animated gradient background ═══
             AnimatedPlayerBackground(
                 albumArtUri = albumArtUri,
+                coverUrl = coverUrl,
                 audioFileUri = audioFileUri,
                 albumId = albumId,
                 albumColors = albumColors,
@@ -260,6 +262,7 @@ fun FullPlayer(
             ) {
                 AlbumArtImage(
                     uri = albumArtUri,
+                    coverUrl = coverUrl,
                     audioFileUri = audioFileUri,
                     albumId = albumId,
                     contentDescription = null,

@@ -394,6 +394,78 @@ fun SettingsScreen(
             // }
 
             // ═══════════════════════════════════════════
+            //  ICM MUSIC API
+            // ═══════════════════════════════════════════
+            SectionLabel("ICM MUSIC API")
+
+            var apiKeyValue by remember {
+                mutableStateOf(
+                    context.getSharedPreferences("icm", Context.MODE_PRIVATE)
+                        .getString("api_key", "") ?: ""
+                )
+            }
+            GlassCapsuleCard(backdrop = screenBackdrop) {
+                Column(modifier = Modifier.padding(vertical = 14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "Partner API Key",
+                            color = LiquidTheme.colors.textPrimary,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        val isActive = apiKeyValue.isNotBlank() && apiKeyValue.startsWith("pk_")
+                        Text(
+                            if (isActive) "Active" else "Not set",
+                            color = if (isActive) Color(0xFF34C759) else LiquidTheme.colors.textTertiary,
+                            fontSize = 13.sp
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    androidx.compose.foundation.text.BasicTextField(
+                        value = apiKeyValue,
+                        onValueChange = { newValue ->
+                            apiKeyValue = newValue
+                            context.getSharedPreferences("icm", Context.MODE_PRIVATE)
+                                .edit().putString("api_key", newValue).apply()
+                            if (newValue.isNotBlank() && newValue.startsWith("pk_")) {
+                                com.liquidmusicglass.api.icm.IcmRepository.init(newValue)
+                            }
+                        },
+                        textStyle = androidx.compose.ui.text.TextStyle(
+                            color = LiquidTheme.colors.textPrimary,
+                            fontSize = 14.sp
+                        ),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        decorationBox = { innerTextField ->
+                            Box {
+                                if (apiKeyValue.isEmpty()) {
+                                    Text(
+                                        "pk_yourname_xxxxxxxxxxxx",
+                                        color = LiquidTheme.colors.textTertiary,
+                                        fontSize = 14.sp
+                                    )
+                                }
+                                innerTextField()
+                            }
+                        }
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        "Get your key at byicloud.online/partners",
+                        color = LiquidTheme.colors.textTertiary,
+                        fontSize = 11.sp
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(28.dp))
+
+            // ═══════════════════════════════════════════
             //  ABOUT
             // ═══════════════════════════════════════════
             SectionLabel("ABOUT")

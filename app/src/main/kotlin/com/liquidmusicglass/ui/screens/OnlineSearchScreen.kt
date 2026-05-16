@@ -1,5 +1,7 @@
 package com.liquidmusicglass.ui.screens
 
+import android.content.Context
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -23,16 +25,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.MusicNote
-import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,7 +44,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
@@ -63,50 +62,59 @@ import com.kyant.backdrop.highlight.Highlight
 import com.kyant.backdrop.shadow.InnerShadow
 import com.kyant.backdrop.shadow.Shadow
 import com.kyant.shapes.Capsule
+import com.liquidmusicglass.api.icm.IcmApi
+import com.liquidmusicglass.api.icm.IcmRepository
+import com.liquidmusicglass.api.icm.toTrack
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.Track
 import com.liquidmusicglass.ui.glass.AlbumArtImage
 import com.liquidmusicglass.ui.theme.LiquidTheme
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
+/**
+ * Экран онлайн-поиска через ICM Music Partner API.
+ * Поиск по каталогу Apple Music + VK (90M+ треков).
+ */
 @Composable
-fun SearchScreen(
-    onNavigateToAlbum: (Long) -> Unit = {},
+fun OnlineSearchScreen(
+    onNavigateToAlbum: (String) -> Unit = {},
     onNavigateToArtist: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
     val screenBackdrop = rememberLayerBackdrop()
-    val allTracks by PlayerController.queueFlow.collectAsState()
 
     var query by remember { mutableStateOf("") }
+    var isSearching by remember { mutableStateOf(false) }
+    var searchResults by remember { mutableStateOf<List<Track>>(emptyList()) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    val isInitialized by IcmRepository.isInitialized.collectAsState()
 
-    val filteredTracks by remember(allTracks, query) {
-        derivedStateOf {
-            if (query.isBlank()) emptyList()
-            else allTracks.filter {
-                it.title.contains(query, ignoreCase = true) ||
-                    it.artist.contains(query, ignoreCase = true) ||
-                    it.albumName.contains(query, ignoreCase = true)
-            }.take(20)
+    // Debounce search: 300ms after last keystroke
+    var searchJob by remember { mutableStateOf<Job?>(null) }
+
+    LaunchedEffect(query) {
+        searchJob?.cancel()
+        if (query.isBlank()) {
+            searchResults = emptyList()
+            errorMessage = null
+            return@LaunchedEffect
         }
-    }
-
-    val filteredAlbums by remember(allTracks, query) {
-        derivedStateOf {
-            if (query.isBlank()) emptyList()
-            else allTracks
-                .filter { it.albumName.contains(query, ignoreCase = true) }
-                .distinctBy { it.albumId }
-                .take(5)
-        }
-    }
-
-    val filteredArtists by remember(allTracks, query) {
-        derivedStateOf {
-            if (query.isBlank()) emptyList()
-            else allTracks
-                .filter { it.artist.contains(query, ignoreCase = true) }
-                .distinctBy { it.artist }
-                .take(5)
+        searchJob = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+            delay(300)
+            if (!isInitialized) {
+                errorMessage = "ICM API not initialized. Set API key in settings."
+                return@launch
+            }
+            isSearching = true
+            errorMessage = null
+            val results = IcmRepository.searchTracks(query)
+            searchResults = results
+            isSearching = false
+            if (results.isEmpty()) {
+                errorMessage = "No results for \"$query\""
+            }
         }
     }
 
@@ -126,16 +134,23 @@ fun SearchScreen(
             Spacer(modifier = Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
 
             Text(
-                text = "Search",
+                text = "Online Music",
                 fontWeight = FontWeight.Bold,
                 fontSize = 32.sp,
                 color = LiquidTheme.colors.textPrimary,
                 modifier = Modifier.padding(horizontal = 20.dp)
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = "Search 90M+ tracks via ICM",
+                fontSize = 13.sp,
+                color = LiquidTheme.colors.textTertiary,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+            )
 
-            // Search field — glass capsule
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Search field
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -190,7 +205,7 @@ fun SearchScreen(
                         Box {
                             if (query.isEmpty()) {
                                 Text(
-                                    text = "Songs, artists, albums",
+                                    text = "Search artists, songs, albums...",
                                     color = LiquidTheme.colors.textTertiary,
                                     fontSize = 16.sp
                                 )
@@ -224,7 +239,62 @@ fun SearchScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            if (query.isBlank()) {
+            if (isSearching) {
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(top = 60.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Searching...",
+                        color = LiquidTheme.colors.textTertiary,
+                        fontSize = 16.sp
+                    )
+                }
+            } else if (errorMessage != null) {
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(top = 60.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = Icons.Rounded.MusicNote,
+                            contentDescription = null,
+                            tint = LiquidTheme.colors.textTertiary,
+                            modifier = Modifier.size(56.dp)
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = errorMessage!!,
+                            color = LiquidTheme.colors.textTertiary,
+                            fontSize = 14.sp
+                        )
+                        if (!isInitialized) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "Get your key at byicloud.online/partners",
+                                color = LiquidTheme.colors.textSecondary,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                }
+            } else if (searchResults.isNotEmpty()) {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 20.dp)
+                ) {
+                    items(searchResults, key = { "icm_${it.id}" }) { track ->
+                        OnlineTrackRow(
+                            track = track,
+                            backdrop = screenBackdrop,
+                            context = context,
+                            onClick = { playOnlineTrack(context, track) }
+                        )
+                    }
+                    item { Spacer(modifier = Modifier.height(200.dp)) }
+                }
+            } else if (query.isBlank()) {
                 // Empty state
                 Box(
                     modifier = Modifier.fillMaxSize(),
@@ -239,89 +309,17 @@ fun SearchScreen(
                         )
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(
-                            text = "Search your music",
+                            text = "Search online music",
                             color = LiquidTheme.colors.textTertiary,
                             fontSize = 16.sp
                         )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Powered by ICM Music (byicloud.online)",
+                            color = LiquidTheme.colors.textSecondary.copy(alpha = 0.6f),
+                            fontSize = 12.sp
+                        )
                     }
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    // Artists
-                    if (filteredArtists.isNotEmpty()) {
-                        item(key = "artists_label") {
-                            SearchSectionLabel("Artists")
-                        }
-                        items(filteredArtists, key = { "artist_${it.artist}" }) { track ->
-                            SearchResultRow(
-                                title = track.artist,
-                                subtitle = "${allTracks.count { it.artist == track.artist }} tracks",
-                                icon = Icons.Rounded.Person,
-                                track = track,
-                                backdrop = screenBackdrop,
-                                onClick = { onNavigateToArtist(track.artist) }
-                            )
-                        }
-                    }
-
-                    // Albums
-                    if (filteredAlbums.isNotEmpty()) {
-                        item(key = "albums_label") {
-                            SearchSectionLabel("Albums")
-                        }
-                        items(filteredAlbums, key = { "album_${it.albumId}" }) { track ->
-                            SearchResultRow(
-                                title = track.albumName,
-                                subtitle = track.artist,
-                                icon = Icons.Rounded.Album,
-                                track = track,
-                                backdrop = screenBackdrop,
-                                onClick = { onNavigateToAlbum(track.albumId) }
-                            )
-                        }
-                    }
-
-                    // Tracks
-                    if (filteredTracks.isNotEmpty()) {
-                        item(key = "tracks_label") {
-                            SearchSectionLabel("Songs")
-                        }
-                        items(filteredTracks, key = { "track_${it.id}" }) { track ->
-                            SearchResultRow(
-                                title = track.title,
-                                subtitle = "${track.artist} · ${track.albumName}",
-                                icon = Icons.Rounded.MusicNote,
-                                track = track,
-                                backdrop = screenBackdrop,
-                                onClick = {
-                                    val idx = allTracks.indexOfFirst { it.id == track.id }
-                                    if (idx >= 0) PlayerController.playTrack(context, idx)
-                                }
-                            )
-                        }
-                    }
-
-                    if (filteredTracks.isEmpty() && filteredAlbums.isEmpty() && filteredArtists.isEmpty()) {
-                        item {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 60.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = "No results for \"$query\"",
-                                    color = LiquidTheme.colors.textTertiary,
-                                    fontSize = 16.sp
-                                )
-                            }
-                        }
-                    }
-
-                    item { Spacer(modifier = Modifier.height(200.dp)) }
                 }
             }
         }
@@ -329,23 +327,10 @@ fun SearchScreen(
 }
 
 @Composable
-private fun SearchSectionLabel(text: String) {
-    Text(
-        text = text,
-        color = LiquidTheme.colors.sectionLabel,
-        fontSize = 13.sp,
-        fontWeight = FontWeight.SemiBold,
-        modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
-    )
-}
-
-@Composable
-private fun SearchResultRow(
-    title: String,
-    subtitle: String,
-    icon: ImageVector,
+private fun OnlineTrackRow(
     track: Track,
     backdrop: LayerBackdrop,
+    context: Context,
     onClick: () -> Unit
 ) {
     val shape = RoundedCornerShape(16.dp)
@@ -379,16 +364,17 @@ private fun SearchResultRow(
                 indication = null,
                 onClick = onClick
             )
-            .padding(horizontal = 12.dp),
+            .padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
             modifier = Modifier
                 .size(46.dp)
-                .clip(RoundedCornerShape(12.dp))
+                .clip(RoundedCornerShape(10.dp))
         ) {
             AlbumArtImage(
                 uri = track.albumArtUri,
+                coverUrl = track.coverUrl,
                 audioFileUri = track.uri,
                 albumId = track.albumId,
                 coverUrl = track.coverUrl,
@@ -401,7 +387,7 @@ private fun SearchResultRow(
 
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = title,
+                text = track.title,
                 color = LiquidTheme.colors.textPrimary,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Medium,
@@ -410,7 +396,7 @@ private fun SearchResultRow(
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
-                text = subtitle,
+                text = "${track.artist} · ${track.albumName}",
                 color = LiquidTheme.colors.textSecondary,
                 fontSize = 12.sp,
                 maxLines = 1,
@@ -418,11 +404,27 @@ private fun SearchResultRow(
             )
         }
 
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = LiquidTheme.colors.iconMuted,
-            modifier = Modifier.size(18.dp)
+        val minutes = (track.durationMs / 1000 / 60).toInt()
+        val seconds = ((track.durationMs / 1000) % 60).toInt()
+        Text(
+            text = "$minutes:${seconds.toString().padStart(2, '0')}",
+            color = LiquidTheme.colors.textTertiary,
+            fontSize = 12.sp,
+            modifier = Modifier.padding(start = 8.dp)
         )
+    }
+}
+
+/**
+ * Проиграть онлайн-трек: получаем подписанный URL и передаём в плеер.
+ */
+private fun playOnlineTrack(context: Context, track: Track) {
+    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+        try {
+            val streamUrl = IcmRepository.getStreamUrl(track.id)
+            if (streamUrl != null) {
+                PlayerController.playRadioStream(context, streamUrl, track.title)
+            }
+        } catch (_: Exception) { }
     }
 }

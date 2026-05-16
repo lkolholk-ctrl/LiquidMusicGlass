@@ -49,6 +49,7 @@ fun MiniPlayer(
     artistName: String,
     isPlaying: Boolean,
     albumArtUri: Uri?,
+    coverUrl: String? = null,
     backdrop: LayerBackdrop,
     onExpand: () -> Unit,
     onPlayPause: () -> Unit,
@@ -113,6 +114,7 @@ fun MiniPlayer(
         ) {
             AlbumArtImage(
                 uri = albumArtUri,
+                coverUrl = coverUrl,
                 modifier = Modifier.fillMaxWidth().fillMaxHeight(),
                 contentScale = ContentScale.Crop
             )

@@ -244,6 +244,7 @@ fun PlaylistDetailScreen(
                     uri = track.albumArtUri,
                     audioFileUri = track.uri,
                     albumId = track.albumId,
+                coverUrl = track.coverUrl,
                     contentDescription = null,
                     modifier = Modifier.size(44.dp).clip(RoundedCornerShape(8.dp))
                 )

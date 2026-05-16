@@ -397,6 +397,7 @@ private fun AlbumCard(
                 uri = album.coverTrack.albumArtUri,
                 audioFileUri = album.coverTrack.uri,
                 albumId = album.albumId,
+                coverUrl = album.coverTrack.coverUrl,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop
             )
@@ -493,6 +494,7 @@ private fun TrackRow(
                 uri = track.albumArtUri,
                 audioFileUri = track.uri,
                 albumId = track.albumId,
+                coverUrl = track.coverUrl,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop
             )
