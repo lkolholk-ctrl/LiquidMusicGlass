@@ -1,0 +1,49 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Musical note body - main shape -->
+    <path
+        android:pathData="M62.5,32 C62.5,32 62.5,68 62.5,68 C62.5,68 62.5,72 62.5,72 C62.5,76.5 59,80 54.5,82 C50,84 44.5,83.5 41.5,81 C38.5,78.5 38.5,75 41,72 C43.5,69 48,67 53,67.5 C55.5,67.7 57.5,68.3 57.5,68.3 L57.5,42 L76,36 L76,60 C76,60 76,64 76,64 C76,68.5 72.5,72 68,74 C63.5,76 58,75.5 55,73 C52,70.5 52,67 54.5,64 C57,61 61.5,59 66.5,59.5 C69,59.7 71,60.3 71,60.3 L71,32 Z"
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.92"/>
+
+    <!-- Note highlight - top specular -->
+    <path
+        android:pathData="M62.5,33 L71,32.5 L76,36.5 L76,38 L71,34 L62.5,36 Z"
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.6"/>
+
+    <!-- Note oval highlight - bottom left -->
+    <path
+        android:pathData="M44,74 C46,71.5 50,70 53.5,70.5 C51,71 48,72 46,74.5 C44.5,76.5 45,78 46,79 C44,77.5 43,76 44,74 Z"
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.45"/>
+
+    <!-- Note oval highlight - bottom right -->
+    <path
+        android:pathData="M57.5,66 C59.5,63.5 63.5,62 67,62.5 C64.5,63 61.5,64 59.5,66.5 C58,68.5 58.5,70 59.5,71 C57.5,69.5 56.5,68 57.5,66 Z"
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.45"/>
+
+    <!-- Glass shine - large top highlight -->
+    <path
+        android:pathData="M57.5,35 L71,32 L76,36 L76,48 L71,50 L62.5,52 L57.5,50 Z"
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.12"/>
+
+    <!-- Stem shadow -->
+    <path
+        android:pathData="M61,35 L63,34.5 L63,68 L61,68.5 Z"
+        android:fillColor="#000000"
+        android:fillAlpha="0.08"/>
+
+    <!-- Stem shadow right -->
+    <path
+        android:pathData="M74.5,34 L76.5,33.5 L76.5,60 L74.5,60.5 Z"
+        android:fillColor="#000000"
+        android:fillAlpha="0.08"/>
+
+</vector>
