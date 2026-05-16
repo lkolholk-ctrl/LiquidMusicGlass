@@ -240,10 +240,15 @@ object PlayerController {
     }
 
     /**
+     * Получить текущую очередь.
+     */
+    fun getCurrentQueue(): List<Track> = queue.toList()
+
+    /**
      * Установить очередь треков из ICM API.
      */
     fun setQueue(tracks: List<Track>, startIndex: Int = 0) {
-        queue = tracks
+        queue = tracks.toMutableList()
         _queue.value = tracks
         if (tracks.isNotEmpty() && startIndex in tracks.indices) {
             currentIndex = startIndex
@@ -445,7 +450,6 @@ object PlayerController {
     }
 
     // ── Current queue access ──
-    fun getCurrentQueue(): List<Track> = queue
     fun getCurrentIndex(): Int = currentIndex
 
     private fun startPositionUpdates() {

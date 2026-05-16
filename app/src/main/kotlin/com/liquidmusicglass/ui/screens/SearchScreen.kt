@@ -28,11 +28,12 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -63,10 +64,13 @@ import com.kyant.backdrop.highlight.Highlight
 import com.kyant.backdrop.shadow.InnerShadow
 import com.kyant.backdrop.shadow.Shadow
 import com.kyant.shapes.Capsule
+import com.liquidmusicglass.api.icm.IcmRepository
+import com.liquidmusicglass.api.icm.IcmSearchItem
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.Track
 import com.liquidmusicglass.ui.glass.AlbumArtImage
 import com.liquidmusicglass.ui.theme.LiquidTheme
+import kotlinx.coroutines.delay
 
 @Composable
 fun SearchScreen(
@@ -75,40 +79,37 @@ fun SearchScreen(
 ) {
     val context = LocalContext.current
     val screenBackdrop = rememberLayerBackdrop()
-    val allTracks by PlayerController.queueFlow.collectAsState()
 
     var query by remember { mutableStateOf("") }
+    var searchResults by remember { mutableStateOf<List<IcmSearchItem>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(false) }
+    var lastError by remember { mutableStateOf<String?>(null) }
 
-    val filteredTracks by remember(allTracks, query) {
-        derivedStateOf {
-            if (query.isBlank()) emptyList()
-            else allTracks.filter {
-                it.title.contains(query, ignoreCase = true) ||
-                    it.artist.contains(query, ignoreCase = true) ||
-                    it.albumName.contains(query, ignoreCase = true)
-            }.take(20)
+    // Debounce search: 300ms after user stops typing
+    LaunchedEffect(query) {
+        if (query.isBlank()) {
+            searchResults = emptyList()
+            return@LaunchedEffect
+        }
+        isLoading = true
+        lastError = null
+        delay(300)
+        try {
+            val result = IcmRepository.searchAll(query)
+            searchResults = result?.items ?: emptyList()
+            if (result == null) {
+                lastError = IcmRepository.lastError.value ?: "Search failed"
+            }
+        } catch (e: Exception) {
+            lastError = e.message
+        } finally {
+            isLoading = false
         }
     }
 
-    val filteredAlbums by remember(allTracks, query) {
-        derivedStateOf {
-            if (query.isBlank()) emptyList()
-            else allTracks
-                .filter { it.albumName.contains(query, ignoreCase = true) }
-                .distinctBy { it.albumId }
-                .take(5)
-        }
-    }
-
-    val filteredArtists by remember(allTracks, query) {
-        derivedStateOf {
-            if (query.isBlank()) emptyList()
-            else allTracks
-                .filter { it.artist.contains(query, ignoreCase = true) }
-                .distinctBy { it.artist }
-                .take(5)
-        }
-    }
+    val tracks = searchResults.filter { it.isTrack }
+    val albums = searchResults.filter { it.isAlbum }
+    val artists = searchResults.filter { it.isArtist }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Box(
@@ -239,9 +240,39 @@ fun SearchScreen(
                         )
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(
-                            text = "Search your music",
+                            text = "Search ICM Music",
                             color = LiquidTheme.colors.textTertiary,
                             fontSize = 16.sp
+                        )
+                    }
+                }
+            } else if (isLoading) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(
+                        color = Color(0xFFFC3C44),
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+            } else if (lastError != null) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "Error",
+                            color = Color(0xFFFC3C44),
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = lastError ?: "Unknown error",
+                            color = LiquidTheme.colors.textTertiary,
+                            fontSize = 14.sp
                         )
                     }
                 }
@@ -251,60 +282,64 @@ fun SearchScreen(
                     verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     // Artists
-                    if (filteredArtists.isNotEmpty()) {
+                    if (artists.isNotEmpty()) {
                         item(key = "artists_label") {
                             SearchSectionLabel("Artists")
                         }
-                        items(filteredArtists, key = { "artist_${it.artist}" }) { track ->
+                        items(artists, key = { "artist_${it.id}" }) { item ->
                             SearchResultRow(
-                                title = track.artist,
-                                subtitle = "${allTracks.count { it.artist == track.artist }} tracks",
+                                title = item.displayArtist,
+                                subtitle = "Artist",
                                 icon = Icons.Rounded.Person,
-                                track = track,
+                                coverUrl = item.cover,
                                 backdrop = screenBackdrop,
-                                onClick = { onNavigateToArtist(track.artist) }
+                                onClick = { onNavigateToArtist(item.displayArtist) }
                             )
                         }
                     }
 
                     // Albums
-                    if (filteredAlbums.isNotEmpty()) {
+                    if (albums.isNotEmpty()) {
                         item(key = "albums_label") {
                             SearchSectionLabel("Albums")
                         }
-                        items(filteredAlbums, key = { "album_${it.albumId}" }) { track ->
+                        items(albums, key = { "album_${it.id}" }) { item ->
                             SearchResultRow(
-                                title = track.albumName,
-                                subtitle = track.artist,
+                                title = item.title,
+                                subtitle = item.displayArtist,
                                 icon = Icons.Rounded.Album,
-                                track = track,
+                                coverUrl = item.cover,
                                 backdrop = screenBackdrop,
-                                onClick = { onNavigateToAlbum(track.albumId) }
+                                onClick = { /* TODO: navigate to album */ }
                             )
                         }
                     }
 
                     // Tracks
-                    if (filteredTracks.isNotEmpty()) {
+                    if (tracks.isNotEmpty()) {
                         item(key = "tracks_label") {
                             SearchSectionLabel("Songs")
                         }
-                        items(filteredTracks, key = { "track_${it.id}" }) { track ->
+                        items(tracks, key = { "track_${it.id}" }) { item ->
+                            val track = item.toTrack()
                             SearchResultRow(
-                                title = track.title,
-                                subtitle = "${track.artist} · ${track.albumName}",
+                                title = item.title,
+                                subtitle = item.displayArtist,
                                 icon = Icons.Rounded.MusicNote,
-                                track = track,
+                                coverUrl = item.cover,
                                 backdrop = screenBackdrop,
                                 onClick = {
-                                    val idx = allTracks.indexOfFirst { it.id == track.id }
-                                    if (idx >= 0) PlayerController.playTrack(context, idx)
+                                    // Add to queue and play
+                                    val currentQueue = PlayerController.getCurrentQueue().toMutableList()
+                                    currentQueue.add(track)
+                                    PlayerController.setQueue(currentQueue, currentQueue.size - 1)
+                                    PlayerController.playTrack(context, currentQueue.size - 1)
                                 }
                             )
                         }
                     }
 
-                    if (filteredTracks.isEmpty() && filteredAlbums.isEmpty() && filteredArtists.isEmpty()) {
+                    if (tracks.isEmpty() && albums.isEmpty() && artists.isEmpty()) {
                         item {
                             Box(
                                 modifier = Modifier
@@ -344,7 +379,7 @@ private fun SearchResultRow(
     title: String,
     subtitle: String,
     icon: ImageVector,
-    track: Track,
+    coverUrl: String? = null,
     backdrop: LayerBackdrop,
     onClick: () -> Unit
 ) {
@@ -388,10 +423,8 @@ private fun SearchResultRow(
                 .clip(RoundedCornerShape(12.dp))
         ) {
             AlbumArtImage(
-                uri = track.albumArtUri,
-                audioFileUri = track.uri,
-                albumId = track.albumId,
-                coverUrl = track.coverUrl,
+                uri = null,
+                coverUrl = coverUrl,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop
             )
