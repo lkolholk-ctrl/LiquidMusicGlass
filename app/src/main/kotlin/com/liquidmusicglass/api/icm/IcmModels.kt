@@ -248,6 +248,17 @@ data class IcmLyricsResponse(
     val synced: Boolean = false
 )
 
+// ─── Errors ───
+
+@Serializable
+data class IcmError(
+    val error: String,
+    val message: String? = null,
+    @SerialName("required_region") val requiredRegion: String? = null,
+    @SerialName("retry_after") val retryAfter: Int? = null,
+    @SerialName("source") val source: String? = null
+)
+
 // ─── Batch Track Meta ───
 
 @Serializable
