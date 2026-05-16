@@ -83,8 +83,8 @@ fun AppRoot() {
     var settingsOpen by remember { mutableStateOf(false) }
 
     // Detail screen navigation
-    var detailAlbumId by remember { mutableStateOf<Long?>(null) }
-    var detailArtistName by remember { mutableStateOf<String?>(null) }
+    var detailAlbumId by remember { mutableStateOf<String?>(null) }
+    var detailArtistId by remember { mutableStateOf<String?>(null) }
     var equalizerOpen by remember { mutableStateOf(false) }
     var playlistsOpen by remember { mutableStateOf(false) }
     var playlistDetailId by remember { mutableStateOf<String?>(null) }
@@ -157,12 +157,12 @@ fun AppRoot() {
             when (selectedIndex) {
                 0 -> HomeScreen(
                     onNavigateToAlbum = { detailAlbumId = it },
-                    onNavigateToArtist = { detailArtistName = it },
+                    onNavigateToArtist = { detailArtistId = it },
                     onNavigateToPlaylist = { playlistDetailId = it }
                 )
                 1 -> SearchScreen(
                     onNavigateToAlbum = { detailAlbumId = it },
-                    onNavigateToArtist = { detailArtistName = it }
+                    onNavigateToArtist = { detailArtistId = it }
                 )
                 2 -> PlaylistsScreen(
                     onBack = { selectedIndex = 0 },
@@ -179,7 +179,7 @@ fun AppRoot() {
                 )
                 else -> HomeScreen(
                     onNavigateToAlbum = { detailAlbumId = it },
-                    onNavigateToArtist = { detailArtistName = it },
+                    onNavigateToArtist = { detailArtistId = it },
                     onNavigateToPlaylist = { playlistDetailId = it }
                 )
             }
@@ -388,6 +388,50 @@ fun AppRoot() {
                 onOpenEqualizer = { equalizerOpen = true; settingsOpen = false },
                 backdrop = rootBackdrop
             )
+        }
+
+        // ── Artist Detail ──
+        AnimatedVisibility(
+            visible = detailArtistId != null,
+            enter = slideInHorizontally(
+                initialOffsetX = { it },
+                animationSpec = spring(dampingRatio = 0.9f, stiffness = 300f)
+            ) + fadeIn(tween(200)),
+            exit = slideOutHorizontally(
+                targetOffsetX = { it },
+                animationSpec = spring(dampingRatio = 0.9f, stiffness = 350f)
+            ) + fadeOut(tween(150))
+        ) {
+            detailArtistId?.let { id ->
+                ArtistDetailScreen(
+                    artistId = id,
+                    onBack = { detailArtistId = null },
+                    onNavigateToAlbum = { albumId ->
+                        detailArtistId = null
+                        detailAlbumId = albumId
+                    }
+                )
+            }
+        }
+
+        // ── Album Detail ──
+        AnimatedVisibility(
+            visible = detailAlbumId != null,
+            enter = slideInHorizontally(
+                initialOffsetX = { it },
+                animationSpec = spring(dampingRatio = 0.9f, stiffness = 300f)
+            ) + fadeIn(tween(200)),
+            exit = slideOutHorizontally(
+                targetOffsetX = { it },
+                animationSpec = spring(dampingRatio = 0.9f, stiffness = 350f)
+            ) + fadeOut(tween(150))
+        ) {
+            detailAlbumId?.let { id ->
+                AlbumDetailScreen(
+                    albumId = id,
+                    onBack = { detailAlbumId = null }
+                )
+            }
         }
 
         // ── Update Dialog ──
