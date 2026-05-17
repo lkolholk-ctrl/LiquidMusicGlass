@@ -358,11 +358,18 @@ object PlayerController {
     /**
      * Добавить трек в очередь и сразу воспроизвести.
      * Сохраняет существующую очередь, вставляет трек после текущего.
+     * Автоматически подбирает похожие треки если включен autoMix.
      */
     fun playNext(track: Track, context: Context) {
         if (queue.isEmpty()) {
             setQueue(listOf(track), 0)
             playTrack(context, 0)
+            // Auto-populate queue with similar tracks
+            if (_autoMixEnabled.value) {
+                scope.launch {
+                    populateSimilarTracks(track, context)
+                }
+            }
             return
         }
         val insertIndex = (currentIndex + 1).coerceAtMost(queue.size)
@@ -371,6 +378,39 @@ object PlayerController {
         queue = newQueue
         _queue.value = queue
         playTrack(context, insertIndex)
+
+        // Auto-populate queue with similar tracks
+        if (_autoMixEnabled.value) {
+            scope.launch {
+                populateSimilarTracks(track, context)
+            }
+        }
+    }
+
+    /**
+     * Подобрать похожие треки и добавить в очередь.
+     */
+    private suspend fun populateSimilarTracks(track: Track, context: Context) {
+        try {
+            val similar = com.liquidmusicglass.api.icm.IcmRepository.search(
+                query = track.artist,
+                limit = 10
+            )
+            val similarTracks = similar.filter { 
+                it.id != track.id && 
+                it.artist.equals(track.artist, ignoreCase = true) 
+            }.take(5)
+            
+            if (similarTracks.isNotEmpty()) {
+                val newQueue = queue.toMutableList()
+                val insertIdx = (currentIndex + 1).coerceAtMost(newQueue.size)
+                similarTracks.forEachIndexed { idx, t ->
+                    newQueue.add(insertIdx + idx, t)
+                }
+                queue = newQueue
+                _queue.value = queue
+            }
+        } catch (_: Exception) {}
     }
 
     private fun buildMediaItem(track: Track): MediaItem {
@@ -665,6 +705,9 @@ object PlayerController {
     // ── Current queue access ──
     fun getCurrentIndex(): Int = currentIndex
 
+    private var prefetchJob: Job? = null
+    private const val PREFETCH_THRESHOLD_MS = 90_000L // 90 seconds before end
+
     private fun startPositionUpdates() {
         stopPositionUpdates()
 
@@ -676,6 +719,12 @@ object PlayerController {
                     val duration = playerController.duration
                     if (duration > 0) {
                         _durationMs.value = duration
+                    }
+
+                    // Prefetch next track when 90 seconds remaining
+                    val remaining = duration - playerController.currentPosition
+                    if (remaining in 1..PREFETCH_THRESHOLD_MS && prefetchJob?.isActive != true) {
+                        prefetchNextTrack()
                     }
                 }
 
