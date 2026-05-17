@@ -12,13 +12,13 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class IcmHealthResponse(
-    val partnerId: String,
+    @SerialName("partner_id") val partnerId: String,
     val status: String,
     val scopes: List<String>,
     val rateLimits: IcmRateLimits? = null,
     val stream: IcmStreamConfig? = null,
     val search: IcmSearchConfig? = null,
-    val serverTime: Long? = null
+    @SerialName("server_time") val serverTime: Long? = null
 )
 
 @Serializable

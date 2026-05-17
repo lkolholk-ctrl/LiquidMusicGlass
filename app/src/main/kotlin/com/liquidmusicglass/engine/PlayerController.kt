@@ -209,8 +209,9 @@ object PlayerController {
         // Initialize ICM API with saved key if available
         val prefs = context.getSharedPreferences("icm", Context.MODE_PRIVATE)
         val savedKey = prefs.getString("api_key", null)
+        val savedUserId = prefs.getString("partner_user_id", null)
         if (!savedKey.isNullOrBlank() && savedKey.startsWith("pk_")) {
-            com.liquidmusicglass.api.icm.IcmRepository.init(savedKey)
+            com.liquidmusicglass.api.icm.IcmRepository.init(savedKey, savedUserId)
         }
 
         // Load play history from local storage
