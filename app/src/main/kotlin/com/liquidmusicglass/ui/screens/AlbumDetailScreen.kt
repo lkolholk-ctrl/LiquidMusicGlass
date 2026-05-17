@@ -293,8 +293,8 @@ fun AlbumDetailScreen(
                                     interactionSource = remember { MutableInteractionSource() },
                                     indication = null,
                                     onClick = {
-                                        PlayerController.setQueue(albumTracks, index)
-                                        PlayerController.playTrack(context, index)
+                                        // Play immediately without replacing current queue
+                                        PlayerController.playNext(track, context)
                                     }
                                 )
                                 .padding(horizontal = 24.dp),

@@ -396,50 +396,6 @@ fun AppRoot() {
             )
         }
 
-        // ── Artist Detail ──
-        AnimatedVisibility(
-            visible = detailArtistId != null,
-            enter = slideInHorizontally(
-                initialOffsetX = { it },
-                animationSpec = spring(dampingRatio = 0.9f, stiffness = 300f)
-            ) + fadeIn(tween(200)),
-            exit = slideOutHorizontally(
-                targetOffsetX = { it },
-                animationSpec = spring(dampingRatio = 0.9f, stiffness = 350f)
-            ) + fadeOut(tween(150))
-        ) {
-            detailArtistId?.let { id ->
-                ArtistDetailScreen(
-                    artistId = id,
-                    onBack = { detailArtistId = null },
-                    onNavigateToAlbum = { albumId ->
-                        detailArtistId = null
-                        detailAlbumId = albumId
-                    }
-                )
-            }
-        }
-
-        // ── Album Detail ──
-        AnimatedVisibility(
-            visible = detailAlbumId != null,
-            enter = slideInHorizontally(
-                initialOffsetX = { it },
-                animationSpec = spring(dampingRatio = 0.9f, stiffness = 300f)
-            ) + fadeIn(tween(200)),
-            exit = slideOutHorizontally(
-                targetOffsetX = { it },
-                animationSpec = spring(dampingRatio = 0.9f, stiffness = 350f)
-            ) + fadeOut(tween(150))
-        ) {
-            detailAlbumId?.let { id ->
-                AlbumDetailScreen(
-                    albumId = id,
-                    onBack = { detailAlbumId = null }
-                )
-            }
-        }
-
         // ── Update Dialog ──
         UpdateDialog(backdrop = rootBackdrop)
     }
