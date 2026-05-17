@@ -285,8 +285,8 @@ data class IcmBatchTrackMetaRequest(
 
 @Serializable
 data class IcmBatchTrackMetaResponse(
-    val count: Int,
-    val items: List<IcmBatchTrackMetaItem>
+    val count: Int? = null,
+    val items: List<IcmBatchTrackMetaItem> = emptyList()
 )
 
 @Serializable
