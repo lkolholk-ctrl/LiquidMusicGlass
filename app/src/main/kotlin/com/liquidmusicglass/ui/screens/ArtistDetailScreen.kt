@@ -91,8 +91,26 @@ fun ArtistDetailScreen(
         }
     }
 
-    val artistTracks = remember(artist) {
-        artist?.topSongs?.map { it.toTrack() } ?: emptyList()
+    var artistTracks by remember { mutableStateOf<List<com.liquidmusicglass.engine.Track>>(emptyList()) }
+    var trackDurations by remember { mutableStateOf<Map<String, Long>>(emptyMap()) }
+
+    // Fetch batch track meta for durations
+    LaunchedEffect(artist) {
+        val songs = artist?.topSongs ?: emptyList()
+        val tracks = songs.map { it.toTrack() }
+        artistTracks = tracks
+        if (tracks.isNotEmpty() && IcmRepository.isInitialized.value) {
+            try {
+                val batch = IcmRepository.getBatchTrackMeta(tracks.map { it.id })
+                val durMap = mutableMapOf<String, Long>()
+                batch?.items?.forEach { item ->
+                    if (item.duration != null && item.duration > 0) {
+                        durMap[item.id] = item.duration
+                    }
+                }
+                trackDurations = durMap
+            } catch (_: Exception) {}
+        }
     }
 
     val albums = remember(artist) {
@@ -495,13 +513,16 @@ fun ArtistDetailScreen(
                                     overflow = TextOverflow.Ellipsis
                                 )
                             }
-                            val min = (track.durationMs / 1000 / 60).toInt()
-                            val sec = ((track.durationMs / 1000) % 60).toInt()
-                            Text(
-                                text = "$min:${sec.toString().padStart(2, '0')}",
-                                color = Color.White.copy(alpha = 0.30f),
-                                fontSize = 12.sp
-                            )
+                            val dur = trackDurations[track.id] ?: track.durationMs
+                            val min = (dur / 1000 / 60).toInt()
+                            val sec = ((dur / 1000) % 60).toInt()
+                            if (dur > 0) {
+                                Text(
+                                    text = "$min:${sec.toString().padStart(2, '0')}",
+                                    color = Color.White.copy(alpha = 0.30f),
+                                    fontSize = 12.sp
+                                )
+                            }
                         }
                         Spacer(modifier = Modifier.height(4.dp))
                     }
