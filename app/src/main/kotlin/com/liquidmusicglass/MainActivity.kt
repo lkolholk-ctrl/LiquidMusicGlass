@@ -45,21 +45,27 @@ class MainActivity : ComponentActivity() {
     private fun handleTelegramAuth(intent: Intent?) {
         val data = intent?.data ?: return
         if (data.host == "liquid.glassfiles.ru" && data.path?.startsWith("/auth/telegram") == true) {
-            // Extract token from query parameters
-            val token = data.getQueryParameter("token")
-            val expiresIn = data.getQueryParameter("expires_in")?.toIntOrNull() ?: 3600
-            val userId = data.getQueryParameter("user_id")
-            val username = data.getQueryParameter("username")
+            // Parse ICM callback parameters
+            val linked = data.getQueryParameter("linked")?.toBoolean() ?: false
+            val icmUserId = data.getQueryParameter("icm_user_id")
+            val state = data.getQueryParameter("state")
+            val error = data.getQueryParameter("error")
 
-            if (token != null && userId != null) {
-                // Store auth data
+            if (error != null) {
+                android.widget.Toast.makeText(
+                    this,
+                    "Auth error: $error",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+                return
+            }
+
+            if (linked && icmUserId != null) {
+                // Store Telegram auth data and issue session token
                 com.liquidmusicglass.api.icm.IcmAuthRepository.setTelegramAuth(
-                    userId = userId,
-                    username = username,
-                    token = token,
-                    expiresIn = expiresIn
+                    icmUserId = icmUserId,
+                    state = state
                 )
-                // Refresh UI or notify success
                 android.widget.Toast.makeText(
                     this,
                     "Telegram auth successful",

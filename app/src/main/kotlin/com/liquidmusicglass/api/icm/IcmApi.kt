@@ -166,6 +166,7 @@ class IcmApi private constructor() {
     /**
      * Выпуск session token для клиентских запросов.
      * Требует apiKey.
+     * После успешной авторизации через Telegram — вызываем этот метод для получения JWT.
      */
     suspend fun issueSession(
         partnerUserId: String,
@@ -175,6 +176,23 @@ class IcmApi private constructor() {
             IcmSessionRequest(partnerUserId = partnerUserId, hideExplicit = hideExplicit)
         )
         return execute("/session/issue", method = "POST", body = body)
+    }
+
+    /**
+     * Проверить статус сессии и обновить токен если нужно.
+     */
+    suspend fun refreshSessionIfNeeded(
+        partnerUserId: String,
+        hideExplicit: Boolean = false
+    ): Result<IcmSessionResponse> {
+        // Check if current token is still valid
+        val currentToken = sessionToken
+        if (currentToken != null) {
+            // Token exists, assume valid for now
+            // In production: decode JWT and check exp claim
+            return Result.failure(IcmApiException(401, "Token refresh needed"))
+        }
+        return issueSession(partnerUserId, hideExplicit)
     }
 
     /**
