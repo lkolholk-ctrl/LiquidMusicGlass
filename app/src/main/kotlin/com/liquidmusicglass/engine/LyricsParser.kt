@@ -168,8 +168,8 @@ object LyricsParser {
                 val parsed = parseLyrics(syncedLyrics)
                 if (parsed.lines.isNotEmpty()) {
                     return parsed.copy(
-                        title = obj.optString("trackName", null),
-                        artist = obj.optString("artistName", null),
+                        title = obj.optString("trackName", ""),
+                        artist = obj.optString("artistName", ""),
                         source = "lrclib"
                     )
                 }
@@ -184,8 +184,8 @@ object LyricsParser {
                 return Lyrics(
                     lines = lines,
                     isSynced = false,
-                    title = obj.optString("trackName", null),
-                    artist = obj.optString("artistName", null),
+                    title = obj.optString("trackName", ""),
+                    artist = obj.optString("artistName", ""),
                     source = "lrclib"
                 )
             }

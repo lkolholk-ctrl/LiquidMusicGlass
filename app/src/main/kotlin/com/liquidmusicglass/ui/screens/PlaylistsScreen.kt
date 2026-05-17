@@ -23,10 +23,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.MusicNote
-import androidx.compose.material.icons.rounded.PlaylistPlay
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -298,7 +298,7 @@ private fun PlaylistRow(
                 .clip(CircleShape),
             contentAlignment = Alignment.Center
         ) {
-            Icon(Icons.Rounded.PlaylistPlay, null, tint = AppleRed, modifier = Modifier.size(24.dp))
+            Icon(Icons.AutoMirrored.Rounded.PlaylistPlay, null, tint = AppleRed, modifier = Modifier.size(24.dp))
         }
 
         Spacer(Modifier.width(14.dp))

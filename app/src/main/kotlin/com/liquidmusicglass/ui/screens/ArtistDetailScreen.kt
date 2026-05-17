@@ -298,7 +298,7 @@ fun ArtistDetailScreen(
                                         ) {
                                             AlbumArtImage(
                                                 uri = null,
-                                                coverUrl = album.cover?.replace("1000x1000", "600x600"),
+                                                coverUrl = album.cover.replace("1000x1000", "600x600"),
                                                 modifier = Modifier.fillMaxSize(),
                                                 contentScale = ContentScale.Crop
                                             )

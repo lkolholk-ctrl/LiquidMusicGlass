@@ -22,9 +22,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.PlaylistPlay
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -132,7 +132,7 @@ fun PlaylistDetailScreen(
                         .clip(RoundedCornerShape(28.dp)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(Icons.Rounded.PlaylistPlay, null, tint = AppleRed, modifier = Modifier.size(56.dp))
+                    Icon(Icons.AutoMirrored.Rounded.PlaylistPlay, null, tint = AppleRed, modifier = Modifier.size(56.dp))
                 }
 
                 Spacer(Modifier.height(16.dp))
