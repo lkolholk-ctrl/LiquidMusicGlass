@@ -63,8 +63,8 @@ fun MiniPlayer(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 4.dp)
-            .height(62.dp)
+            .padding(horizontal = 6.dp, vertical = 2.dp)
+            .height(52.dp)
             .drawBackdrop(
                 backdrop = backdrop,
                 shape = { pillShape },
@@ -109,7 +109,7 @@ fun MiniPlayer(
     ) {
         Box(
             modifier = Modifier
-                .size(44.dp)
+                .size(38.dp)
                 .clip(artShape)
         ) {
             AlbumArtImage(
@@ -120,49 +120,49 @@ fun MiniPlayer(
             )
         }
 
-        Spacer(modifier = Modifier.width(12.dp))
+        Spacer(modifier = Modifier.width(10.dp))
 
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = trackTitle,
                 color = LiquidTheme.colors.textPrimary,
                 fontWeight = FontWeight.SemiBold,
-                fontSize = 14.sp,
+                fontSize = 13.sp,
                 maxLines = 1
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = artistName,
                 color = LiquidTheme.colors.textSecondary,
-                fontSize = 12.sp,
+                fontSize = 11.sp,
                 maxLines = 1
             )
         }
 
         Box(
             modifier = Modifier
-                .size(40.dp)
+                .size(36.dp)
                 .pressScale { onPlayPause() },
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                 contentDescription = null,
-                modifier = Modifier.size(24.dp),
+                modifier = Modifier.size(22.dp),
                 tint = LiquidTheme.colors.iconDefault
             )
         }
 
         Box(
             modifier = Modifier
-                .size(40.dp)
+                .size(36.dp)
                 .pressScale { onSkipNext() },
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = Icons.Rounded.SkipNext,
                 contentDescription = null,
-                modifier = Modifier.size(22.dp),
+                modifier = Modifier.size(20.dp),
                 tint = LiquidTheme.colors.iconDefault
             )
         }

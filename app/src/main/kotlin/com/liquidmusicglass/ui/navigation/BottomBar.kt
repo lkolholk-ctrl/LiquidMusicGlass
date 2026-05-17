@@ -102,7 +102,7 @@ fun BottomBar(
     val items = listOf(
         BottomNavItem(Icons.Rounded.Home, "Home"),
         BottomNavItem(Icons.Rounded.Search, "Search"),
-        BottomNavItem(Icons.AutoMirrored.Rounded.PlaylistPlay, "Playlists"),
+        BottomNavItem(Icons.AutoMirrored.Rounded.PlaylistPlay, "Library"),
         BottomNavItem(Icons.Rounded.Person, "Profile")
     )
 
@@ -272,9 +272,9 @@ private fun NavigationCapsule(
                     }
                 )
                 .then(interactiveHighlight.modifier)
-                .height(64f.dp)
+                .height(56f.dp)
                 .fillMaxWidth()
-                .padding(4f.dp),
+                .padding(horizontal = 12.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             content = content
         )
@@ -387,7 +387,7 @@ private fun NavigationCapsule(
                         drawRect(Color.Black.copy(alpha = 0.03f * progress))
                     }
                 )
-                .height(56f.dp)
+                .height(48f.dp)
                 .fillMaxWidth(1f / tabsCount)
         )
     }
