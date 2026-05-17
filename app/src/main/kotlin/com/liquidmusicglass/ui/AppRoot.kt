@@ -97,6 +97,7 @@ fun AppRoot() {
     LaunchedEffect(Unit) {
         PlayerController.init(context)
         com.liquidmusicglass.api.icm.IcmAuthRepository.init(context)
+        com.liquidmusicglass.data.local.LocalAuthManager.init(context)
     }
 
     val currentTrack by PlayerController.currentTrack.collectAsState()
