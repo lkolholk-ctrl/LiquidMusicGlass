@@ -3,11 +3,6 @@ package com.liquidmusicglass.api.icm
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-/**
- * Модели данных для ICM Music Partner API (byicloud.online)
- * Полная документация: https://byicloud.online/partners/api-docs
- */
-
 // ─── Health ───
 
 @Serializable
@@ -130,11 +125,12 @@ data class IcmAlbum(
     val id: String,
     val title: String,
     val artist: String,
-    @SerialName("artistId") val artistId: String,
+    @SerialName("artistId") val artistId: String? = null,
     val cover: String,
-    val type: String,
-    val year: Int? = null,
-    @SerialName("trackCount") val trackCount: Int
+    @SerialName("motionCoverUrl") val motionCoverUrl: String? = null,
+    @SerialName("releaseDate") val releaseDate: String? = null,
+    val year: String? = null,
+    val type: String? = null
 )
 
 @Serializable
@@ -142,39 +138,50 @@ data class IcmAlbumTrack(
     val id: String,
     val title: String,
     val artist: String,
-    @SerialName("artistId") val artistId: String,
+    @SerialName("artistId") val artistId: String? = null,
     val cover: String,
-    @SerialName("collectionId") val collectionId: String,
-    val duration: Long,
+    @SerialName("collectionId") val collectionId: String? = null,
     @SerialName("is_explicit") val isExplicit: Boolean = false,
-    @SerialName("trackNumber") val trackNumber: Int,
-    val preview: String? = null
+    val region: String? = null
 )
 
 // ─── Artist ───
+// Real API returns: image (not cover), topSongs (not topTracks), artists array, genre, url, editorialVideoUrl, latestRelease, playlists, appearsOn
 
 @Serializable
 data class IcmArtistResponse(
     val id: String,
     val name: String,
-    val cover: String? = null,
-    val description: String? = null,
-    @SerialName("topTracks") val topTracks: List<IcmArtistTrack> = emptyList(),
+    val genre: String? = null,
+    val url: String? = null,
+    val image: String? = null,
+    @SerialName("editorialVideoUrl") val editorialVideoUrl: String? = null,
+    @SerialName("topSongs") val topSongs: List<IcmArtistSong> = emptyList(),
+    @SerialName("latestRelease") val latestRelease: IcmArtistAlbum? = null,
     val albums: List<IcmArtistAlbum> = emptyList(),
-    @SerialName("similarArtists") val similarArtists: List<IcmSimilarArtist> = emptyList()
+    @SerialName("similarArtists") val similarArtists: List<IcmSimilarArtist> = emptyList(),
+    val playlists: List<IcmArtistPlaylist> = emptyList(),
+    @SerialName("appearsOn") val appearsOn: List<IcmArtistAlbum> = emptyList()
 )
 
 @Serializable
-data class IcmArtistTrack(
+data class IcmArtistSong(
     val id: String,
     val title: String,
     val artist: String,
-    @SerialName("artistId") val artistId: String,
+    @SerialName("artistId") val artistId: String? = null,
+    val artists: List<IcmMiniArtist> = emptyList(),
     val cover: String,
-    @SerialName("collectionId") val collectionId: String,
-    val duration: Long,
+    @SerialName("albumName") val albumName: String? = null,
+    @SerialName("isAlbum") val isAlbum: Boolean = false,
     @SerialName("is_explicit") val isExplicit: Boolean = false,
-    val preview: String? = null
+    val region: String? = null
+)
+
+@Serializable
+data class IcmMiniArtist(
+    val id: String? = null,
+    val name: String
 )
 
 @Serializable
@@ -182,17 +189,26 @@ data class IcmArtistAlbum(
     val id: String,
     val title: String,
     val artist: String,
-    @SerialName("artistId") val artistId: String,
+    val artists: List<IcmMiniArtist> = emptyList(),
+    val year: String? = null,
+    val date: String? = null,
     val cover: String,
-    val type: String,
-    val year: Int? = null,
-    @SerialName("trackCount") val trackCount: Int
+    val type: String? = null,
+    @SerialName("isAlbum") val isAlbum: Boolean = false
 )
 
 @Serializable
 data class IcmSimilarArtist(
     val id: String,
     val name: String,
+    val url: String? = null,
+    val cover: String? = null
+)
+
+@Serializable
+data class IcmArtistPlaylist(
+    val id: String,
+    val title: String,
     val cover: String? = null
 )
 
@@ -273,10 +289,6 @@ data class IcmBatchTrackMetaResponse(
     val items: List<IcmBatchTrackMetaItem>
 )
 
-/**
- * Batch item — может быть либо успешным результатом, либо ошибкой.
- * API не использует дискриминатор; отличай по наличию поля `error`.
- */
 @Serializable
 data class IcmBatchTrackMetaItem(
     val id: String,
@@ -356,22 +368,22 @@ fun IcmAlbumTrack.toTrack(): com.liquidmusicglass.engine.Track {
         artist = artist,
         albumName = "",
         uri = android.net.Uri.parse("https://byicloud.online/track/$id"),
-        durationMs = duration,
-        albumId = collectionId.hashCode().toLong(),
+        durationMs = 0L,
+        albumId = collectionId?.hashCode()?.toLong() ?: id.hashCode().toLong(),
         coverUrl = cover.replace("1000x1000", "600x600")
     )
 }
 
-fun IcmArtistTrack.toTrack(): com.liquidmusicglass.engine.Track {
+fun IcmArtistSong.toTrack(): com.liquidmusicglass.engine.Track {
     return com.liquidmusicglass.engine.Track(
         id = id,
         title = title,
-        artist = artist,
-        albumName = "",
+        artist = artists.firstOrNull()?.name ?: artist,
+        albumName = albumName ?: "",
         uri = android.net.Uri.parse("https://byicloud.online/track/$id"),
-        durationMs = duration,
-        albumId = collectionId.hashCode().toLong(),
-        coverUrl = cover.replace("1000x1000", "600x600")
+        durationMs = 0L,
+        albumId = 0L,
+        coverUrl = cover.replace("300x300", "600x600")
     )
 }
 

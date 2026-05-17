@@ -51,7 +51,6 @@ import androidx.compose.ui.unit.sp
 import com.liquidmusicglass.api.icm.IcmArtistResponse
 import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.api.icm.toTrack
-import com.liquidmusicglass.engine.IcmKeyProvider
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.ui.glass.AlbumArtImage
 
@@ -93,15 +92,19 @@ fun ArtistDetailScreen(
     }
 
     val artistTracks = remember(artist) {
-        artist?.topTracks?.map { it.toTrack() } ?: emptyList()
+        artist?.topSongs?.map { it.toTrack() } ?: emptyList()
     }
 
     val albums = remember(artist) {
         artist?.albums ?: emptyList()
     }
 
+    val similarArtistsList = remember(artist) {
+        artist?.similarArtists ?: emptyList()
+    }
+
     val artistName = artist?.name ?: "Unknown Artist"
-    val coverUrl = artist?.cover
+    val coverUrl = artist?.image
 
     Box(
         modifier = Modifier
@@ -208,7 +211,7 @@ fun ArtistDetailScreen(
                             ) {
                                 AlbumArtImage(
                                     uri = null,
-                                    coverUrl = coverUrl?.replace("1000x1000", "600x600"),
+                                    coverUrl = coverUrl?.replace("1000x1000", "600x600")?.replace("1500x1500", "600x600")?.replace("300x300", "600x600"),
                                     modifier = Modifier.fillMaxSize(),
                                     contentScale = ContentScale.Crop
                                 )
@@ -238,16 +241,15 @@ fun ArtistDetailScreen(
                                 .padding(horizontal = 20.dp)
                         )
 
-                        // Description / Bio
-                        val description = artist?.description
-                        if (!description.isNullOrBlank()) {
-                            Spacer(modifier = Modifier.height(12.dp))
+                        // Genre
+                        val genre = artist?.genre
+                        if (!genre.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                text = description,
-                                color = Color.White.copy(alpha = 0.60f),
-                                fontSize = 14.sp,
+                                text = genre,
+                                color = Color.White.copy(alpha = 0.50f),
+                                fontSize = 13.sp,
                                 textAlign = TextAlign.Center,
-                                lineHeight = 20.sp,
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(horizontal = 24.dp)
@@ -320,7 +322,7 @@ fun ArtistDetailScreen(
                         Spacer(modifier = Modifier.height(28.dp))
 
                         // Similar Artists
-                        val similar = artist?.similarArtists ?: emptyList()
+                        val similar = similarArtistsList
                         if (similar.isNotEmpty()) {
                             Text(
                                 text = "Similar Artists",
@@ -353,7 +355,7 @@ fun ArtistDetailScreen(
                                         ) {
                                             AlbumArtImage(
                                                 uri = null,
-                                                coverUrl = sim.cover?.replace("1000x1000", "600x600"),
+                                                coverUrl = sim.cover?.replace("1000x1000", "600x600")?.replace("1500x1500", "600x600")?.replace("300x300", "600x600"),
                                                 modifier = Modifier.fillMaxSize(),
                                                 contentScale = ContentScale.Crop
                                             )
