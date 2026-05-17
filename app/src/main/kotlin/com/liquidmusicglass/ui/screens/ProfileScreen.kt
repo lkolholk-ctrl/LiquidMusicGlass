@@ -43,6 +43,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.liquidmusicglass.api.icm.IcmAuthRepository
+import com.liquidmusicglass.data.local.LocalAuthManager
 import com.liquidmusicglass.ui.theme.LiquidTheme
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -59,17 +60,15 @@ fun ProfileScreen(
 ) {
     val scroll = rememberScrollState()
 
-    val isLoggedIn by IcmAuthRepository.isLoggedIn.collectAsState()
+    val isLoggedIn = LocalAuthManager.isLoggedIn()
     val isPremium by IcmAuthRepository.isPremium.collectAsState()
-    val userEmail by IcmAuthRepository.userEmail.collectAsState()
-    val telegramId by IcmAuthRepository.telegramId.collectAsState()
+    val userEmail = LocalAuthManager.getEmail()
     val premiumExpiresAt by IcmAuthRepository.premiumExpiresAt.collectAsState()
 
     val displayName = userEmail?.substringBefore("@")?.replaceFirstChar { it.uppercase() }
-        ?: telegramId?.let { "User $it" }
         ?: "Guest"
 
-    val emailDisplay = userEmail ?: telegramId?.let { "Telegram: $it" } ?: "Not signed in"
+    val emailDisplay = userEmail ?: "Not signed in"
 
     Box(
         modifier = Modifier
@@ -242,6 +241,7 @@ fun ProfileScreen(
                     title = "Sign Out",
                     subtitle = "Log out of your account",
                     onClick = {
+                        LocalAuthManager.logout()
                         IcmAuthRepository.logout()
                         onLogout()
                     },
