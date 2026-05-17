@@ -17,8 +17,15 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        // BuildConfig field removed — API key now lives in native .so (JNI)
-        // See: app/src/main/cpp/icmkey.c for encrypted key storage
+        // Read ICM API key from local.properties (GitHub Secret in CI)
+        // Fallback to native .so (JNI) at runtime for maximum protection
+        val localProperties = java.util.Properties()
+        val localPropsFile = rootProject.file("local.properties")
+        if (localPropsFile.exists()) {
+            localProperties.load(localPropsFile.inputStream())
+        }
+        val icmApiKey = localProperties.getProperty("ICM_API_KEY", "")
+        buildConfigField("String", "ICM_API_KEY", "\"$icmApiKey\"")
     }
 
     signingConfigs {
