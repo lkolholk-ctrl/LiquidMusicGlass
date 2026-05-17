@@ -158,6 +158,7 @@ data class IcmArtistResponse(
     val id: String,
     val name: String,
     val cover: String? = null,
+    val description: String? = null,
     @SerialName("topTracks") val topTracks: List<IcmArtistTrack> = emptyList(),
     val albums: List<IcmArtistAlbum> = emptyList(),
     @SerialName("similarArtists") val similarArtists: List<IcmSimilarArtist> = emptyList()

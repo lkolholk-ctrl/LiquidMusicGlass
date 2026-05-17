@@ -250,7 +250,7 @@ fun SearchScreen(
                                 icon = Icons.Rounded.Person,
                                 coverUrl = item.cover,
                                 
-                                onClick = { onNavigateToArtist(item.displayArtist) }
+                                onClick = { onNavigateToArtist(item.id) }
                             )
                         }
                     }
@@ -286,11 +286,9 @@ fun SearchScreen(
                                 coverUrl = item.cover,
                                 
                                 onClick = {
-                                    // Add to queue and play
-                                    val currentQueue = PlayerController.getCurrentQueue().toMutableList()
-                                    currentQueue.add(track)
-                                    PlayerController.setQueue(currentQueue, currentQueue.size - 1)
-                                    PlayerController.playTrack(context, currentQueue.size - 1)
+                                    // Replace queue with single track and play
+                                    PlayerController.setQueue(listOf(track), 0)
+                                    PlayerController.playTrack(context, 0)
                                 }
                             )
                         }
@@ -343,6 +341,7 @@ private fun SearchResultRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .padding(horizontal = 16.dp)
             .height(64.dp)
             .clip(shape)
             .background(Color(0xFF1A1A1A))

@@ -239,6 +239,25 @@ fun SettingsScreen(
                         .getString("api_key", "") ?: ""
                 )
             }
+            
+            // Stream quality selector
+            val qualityOptions = listOf("128K", "256K", "320K", "ALAC")
+            var selectedQuality by remember { 
+                mutableStateOf(
+                    context.getSharedPreferences("icm", Context.MODE_PRIVATE)
+                        .getString("stream_quality", "256K") ?: "256K"
+                )
+            }
+            
+            // Region selector
+            val regionOptions = listOf("us", "ru", "nz")
+            var selectedRegion by remember {
+                mutableStateOf(
+                    context.getSharedPreferences("icm", Context.MODE_PRIVATE)
+                        .getString("region", "us") ?: "us"
+                )
+            }
+            
             GlassCapsuleCard(backdrop = screenBackdrop) {
                 Column(modifier = Modifier.padding(vertical = 14.dp)) {
                     Row(
@@ -295,6 +314,70 @@ fun SettingsScreen(
                         color = LiquidTheme.colors.textTertiary,
                         fontSize = 11.sp
                     )
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    GlassDivider()
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    // Stream Quality
+                    Text(
+                        "Stream Quality",
+                        color = LiquidTheme.colors.textPrimary,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        qualityOptions.forEach { quality ->
+                            GlassCapsuleChip(
+                                text = quality,
+                                isSelected = quality == selectedQuality,
+                                backdrop = screenBackdrop,
+                                onClick = {
+                                    selectedQuality = quality
+                                    context.getSharedPreferences("icm", Context.MODE_PRIVATE)
+                                        .edit().putString("stream_quality", quality).apply()
+                                    com.liquidmusicglass.api.icm.IcmRepository.streamQuality = quality
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    GlassDivider()
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    // Region
+                    Text(
+                        "Region",
+                        color = LiquidTheme.colors.textPrimary,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        regionOptions.forEach { region ->
+                            GlassCapsuleChip(
+                                text = region.uppercase(),
+                                isSelected = region == selectedRegion,
+                                backdrop = screenBackdrop,
+                                onClick = {
+                                    selectedRegion = region
+                                    context.getSharedPreferences("icm", Context.MODE_PRIVATE)
+                                        .edit().putString("region", region).apply()
+                                    com.liquidmusicglass.api.icm.IcmRepository.region = region
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
                 }
             }
 

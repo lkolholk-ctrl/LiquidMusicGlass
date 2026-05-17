@@ -201,6 +201,22 @@ fun ArtistDetailScreen(
                                 .padding(horizontal = 20.dp)
                         )
 
+                        // Description / Bio
+                        val description = artist?.description
+                        if (!description.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = description,
+                                color = Color.White.copy(alpha = 0.60f),
+                                fontSize = 14.sp,
+                                textAlign = TextAlign.Center,
+                                lineHeight = 20.sp,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 24.dp)
+                            )
+                        }
+
                         Spacer(modifier = Modifier.height(20.dp))
 
                         // Play All / Shuffle
@@ -265,6 +281,63 @@ fun ArtistDetailScreen(
                         }
 
                         Spacer(modifier = Modifier.height(28.dp))
+
+                        // Similar Artists
+                        val similar = artist?.similarArtists ?: emptyList()
+                        if (similar.isNotEmpty()) {
+                            Text(
+                                text = "Similar Artists",
+                                color = Color.White,
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(horizontal = 20.dp)
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = 20.dp),
+                                horizontalArrangement = Arrangement.spacedBy(14.dp)
+                            ) {
+                                items(similar, key = { it.id }) { sim ->
+                                    Column(
+                                        modifier = Modifier
+                                            .width(100.dp)
+                                            .clickable(
+                                                interactionSource = remember { MutableInteractionSource() },
+                                                indication = null,
+                                                onClick = { onNavigateToAlbum(sim.id) }
+                                            ),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(100.dp)
+                                                .clip(CircleShape)
+                                        ) {
+                                            AlbumArtImage(
+                                                uri = null,
+                                                coverUrl = sim.cover?.replace("1000x1000", "600x600"),
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentScale = ContentScale.Crop
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Text(
+                                            text = sim.name,
+                                            color = Color.White,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            textAlign = TextAlign.Center,
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(28.dp))
+                        }
 
                         // Albums section
                         if (albums.isNotEmpty()) {
@@ -335,7 +408,10 @@ fun ArtistDetailScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .padding(horizontal = 16.dp)
                                 .height(58.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0xFF1A1A1A))
                                 .clickable(
                                     interactionSource = remember { MutableInteractionSource() },
                                     indication = null,
@@ -347,7 +423,7 @@ fun ArtistDetailScreen(
                                         }
                                     }
                                 )
-                                .padding(horizontal = 20.dp),
+                                .padding(horizontal = 12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Box(
@@ -373,7 +449,7 @@ fun ArtistDetailScreen(
                                 )
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
-                                    text = track.albumName,
+                                    text = track.artist,
                                     color = Color.White.copy(alpha = 0.45f),
                                     fontSize = 12.sp,
                                     maxLines = 1,
@@ -388,6 +464,7 @@ fun ArtistDetailScreen(
                                 fontSize = 12.sp
                             )
                         }
+                        Spacer(modifier = Modifier.height(4.dp))
                     }
 
                     item { Spacer(modifier = Modifier.height(200.dp)) }

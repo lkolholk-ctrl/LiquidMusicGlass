@@ -68,13 +68,26 @@ object PlayerController {
     private val recentHistory = mutableListOf<Track>()
 
     /**
-     * Добавить трек в недавно прослушанные.
+     * Добавить трек в недавно прослушанные (локальная история).
      */
     private fun addToRecent(track: Track) {
         recentHistory.removeAll { it.id == track.id }
         recentHistory.add(0, track)
         if (recentHistory.size > 30) recentHistory.removeLast()
         _recentlyPlayed.value = recentHistory.toList()
+
+        // Save to persistent local storage
+        appContext?.let { ctx ->
+            com.liquidmusicglass.data.local.LocalStorage.addToHistory(ctx,
+                com.liquidmusicglass.data.local.HistoryEntry(
+                    trackId = track.id,
+                    title = track.title,
+                    artist = track.artist,
+                    coverUrl = track.coverUrl,
+                    durationMs = track.durationMs
+                )
+            )
+        }
     }
 
     // Shuffle & Repeat
@@ -200,6 +213,27 @@ object PlayerController {
             com.liquidmusicglass.api.icm.IcmRepository.init(savedKey)
         }
 
+        // Load play history from local storage
+        scope.launch {
+            val history = com.liquidmusicglass.data.local.LocalStorage.getHistory(context)
+            recentHistory.clear()
+            recentHistory.addAll(
+                history.map { h ->
+                    Track(
+                        id = h.trackId,
+                        title = h.title,
+                        artist = h.artist,
+                        albumName = "",
+                        uri = android.net.Uri.parse("https://byicloud.online/track/${h.trackId}"),
+                        durationMs = h.durationMs,
+                        albumId = 0L,
+                        coverUrl = h.coverUrl
+                    )
+                }
+            )
+            _recentlyPlayed.value = recentHistory.toList()
+        }
+
         scope.launch {
             obtainController(context)
         }
@@ -302,21 +336,18 @@ object PlayerController {
         if (index !in queue.indices) return
 
         scope.launch {
-            val playerController = obtainController(context) ?: return@launch
             val track = queue[index]
-            
-            // Fetch stream URL from ICM API
+
+            // Always resolve stream URL for online tracks via ICM API
             val prefs = context.getSharedPreferences("icm", Context.MODE_PRIVATE)
             val apiKey = prefs.getString("api_key", null)
-            val streamUri = if (track.uri.toString().startsWith("http")) {
-                track.uri
-            } else {
-                val url = if (!apiKey.isNullOrBlank()) {
-                    com.liquidmusicglass.api.icm.IcmRepository.getStreamUrl(track.id)
-                } else null
+            val streamUri = if (track.isOnlineTrack && !apiKey.isNullOrBlank()) {
+                val url = com.liquidmusicglass.api.icm.IcmRepository.getStreamUrl(track.id)
                 if (url != null) android.net.Uri.parse(url) else track.uri
+            } else {
+                track.uri
             }
-            
+
             val mediaItem = MediaItem.Builder()
                 .setMediaId(track.id)
                 .setUri(streamUri)
@@ -335,11 +366,24 @@ object PlayerController {
             _durationMs.value = track.durationMs
             _currentPositionMs.value = 0L
 
-            playerController.setMediaItem(mediaItem)
-            playerController.prepare()
-            playerController.play()
-            
+            // Try MediaController first, fallback to direct ExoPlayer
+            val playerController = obtainController(context)
+            if (playerController != null) {
+                playerController.setMediaItem(mediaItem)
+                playerController.prepare()
+                playerController.play()
+            } else {
+                val exo = AudioService.companionPlayer
+                if (exo != null) {
+                    exo.setMediaItem(mediaItem)
+                    exo.prepare()
+                    exo.play()
+                }
+            }
+
             addToRecent(track)
+            _isPlaying.value = true
+            startPositionUpdates()
 
             AudioService.companionService?.notifyManualNavigation()
         }
