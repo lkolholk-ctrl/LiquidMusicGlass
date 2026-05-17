@@ -356,6 +356,10 @@ fun AppRoot() {
                 Spacer(
                     modifier = Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)
                 )
+
+                Spacer(
+                    modifier = Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)
+                )
             }
         }
 
