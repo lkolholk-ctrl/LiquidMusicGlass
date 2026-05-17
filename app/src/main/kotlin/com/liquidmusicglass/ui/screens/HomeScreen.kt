@@ -1,7 +1,6 @@
 package com.liquidmusicglass.ui.screens
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -25,10 +24,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
-import androidx.compose.material.icons.rounded.Equalizer
 import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.Radio
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -38,16 +34,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.Track
 import com.liquidmusicglass.ui.glass.AlbumArtImage
@@ -102,7 +95,6 @@ fun HomeScreen(
                     items(recentlyPlayed.take(15), key = { "recent_${it.id}" }) { track ->
                         RecentTrackCard(
                             track = track,
-                            backdrop = screenBackdrop,
                             onClick = {
                                 val idx = allTracks.indexOfFirst { it.id == track.id }
                                 if (idx >= 0) PlayerController.playTrack(context, idx)
@@ -124,7 +116,6 @@ fun HomeScreen(
                     items(allTracks.shuffled().take(15), key = { "rec_${it.id}" }) { track ->
                         RecommendationCard(
                             track = track,
-                            backdrop = screenBackdrop,
                             onClick = {
                                 val idx = allTracks.indexOfFirst { it.id == track.id }
                                 if (idx >= 0) PlayerController.playTrack(context, idx)
@@ -156,7 +147,6 @@ fun HomeScreen(
                         ArtistMixCard(
                             artistName = artist,
                             tracks = tracks,
-                            backdrop = screenBackdrop,
                             onClick = {
                                 val idx = allTracks.indexOfFirst { it.id == tracks.first().id }
                                 if (idx >= 0) PlayerController.playTrack(context, idx)
@@ -183,7 +173,6 @@ fun HomeScreen(
                     quickPicks.forEach { track ->
                         QuickPickRow(
                             track = track,
-                            backdrop = screenBackdrop,
                             onClick = {
                                 val idx = allTracks.indexOfFirst { it.id == track.id }
                                 if (idx >= 0) PlayerController.playTrack(context, idx)
@@ -198,17 +187,13 @@ fun HomeScreen(
     }
 }
 
-// ═══════════════════════════════════════════════════════════
-//  Components
-// ═══════════════════════════════════════════════════════════
-
 @Composable
 private fun SectionHeader(title: String) {
     Text(
         text = title,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 22.sp,
         color = LiquidTheme.colors.textPrimary,
+        fontSize = 20.sp,
+        fontWeight = FontWeight.SemiBold,
         modifier = Modifier.padding(horizontal = 20.dp)
     )
 }
@@ -216,14 +201,11 @@ private fun SectionHeader(title: String) {
 @Composable
 private fun RecentTrackCard(
     track: Track,
-    backdrop: LayerBackdrop,
     onClick: () -> Unit
 ) {
-    val shape = RoundedCornerShape(16.dp)
-
     Column(
         modifier = Modifier
-            .width(140.dp)
+            .width(130.dp)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -232,58 +214,18 @@ private fun RecentTrackCard(
     ) {
         Box(
             modifier = Modifier
-                .size(140.dp)
-                .clip(shape)
+                .size(130.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color(0xFF1A1A1A))
         ) {
             AlbumArtImage(
-                uri = track.albumArtUri,
-                audioFileUri = track.uri,
-                albumId = track.albumId,
-                coverUrl = track.coverUrl,
+                uri = null,
+                coverUrl = track.coverUrl?.replace("1000x1000", "600x600"),
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop
             )
-
-            // Bottom fade
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(40.dp)
-                    .align(Alignment.BottomCenter)
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.5f))
-                        )
-                    )
-            )
-
-            // Play button
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(8.dp)
-                    .size(28.dp)
-                    .drawBackdrop(
-                        backdrop = backdrop,
-                        shape = { RoundedCornerShape(50) },
-                        effects = {
-                            blur(4.dp.toPx())
-                            vibrancy()
-                        },
-                        onDrawSurface = { drawRect(Color.White.copy(alpha = 0.25f)) }
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.PlayArrow,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = Color.White
-                )
-            }
         }
-
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(6.dp))
         Text(
             text = track.title,
             color = LiquidTheme.colors.textPrimary,
@@ -295,7 +237,7 @@ private fun RecentTrackCard(
         Text(
             text = track.artist,
             color = LiquidTheme.colors.textSecondary,
-            fontSize = 12.sp,
+            fontSize = 11.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
@@ -305,14 +247,11 @@ private fun RecentTrackCard(
 @Composable
 private fun RecommendationCard(
     track: Track,
-    backdrop: LayerBackdrop,
     onClick: () -> Unit
 ) {
-    val shape = RoundedCornerShape(20.dp)
-
     Column(
         modifier = Modifier
-            .width(160.dp)
+            .width(130.dp)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -321,46 +260,18 @@ private fun RecommendationCard(
     ) {
         Box(
             modifier = Modifier
-                .size(160.dp)
-                .drawBackdrop(
-                    backdrop = backdrop,
-                    shape = { shape },
-                    effects = {
-                        blur(4.dp.toPx())
-                        vibrancy()
-                        lens(
-                            refractionHeight = 16.dp.toPx(),
-                            refractionAmount = -40.dp.toPx(),
-                            chromaticAberration = true
-                        )
-                    },
-                    highlight = {
-                        Highlight.Ambient.copy(alpha = 0.4f)
-                    },
-                    shadow = {
-                        Shadow(radius = 6.dp, color = Color.Black.copy(alpha = 0.12f))
-                    },
-                    innerShadow = {
-                        InnerShadow(radius = 3.dp, alpha = 0.2f)
-                    },
-                    onDrawSurface = {
-                        drawRect(Color.White.copy(alpha = 0.06f))
-                        drawRect(Color.White.copy(alpha = 0.22f), style = Stroke(width = 1.dp.toPx()))
-                    }
-                )
-                .clip(shape)
+                .size(130.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color(0xFF1A1A1A))
         ) {
             AlbumArtImage(
-                uri = track.albumArtUri,
-                audioFileUri = track.uri,
-                albumId = track.albumId,
-                coverUrl = track.coverUrl,
+                uri = null,
+                coverUrl = track.coverUrl?.replace("1000x1000", "600x600"),
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop
             )
         }
-
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(6.dp))
         Text(
             text = track.title,
             color = LiquidTheme.colors.textPrimary,
@@ -372,7 +283,7 @@ private fun RecommendationCard(
         Text(
             text = track.artist,
             color = LiquidTheme.colors.textSecondary,
-            fontSize = 12.sp,
+            fontSize = 11.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
@@ -383,82 +294,51 @@ private fun RecommendationCard(
 private fun ArtistMixCard(
     artistName: String,
     tracks: List<Track>,
-    backdrop: LayerBackdrop,
     onClick: () -> Unit
 ) {
-    val shape = RoundedCornerShape(24.dp)
-    val coverTrack = tracks.first()
-
-    Box(
+    Column(
         modifier = Modifier
-            .width(200.dp)
-            .height(120.dp)
-            .drawBackdrop(
-                backdrop = backdrop,
-                shape = { shape },
-                effects = {
-                    blur(4.dp.toPx())
-                    vibrancy()
-                    lens(
-                        refractionHeight = 20.dp.toPx(),
-                        refractionAmount = -50.dp.toPx(),
-                        chromaticAberration = true
-                    )
-                },
-                highlight = {
-                    Highlight.Ambient.copy(alpha = 0.4f)
-                },
-                shadow = {
-                    Shadow(radius = 6.dp, color = Color.Black.copy(alpha = 0.15f))
-                },
-                innerShadow = {
-                    InnerShadow(radius = 3.dp, alpha = 0.2f)
-                },
-                onDrawSurface = {
-                    drawRect(Color.White.copy(alpha = 0.08f))
-                    drawRect(Color.White.copy(alpha = 0.22f), style = Stroke(width = 1.dp.toPx()))
-                }
-            )
-            .clip(shape)
+            .width(180.dp)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = onClick
             )
     ) {
-        AlbumArtImage(
-            uri = coverTrack.albumArtUri,
-            audioFileUri = coverTrack.uri,
-            albumId = coverTrack.albumId,
-            modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop
-        )
-
         Box(
             modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.45f))
-        )
-
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.Bottom
+                .size(180.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color(0xFF1A1A1A))
         ) {
-            Text(
-                text = artistName,
-                color = Color.White,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+            AlbumArtImage(
+                uri = null,
+                coverUrl = tracks.firstOrNull()?.coverUrl?.replace("1000x1000", "600x600"),
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
             )
-            Text(
-                text = "${tracks.size} tracks",
-                color = Color.White.copy(alpha = 0.65f),
-                fontSize = 12.sp
-            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.3f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = artistName,
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "${tracks.size} tracks",
+                        color = Color.White.copy(alpha = 0.7f),
+                        fontSize = 12.sp
+                    )
+                }
+            }
         }
     }
 }
@@ -466,67 +346,36 @@ private fun ArtistMixCard(
 @Composable
 private fun QuickPickRow(
     track: Track,
-    backdrop: LayerBackdrop,
     onClick: () -> Unit
 ) {
-    val shape = RoundedCornerShape(18.dp)
-
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(68.dp)
-            .drawBackdrop(
-                backdrop = backdrop,
-                shape = { shape },
-                effects = {
-                    blur(4.dp.toPx())
-                    vibrancy()
-                    lens(
-                        refractionHeight = 20.dp.toPx(),
-                        refractionAmount = 32.dp.toPx(),
-                        chromaticAberration = true
-                    )
-                },
-                highlight = {
-                    Highlight.Ambient.copy(alpha = 0.3f)
-                },
-                shadow = {
-                    Shadow(radius = 4.dp, color = Color.Black.copy(alpha = 0.10f))
-                },
-                innerShadow = {
-                    InnerShadow(radius = 2.dp, alpha = 0.15f)
-                },
-                onDrawSurface = {
-                    drawRect(Color.White.copy(alpha = 0.04f))
-                    drawRect(Color.White.copy(alpha = 0.25f), style = Stroke(width = 1.dp.toPx()))
-                }
-            )
-            .clip(shape)
+            .height(56.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF1A1A1A))
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = onClick
             )
-            .padding(horizontal = 10.dp),
+            .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
             modifier = Modifier
-                .size(48.dp)
-                .clip(RoundedCornerShape(12.dp))
+                .size(44.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color(0xFF2A2A2A))
         ) {
             AlbumArtImage(
-                uri = track.albumArtUri,
-                audioFileUri = track.uri,
-                albumId = track.albumId,
-                coverUrl = track.coverUrl,
+                uri = null,
+                coverUrl = track.coverUrl?.replace("1000x1000", "600x600"),
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop
             )
         }
-
-        Spacer(modifier = Modifier.width(14.dp))
-
+        Spacer(modifier = Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = track.title,
@@ -536,7 +385,6 @@ private fun QuickPickRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = track.artist,
                 color = LiquidTheme.colors.textSecondary,
@@ -545,13 +393,11 @@ private fun QuickPickRow(
                 overflow = TextOverflow.Ellipsis
             )
         }
-
-        val minutes = (track.durationMs / 1000 / 60).toInt()
-        val seconds = ((track.durationMs / 1000) % 60).toInt()
-        Text(
-            text = "$minutes:${seconds.toString().padStart(2, '0')}",
-            color = LiquidTheme.colors.textTertiary,
-            fontSize = 12.sp
+        Icon(
+            imageVector = Icons.Rounded.PlayArrow,
+            contentDescription = null,
+            tint = AppleRed,
+            modifier = Modifier.size(20.dp)
         )
     }
 }
