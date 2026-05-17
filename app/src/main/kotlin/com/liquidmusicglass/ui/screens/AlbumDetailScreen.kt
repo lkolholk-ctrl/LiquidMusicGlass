@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -183,7 +184,7 @@ fun AlbumDetailScreen(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
-                                    imageVector = androidx.compose.material.icons.Icons.Rounded.Share,
+                                    imageVector = Icons.Rounded.Share,
                                     contentDescription = null,
                                     tint = Color.White,
                                     modifier = Modifier.size(22.dp)
