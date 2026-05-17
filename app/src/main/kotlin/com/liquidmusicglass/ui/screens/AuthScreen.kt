@@ -152,7 +152,8 @@ fun AuthScreen(
                 when (currentMode) {
                     AuthMode.WELCOME -> WelcomeContent(
                         onLogin = { mode = AuthMode.LOGIN },
-                        onRegister = { mode = AuthMode.REGISTER }
+                        onRegister = { mode = AuthMode.REGISTER },
+                        context = context
                     )
                     AuthMode.LOGIN -> LoginContent(
                         email = email,
@@ -288,7 +289,8 @@ fun AuthScreen(
 @Composable
 private fun WelcomeContent(
     onLogin: () -> Unit,
-    onRegister: () -> Unit
+    onRegister: () -> Unit,
+    context: android.content.Context
 ) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Spacer(modifier = Modifier.height(40.dp))

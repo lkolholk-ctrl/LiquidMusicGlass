@@ -93,17 +93,19 @@ fun HomeScreen(
             if (recentlyPlayed.isNotEmpty()) {
                 SectionHeader(title = "Recently Played")
                 Spacer(modifier = Modifier.height(12.dp))
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 20.dp),
-                    horizontalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    items(recentlyPlayed.take(15).distinctBy { it.id }, key = { "recent_${it.id}" }) { track ->
-                        RecentTrackCard(
-                            track = track,
-                            onClick = {
-                                PlayerController.playNext(track, context)
-                            }
-                        )
+                Box(modifier = Modifier.height(190.dp)) {
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 20.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        items(recentlyPlayed.take(15).distinctBy { it.id }, key = { "recent_${it.id}" }) { track ->
+                            RecentTrackCard(
+                                track = track,
+                                onClick = {
+                                    PlayerController.playNext(track, context)
+                                }
+                            )
+                        }
                     }
                 }
                 Spacer(modifier = Modifier.height(32.dp))
@@ -113,18 +115,20 @@ fun HomeScreen(
             if (allTracks.isNotEmpty()) {
                 SectionHeader(title = "For You")
                 Spacer(modifier = Modifier.height(12.dp))
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 20.dp),
-                    horizontalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    val recs = remember(allTracks) { allTracks.shuffled().take(15) }
-                    items(recs, key = { "foryou_${it.id}" }) { track ->
-                        RecommendationCard(
-                            track = track,
-                            onClick = {
-                                PlayerController.playNext(track, context)
-                            }
-                        )
+                Box(modifier = Modifier.height(190.dp)) {
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 20.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        val recs = remember(allTracks) { allTracks.shuffled().take(15) }
+                        items(recs, key = { "foryou_${it.id}" }) { track ->
+                            RecommendationCard(
+                                track = track,
+                                onClick = {
+                                    PlayerController.playNext(track, context)
+                                }
+                            )
+                        }
                     }
                 }
                 Spacer(modifier = Modifier.height(32.dp))
@@ -143,19 +147,21 @@ fun HomeScreen(
                         .take(8)
                 }
 
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 20.dp),
-                    horizontalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    items(artistGroups, key = { it.key }) { (artist, tracks) ->
-                        ArtistMixCard(
-                            artistName = artist,
-                            tracks = tracks,
-                            onClick = {
-                                PlayerController.setQueue(tracks)
-                                PlayerController.playTrack(context, 0)
-                            }
-                        )
+                Box(modifier = Modifier.height(220.dp)) {
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 20.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        items(artistGroups, key = { it.key }) { (artist, tracks) ->
+                            ArtistMixCard(
+                                artistName = artist,
+                                tracks = tracks,
+                                onClick = {
+                                    PlayerController.setQueue(tracks)
+                                    PlayerController.playTrack(context, 0)
+                                }
+                            )
+                        }
                     }
                 }
                 Spacer(modifier = Modifier.height(32.dp))
@@ -165,17 +171,19 @@ fun HomeScreen(
             if (favoriteTracks.isNotEmpty()) {
                 SectionHeader(title = "Favorites")
                 Spacer(modifier = Modifier.height(12.dp))
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 20.dp),
-                    horizontalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    items(favoriteTracks.take(15).distinctBy { it.id }, key = { "fav_${it.id}" }) { track ->
-                        RecentTrackCard(
-                            track = track,
-                            onClick = {
-                                PlayerController.playNext(track, context)
-                            }
-                        )
+                Box(modifier = Modifier.height(190.dp)) {
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 20.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        items(favoriteTracks.take(15).distinctBy { it.id }, key = { "fav_${it.id}" }) { track ->
+                            RecentTrackCard(
+                                track = track,
+                                onClick = {
+                                    PlayerController.playNext(track, context)
+                                }
+                            )
+                        }
                     }
                 }
                 Spacer(modifier = Modifier.height(32.dp))
