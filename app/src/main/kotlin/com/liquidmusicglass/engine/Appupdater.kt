@@ -106,7 +106,7 @@ object AppUpdater {
                     val asset = assets.getJSONObject(i)
                     val name = asset.optString("name", "")
                     if (name.endsWith(".apk")) {
-                        apkDownloadUrl = asset.optString("browser_download_url", null)
+                        apkDownloadUrl = asset.optString("browser_download_url", "")
                         apkSize = asset.optLong("size", 0L)
                         break
                     }
