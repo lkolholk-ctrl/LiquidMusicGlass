@@ -322,6 +322,38 @@ object PlayerController {
         }
     }
 
+    /**
+     * Добавить трек в конец очереди.
+     * Если очередь пуста — устанавливает как текущий.
+     */
+    fun addToQueue(track: Track) {
+        queue = queue + track
+        _queue.value = queue
+        if (currentIndex < 0) {
+            currentIndex = 0
+            _currentTrack.value = track
+            _durationMs.value = track.durationMs
+        }
+    }
+
+    /**
+     * Добавить трек в очередь и сразу воспроизвести.
+     * Сохраняет существующую очередь, вставляет трек после текущего.
+     */
+    fun playNext(track: Track, context: Context) {
+        if (queue.isEmpty()) {
+            setQueue(listOf(track), 0)
+            playTrack(context, 0)
+            return
+        }
+        val insertIndex = (currentIndex + 1).coerceAtMost(queue.size)
+        val newQueue = queue.toMutableList()
+        newQueue.add(insertIndex, track)
+        queue = newQueue
+        _queue.value = queue
+        playTrack(context, insertIndex)
+    }
+
     private fun buildMediaItem(track: Track): MediaItem {
         return MediaItem.Builder()
             .setMediaId(track.id)

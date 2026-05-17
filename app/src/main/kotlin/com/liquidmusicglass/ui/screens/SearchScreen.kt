@@ -59,6 +59,8 @@ import com.liquidmusicglass.engine.Track
 import com.liquidmusicglass.ui.glass.AlbumArtImage
 import com.liquidmusicglass.ui.theme.LiquidTheme
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 @Composable
 fun SearchScreen(
@@ -71,26 +73,29 @@ fun SearchScreen(
     var searchResults by remember { mutableStateOf<List<IcmSearchItem>>(emptyList()) }
     var isLoading by remember { mutableStateOf(false) }
     var lastError by remember { mutableStateOf<String?>(null) }
+    val searchMutex = remember { Mutex() }
 
-    // Debounce search: 300ms after user stops typing
+    // Debounce search: 500ms after user stops typing + mutex serialization
     LaunchedEffect(query) {
         if (query.isBlank()) {
             searchResults = emptyList()
             return@LaunchedEffect
         }
+        delay(500)
         isLoading = true
         lastError = null
-        delay(300)
-        try {
-            val result = IcmRepository.searchAll(query)
-            searchResults = result?.items ?: emptyList()
-            if (result == null) {
-                lastError = IcmRepository.lastError.value ?: "Search failed"
+        searchMutex.withLock {
+            try {
+                val result = IcmRepository.searchAll(query)
+                searchResults = result?.items ?: emptyList()
+                if (result == null) {
+                    lastError = IcmRepository.lastError.value ?: "Search failed"
+                }
+            } catch (e: Exception) {
+                lastError = e.message
+            } finally {
+                isLoading = false
             }
-        } catch (e: Exception) {
-            lastError = e.message
-        } finally {
-            isLoading = false
         }
     }
 
@@ -286,9 +291,8 @@ fun SearchScreen(
                                 coverUrl = item.cover,
                                 
                                 onClick = {
-                                    // Replace queue with single track and play
-                                    PlayerController.setQueue(listOf(track), 0)
-                                    PlayerController.playTrack(context, 0)
+                                    // Add to queue and play next without clearing existing queue
+                                    PlayerController.playNext(track, context)
                                 }
                             )
                         }
