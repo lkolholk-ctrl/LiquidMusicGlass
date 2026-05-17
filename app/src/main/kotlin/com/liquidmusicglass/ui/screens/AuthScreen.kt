@@ -103,11 +103,10 @@ fun AuthScreen(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null
                     ) {
-                        val intent = android.content.Intent(
-                            android.content.Intent.ACTION_VIEW,
-                            android.net.Uri.parse(telegramAuthUrl)
-                        )
-                        context.startActivity(intent)
+                        val customTabsIntent = androidx.browser.customtabs.CustomTabsIntent.Builder()
+                        .setShowTitle(true)
+                        .build()
+                    customTabsIntent.launchUrl(context, android.net.Uri.parse(telegramAuthUrl))
                     },
                 contentAlignment = Alignment.Center
             ) {
