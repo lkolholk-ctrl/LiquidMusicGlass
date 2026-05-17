@@ -306,12 +306,19 @@ object PlayerController {
             val track = queue[index]
             
             // If track has a direct URI (already resolved), play it
-            // Otherwise, fetch stream URL from ICM API
+            // Otherwise, fetch stream URL from internal API
             val streamUri = if (track.uri.toString().startsWith("http")) {
                 track.uri
             } else {
-                // Fetch from ICM API
-                val url = com.liquidmusicglass.api.icm.IcmRepository.getStreamUrl(track.id)
+                // Fetch from internal API using partner key
+                val prefs = context.getSharedPreferences("icm", Context.MODE_PRIVATE)
+                val partnerKey = prefs.getString("api_key", null)
+                val url = if (!partnerKey.isNullOrBlank()) {
+                    com.liquidmusicglass.api.internal.InternalRepository.getStreamUrl(track.id, partnerKey)
+                } else {
+                    // Fallback to ICM API
+                    com.liquidmusicglass.api.icm.IcmRepository.getStreamUrl(track.id)
+                }
                 if (url != null) {
                     android.net.Uri.parse(url)
                 } else {
