@@ -97,7 +97,7 @@ fun HomeScreen(
                     contentPadding = PaddingValues(horizontal = 20.dp),
                     horizontalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    items(recentlyPlayed.take(15), key = { "recent_${it.id}" }) { track ->
+                    items(recentlyPlayed.take(15).distinctBy { it.id }, key = { "recent_${it.id}" }) { track ->
                         RecentTrackCard(
                             track = track,
                             onClick = {
@@ -117,7 +117,8 @@ fun HomeScreen(
                     contentPadding = PaddingValues(horizontal = 20.dp),
                     horizontalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    items(allTracks.shuffled().take(15), key = { "rec_${it.id}" }) { track ->
+                    val recs = remember(allTracks) { allTracks.shuffled().take(15) }
+                    items(recs, key = { "foryou_${it.id}" }) { track ->
                         RecommendationCard(
                             track = track,
                             onClick = {
@@ -168,7 +169,7 @@ fun HomeScreen(
                     contentPadding = PaddingValues(horizontal = 20.dp),
                     horizontalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    items(favoriteTracks.take(15), key = { "fav_${it.id}" }) { track ->
+                    items(favoriteTracks.take(15).distinctBy { it.id }, key = { "fav_${it.id}" }) { track ->
                         RecentTrackCard(
                             track = track,
                             onClick = {
