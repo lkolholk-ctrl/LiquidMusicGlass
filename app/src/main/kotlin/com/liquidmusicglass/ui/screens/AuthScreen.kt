@@ -85,7 +85,13 @@ fun AuthScreen(
             Spacer(modifier = Modifier.height(40.dp))
 
             // Telegram auth via ICM API redirect
-            val partnerUserId = "app_${System.currentTimeMillis()}"
+            // Generate stable partner_user_id per device
+            val prefs = context.getSharedPreferences("icm_auth", android.content.Context.MODE_PRIVATE)
+            var partnerUserId = prefs.getString("partner_user_id", null)
+            if (partnerUserId == null) {
+                partnerUserId = "lg_${java.util.UUID.randomUUID().toString().replace("-", "").take(16)}"
+                prefs.edit().putString("partner_user_id", partnerUserId).apply()
+            }
             val telegramAuthUrl = "https://byicloud.online/partner/msng?partner_user_id=$partnerUserId&redirect_uri=https://liquid.glassfiles.ru/auth/telegram&state=android"
             Box(
                 modifier = Modifier
