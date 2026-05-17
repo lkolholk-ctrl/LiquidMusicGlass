@@ -44,8 +44,42 @@ class MainActivity : ComponentActivity() {
 
     private fun handleTelegramAuth(intent: Intent?) {
         val data = intent?.data ?: return
+        
+        // Handle server redirect with session token (liquidmusicglass://auth/telegram)
+        if (data.scheme == "liquidmusicglass" && data.host == "auth" && data.path == "/telegram") {
+            val success = data.getQueryParameter("success")?.toBoolean() ?: false
+            val token = data.getQueryParameter("token")
+            val expiresIn = data.getQueryParameter("expires_in")?.toIntOrNull() ?: 3600
+            val icmUserId = data.getQueryParameter("icm_user_id")
+            val error = data.getQueryParameter("error")
+
+            if (!success || error != null) {
+                android.widget.Toast.makeText(
+                    this,
+                    "Auth error: ${error ?: "Unknown error"}",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+                return
+            }
+
+            if (token != null && icmUserId != null) {
+                // Store Telegram auth data with session token from server
+                com.liquidmusicglass.api.icm.IcmAuthRepository.setTelegramAuthWithToken(
+                    icmUserId = icmUserId,
+                    token = token,
+                    expiresIn = expiresIn
+                )
+                android.widget.Toast.makeText(
+                    this,
+                    "Telegram auth successful",
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+            }
+            return
+        }
+        
+        // Fallback: handle direct ICM callback (if no server redirect)
         if (data.host == "liquid.glassfiles.ru" && data.path?.startsWith("/auth/telegram") == true) {
-            // Parse ICM callback parameters
             val linked = data.getQueryParameter("linked")?.toBoolean() ?: false
             val icmUserId = data.getQueryParameter("icm_user_id")
             val state = data.getQueryParameter("state")
@@ -61,7 +95,6 @@ class MainActivity : ComponentActivity() {
             }
 
             if (linked && icmUserId != null) {
-                // Store Telegram auth data and issue session token
                 com.liquidmusicglass.api.icm.IcmAuthRepository.setTelegramAuth(
                     icmUserId = icmUserId,
                     state = state

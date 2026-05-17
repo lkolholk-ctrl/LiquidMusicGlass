@@ -252,7 +252,7 @@ object IcmAuthRepository {
     }
 
     /**
-     * Set Telegram auth data from ICM redirect.
+     * Set Telegram auth data from ICM redirect (no token yet).
      * After successful Telegram link, we get icm_user_id and need to issue session token.
      */
     fun setTelegramAuth(
@@ -262,6 +262,29 @@ object IcmAuthRepository {
         prefs?.edit()?.apply {
             putString(KEY_TELEGRAM_ID, icmUserId)
             putString(KEY_USER_ID, "tg_${icmUserId}")
+            putString(KEY_AUTH_METHOD, "telegram")
+            apply()
+        }
+        _telegramId.value = icmUserId
+        _partnerUserId.value = "tg_${icmUserId}"
+        _isLoggedIn.value = true
+    }
+
+    /**
+     * Set Telegram auth with session token from server redirect.
+     * Server issues token and redirects to app with token in URL.
+     */
+    fun setTelegramAuthWithToken(
+        icmUserId: String,
+        token: String,
+        expiresIn: Int
+    ) {
+        val expiresAt = System.currentTimeMillis() + expiresIn * 1000
+        prefs?.edit()?.apply {
+            putString(KEY_TELEGRAM_ID, icmUserId)
+            putString(KEY_USER_ID, "tg_${icmUserId}")
+            putString(KEY_TOKEN, token)
+            putLong(KEY_TOKEN_EXPIRES, expiresAt)
             putString(KEY_AUTH_METHOD, "telegram")
             apply()
         }
