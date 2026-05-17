@@ -52,6 +52,7 @@ import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.StarBorder
+import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -682,6 +683,26 @@ fun FullPlayer(
                     }
                     BottomIcon(Icons.Rounded.Cast) { showAirPlay = true }
                     BottomIcon(Icons.AutoMirrored.Rounded.QueueMusic) { showQueue = true }
+                    val isPremium by com.liquidmusicglass.api.icm.IcmAuthRepository.isPremium.collectAsState()
+                    if (isPremium) {
+                        BottomIcon(Icons.Rounded.Download) {
+                            // Download current track
+                            val track = PlayerController.currentTrack.value
+                            if (track != null) {
+                                scope.launch {
+                                    com.liquidmusicglass.api.icm.IcmRepository.getStreamUrl(track.id)?.let { url ->
+                                        val request = android.app.DownloadManager.Request(android.net.Uri.parse(url))
+                                            .setTitle(track.title)
+                                            .setDescription("${track.artist} - ${track.title}")
+                                            .setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                                            .setDestinationInExternalPublicDir(android.os.Environment.DIRECTORY_MUSIC, "${track.artist} - ${track.title}.m4a")
+                                        val dm = context.getSystemService(android.content.Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
+                                        dm.enqueue(request)
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
