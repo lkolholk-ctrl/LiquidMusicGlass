@@ -163,6 +163,25 @@ object PlayerController {
         _themeMode.value = mode.coerceIn(0, 2)
     }
 
+    // Sleep timer
+    private var sleepTimerJob: Job? = null
+    private val _sleepTimerMinutes = MutableStateFlow(0)
+    val sleepTimerMinutes: StateFlow<Int> = _sleepTimerMinutes
+
+    fun setSleepTimer(minutes: Int) {
+        sleepTimerJob?.cancel()
+        sleepTimerJob = null
+        _sleepTimerMinutes.value = minutes
+        if (minutes <= 0) return
+        sleepTimerJob = scope.launch {
+            delay(minutes * 60 * 1000L)
+            controller?.pause()
+            _isPlaying.value = false
+            stopPositionUpdates()
+            _sleepTimerMinutes.value = 0
+        }
+    }
+
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             _isPlaying.value = isPlaying
@@ -377,6 +396,7 @@ object PlayerController {
     /**
      * Воспроизвести трек из очереди по индексу.
      * Получает stream URL через ICM API если нужно.
+     * Загружает всю очередь для непрерывного воспроизведения.
      */
     fun playTrack(context: Context, index: Int) {
         if (index !in queue.indices) return
@@ -415,7 +435,9 @@ object PlayerController {
             // Try MediaController first, fallback to direct ExoPlayer
             val playerController = obtainController(context)
             if (playerController != null) {
-                playerController.setMediaItem(mediaItem)
+                // Load entire queue for continuous playback
+                val mediaItems = queue.map { buildMediaItem(it) }
+                playerController.setMediaItems(mediaItems, index, 0L)
                 playerController.prepare()
                 playerController.play()
             } else {
@@ -430,6 +452,7 @@ object PlayerController {
             addToRecent(track)
             _isPlaying.value = true
             startPositionUpdates()
+            preloadNextTrack()
 
             AudioService.companionService?.notifyManualNavigation()
         }
@@ -596,6 +619,47 @@ object PlayerController {
         val firstTrack = tracks.first()
         val idx = queue.indexOfFirst { it.id == firstTrack.id }
         if (idx >= 0) playTrack(context, idx)
+    }
+
+    // ── Share ──
+    fun shareCurrentTrack(context: Context) {
+        val track = _currentTrack.value ?: return
+        val shareText = buildString {
+            append("${track.title} by ${track.artist}")
+            if (track.albumName.isNotBlank()) append(" — ${track.albumName}")
+            append("\n\nhttps://music.apple.com/search?term=${
+                java.net.URLEncoder.encode("${track.title} ${track.artist}", "UTF-8")
+            }")
+        }
+        val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(android.content.Intent.EXTRA_TEXT, shareText)
+        }
+        val chooser = android.content.Intent.createChooser(intent, "Share Track")
+        chooser.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(chooser)
+    }
+
+    // ── Preload next track ──
+    private var preloadJob: Job? = null
+
+    fun preloadNextTrack() {
+        preloadJob?.cancel()
+        if (queue.isEmpty()) return
+        val nextIdx = if (_shuffleEnabled.value) {
+            (queue.indices).random()
+        } else {
+            (currentIndex + 1).coerceAtMost(queue.lastIndex)
+        }
+        if (nextIdx !in queue.indices || nextIdx == currentIndex) return
+        val nextTrack = queue[nextIdx]
+        if (!nextTrack.isOnlineTrack) return
+
+        preloadJob = scope.launch {
+            try {
+                com.liquidmusicglass.api.icm.IcmRepository.getStreamUrl(nextTrack.id)
+            } catch (_: Exception) {}
+        }
     }
 
     // ── Current queue access ──

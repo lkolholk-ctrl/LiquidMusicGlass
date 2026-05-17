@@ -76,6 +76,10 @@ object AppSettings {
     private val _loudness = MutableStateFlow(0)
     val loudness: StateFlow<Int> = _loudness
 
+    // ── Explicit Content Filter ──
+    private val _hideExplicit = MutableStateFlow(false)
+    val hideExplicit: StateFlow<Boolean> = _hideExplicit
+
     // ── Sleep Timer ──
     private var sleepTimerJob: Job? = null
 
@@ -158,6 +162,11 @@ object AppSettings {
     fun setLoudness(value: Int) {
         _loudness.value = value
         prefs.edit().putInt("loudness", value).apply()
+    }
+
+    fun setHideExplicit(enabled: Boolean) {
+        _hideExplicit.value = enabled
+        prefs.edit().putBoolean("hide_explicit", enabled).apply()
     }
 
     // ── Scan Folders ──
@@ -279,6 +288,7 @@ object AppSettings {
         _lastScreenIndex.value = prefs.getInt("last_screen", 0)
 
         _eqEnabled.value = prefs.getBoolean("eq_enabled", false)
+        _hideExplicit.value = prefs.getBoolean("hide_explicit", false)
         _eqPreset.value = prefs.getString("eq_preset", "Flat") ?: "Flat"
         _bassBoost.value = prefs.getInt("bass_boost", 0)
         _virtualizer.value = prefs.getInt("virtualizer", 0)

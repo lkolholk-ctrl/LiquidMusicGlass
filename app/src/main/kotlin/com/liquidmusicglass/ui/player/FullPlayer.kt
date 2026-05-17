@@ -483,7 +483,7 @@ fun FullPlayer(
                     Box(
                         modifier = Modifier
                             .size(44.dp)
-                            .pressScale { onOpenSettings() },
+                            .pressScale { PlayerController.shareCurrentTrack(context) },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(

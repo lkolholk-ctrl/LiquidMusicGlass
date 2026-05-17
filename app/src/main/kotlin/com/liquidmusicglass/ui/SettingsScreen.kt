@@ -186,6 +186,8 @@ fun SettingsScreen(
             // ═══════════════════════════════════════════
             SectionLabel("PLAYBACK")
 
+            val hideExplicit by AppSettings.hideExplicit.collectAsState()
+
             GlassCapsuleCard(backdrop = screenBackdrop) {
                 SettingsToggleItem(
                     title = "AutoMix",
@@ -199,6 +201,13 @@ fun SettingsScreen(
                     subtitle = "No silence between tracks",
                     checked = gaplessEnabled,
                     onCheckedChange = { AppSettings.setGapless(it) }
+                )
+                GlassDivider()
+                SettingsToggleItem(
+                    title = "Hide Explicit",
+                    subtitle = "Filter explicit content from search & artist",
+                    checked = hideExplicit,
+                    onCheckedChange = { AppSettings.setHideExplicit(it) }
                 )
                 GlassDivider()
                 SettingsActionItem(

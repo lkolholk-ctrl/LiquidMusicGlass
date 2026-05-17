@@ -193,26 +193,62 @@ fun ArtistDetailScreen(
                         Spacer(modifier = Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
                         Spacer(modifier = Modifier.height(12.dp))
 
-                        // Back button
-                        Box(
+                        // Back + Share
+                        Row(
                             modifier = Modifier
-                                .padding(horizontal = 20.dp)
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF1A1A1A))
-                                .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null,
-                                    onClick = onBack
-                                ),
-                            contentAlignment = Alignment.Center
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(22.dp)
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF1A1A1A))
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null,
+                                        onClick = onBack
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF1A1A1A))
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null,
+                                        onClick = {
+                                            artist?.let { a ->
+                                                val shareText = "${a.name} on Liquid Music Glass\n\nhttps://music.apple.com/artist/${a.id}"
+                                                val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                                    type = "text/plain"
+                                                    putExtra(android.content.Intent.EXTRA_TEXT, shareText)
+                                                }
+                                                val chooser = android.content.Intent.createChooser(intent, "Share Artist")
+                                                chooser.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                context.startActivity(chooser)
+                                            }
+                                        }
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = androidx.compose.material.icons.Icons.Rounded.Share,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
                         }
 
                         Spacer(modifier = Modifier.height(20.dp))
