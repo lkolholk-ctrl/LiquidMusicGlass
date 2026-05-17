@@ -375,6 +375,7 @@ private fun WelcomeContent(
         Spacer(modifier = Modifier.height(24.dp))
 
         // Telegram button
+        val telegramAuthUrl = "https://t.me/liquidmusicglass_redirectURL_bot?start=auth"
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -384,7 +385,14 @@ private fun WelcomeContent(
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null
-                ) { /* TODO: Telegram auth */ },
+                ) {
+                    // Open Telegram auth in Custom Tabs
+                    val intent = android.content.Intent(
+                        android.content.Intent.ACTION_VIEW,
+                        android.net.Uri.parse(telegramAuthUrl)
+                    )
+                    context.startActivity(intent)
+                },
             contentAlignment = Alignment.Center
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
