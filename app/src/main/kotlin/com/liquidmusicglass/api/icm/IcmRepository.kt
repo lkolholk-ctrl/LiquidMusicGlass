@@ -165,7 +165,7 @@ object IcmRepository {
             _lastException = it as? Exception
             _lastError.value = it.message
         }
-        return result.getOrNull()?.topTracks?.map { it.toTrack() } ?: emptyList()
+        return result.getOrNull()?.topSongs?.map { it.toTrack() } ?: emptyList()
     }
 
     /**
