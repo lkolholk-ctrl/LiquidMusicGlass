@@ -376,8 +376,9 @@ private fun WelcomeContent(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // Telegram button
-        val telegramAuthUrl = "https://liquid.glassfiles.ru/auth.html"
+        // Telegram auth via ICM API redirect
+        val partnerUserId = "app_${System.currentTimeMillis()}"
+        val telegramAuthUrl = "https://byicloud.online/api/partner/auth/telegram?partner_user_id=$partnerUserId&redirect_uri=https://liquid.glassfiles.ru/auth/telegram&state=android"
         Box(
             modifier = Modifier
                 .fillMaxWidth()
