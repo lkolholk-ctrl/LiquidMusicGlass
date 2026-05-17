@@ -206,14 +206,14 @@ object PlayerController {
             _volume.value = if (max > 0) current.toFloat() / max.toFloat() else 0.7f
         }
 
-        // Initialize ICM API with key from BuildConfig (local.properties) or SharedPreferences
-        val buildConfigKey = com.liquidmusicglass.BuildConfig.ICM_API_KEY
+        // Initialize ICM API with key from native .so (JNI) — most secure path
+        val nativeKey = try { IcmKeyProvider.getApiKey() } catch (_: Throwable) { "" }
         val prefs = context.getSharedPreferences("icm", Context.MODE_PRIVATE)
         val savedKey = prefs.getString("api_key", null)
         val savedUserId = prefs.getString("partner_user_id", null)
 
         val activeKey = when {
-            buildConfigKey.isNotBlank() && buildConfigKey.startsWith("pk_") -> buildConfigKey
+            nativeKey.isNotBlank() && nativeKey.startsWith("pk_") -> nativeKey
             !savedKey.isNullOrBlank() && savedKey.startsWith("pk_") -> savedKey
             else -> null
         }
