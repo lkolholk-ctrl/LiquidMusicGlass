@@ -94,9 +94,9 @@ fun AlbumDetailScreen(
         album?.tracks?.map { it.toTrack() } ?: emptyList()
     }
 
-    val albumName = album?.title ?: "Unknown Album"
-    val artistName = album?.artist ?: "Unknown Artist"
-    val coverUrl = album?.cover
+    val albumName = album?.album?.title ?: "Unknown Album"
+    val artistName = album?.album?.artist ?: "Unknown Artist"
+    val coverUrl = album?.album?.cover
 
     Box(
         modifier = Modifier
