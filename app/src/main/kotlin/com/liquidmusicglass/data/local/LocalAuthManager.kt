@@ -5,6 +5,8 @@ import android.content.SharedPreferences
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import androidx.core.content.edit
+import org.json.JSONArray
+import org.json.JSONObject
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -13,8 +15,7 @@ import javax.crypto.spec.GCMParameterSpec
 import android.util.Base64
 
 /**
- * Local authentication manager — stores credentials securely using Android Keystore.
- * This is a temporary solution until a backend is available.
+ * Local authentication manager — stores multiple user credentials securely using Android Keystore.
  *
  * Passwords are encrypted with AES-256-GCM via hardware-backed keystore when possible.
  */
@@ -26,11 +27,8 @@ object LocalAuthManager {
     private const val TRANSFORMATION = "AES/GCM/NoPadding"
     private const val GCM_TAG_LENGTH = 128
 
-    private const val KEY_EMAIL = "auth_email"
-    private const val KEY_PASSWORD_ENC = "auth_password_enc"
-    private const val KEY_IV = "auth_iv"
-    private const val KEY_IS_VERIFIED = "auth_verified"
-    private const val KEY_CREATED_AT = "auth_created_at"
+    private const val KEY_USERS = "auth_users"
+    private const val KEY_CURRENT_USER = "auth_current_user"
 
     private var prefs: SharedPreferences? = null
 
@@ -79,23 +77,58 @@ object LocalAuthManager {
         return String(cipher.doFinal(encryptedBytes), Charsets.UTF_8)
     }
 
+    private fun getUsers(): MutableList<UserData> {
+        val p = prefs ?: return mutableListOf()
+        val json = p.getString(KEY_USERS, "[]") ?: "[]"
+        val array = JSONArray(json)
+        val users = mutableListOf<UserData>()
+        for (i in 0 until array.length()) {
+            val obj = array.getJSONObject(i)
+            users.add(UserData(
+                email = obj.getString("email"),
+                passwordEnc = obj.getString("password_enc"),
+                iv = obj.getString("iv"),
+                isVerified = obj.getBoolean("is_verified"),
+                createdAt = obj.getLong("created_at")
+            ))
+        }
+        return users
+    }
+
+    private fun saveUsers(users: List<UserData>) {
+        val array = JSONArray()
+        users.forEach { user ->
+            val obj = JSONObject()
+            obj.put("email", user.email)
+            obj.put("password_enc", user.passwordEnc)
+            obj.put("iv", user.iv)
+            obj.put("is_verified", user.isVerified)
+            obj.put("created_at", user.createdAt)
+            array.put(obj)
+        }
+        prefs?.edit { putString(KEY_USERS, array.toString()) }
+    }
+
     /**
      * Register a new account. Returns false if email already exists.
      */
     fun register(email: String, password: String): Boolean {
-        val p = prefs ?: return false
         val normalizedEmail = email.trim().lowercase()
-        if (p.getString(KEY_EMAIL, null) == normalizedEmail) {
+        val users = getUsers()
+        
+        if (users.any { it.email == normalizedEmail }) {
             return false // Already exists
         }
+        
         val (iv, enc) = encrypt(password)
-        p.edit {
-            putString(KEY_EMAIL, normalizedEmail)
-            putString(KEY_PASSWORD_ENC, enc)
-            putString(KEY_IV, iv)
-            putBoolean(KEY_IS_VERIFIED, false)
-            putLong(KEY_CREATED_AT, System.currentTimeMillis())
-        }
+        users.add(UserData(
+            email = normalizedEmail,
+            passwordEnc = enc,
+            iv = iv,
+            isVerified = false,
+            createdAt = System.currentTimeMillis()
+        ))
+        saveUsers(users)
         return true
     }
 
@@ -103,16 +136,18 @@ object LocalAuthManager {
      * Login with email and password. Returns true if credentials match.
      */
     fun login(email: String, password: String): Boolean {
-        val p = prefs ?: return false
         val normalizedEmail = email.trim().lowercase()
-        val storedEmail = p.getString(KEY_EMAIL, null) ?: return false
-        if (storedEmail != normalizedEmail) return false
+        val users = getUsers()
+        val user = users.find { it.email == normalizedEmail } ?: return false
 
-        val enc = p.getString(KEY_PASSWORD_ENC, null) ?: return false
-        val iv = p.getString(KEY_IV, null) ?: return false
         return try {
-            val decrypted = decrypt(iv, enc)
-            decrypted == password
+            val decrypted = decrypt(user.iv, user.passwordEnc)
+            if (decrypted == password) {
+                prefs?.edit { putString(KEY_CURRENT_USER, normalizedEmail) }
+                true
+            } else {
+                false
+            }
         } catch (_: Exception) {
             false
         }
@@ -122,49 +157,63 @@ object LocalAuthManager {
      * Check if user is logged in.
      */
     fun isLoggedIn(): Boolean {
-        return prefs?.getString(KEY_EMAIL, null) != null
+        return prefs?.getString(KEY_CURRENT_USER, null) != null
     }
 
     /**
      * Get current user email.
      */
     fun getEmail(): String? {
-        return prefs?.getString(KEY_EMAIL, null)
+        return prefs?.getString(KEY_CURRENT_USER, null)
     }
 
     /**
      * Check if email is verified.
      */
     fun isVerified(): Boolean {
-        return prefs?.getBoolean(KEY_IS_VERIFIED, false) ?: false
+        val email = getEmail() ?: return false
+        val users = getUsers()
+        return users.find { it.email == email }?.isVerified ?: false
     }
 
     /**
      * Mark email as verified.
      */
     fun verifyEmail() {
-        prefs?.edit { putBoolean(KEY_IS_VERIFIED, true) }
+        val email = getEmail() ?: return
+        val users = getUsers()
+        val user = users.find { it.email == email } ?: return
+        user.isVerified = true
+        saveUsers(users)
     }
 
     /**
      * Reset password. Returns true if email exists.
      */
     fun resetPassword(email: String, newPassword: String): Boolean {
-        val p = prefs ?: return false
         val normalizedEmail = email.trim().lowercase()
-        if (p.getString(KEY_EMAIL, null) != normalizedEmail) return false
+        val users = getUsers()
+        val user = users.find { it.email == normalizedEmail } ?: return false
+        
         val (iv, enc) = encrypt(newPassword)
-        p.edit {
-            putString(KEY_PASSWORD_ENC, enc)
-            putString(KEY_IV, iv)
-        }
+        user.passwordEnc = enc
+        user.iv = iv
+        saveUsers(users)
         return true
     }
 
     /**
-     * Logout — clear all auth data.
+     * Logout — clear current user.
      */
     fun logout() {
-        prefs?.edit { clear() }
+        prefs?.edit { remove(KEY_CURRENT_USER) }
     }
+
+    private data class UserData(
+        val email: String,
+        var passwordEnc: String,
+        var iv: String,
+        var isVerified: Boolean,
+        val createdAt: Long
+    )
 }
