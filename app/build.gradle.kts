@@ -119,10 +119,16 @@ dependencies {
 
     implementation("com.github.wendykierp:JTransforms:3.2")
 
-    // Kotlinx Serialization (ICM Partner API)
+    // Kotlinx Serialization (ICM Partner API + Internal API)
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.0")
 
-    // OkHttp (ICM Partner API — более надёжный чем HttpURLConnection)
+    // OkHttp (ICM Partner API)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
+
+    // Ktor (Internal API client)
+    implementation("io.ktor:ktor-client-core:3.0.0")
+    implementation("io.ktor:ktor-client-okhttp:3.0.0")
+    implementation("io.ktor:ktor-client-content-negotiation:3.0.0")
+    implementation("io.ktor:ktor-serialization-kotlinx-json:3.0.0")
 }
