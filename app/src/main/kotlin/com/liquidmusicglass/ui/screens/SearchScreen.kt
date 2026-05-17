@@ -163,6 +163,7 @@ fun SearchScreen(
                     modifier = Modifier.size(20.dp)
                 )
                 Spacer(modifier = Modifier.width(10.dp))
+                val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
                 BasicTextField(
                     value = query,
                     onValueChange = { query = it },
@@ -173,6 +174,8 @@ fun SearchScreen(
                     singleLine = true,
                     cursorBrush = SolidColor(Color(0xFFFC3C44)),
                     modifier = Modifier.weight(1f),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
+                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { focusManager.clearFocus() }),
                     decorationBox = { innerTextField ->
                         Box {
                             if (query.isEmpty()) {
