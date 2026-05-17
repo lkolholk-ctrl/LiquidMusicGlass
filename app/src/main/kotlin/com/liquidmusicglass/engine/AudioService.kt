@@ -70,18 +70,30 @@ class AudioService : MediaSessionService() {
     }
 
     private fun buildPrimaryPlayer(): ExoPlayer {
-        return ExoPlayer.Builder(this).build().apply {
-            val audioAttributes = AudioAttributes.Builder()
-                .setUsage(C.USAGE_MEDIA)
-                .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
-                .build()
+        return ExoPlayer.Builder(this)
+            .setLoadControl(
+                androidx.media3.exoplayer.DefaultLoadControl.Builder()
+                    .setBufferDurationsMs(
+                        15_000, // minBufferMs
+                        50_000, // maxBufferMs
+                        2_500,  // bufferForPlaybackMs
+                        5_000   // bufferForPlaybackAfterRebufferMs
+                    )
+                    .build()
+            )
+            .build()
+            .apply {
+                val audioAttributes = AudioAttributes.Builder()
+                    .setUsage(C.USAGE_MEDIA)
+                    .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                    .build()
 
-            setAudioAttributes(audioAttributes, true)
-            setHandleAudioBecomingNoisy(true)
-            playWhenReady = false
-            repeatMode = Player.REPEAT_MODE_OFF
-            addListener(primaryListener)
-        }
+                setAudioAttributes(audioAttributes, true)
+                setHandleAudioBecomingNoisy(true)
+                playWhenReady = false
+                repeatMode = Player.REPEAT_MODE_OFF
+                addListener(primaryListener)
+            }
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
