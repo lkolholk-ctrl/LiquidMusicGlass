@@ -16,6 +16,15 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
+
+        // Read ICM API key from local.properties (never committed to git)
+        val localProperties = java.util.Properties()
+        val localPropsFile = rootProject.file("local.properties")
+        if (localPropsFile.exists()) {
+            localProperties.load(localPropsFile.inputStream())
+        }
+        val icmApiKey = localProperties.getProperty("ICM_API_KEY", "")
+        buildConfigField("String", "ICM_API_KEY", "\"$icmApiKey\"")
     }
 
     signingConfigs {
@@ -45,6 +54,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     packaging {

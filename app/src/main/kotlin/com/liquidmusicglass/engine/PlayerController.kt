@@ -206,12 +206,20 @@ object PlayerController {
             _volume.value = if (max > 0) current.toFloat() / max.toFloat() else 0.7f
         }
 
-        // Initialize ICM API with saved key if available
+        // Initialize ICM API with key from BuildConfig (local.properties) or SharedPreferences
+        val buildConfigKey = com.liquidmusicglass.BuildConfig.ICM_API_KEY
         val prefs = context.getSharedPreferences("icm", Context.MODE_PRIVATE)
         val savedKey = prefs.getString("api_key", null)
         val savedUserId = prefs.getString("partner_user_id", null)
-        if (!savedKey.isNullOrBlank() && savedKey.startsWith("pk_")) {
-            com.liquidmusicglass.api.icm.IcmRepository.init(savedKey, savedUserId)
+
+        val activeKey = when {
+            buildConfigKey.isNotBlank() && buildConfigKey.startsWith("pk_") -> buildConfigKey
+            !savedKey.isNullOrBlank() && savedKey.startsWith("pk_") -> savedKey
+            else -> null
+        }
+
+        if (activeKey != null) {
+            com.liquidmusicglass.api.icm.IcmRepository.init(activeKey, savedUserId)
         }
 
         // Load play history from local storage
