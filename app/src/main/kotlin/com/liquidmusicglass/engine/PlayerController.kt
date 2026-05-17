@@ -358,11 +358,16 @@ object PlayerController {
     /**
      * Добавить трек в очередь и сразу воспроизвести.
      * Сохраняет существующую очередь, вставляет трек после текущего.
+     * Автоматически подбирает похожие треки по жанру.
      */
     fun playNext(track: Track, context: Context) {
         if (queue.isEmpty()) {
             setQueue(listOf(track), 0)
             playTrack(context, 0)
+            // Auto-populate with similar genre tracks
+            scope.launch {
+                populateSimilarTracks(track, context)
+            }
             return
         }
         val insertIndex = (currentIndex + 1).coerceAtMost(queue.size)
@@ -371,6 +376,10 @@ object PlayerController {
         queue = newQueue
         _queue.value = queue
         playTrack(context, insertIndex)
+        // Auto-populate with similar genre tracks
+        scope.launch {
+            populateSimilarTracks(track, context)
+        }
     }
 
     private fun buildMediaItem(track: Track): MediaItem {
@@ -667,6 +676,67 @@ object PlayerController {
 
     private var prefetchJob: Job? = null
     private const val PREFETCH_THRESHOLD_MS = 90_000L // 90 seconds before end
+
+    // Genre keywords for auto-track selection
+    private val genreKeywords = mapOf(
+        "electro" to "electro house",
+        "house" to "electro house",
+        "edm" to "electro house",
+        "dubstep" to "electro house",
+        "trance" to "trance",
+        "techno" to "techno",
+        "rock" to "rock",
+        "metal" to "rock",
+        "punk" to "rock",
+        "rap" to "hip-hop",
+        "hip-hop" to "hip-hop",
+        "trap" to "hip-hop",
+        "pop" to "pop",
+        "dance" to "pop",
+        "rnb" to "rnb",
+        "jazz" to "jazz",
+        "classical" to "classical",
+        "country" to "country",
+        "reggae" to "reggae",
+        "latin" to "latin"
+    )
+
+    /**
+     * Detect genre from track title and artist name.
+     */
+    private fun detectGenre(track: Track): String? {
+        val text = "${track.title} ${track.artist}".lowercase()
+        for ((keyword, genre) in genreKeywords) {
+            if (keyword in text) return genre
+        }
+        return null
+    }
+
+    /**
+     * Auto-populate queue with similar genre tracks.
+     */
+    private suspend fun populateSimilarTracks(track: Track, context: Context) {
+        val genre = detectGenre(track) ?: return
+        try {
+            val results = com.liquidmusicglass.api.icm.IcmRepository.search(
+                query = genre,
+                limit = 15
+            )
+            val similarTracks = results
+                .filter { it.id != track.id && !it.isArtist && !it.isAlbum }
+                .shuffled()
+                .take(5)
+            if (similarTracks.isNotEmpty()) {
+                val newQueue = queue.toMutableList()
+                val insertIdx = (currentIndex + 1).coerceAtMost(newQueue.size)
+                similarTracks.forEachIndexed { idx, t ->
+                    newQueue.add(insertIdx + idx, t)
+                }
+                queue = newQueue
+                _queue.value = queue
+            }
+        } catch (_: Exception) {}
+    }
 
     private fun startPositionUpdates() {
         stopPositionUpdates()
