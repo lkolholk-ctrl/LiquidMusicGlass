@@ -56,6 +56,14 @@
                       android:host="liquid.glassfiles.ru"
                       android:pathPrefix="/auth/telegram" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="liquidmusicglass"
+                      android:host="auth"
+                      android:path="/telegram" />
+            </intent-filter>
         </activity>
 
         <service
