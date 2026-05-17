@@ -144,9 +144,6 @@ dependencies {
 
     implementation("com.github.wendykierp:JTransforms:3.2")
 
-    // Chrome Custom Tabs (Telegram auth)
-    implementation("androidx.browser:browser:1.8.0")
-
     // Kotlinx Serialization (ICM Partner API + Internal API)
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.0")
 
