@@ -252,26 +252,41 @@ object IcmAuthRepository {
     }
 
     /**
-     * Set Telegram auth data from redirect.
+     * Set Telegram auth data from ICM redirect.
+     * After successful Telegram link, we get icm_user_id and need to issue session token.
      */
     fun setTelegramAuth(
-        userId: String,
-        username: String?,
-        token: String,
-        expiresIn: Int
+        icmUserId: String,
+        state: String?
     ) {
-        val expiresAt = System.currentTimeMillis() + expiresIn * 1000
         prefs?.edit()?.apply {
-            putString(KEY_TELEGRAM_ID, userId)
-            putString(KEY_USER_ID, "tg_${userId}")
-            putString(KEY_TOKEN, token)
-            putLong(KEY_TOKEN_EXPIRES, expiresAt)
+            putString(KEY_TELEGRAM_ID, icmUserId)
+            putString(KEY_USER_ID, "tg_${icmUserId}")
             putString(KEY_AUTH_METHOD, "telegram")
             apply()
         }
-        _telegramId.value = userId
-        _partnerUserId.value = "tg_${userId}"
+        _telegramId.value = icmUserId
+        _partnerUserId.value = "tg_${icmUserId}"
         _isLoggedIn.value = true
+    }
+
+    /**
+     * Issue session token after Telegram auth.
+     * Must be called after setTelegramAuth with valid API key.
+     */
+    suspend fun issueSessionAfterTelegramAuth(apiKey: String, hideExplicit: Boolean = false): Result<String> = withContext(Dispatchers.IO) {
+        val userId = _partnerUserId.value ?: return@withContext Result.failure(IOException("No partner_user_id set"))
+        val result = issueSessionToken(userId, apiKey, hideExplicit)
+
+        result.onSuccess { tokenData ->
+            prefs?.edit()?.apply {
+                putString(KEY_TOKEN, tokenData.token)
+                putLong(KEY_TOKEN_EXPIRES, tokenData.expiresAt)
+                apply()
+            }
+        }
+
+        result.map { it.token }
     }
 
     /**
