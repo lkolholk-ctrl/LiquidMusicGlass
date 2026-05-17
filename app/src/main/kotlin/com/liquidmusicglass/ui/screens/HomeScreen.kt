@@ -62,6 +62,10 @@ fun HomeScreen(
     val allTracks by PlayerController.queueFlow.collectAsState()
     val recentlyPlayed by PlayerController.recentlyPlayed.collectAsState()
     val currentTrack by PlayerController.currentTrack.collectAsState()
+    val favoriteIds by PlayerController.favoriteIds.collectAsState()
+    val favoriteTracks = remember(allTracks, favoriteIds) {
+        allTracks.filter { it.id in favoriteIds }
+    }
 
     // TODO: Load ICM featured playlists, top charts, new releases
     // For now, show recently played and recommendations
@@ -97,8 +101,7 @@ fun HomeScreen(
                         RecentTrackCard(
                             track = track,
                             onClick = {
-                                val idx = allTracks.indexOfFirst { it.id == track.id }
-                                if (idx >= 0) PlayerController.playTrack(context, idx)
+                                PlayerController.playNext(track, context)
                             }
                         )
                     }
@@ -118,8 +121,7 @@ fun HomeScreen(
                         RecommendationCard(
                             track = track,
                             onClick = {
-                                val idx = allTracks.indexOfFirst { it.id == track.id }
-                                if (idx >= 0) PlayerController.playTrack(context, idx)
+                                PlayerController.playNext(track, context)
                             }
                         )
                     }
@@ -149,8 +151,28 @@ fun HomeScreen(
                             artistName = artist,
                             tracks = tracks,
                             onClick = {
-                                val idx = allTracks.indexOfFirst { it.id == tracks.first().id }
-                                if (idx >= 0) PlayerController.playTrack(context, idx)
+                                PlayerController.setQueue(tracks)
+                                PlayerController.playTrack(context, 0)
+                            }
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(32.dp))
+            }
+
+            // ─── Favorites ───
+            if (favoriteTracks.isNotEmpty()) {
+                SectionHeader(title = "Favorites")
+                Spacer(modifier = Modifier.height(12.dp))
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    items(favoriteTracks.take(15), key = { "fav_${it.id}" }) { track ->
+                        RecentTrackCard(
+                            track = track,
+                            onClick = {
+                                PlayerController.playNext(track, context)
                             }
                         )
                     }
@@ -175,8 +197,7 @@ fun HomeScreen(
                         QuickPickRow(
                             track = track,
                             onClick = {
-                                val idx = allTracks.indexOfFirst { it.id == track.id }
-                                if (idx >= 0) PlayerController.playTrack(context, idx)
+                                PlayerController.playNext(track, context)
                             }
                         )
                     }
