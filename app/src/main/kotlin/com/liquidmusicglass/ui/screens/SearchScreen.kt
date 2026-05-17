@@ -79,7 +79,7 @@ fun SearchScreen(
 
     // Load search history
     var history by remember {
-        mutableStateOf(
+        mutableStateOf<List<String>>(
             prefs.getStringSet("queries", emptySet())?.toList()?.sortedDescending() ?: emptyList()
         )
     }

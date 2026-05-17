@@ -405,38 +405,6 @@ fun SettingsScreen(
                     GlassDivider()
                     Spacer(modifier = Modifier.height(16.dp))
                     
-                    // Stream Quality
-                    Text(
-                        "Stream Quality",
-                        color = LiquidTheme.colors.textPrimary,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        qualityOptions.forEach { quality ->
-                            GlassCapsuleChip(
-                                text = quality,
-                                isSelected = quality == selectedQuality,
-                                backdrop = screenBackdrop,
-                                onClick = {
-                                    selectedQuality = quality
-                                    context.getSharedPreferences("icm", Context.MODE_PRIVATE)
-                                        .edit().putString("stream_quality", quality).apply()
-                                    com.liquidmusicglass.api.icm.IcmRepository.streamQuality = quality
-                                },
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                    }
-                    
-                    Spacer(modifier = Modifier.height(16.dp))
-                    GlassDivider()
-                    Spacer(modifier = Modifier.height(16.dp))
-                    
                     // Region
                     Text(
                         "Region",
