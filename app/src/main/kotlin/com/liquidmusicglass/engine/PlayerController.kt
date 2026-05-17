@@ -718,22 +718,32 @@ object PlayerController {
     private suspend fun populateSimilarTracks(track: Track, context: Context) {
         val genre = detectGenre(track) ?: return
         try {
-            val results = com.liquidmusicglass.api.icm.IcmRepository.search(
-                query = genre,
-                limit = 15
-            )
-            val similarTracks = results
-                .filter { it.id != track.id && !it.isArtist && !it.isAlbum }
-                .shuffled()
-                .take(5)
-            if (similarTracks.isNotEmpty()) {
-                val newQueue = queue.toMutableList()
-                val insertIdx = (currentIndex + 1).coerceAtMost(newQueue.size)
-                similarTracks.forEachIndexed { idx, t ->
-                    newQueue.add(insertIdx + idx, t)
+            val api = com.liquidmusicglass.api.icm.IcmApi.getInstance()
+            val result = api.search(query = genre)
+            result.onSuccess { response ->
+                val similarTracks = response.items
+                    .filter { it.id != track.id && it.isTrack }
+                    .shuffled()
+                    .take(5)
+                    .map { item ->
+                        Track(
+                            id = item.id,
+                            title = item.title,
+                            artist = item.displayArtist,
+                            albumName = item.album ?: "",
+                            uri = android.net.Uri.parse("https://byicloud.online/track/${item.id}"),
+                            durationMs = 0L,
+                            albumId = item.collectionId?.toLongOrNull() ?: 0L,
+                            coverUrl = item.cover
+                        )
+                    }
+                if (similarTracks.isNotEmpty()) {
+                    val newQueue = queue.toMutableList()
+                    val insertIdx = (currentIndex + 1).coerceAtMost(newQueue.size)
+                    newQueue.addAll(insertIdx, similarTracks)
+                    queue = newQueue
+                    _queue.value = queue
                 }
-                queue = newQueue
-                _queue.value = queue
             }
         } catch (_: Exception) {}
     }
@@ -754,7 +764,7 @@ object PlayerController {
                     // Prefetch next track when 90 seconds remaining
                     val remaining = duration - playerController.currentPosition
                     if (remaining in 1..PREFETCH_THRESHOLD_MS && prefetchJob?.isActive != true) {
-                        prefetchNextTrack()
+                        preloadNextTrack()
                     }
                 }
 
