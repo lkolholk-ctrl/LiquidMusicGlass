@@ -223,6 +223,9 @@ fun AppRoot() {
                         onNavigateToAlbum = { albumId ->
                             detailArtistId = null
                             detailAlbumId = albumId
+                        },
+                        onNavigateToArtist = { nextArtistId ->
+                            detailArtistId = nextArtistId
                         }
                     )
                 }

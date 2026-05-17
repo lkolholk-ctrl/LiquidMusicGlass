@@ -64,6 +64,9 @@ class IcmApi private constructor() {
     /** Качество стрима: "128K", "256K", "320K", "ALAC" или null для дефолта */
     var streamQuality: String? = IcmStreamQuality.K256
 
+    /** Partner user id для аналитики и per-user настроек (X-Partner-User-Id) */
+    var partnerUserId: String? = null
+
     /** Callback для X-Request-Id tracing */
     var onRequestId: ((String) -> Unit)? = null
 
@@ -87,6 +90,10 @@ class IcmApi private constructor() {
             builder.header("Authorization", "Bearer $it")
         } ?: apiKey?.let {
             builder.header("X-Partner-Key", it)
+        }
+
+        partnerUserId?.let {
+            builder.header("X-Partner-User-Id", it)
         }
 
         if (body != null) {
@@ -233,14 +240,15 @@ class IcmApi private constructor() {
         execute("/track/$trackId/meta")
 
     /**
-     * Плейлист редакционный (Today Hits, etc).
+     * Плейлист редакционный Apple Music (Today Hits, etc).
+     * ICM API использует тот же эндпоинт /album/{id} для плейлистов (id начинается с pl.).
      */
     suspend fun getPlaylist(
         playlistId: String,
         region: String? = null
-    ): Result<IcmPlaylist> {
+    ): Result<IcmAlbumResponse> {
         val r = region ?: defaultRegion
-        return execute("/playlist/$playlistId?region=$r")
+        return execute("/album/$playlistId?region=$r")
     }
 
     /**

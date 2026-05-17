@@ -35,9 +35,10 @@ object IcmRepository {
      * Инициализация с API-ключом.
      * Получить ключ: https://byicloud.online/partners
      */
-    fun init(apiKey: String) {
+    fun init(apiKey: String, partnerUserId: String? = null) {
         api.apiKey = apiKey
         api.sessionToken = null
+        api.partnerUserId = partnerUserId
         _isInitialized.value = true
         _lastError.value = null
     }
@@ -45,9 +46,10 @@ object IcmRepository {
     /**
      * Инициализация с session token (для клиентских запросов).
      */
-    fun initWithToken(sessionToken: String) {
+    fun initWithToken(sessionToken: String, partnerUserId: String? = null) {
         api.apiKey = null
         api.sessionToken = sessionToken
+        api.partnerUserId = partnerUserId
         _isInitialized.value = true
         _lastError.value = null
     }
@@ -58,6 +60,7 @@ object IcmRepository {
     fun reset() {
         api.apiKey = null
         api.sessionToken = null
+        api.partnerUserId = null
         _isInitialized.value = false
         _lastError.value = null
         _lastException = null
@@ -190,9 +193,10 @@ object IcmRepository {
     }
 
     /**
-     * Плейлист редакционный.
+     * Плейлист редакционный Apple Music (id начинается с pl.).
+     * ICM API использует тот же эндпоинт /album/{id} для плейлистов.
      */
-    suspend fun getPlaylist(playlistId: String, region: String? = null): IcmPlaylist? {
+    suspend fun getPlaylist(playlistId: String, region: String? = null): IcmAlbumResponse? {
         val result = api.getPlaylist(playlistId, region)
         result.exceptionOrNull()?.let {
             _lastException = it as? Exception

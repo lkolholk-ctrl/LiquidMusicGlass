@@ -60,7 +60,8 @@ private val AppleRed = Color(0xFFFC3C44)
 fun ArtistDetailScreen(
     artistId: String,
     onBack: () -> Unit,
-    onNavigateToAlbum: (String) -> Unit
+    onNavigateToAlbum: (String) -> Unit = {},
+    onNavigateToArtist: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
 
@@ -305,7 +306,7 @@ fun ArtistDetailScreen(
                                             .clickable(
                                                 interactionSource = remember { MutableInteractionSource() },
                                                 indication = null,
-                                                onClick = { onNavigateToAlbum(sim.id) }
+                                                onClick = { onNavigateToArtist(sim.id) }
                                             ),
                                         horizontalAlignment = Alignment.CenterHorizontally
                                     ) {
