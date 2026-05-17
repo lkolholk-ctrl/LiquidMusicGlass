@@ -3,11 +3,14 @@ package com.liquidmusicglass.ui.player
 import android.content.Context
 import android.media.AudioManager
 import android.net.Uri
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -126,6 +129,9 @@ fun FullPlayer(
     var showAirPlay by remember { mutableStateOf(false) }
     var showQueue by remember { mutableStateOf(false) }
     var showLyrics by remember { mutableStateOf(false) }
+    // Видимость контролов плеера. Когда открыта лирика — скрываются (как в Apple Music).
+    // Тап по области лирики временно показывает их снова.
+    var controlsVisible by remember { mutableStateOf(true) }
     val playerBackdrop: LayerBackdrop = rememberLayerBackdrop()
 
     val shuffleEnabled by PlayerController.shuffleEnabled.collectAsState()
@@ -180,6 +186,14 @@ fun FullPlayer(
             onSeek((fraction * durationMs).toLong())
         }
         userDragFraction = null
+    }
+
+    // Авто-скрытие контролов поверх лирики: через 3 сек после показа прячем обратно
+    LaunchedEffect(controlsVisible, showLyrics) {
+        if (showLyrics && controlsVisible) {
+            kotlinx.coroutines.delay(3000L)
+            controlsVisible = false
+        }
     }
 
     val controlsAlpha = ((expandProgress - 0.4f) / 0.6f).coerceIn(0f, 1f)
@@ -243,6 +257,12 @@ fun FullPlayer(
             )
 
             // ═══ Album art (inside backdrop so glass sees it) ═══
+            // При открытой лирике большая обложка скрывается — у лирики своя шапка
+            val artAlpha by animateFloatAsState(
+                targetValue = if (showLyrics) 0f else 1f,
+                animationSpec = tween(300),
+                label = "artAlpha"
+            )
             val artPaddingH = (24f * expandProgress.coerceIn(0f, 1f)).coerceIn(0f, 24f)
             val artCornerR = (16f * expandProgress.coerceIn(0f, 1f)).coerceIn(0f, 16f)
             val artShape = RoundedCornerShape(artCornerR.dp)
@@ -256,6 +276,7 @@ fun FullPlayer(
                     .graphicsLayer {
                         translationX = swipeOffsetX.value
                         shadowElevation = 24f * expandProgress.coerceIn(0f, 1f)
+                        alpha = artAlpha
                         clip = true
                         shape = artShape
                     }
@@ -326,6 +347,13 @@ fun FullPlayer(
         )
 
         // ═══ Controls ═══
+        // Видны всегда, когда лирика закрыта. Когда лирика открыта — только
+        // если controlsVisible (по тапу), и автоматически прячутся через 3 сек.
+        AnimatedVisibility(
+            visible = !showLyrics || controlsVisible,
+            enter = fadeIn(tween(250)),
+            exit = fadeOut(tween(250))
+        ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -590,12 +618,23 @@ fun FullPlayer(
                         .graphicsLayer { alpha = bottomAlpha },
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    BottomIcon(Icons.Rounded.ChatBubbleOutline) { showLyrics = true }
+                    BottomIcon(Icons.Rounded.ChatBubbleOutline) {
+                        if (showLyrics) {
+                            // Лирика открыта и контролы видны (раз кнопку нажали) — закрываем лирику
+                            showLyrics = false
+                            controlsVisible = true
+                        } else {
+                            // Открываем лирику и прячем контролы
+                            showLyrics = true
+                            controlsVisible = false
+                        }
+                    }
                     BottomIcon(Icons.Rounded.Cast) { showAirPlay = true }
                     BottomIcon(Icons.AutoMirrored.Rounded.QueueMusic) { showQueue = true }
                 }
             }
         }
+        } // AnimatedVisibility(controls)
 
         // ═══ AirPlay ═══
         AirPlaySheet(
@@ -614,7 +653,11 @@ fun FullPlayer(
         )
 
         // ═══ Lyrics ═══
-        if (showLyrics) {
+        AnimatedVisibility(
+            visible = showLyrics,
+            enter = fadeIn(tween(300)),
+            exit = fadeOut(tween(300))
+        ) {
             LyricsSheet(
                 audioFileUri = audioFileUri,
                 lrcText = null,
@@ -622,7 +665,11 @@ fun FullPlayer(
                 trackTitle = trackTitle,
                 trackArtist = artistName,
                 trackDurationMs = durationMs,
-                onDismiss = { showLyrics = false }
+                albumArtUri = albumArtUri,
+                coverUrl = coverUrl,
+                albumId = albumId,
+                albumColors = albumColors,
+                onRequestControls = { controlsVisible = true }
             )
         }
     }
