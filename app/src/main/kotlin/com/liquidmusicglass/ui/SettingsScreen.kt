@@ -229,6 +229,101 @@ fun SettingsScreen(
 
             // ═══════════════════════════════════════════
             // ═══════════════════════════════════════════
+            //  STREAM QUALITY
+            // ═══════════════════════════════════════════
+            SectionLabel("STREAM QUALITY")
+
+            val qualityOptions = listOf(
+                "128K" to "Compressed. Fastest load, lowest data usage. Good for mobile networks.",
+                "256K" to "Balanced. Standard high-quality AAC. Recommended for most listeners.",
+                "320K" to "Premium. Near-lossless perceptual quality. Best for quality-conscious users.",
+                "ALAC" to "Lossless Apple format. Studio quality. Requires fast connection & storage."
+            )
+            var selectedQuality by remember { 
+                mutableStateOf(
+                    context.getSharedPreferences("icm", Context.MODE_PRIVATE)
+                        .getString("stream_quality", "256K") ?: "256K"
+                )
+            }
+            
+            GlassCapsuleCard(backdrop = screenBackdrop) {
+                Column(modifier = Modifier.padding(vertical = 14.dp)) {
+                    qualityOptions.forEach { (quality, description) ->
+                        val isSelected = selectedQuality == quality
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null
+                                ) {
+                                    selectedQuality = quality
+                                    context.getSharedPreferences("icm", Context.MODE_PRIVATE)
+                                        .edit().putString("stream_quality", quality).apply()
+                                    com.liquidmusicglass.api.icm.IcmRepository.streamQuality = quality
+                                }
+                                .padding(vertical = 10.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(20.dp)
+                                    .drawBackdrop(
+                                        backdrop = screenBackdrop,
+                                        shape = { Capsule() },
+                                        effects = {
+                                            vibrancy()
+                                            blur(2.dp.toPx())
+                                        },
+                                        onDrawSurface = {
+                                            if (isSelected) {
+                                                drawRect(AppleRed)
+                                            } else {
+                                                drawRect(Color.White.copy(alpha = 0.06f))
+                                                drawRect(
+                                                    color = Color.White.copy(alpha = 0.12f),
+                                                    style = Stroke(width = 1.dp.toPx())
+                                                )
+                                            }
+                                        }
+                                    )
+                                    .clip(CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (isSelected) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .background(Color.White, CircleShape)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(14.dp))
+                            Column {
+                                Text(
+                                    text = quality,
+                                    color = if (isSelected) AppleRed else lc.textPrimary,
+                                    fontSize = 15.sp,
+                                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium
+                                )
+                                Text(
+                                    text = description,
+                                    color = lc.textTertiary,
+                                    fontSize = 12.sp,
+                                    lineHeight = 16.sp
+                                )
+                            }
+                        }
+                        if (quality != qualityOptions.last().first) {
+                            GlassDivider()
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(28.dp))
+
+            // ═══════════════════════════════════════════
             //  ICM MUSIC API
             // ═══════════════════════════════════════════
             SectionLabel("ICM MUSIC API")
@@ -237,15 +332,6 @@ fun SettingsScreen(
                 mutableStateOf(
                     context.getSharedPreferences("icm", Context.MODE_PRIVATE)
                         .getString("api_key", "") ?: ""
-                )
-            }
-            
-            // Stream quality selector
-            val qualityOptions = listOf("128K", "256K", "320K", "ALAC")
-            var selectedQuality by remember { 
-                mutableStateOf(
-                    context.getSharedPreferences("icm", Context.MODE_PRIVATE)
-                        .getString("stream_quality", "256K") ?: "256K"
                 )
             }
             
