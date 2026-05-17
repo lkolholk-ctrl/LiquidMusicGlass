@@ -252,6 +252,29 @@ object IcmAuthRepository {
     }
 
     /**
+     * Set Telegram auth data from redirect.
+     */
+    fun setTelegramAuth(
+        userId: String,
+        username: String?,
+        token: String,
+        expiresIn: Int
+    ) {
+        val expiresAt = System.currentTimeMillis() + expiresIn * 1000
+        prefs?.edit()?.apply {
+            putString(KEY_TELEGRAM_ID, userId)
+            putString(KEY_USER_ID, "tg_${userId}")
+            putString(KEY_TOKEN, token)
+            putLong(KEY_TOKEN_EXPIRES, expiresAt)
+            putString(KEY_AUTH_METHOD, "telegram")
+            apply()
+        }
+        _telegramId.value = userId
+        _partnerUserId.value = "tg_${userId}"
+        _isLoggedIn.value = true
+    }
+
+    /**
      * Logout — clear all auth data.
      */
     fun logout() {
