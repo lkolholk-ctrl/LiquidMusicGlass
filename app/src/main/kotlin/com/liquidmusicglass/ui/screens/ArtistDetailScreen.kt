@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.sp
 import com.liquidmusicglass.api.icm.IcmArtistResponse
 import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.api.icm.toTrack
+import com.liquidmusicglass.engine.IcmKeyProvider
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.ui.glass.AlbumArtImage
 
@@ -73,7 +74,17 @@ fun ArtistDetailScreen(
         isLoading = true
         error = null
         try {
-            artist = IcmRepository.getArtist(artistId)
+            if (!IcmRepository.isInitialized.value) {
+                error = "API not initialized. Check API key in Settings."
+            } else {
+                val result = IcmRepository.getArtist(artistId)
+                if (result == null) {
+                    val lastErr = IcmRepository.lastError.value
+                    error = lastErr ?: "Artist not found (ID: $artistId)"
+                } else {
+                    artist = result
+                }
+            }
         } catch (e: Exception) {
             error = e.message
         } finally {
@@ -127,6 +138,31 @@ fun ArtistDetailScreen(
                             color = Color.White.copy(alpha = 0.5f),
                             fontSize = 14.sp
                         )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            "Artist ID: $artistId",
+                            color = Color.White.copy(alpha = 0.3f),
+                            fontSize = 12.sp
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        // Retry button
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(AppleRed)
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null,
+                                    onClick = {
+                                        isLoading = true
+                                        error = null
+                                    }
+                                )
+                                .padding(horizontal = 24.dp, vertical = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("Retry", color = Color.White, fontWeight = FontWeight.SemiBold)
+                        }
                     }
                 }
             }
