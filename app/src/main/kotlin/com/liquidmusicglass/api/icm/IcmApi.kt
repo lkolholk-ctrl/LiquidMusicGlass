@@ -45,9 +45,11 @@ class IcmApi private constructor() {
     }
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
-        .writeTimeout(15, TimeUnit.SECONDS)
+        .writeTimeout(10, TimeUnit.SECONDS)
+        .connectionPool(okhttp3.ConnectionPool(5, 30, TimeUnit.SECONDS))
+        .protocols(listOf(okhttp3.Protocol.HTTP_2, okhttp3.Protocol.HTTP_1_1))
         .build()
 
     private val mediaTypeJson = "application/json; charset=utf-8".toMediaType()

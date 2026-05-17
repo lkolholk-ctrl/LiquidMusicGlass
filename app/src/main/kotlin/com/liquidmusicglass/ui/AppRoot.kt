@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.windowInsetsBottomHeight
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -133,6 +134,19 @@ fun AppRoot() {
     val bgAlpha = (1f - expandProgress.value * 0.15f).coerceIn(0.8f, 1f)
 
     val rootBackdrop: LayerBackdrop = rememberLayerBackdrop()
+
+    // Back handler: close detail screens first, then player, then app
+    BackHandler(enabled = detailAlbumId != null || detailArtistId != null || equalizerOpen || playlistsOpen || playlistDetailId != null || settingsOpen || expandProgress.value > 0.5f) {
+        when {
+            settingsOpen -> settingsOpen = false
+            equalizerOpen -> equalizerOpen = false
+            playlistsOpen -> playlistsOpen = false
+            playlistDetailId != null -> playlistDetailId = null
+            detailAlbumId != null -> detailAlbumId = null
+            detailArtistId != null -> detailArtistId = null
+            expandProgress.value > 0.5f -> animateCollapse()
+        }
+    }
 
     Box(
         modifier = Modifier
