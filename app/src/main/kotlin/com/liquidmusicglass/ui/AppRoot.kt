@@ -58,6 +58,8 @@ import com.liquidmusicglass.ui.screens.EqualizerScreen
 import com.liquidmusicglass.ui.screens.PlaylistDetailScreen
 import com.liquidmusicglass.ui.screens.PlaylistsScreen
 import com.liquidmusicglass.ui.screens.SettingsScreen
+import com.liquidmusicglass.ui.screens.AuthScreen
+import com.liquidmusicglass.ui.screens.ProfileScreen
 import com.liquidmusicglass.ui.theme.LiquidTheme
 import kotlinx.coroutines.launch
 
@@ -89,9 +91,12 @@ fun AppRoot() {
     var equalizerOpen by remember { mutableStateOf(false) }
     var playlistsOpen by remember { mutableStateOf(false) }
     var playlistDetailId by remember { mutableStateOf<String?>(null) }
+    var authOpen by remember { mutableStateOf(false) }
+    var profileOpen by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         PlayerController.init(context)
+        com.liquidmusicglass.api.icm.IcmAuthRepository.init(context)
     }
 
     val currentTrack by PlayerController.currentTrack.collectAsState()
@@ -136,9 +141,11 @@ fun AppRoot() {
     val rootBackdrop: LayerBackdrop = rememberLayerBackdrop()
 
     // Back handler: close detail screens first, then player, then app
-    BackHandler(enabled = detailAlbumId != null || detailArtistId != null || equalizerOpen || playlistsOpen || playlistDetailId != null || settingsOpen || expandProgress.value > 0.5f) {
+    BackHandler(enabled = detailAlbumId != null || detailArtistId != null || equalizerOpen || playlistsOpen || playlistDetailId != null || settingsOpen || authOpen || profileOpen || expandProgress.value > 0.5f) {
         when {
             settingsOpen -> settingsOpen = false
+            authOpen -> authOpen = false
+            profileOpen -> profileOpen = false
             equalizerOpen -> equalizerOpen = false
             playlistsOpen -> playlistsOpen = false
             playlistDetailId != null -> playlistDetailId = null
@@ -184,12 +191,10 @@ fun AppRoot() {
                         playlistDetailId = id
                     }
                 )
-                3 -> SettingsScreen(
-                    autoMixEnabled = autoMixEnabled,
-                    onAutoMixChange = { PlayerController.setAutoMix(it) },
-                    onBack = { selectedIndex = 0 },
-                    onOpenEqualizer = { equalizerOpen = true },
-                    backdrop = rootBackdrop
+                3 -> ProfileScreen(
+                    onOpenSettings = { settingsOpen = true },
+                    onLogout = { selectedIndex = 0 },
+                    onOpenAuth = { authOpen = true }
                 )
                 else -> HomeScreen(
                     onNavigateToAlbum = { detailAlbumId = it },
@@ -407,6 +412,41 @@ fun AppRoot() {
                 onBack = { settingsOpen = false },
                 onOpenEqualizer = { equalizerOpen = true; settingsOpen = false },
                 backdrop = rootBackdrop
+            )
+        }
+
+        // ── Auth Screen ──
+        AnimatedVisibility(
+            visible = authOpen,
+            enter = slideInVertically(
+                initialOffsetY = { it },
+                animationSpec = spring(dampingRatio = 0.88f, stiffness = 300f)
+            ) + fadeIn(tween(200)),
+            exit = slideOutVertically(
+                targetOffsetY = { it },
+                animationSpec = spring(dampingRatio = 0.92f, stiffness = 400f)
+            ) + fadeOut(tween(150))
+        ) {
+            AuthScreen(
+                onAuthSuccess = { authOpen = false }
+            )
+        }
+
+        // ── Profile Screen ──
+        AnimatedVisibility(
+            visible = profileOpen,
+            enter = slideInHorizontally(
+                initialOffsetX = { it },
+                animationSpec = spring(dampingRatio = 0.9f, stiffness = 300f)
+            ) + fadeIn(tween(200)),
+            exit = slideOutHorizontally(
+                targetOffsetX = { it },
+                animationSpec = spring(dampingRatio = 0.9f, stiffness = 350f)
+            ) + fadeOut(tween(150))
+        ) {
+            ProfileScreen(
+                onOpenSettings = { settingsOpen = true },
+                onLogout = { profileOpen = false }
             )
         }
 

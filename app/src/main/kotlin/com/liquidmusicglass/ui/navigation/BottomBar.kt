@@ -24,7 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -103,7 +103,7 @@ fun BottomBar(
         BottomNavItem(Icons.Rounded.Home, "Home"),
         BottomNavItem(Icons.Rounded.Search, "Search"),
         BottomNavItem(Icons.AutoMirrored.Rounded.PlaylistPlay, "Playlists"),
-        BottomNavItem(Icons.Rounded.Settings, "Settings")
+        BottomNavItem(Icons.Rounded.Person, "Profile")
     )
 
     NavigationCapsule(
