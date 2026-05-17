@@ -1,21 +1,58 @@
-# Add project specific ProGuard rules here.
-# You can control the set of applied configuration files using the
-# proguardFiles setting in build.gradle.
-#
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
+# ProGuard rules for LiquidMusicGlass
+# Maximum obfuscation + anti-tampering
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# Keep entry points
+-keep public class com.liquidmusicglass.MainActivity { *; }
+-keep public class com.liquidmusicglass.engine.AudioService { *; }
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+# Keep native methods
+-keepclasseswithmembernames class * {
+    native <methods>;
+}
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# Keep JNI class
+-keep class com.liquidmusicglass.engine.IcmKeyProvider {
+    native <methods>;
+    <init>(...);
+}
+
+# Obfuscate everything else
+-repackageclasses 'a'
+-allowaccessmodification
+-overloadaggressively
+-useuniqueclassmembernames
+-flattenpackagehierarchy
+
+# String encryption (basic)
+-assumenosideeffects class java.lang.String {
+    public java.lang.String intern();
+}
+
+# Remove logs in release
+-assumenosideeffects class android.util.Log {
+    public static boolean isLoggable(java.lang.String, int);
+    public static int v(...);
+    public static int d(...);
+    public static int i(...);
+}
+
+# Keep serialization
+-keepattributes *Annotation*, Signature, Exception, InnerClasses, EnclosingMethod
+-keepclassmembers class * {
+    @com.google.gson.annotations.SerializedName <fields>;
+}
+
+# Keep Compose
+-keep class androidx.compose.** { *; }
+-dontwarn androidx.compose.**
+
+# Keep Media3
+-keep class androidx.media3.** { *; }
+-dontwarn androidx.media3.**
+
+# Keep Kotlin serialization
+-keep class kotlinx.serialization.** { *; }
+-keepclassmembers class * {
+    @kotlinx.serialization.SerialName <fields>;
+    @kotlinx.serialization.Serializable <methods>;
+}

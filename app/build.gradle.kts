@@ -17,14 +17,8 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        // Read ICM API key from local.properties (never committed to git)
-        val localProperties = java.util.Properties()
-        val localPropsFile = rootProject.file("local.properties")
-        if (localPropsFile.exists()) {
-            localProperties.load(localPropsFile.inputStream())
-        }
-        val icmApiKey = localProperties.getProperty("ICM_API_KEY", "")
-        buildConfigField("String", "ICM_API_KEY", "\"$icmApiKey\"")
+        // BuildConfig field removed — API key now lives in native .so (JNI)
+        // See: app/src/main/cpp/icmkey.c for encrypted key storage
     }
 
     signingConfigs {
@@ -43,14 +37,27 @@ android {
             // Debug uses auto-generated debug signing
         }
         release {
-            isMinifyEnabled = false
-            isShrinkResources = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             isDebuggable = false
             isJniDebuggable = false
             vcsInfo.include = false
             signingConfig = signingConfigs.getByName("release")
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
+
+    ndkVersion = "27.2.12479018"
 
     buildFeatures {
         compose = true
