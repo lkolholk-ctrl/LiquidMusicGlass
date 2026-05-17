@@ -60,8 +60,7 @@ class AudioService : MediaSessionService() {
         companionSession = mediaSession
         companionService = this
 
-        // Init listening stats & playlists
-        ListeningStats.init(applicationContext)
+        // Init playlists
         PlaylistManager.init(applicationContext)
 
         // Restore last playback state
@@ -135,7 +134,6 @@ class AudioService : MediaSessionService() {
             mediaItem: androidx.media3.common.MediaItem?,
             reason: Int
         ) {
-            recordCurrentTrackStats()
             lastTrackStartTime = System.currentTimeMillis()
             lastTrackPosition = 0L
 
@@ -150,7 +148,6 @@ class AudioService : MediaSessionService() {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             if (!isPlaying) {
                 mixingState = false
-                recordCurrentTrackStats()
                 // Save position on pause
                 servicePlayer?.let { player ->
                     AppSettings.savePlayerState(
@@ -176,34 +173,6 @@ class AudioService : MediaSessionService() {
                 }
             }
         }
-    }
-
-    private fun recordCurrentTrackStats() {
-        val player = servicePlayer ?: return
-        val track = PlayerController.currentTrack.value ?: return
-        val position = player.currentPosition
-        val listenedMs = if (lastTrackStartTime > 0) {
-            System.currentTimeMillis() - lastTrackStartTime
-        } else 0L
-
-        if (listenedMs > 30_000L) {
-            // Считаем как полное прослушивание (>30 сек)
-            ListeningStats.recordPlay(
-                trackId = track.id,
-                title = track.title,
-                artist = track.artist,
-                durationMs = listenedMs
-            )
-        } else if (listenedMs > 5_000L) {
-            // Добавляем только время
-            ListeningStats.addListenTime(
-                trackId = track.id,
-                title = track.title,
-                artist = track.artist,
-                timeMs = listenedMs
-            )
-        }
-        lastTrackStartTime = 0L
     }
 
     private fun startMonitorLoop() {

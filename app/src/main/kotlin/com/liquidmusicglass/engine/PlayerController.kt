@@ -67,6 +67,16 @@ object PlayerController {
 
     private val recentHistory = mutableListOf<Track>()
 
+    /**
+     * Добавить трек в недавно прослушанные.
+     */
+    private fun addToRecent(track: Track) {
+        recentHistory.removeAll { it.id == track.id }
+        recentHistory.add(0, track)
+        if (recentHistory.size > 30) recentHistory.removeLast()
+        _recentlyPlayed.value = recentHistory.toList()
+    }
+
     // Shuffle & Repeat
     private val _shuffleEnabled = MutableStateFlow(false)
     val shuffleEnabled: StateFlow<Boolean> = _shuffleEnabled

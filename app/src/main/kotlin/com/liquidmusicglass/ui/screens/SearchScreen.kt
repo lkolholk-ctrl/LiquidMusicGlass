@@ -74,7 +74,7 @@ import kotlinx.coroutines.delay
 
 @Composable
 fun SearchScreen(
-    onNavigateToAlbum: (Long) -> Unit = {},
+    onNavigateToAlbum: (String) -> Unit = {},
     onNavigateToArtist: (String) -> Unit = {}
 ) {
     val context = LocalContext.current

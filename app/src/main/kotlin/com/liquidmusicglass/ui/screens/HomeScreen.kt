@@ -66,7 +66,7 @@ private val AppleRed = Color(0xFFFC3C44)
 
 @Composable
 fun HomeScreen(
-    onNavigateToAlbum: (Long) -> Unit = {},
+    onNavigateToAlbum: (String) -> Unit = {},
     onNavigateToArtist: (String) -> Unit = {},
     onNavigateToPlaylist: (String) -> Unit = {}
 ) {
