@@ -40,9 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -50,16 +48,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.kyant.backdrop.backdrops.layerBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
-import com.kyant.backdrop.drawBackdrop
-import com.kyant.backdrop.effects.blur
-import com.kyant.backdrop.effects.lens
-import com.kyant.backdrop.effects.vibrancy
-import com.kyant.backdrop.highlight.Highlight
-import com.kyant.backdrop.shadow.InnerShadow
-import com.kyant.backdrop.shadow.Shadow
-import com.kyant.shapes.Capsule
 import com.liquidmusicglass.api.icm.IcmArtistResponse
 import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.api.icm.toTrack
@@ -75,7 +63,6 @@ fun ArtistDetailScreen(
     onNavigateToAlbum: (String) -> Unit
 ) {
     val context = LocalContext.current
-    val screenBackdrop = rememberLayerBackdrop()
 
     var artist by remember { mutableStateOf<IcmArtistResponse?>(null) }
     var isLoading by remember { mutableStateOf(true) }
@@ -107,22 +94,8 @@ fun ArtistDetailScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        Color(0xFF1A1A2E),
-                        Color(0xFF0F0F1A),
-                        Color(0xFF080A0F)
-                    )
-                )
-            )
+            .background(Color.Black)
     ) {
-        Box(
-            modifier = Modifier
-                .matchParentSize()
-                .layerBackdrop(screenBackdrop)
-        )
-
         when {
             isLoading -> {
                 Box(
@@ -167,32 +140,8 @@ fun ArtistDetailScreen(
                             modifier = Modifier
                                 .padding(horizontal = 20.dp)
                                 .size(40.dp)
-                                .drawBackdrop(
-                                    backdrop = screenBackdrop,
-                                    shape = { Capsule() },
-                                    effects = {
-                                        vibrancy()
-                                        blur(4.dp.toPx())
-                                        lens(18.dp.toPx(), 24.dp.toPx(), chromaticAberration = true)
-                                    },
-                                    highlight = {
-                                        Highlight.Ambient.copy(alpha = 0.5f)
-                                    },
-                                    shadow = {
-                                        Shadow(radius = 4.dp, color = Color.Black.copy(alpha = 0.12f))
-                                    },
-                                    innerShadow = {
-                                        InnerShadow(radius = 3.dp, alpha = 0.2f)
-                                    },
-                                    onDrawSurface = {
-                                        drawRect(Color.White.copy(alpha = 0.04f))
-                                        drawRect(
-                                            color = Color.White.copy(alpha = 0.10f),
-                                            style = Stroke(width = 1.dp.toPx())
-                                        )
-                                    }
-                                )
                                 .clip(CircleShape)
+                                .background(Color(0xFF1A1A1A))
                                 .clickable(
                                     interactionSource = remember { MutableInteractionSource() },
                                     indication = null,
@@ -265,26 +214,8 @@ fun ArtistDetailScreen(
                                 modifier = Modifier
                                     .weight(1f)
                                     .height(44.dp)
-                                    .drawBackdrop(
-                                        backdrop = screenBackdrop,
-                                        shape = { Capsule() },
-                                        effects = {
-                                            vibrancy()
-                                            blur(4.dp.toPx())
-                                            lens(16.dp.toPx(), 24.dp.toPx(), chromaticAberration = true)
-                                        },
-                                        highlight = {
-                                            Highlight.Default.copy(alpha = 0.7f)
-                                        },
-                                        shadow = {
-                                            Shadow(radius = 6.dp, color = AppleRed.copy(alpha = 0.3f))
-                                        },
-                                        innerShadow = {
-                                            InnerShadow(radius = 3.dp, alpha = 0.2f)
-                                        },
-                                        onDrawSurface = { drawRect(AppleRed) }
-                                    )
                                     .clip(RoundedCornerShape(50))
+                                    .background(AppleRed)
                                     .clickable(
                                         interactionSource = remember { MutableInteractionSource() },
                                         indication = null,
@@ -307,23 +238,8 @@ fun ArtistDetailScreen(
                                 modifier = Modifier
                                     .weight(1f)
                                     .height(44.dp)
-                                    .drawBackdrop(
-                                        backdrop = screenBackdrop,
-                                        shape = { Capsule() },
-                                        effects = {
-                                            vibrancy()
-                                            blur(4.dp.toPx())
-                                            lens(16.dp.toPx(), 24.dp.toPx(), chromaticAberration = true)
-                                        },
-                                        onDrawSurface = {
-                                            drawRect(Color.White.copy(alpha = 0.04f))
-                                            drawRect(
-                                                color = Color.White.copy(alpha = 0.10f),
-                                                style = Stroke(width = 1.dp.toPx())
-                                            )
-                                        }
-                                    )
                                     .clip(RoundedCornerShape(50))
+                                    .background(Color(0xFF1A1A1A))
                                     .clickable(
                                         interactionSource = remember { MutableInteractionSource() },
                                         indication = null,
