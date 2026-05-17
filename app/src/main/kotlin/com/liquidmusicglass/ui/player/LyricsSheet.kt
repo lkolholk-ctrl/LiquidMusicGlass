@@ -205,9 +205,9 @@ fun LyricsSheet(
                         val textColor by animateColorAsState(
                             targetValue = when {
                                 isCurrent -> Color.White
-                                isPast -> Color.White.copy(alpha = 0.3f)
+                                isPast -> Color.Transparent          // спетые строки скрыты
                                 !lyrics.isSynced -> Color.White.copy(alpha = 0.8f)
-                                else -> Color.White.copy(alpha = 0.4f)
+                                else -> Color.White.copy(alpha = 0.45f)
                             },
                             animationSpec = tween(300),
                             label = "lyricColor"
@@ -271,45 +271,64 @@ fun LyricsSheet(
             )
 
             // ─── Компактная шапка: мини-обложка + название + артист ───
-            Row(
+            // Непрозрачная подложка, чтобы текст лирики не просвечивал.
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .align(Alignment.TopCenter)
-                    .padding(horizontal = 20.dp, vertical = 16.dp),
-                verticalAlignment = Alignment.CenterVertically
             ) {
+                // Сплошной фон шапки + мягкий переход вниз
                 Box(
                     modifier = Modifier
-                        .size(56.dp)
-                        .clip(RoundedCornerShape(8.dp))
+                        .fillMaxWidth()
+                        .height(headerHeight + 28.dp)
+                        .background(
+                            Brush.verticalGradient(
+                                0.00f to Color.Black.copy(alpha = 0.92f),
+                                0.72f to Color.Black.copy(alpha = 0.92f),
+                                1.00f to Color.Transparent
+                            )
+                        )
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    AlbumArtImage(
-                        uri = albumArtUri,
-                        coverUrl = coverUrl,
-                        audioFileUri = audioFileUri,
-                        albumId = albumId,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
-                Spacer(Modifier.width(14.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = trackTitle,
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = trackArtist,
-                        color = Color.White.copy(alpha = 0.65f),
-                        fontSize = 14.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Box(
+                        modifier = Modifier
+                            .size(56.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                    ) {
+                        AlbumArtImage(
+                            uri = albumArtUri,
+                            coverUrl = coverUrl,
+                            audioFileUri = audioFileUri,
+                            albumId = albumId,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                    Spacer(Modifier.width(14.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = trackTitle,
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = trackArtist,
+                            color = Color.White.copy(alpha = 0.65f),
+                            fontSize = 14.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
         }
