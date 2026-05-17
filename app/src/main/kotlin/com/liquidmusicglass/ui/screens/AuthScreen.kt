@@ -92,7 +92,7 @@ fun AuthScreen(
                 partnerUserId = "lg_${java.util.UUID.randomUUID().toString().replace("-", "").take(16)}"
                 prefs.edit().putString("partner_user_id", partnerUserId).apply()
             }
-            val telegramAuthUrl = "https://byicloud.online/partner/msng?partner_user_id=$partnerUserId&redirect_uri=https://liquid.glassfiles.ru/auth/telegram&state=android"
+            val telegramAuthUrl = "https://byicloud.online/partner/msng/link?partner_user_id=$partnerUserId&redirect_uri=https://liquid.glassfiles.ru/auth/telegram&state=android"
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
