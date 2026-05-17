@@ -207,13 +207,16 @@ object PlayerController {
         }
 
         // Initialize ICM API with key from native .so (JNI) — most secure path
+        // Fallback to BuildConfig (from local.properties / GitHub Secret) for CI builds
         val nativeKey = try { IcmKeyProvider.getApiKey() } catch (_: Throwable) { "" }
+        val buildConfigKey = com.liquidmusicglass.BuildConfig.ICM_API_KEY
         val prefs = context.getSharedPreferences("icm", Context.MODE_PRIVATE)
         val savedKey = prefs.getString("api_key", null)
         val savedUserId = prefs.getString("partner_user_id", null)
 
         val activeKey = when {
             nativeKey.isNotBlank() && nativeKey.startsWith("pk_") -> nativeKey
+            buildConfigKey.isNotBlank() && buildConfigKey.startsWith("pk_") -> buildConfigKey
             !savedKey.isNullOrBlank() && savedKey.startsWith("pk_") -> savedKey
             else -> null
         }
@@ -221,7 +224,7 @@ object PlayerController {
         if (activeKey != null) {
             com.liquidmusicglass.api.icm.IcmRepository.init(activeKey, savedUserId)
         } else {
-            android.util.Log.e("PlayerController", "ICM API key not available. Native key: '${nativeKey.take(3)}...', Saved key: '${savedKey?.take(3)}...'")
+            android.util.Log.e("PlayerController", "ICM API key not available. Native: '${nativeKey.take(3)}...', BuildConfig: '${buildConfigKey.take(3)}...', Saved: '${savedKey?.take(3)}...'")
         }
 
         // Load play history from local storage

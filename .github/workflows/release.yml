@@ -18,12 +18,26 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK
+        run: sdkmanager "ndk;27.2.12479018" "cmake;3.22.1"
+
       - name: Decode Keystore
         env:
           ENCODED_KEYSTORE: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
         run: |
           echo "$ENCODED_KEYSTORE" | tr -d '\n\r ' | base64 -d > app/release-key.jks
           ls -la app/release-key.jks
+
+      - name: Write local.properties with API key
+        env:
+          ICM_API_KEY: ${{ secrets.ICM_API_KEY }}
+        run: |
+          echo "sdk.dir=/usr/local/lib/android/sdk" > local.properties
+          echo "ICM_API_KEY=$ICM_API_KEY" >> local.properties
+          cat local.properties
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
@@ -51,4 +65,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: app/build/outputs/apk/release/*.apk
-          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
