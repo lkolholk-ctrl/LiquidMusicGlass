@@ -193,6 +193,13 @@ object PlayerController {
             _volume.value = if (max > 0) current.toFloat() / max.toFloat() else 0.7f
         }
 
+        // Initialize ICM API with saved key if available
+        val prefs = context.getSharedPreferences("icm", Context.MODE_PRIVATE)
+        val savedKey = prefs.getString("api_key", null)
+        if (!savedKey.isNullOrBlank() && savedKey.startsWith("pk_")) {
+            com.liquidmusicglass.api.icm.IcmRepository.init(savedKey)
+        }
+
         scope.launch {
             obtainController(context)
         }
@@ -304,7 +311,7 @@ object PlayerController {
                 track.uri
             } else {
                 // Fetch from ICM API
-                val url = com.liquidmusicglass.api.icm.IcmRepository.getStreamUrlAsync(track.id)
+                val url = com.liquidmusicglass.api.icm.IcmRepository.getStreamUrl(track.id)
                 if (url != null) {
                     android.net.Uri.parse(url)
                 } else {
