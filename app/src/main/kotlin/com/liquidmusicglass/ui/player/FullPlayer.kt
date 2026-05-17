@@ -346,6 +346,28 @@ fun FullPlayer(
                 }
         )
 
+        // ═══ Lyrics ═══
+        // Рисуется ДО контролов — чтобы контролы (по тапу) всплывали поверх лирики.
+        AnimatedVisibility(
+            visible = showLyrics,
+            enter = fadeIn(tween(400, easing = FastOutSlowInEasing)),
+            exit = fadeOut(tween(350, easing = FastOutSlowInEasing))
+        ) {
+            LyricsSheet(
+                audioFileUri = audioFileUri,
+                lrcText = null,
+                currentPositionMs = currentPositionMs,
+                trackTitle = trackTitle,
+                trackArtist = artistName,
+                trackDurationMs = durationMs,
+                albumArtUri = albumArtUri,
+                coverUrl = coverUrl,
+                albumId = albumId,
+                albumColors = albumColors,
+                onRequestControls = { controlsVisible = true }
+            )
+        }
+
         // ═══ Controls ═══
         // Видны всегда, когда лирика закрыта. Когда лирика открыта — только
         // если controlsVisible (по тапу), и автоматически прячутся через 3 сек.
@@ -651,27 +673,6 @@ fun FullPlayer(
             visible = showQueue,
             onDismiss = { showQueue = false }
         )
-
-        // ═══ Lyrics ═══
-        AnimatedVisibility(
-            visible = showLyrics,
-            enter = fadeIn(tween(300)),
-            exit = fadeOut(tween(300))
-        ) {
-            LyricsSheet(
-                audioFileUri = audioFileUri,
-                lrcText = null,
-                currentPositionMs = currentPositionMs,
-                trackTitle = trackTitle,
-                trackArtist = artistName,
-                trackDurationMs = durationMs,
-                albumArtUri = albumArtUri,
-                coverUrl = coverUrl,
-                albumId = albumId,
-                albumColors = albumColors,
-                onRequestControls = { controlsVisible = true }
-            )
-        }
     }
 }
 
