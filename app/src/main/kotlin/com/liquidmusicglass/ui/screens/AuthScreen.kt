@@ -376,43 +376,7 @@ private fun WelcomeContent(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // Telegram button
-        val telegramAuthUrl = "https://liquid.glassfiles.ru/auth.html"
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(52.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(TelegramBlue)
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null
-                ) {
-                    // Open Telegram Login Widget page in browser/Custom Tabs
-                    val intent = android.content.Intent(
-                        android.content.Intent.ACTION_VIEW,
-                        android.net.Uri.parse(telegramAuthUrl)
-                    )
-                    context.startActivity(intent)
-                },
-            contentAlignment = Alignment.Center
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    Icons.Rounded.Send,
-                    null,
-                    tint = Color.White,
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    "Continue with Telegram",
-                    color = Color.White,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 16.sp
-                )
-            }
-        }
+        // Telegram auth removed — using email only
     }
 }
 
