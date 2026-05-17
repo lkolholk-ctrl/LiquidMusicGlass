@@ -70,6 +70,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -376,6 +377,26 @@ fun FullPlayer(
             enter = fadeIn(tween(250)),
             exit = fadeOut(tween(250))
         ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+        // Подложка под контролами — только когда открыта лирика.
+        // Цвет — из палитры обложки (не чёрный), чтобы совпадал с фоном.
+        if (showLyrics) {
+            // Цвет обложки, притемнённый — совпадает с затемнённым низом фона
+            val scrimColor = lerp(albumColors.dominant, Color.Black, 0.55f)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(460.dp)
+                    .align(Alignment.BottomCenter)
+                    .background(
+                        Brush.verticalGradient(
+                            0.00f to Color.Transparent,
+                            0.32f to scrimColor.copy(alpha = 0.88f),
+                            1.00f to scrimColor.copy(alpha = 0.97f)
+                        )
+                    )
+            )
+        }
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -415,7 +436,9 @@ fun FullPlayer(
                     .padding(bottom = 36.dp)
                     .graphicsLayer { translationY = controlsOffsetY }
             ) {
-                // Track Info (stagger: titleAlpha)
+                // Track Info — скрыта в режиме лирики (название уже в шапке лирики)
+                AnimatedVisibility(visible = !showLyrics) {
+                Column {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -470,8 +493,9 @@ fun FullPlayer(
                         )
                     }
                 }
-
                 Spacer(modifier = Modifier.height(16.dp))
+                }
+                }
 
                 // Progress (stagger: sliderAlpha)
                 Box(
@@ -583,6 +607,9 @@ fun FullPlayer(
                     }
                 }
 
+                // Volume — скрыта в режиме лирики
+                AnimatedVisibility(visible = !showLyrics) {
+                Column {
                 Spacer(modifier = Modifier.height(22.dp))
 
                 // Volume — liquid glass slider
@@ -629,6 +656,8 @@ fun FullPlayer(
                         modifier = Modifier.size(16.dp)
                     )
                 }
+                }
+                }
 
                 Spacer(modifier = Modifier.height(18.dp))
 
@@ -656,6 +685,7 @@ fun FullPlayer(
                 }
             }
         }
+        } // Box (controls + scrim)
         } // AnimatedVisibility(controls)
 
         // ═══ AirPlay ═══
