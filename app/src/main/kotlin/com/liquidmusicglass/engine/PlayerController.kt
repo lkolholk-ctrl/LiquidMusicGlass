@@ -220,6 +220,8 @@ object PlayerController {
 
         if (activeKey != null) {
             com.liquidmusicglass.api.icm.IcmRepository.init(activeKey, savedUserId)
+        } else {
+            android.util.Log.e("PlayerController", "ICM API key not available. Native key: '${nativeKey.take(3)}...', Saved key: '${savedKey?.take(3)}...'")
         }
 
         // Load play history from local storage
