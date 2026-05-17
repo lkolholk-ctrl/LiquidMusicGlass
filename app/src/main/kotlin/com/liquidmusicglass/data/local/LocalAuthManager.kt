@@ -60,8 +60,8 @@ object LocalAuthManager {
 
     private fun getSecretKey(): SecretKey {
         val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
-        return keyStore.getEntry(KEY_ALIAS, null) as KeyStore.SecretKeyEntry
-    }.secretKey
+        return (keyStore.getEntry(KEY_ALIAS, null) as KeyStore.SecretKeyEntry).secretKey
+    }
 
     private fun encrypt(plaintext: String): Pair<String, String> {
         val cipher = Cipher.getInstance(TRANSFORMATION)
