@@ -19,12 +19,14 @@ android {
 
         // Read ICM API key from local.properties (GitHub Secret in CI)
         // Fallback to native .so (JNI) at runtime for maximum protection
-        val localProperties = java.util.Properties()
-        val localPropsFile = rootProject.file("local.properties")
-        if (localPropsFile.exists()) {
-            localProperties.load(localPropsFile.inputStream())
-        }
-        val icmApiKey = localProperties.getProperty("ICM_API_KEY", "")
+        val icmApiKey = try {
+            val props = java.util.Properties()
+            val f = rootProject.file("local.properties")
+            if (f.exists()) {
+                f.inputStream().use { props.load(it) }
+            }
+            props.getProperty("ICM_API_KEY", "")
+        } catch (_: Exception) { "" }
         buildConfigField("String", "ICM_API_KEY", "\"$icmApiKey\"")
     }
 
