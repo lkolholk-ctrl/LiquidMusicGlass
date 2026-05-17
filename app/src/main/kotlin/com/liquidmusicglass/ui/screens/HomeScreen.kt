@@ -48,15 +48,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.backdrops.LayerBackdrop
-import com.kyant.backdrop.backdrops.layerBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
-import com.kyant.backdrop.drawBackdrop
-import com.kyant.backdrop.effects.blur
-import com.kyant.backdrop.effects.lens
-import com.kyant.backdrop.effects.vibrancy
-import com.kyant.backdrop.highlight.Highlight
-import com.kyant.backdrop.shadow.InnerShadow
-import com.kyant.backdrop.shadow.Shadow
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.Track
 import com.liquidmusicglass.ui.glass.AlbumArtImage
@@ -72,7 +63,6 @@ fun HomeScreen(
 ) {
     val context = LocalContext.current
     val scroll = rememberScrollState()
-    val screenBackdrop = rememberLayerBackdrop()
     val lc = LiquidTheme.colors
 
     val allTracks by PlayerController.queueFlow.collectAsState()
@@ -82,15 +72,7 @@ fun HomeScreen(
     // TODO: Load ICM featured playlists, top charts, new releases
     // For now, show recently played and recommendations
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        // ── Ambient background ──
-        Box(
-            modifier = Modifier
-                .matchParentSize()
-                .background(LiquidTheme.colors.screenBackground)
-                .layerBackdrop(screenBackdrop)
-        )
-
+    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
