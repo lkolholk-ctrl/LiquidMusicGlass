@@ -26,7 +26,7 @@ android {
                 f.inputStream().use { props.load(it) }
             }
             props.getProperty("ICM_API_KEY", "")
-        } catch (_: Exception) { "" }
+        } catch (_: Throwable) { "" }
         buildConfigField("String", "ICM_API_KEY", "\"$icmApiKey\"")
     }
 

@@ -262,9 +262,10 @@ class IcmApi private constructor() {
 
     /**
      * Текст песни.
+     * NOTE: endpoint currently unavailable (scope_not_allowed). Will be enabled by API provider soon.
      */
     suspend fun getLyrics(trackId: String): Result<IcmLyricsResponse> =
-        execute("/lyrics?trackId=$trackId")
+        Result.failure(IcmApiException(403, "Lyrics endpoint not available yet"))
 
     // ═══════════════════════════════════════════════════════════
     //  Batch & Async
