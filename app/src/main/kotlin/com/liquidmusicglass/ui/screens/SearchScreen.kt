@@ -25,6 +25,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Search
@@ -68,12 +69,33 @@ fun SearchScreen(
     onNavigateToArtist: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("search_history", android.content.Context.MODE_PRIVATE) }
 
     var query by remember { mutableStateOf("") }
     var searchResults by remember { mutableStateOf<List<IcmSearchItem>>(emptyList()) }
     var isLoading by remember { mutableStateOf(false) }
     var lastError by remember { mutableStateOf<String?>(null) }
     val searchMutex = remember { Mutex() }
+
+    // Load search history
+    var history by remember {
+        mutableStateOf(
+            prefs.getStringSet("queries", emptySet())?.toList()?.sortedDescending() ?: emptyList()
+        )
+    }
+    fun saveQuery(q: String) {
+        if (q.isBlank()) return
+        val current = prefs.getStringSet("queries", emptySet())?.toMutableSet() ?: mutableSetOf()
+        current.add(q)
+        // Keep max 20 items
+        val trimmed = if (current.size > 20) current.drop(current.size - 20).toSet() else current
+        prefs.edit().putStringSet("queries", trimmed).apply()
+        history = trimmed.toList().sortedDescending()
+    }
+    fun clearHistory() {
+        prefs.edit().remove("queries").apply()
+        history = emptyList()
+    }
 
     // Debounce search: 500ms after user stops typing + mutex serialization
     LaunchedEffect(query) {
@@ -88,7 +110,9 @@ fun SearchScreen(
             try {
                 val result = IcmRepository.searchAll(query)
                 searchResults = result?.items ?: emptyList()
-                if (result == null) {
+                if (result != null) {
+                    saveQuery(query)
+                } else {
                     lastError = IcmRepository.lastError.value ?: "Search failed"
                 }
             } catch (e: Exception) {
@@ -188,24 +212,99 @@ fun SearchScreen(
             Spacer(modifier = Modifier.height(16.dp))
 
             if (query.isBlank()) {
-                // Empty state
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            imageVector = Icons.Rounded.Search,
-                            contentDescription = null,
-                            tint = LiquidTheme.colors.textTertiary,
-                            modifier = Modifier.size(56.dp)
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text(
-                            text = "Search ICM Music",
-                            color = LiquidTheme.colors.textTertiary,
-                            fontSize = 16.sp
-                        )
+                // Show search history
+                if (history.isNotEmpty()) {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        item {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Recent Searches",
+                                    color = LiquidTheme.colors.sectionLabel,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = "Clear",
+                                    color = Color(0xFFFC3C44),
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null,
+                                        onClick = { clearHistory() }
+                                    )
+                                )
+                            }
+                        }
+                        items(history, key = { "hist_$it" }) { item ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp)
+                                    .height(52.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color(0xFF1A1A1A))
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null
+                                    ) { query = item }
+                                    .padding(horizontal = 14.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.History,
+                                    contentDescription = null,
+                                    tint = LiquidTheme.colors.iconMuted,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(
+                                    text = item,
+                                    color = LiquidTheme.colors.textPrimary,
+                                    fontSize = 15.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Icon(
+                                    imageVector = Icons.Rounded.Search,
+                                    contentDescription = null,
+                                    tint = LiquidTheme.colors.iconMuted,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                        item { Spacer(modifier = Modifier.height(200.dp)) }
+                    }
+                } else {
+                    // Empty state
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                imageVector = Icons.Rounded.Search,
+                                contentDescription = null,
+                                tint = LiquidTheme.colors.textTertiary,
+                                modifier = Modifier.size(56.dp)
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = "Search ICM Music",
+                                color = LiquidTheme.colors.textTertiary,
+                                fontSize = 16.sp
+                            )
+                        }
                     }
                 }
             } else if (isLoading) {

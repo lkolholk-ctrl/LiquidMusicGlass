@@ -473,11 +473,8 @@ fun ArtistDetailScreen(
                                     interactionSource = remember { MutableInteractionSource() },
                                     indication = null,
                                     onClick = {
-                                        val idx = artistTracks.indexOfFirst { it.id == track.id }
-                                        if (idx >= 0) {
-                                            PlayerController.setQueue(artistTracks, idx)
-                                            PlayerController.playTrack(context, idx)
-                                        }
+                                        // Play immediately without replacing current queue
+                                        PlayerController.playNext(track, context)
                                     }
                                 )
                                 .padding(horizontal = 12.dp),
