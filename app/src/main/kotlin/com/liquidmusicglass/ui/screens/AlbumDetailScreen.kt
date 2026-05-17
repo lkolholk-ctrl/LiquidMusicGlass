@@ -84,6 +84,8 @@ fun AlbumDetailScreen(
     val albumName = album?.album?.title ?: "Unknown Album"
     val artistName = album?.album?.artist ?: "Unknown Artist"
     val coverUrl = album?.album?.cover
+    val albumYear = album?.album?.year
+    val releaseDate = album?.album?.releaseDate
 
     Box(
         modifier = Modifier
@@ -167,7 +169,7 @@ fun AlbumDetailScreen(
                             ) {
                                 AlbumArtImage(
                                     uri = null,
-                                    coverUrl = coverUrl?.replace("1000x1000", "600x600"),
+                                    coverUrl = coverUrl?.replace("1000x1000", "600x600")?.replace("600x600", "600x600"),
                                     modifier = Modifier.fillMaxSize(),
                                     contentScale = ContentScale.Crop
                                 )
@@ -188,8 +190,14 @@ fun AlbumDetailScreen(
                                 .padding(horizontal = 20.dp)
                         )
                         Spacer(modifier = Modifier.height(4.dp))
+                        val yearText = albumYear ?: releaseDate?.take(4) ?: ""
+                        val subtitle = buildString {
+                            append(artistName)
+                            if (yearText.isNotBlank()) append(" · $yearText")
+                            append(" · ${albumTracks.size} tracks")
+                        }
                         Text(
-                            text = "$artistName · ${albumTracks.size} tracks",
+                            text = subtitle,
                             color = Color.White.copy(alpha = 0.50f),
                             fontSize = 14.sp,
                             textAlign = TextAlign.Center,
