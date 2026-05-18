@@ -484,3 +484,48 @@ object IcmStreamQuality {
     const val K320 = "320K"
     const val ALAC = "ALAC"
 }
+
+// ─── Library (likes, subscriptions) ───
+
+@Serializable
+data class IcmLibraryLikesResponse(
+    val items: List<IcmLibraryTrack> = emptyList(),
+    val count: Int? = null
+)
+
+@Serializable
+data class IcmLibrarySubscriptionsResponse(
+    val items: List<IcmLibraryArtist> = emptyList(),
+    val count: Int? = null
+)
+
+@Serializable
+data class IcmLibraryTrack(
+    val id: String,
+    val title: String,
+    val artist: String? = null,
+    @SerialName("artistId") val artistId: String? = null,
+    val cover: String? = null,
+    val duration: Long? = null,
+    @SerialName("collectionId") val collectionId: String? = null,
+    @SerialName("is_explicit") val isExplicit: Boolean = false,
+    val source: String? = null
+) {
+    /** VK returns duration in seconds, Apple in milliseconds. Normalized to ms. */
+    val durationMs: Long
+        get() {
+            val d = duration ?: return 0L
+            return if (d < 1000) d * 1000L else d
+        }
+}
+
+@Serializable
+data class IcmLibraryArtist(
+    val id: String,
+    val name: String? = null,
+    val cover: String? = null,
+    val source: String? = null
+) {
+    val displayName: String
+        get() = name ?: "Unknown Artist"
+}

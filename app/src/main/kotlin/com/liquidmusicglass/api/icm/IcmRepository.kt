@@ -256,6 +256,32 @@ object IcmRepository {
         return result.getOrNull()
     }
 
+    /**
+     * Get user's liked tracks from library.
+     * Requires partnerUserId to be set and user to be linked.
+     */
+    suspend fun getLibraryLikes(): IcmLibraryLikesResponse? {
+        val result = api.getLibraryLikes()
+        result.exceptionOrNull()?.let {
+            _lastException = it as? Exception
+            _lastError.value = it.message
+        }
+        return result.getOrNull()
+    }
+
+    /**
+     * Get user's artist subscriptions from library.
+     * Requires partnerUserId to be set and user to be linked.
+     */
+    suspend fun getLibrarySubscriptions(): IcmLibrarySubscriptionsResponse? {
+        val result = api.getLibrarySubscriptions()
+        result.exceptionOrNull()?.let {
+            _lastException = it as? Exception
+            _lastError.value = it.message
+        }
+        return result.getOrNull()
+    }
+
     // ═══════════════════════════════════════════════════════════
     //  Batch & Async
     // ═══════════════════════════════════════════════════════════
