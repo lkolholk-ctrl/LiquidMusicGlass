@@ -208,7 +208,13 @@ class AudioService : MediaSessionService() {
     }
 
     fun notifyManualNavigation() {
-        autoMixEngine?.onManualNavigation()
+        // Auto-mix is non-critical. If it throws (e.g. player timeline not
+        // ready yet -> IndexOutOfBounds), swallow it instead of crashing.
+        try {
+            autoMixEngine?.onManualNavigation()
+        } catch (e: Exception) {
+            android.util.Log.e("AudioService", "onManualNavigation failed", e)
+        }
     }
 
     companion object {
