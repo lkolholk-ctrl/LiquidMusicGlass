@@ -51,7 +51,7 @@ X-Partner-Key: pk_...
 {
   "track_id": "1440831203",
   "file_id": "CQACAgIAAyEGAAS...",
-  "source": "apple",
+  "source": "platform_a",
   "quality": "256K",
   "artist_id": null,
   "url": "https://byicloud.online/api/partner/audio/...?ps=...",
