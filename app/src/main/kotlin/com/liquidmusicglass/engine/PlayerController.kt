@@ -217,6 +217,7 @@ object PlayerController {
                 addToRecent(track)
 
                 // Lazy resolve stream URL for this track if online
+                // Docs: "Когда URL истёк — позови /track заново. У нас сработает свой кеш, ответ придёт за миллисекунды."
                 if (track.isOnlineTrack) {
                     scope.launch {
                         val resolvedUri = getCachedOrResolveStreamUrl(track.id)
@@ -225,7 +226,10 @@ object PlayerController {
                             queue = queue.map { t ->
                                 if (t.id == track.id) t.copy(uri = resolvedUri) else t
                             }
+                            _queue.value = queue
                         }
+                        // Preload next track after transition
+                        preloadNextTrack()
                     }
                 }
             }
@@ -423,8 +427,9 @@ object PlayerController {
 
     /**
      * Воспроизвести трек из очереди по индексу.
-     * Резолвит stream URL ТОЛЬКО для текущего трека (быстрый старт).
-     * Остальные треки резолвятся lazy через onMediaItemTransition.
+     * Docs: "URL из поля url ответа /track подставляй прямо в плеер."
+     * Загружаем всю очередь в ExoPlayer как MediaItem list, с резолвленными URL.
+     * Текущий трек резолвим сразу, остальные — с placeholder URI (резолвим lazy).
      */
     fun playTrack(context: Context, index: Int) {
         if (index !in queue.indices) return
@@ -440,38 +445,80 @@ object PlayerController {
             _isPlaying.value = true
             startPositionUpdates()
 
-            // Resolve ONLY current track's stream URL (fast start)
+            // Resolve current track URL immediately (fast start)
+            // Docs: "URL из поля url ответа /track подставляй прямо в плеер."
+            android.util.Log.d("PlayerController", "playTrack: ${track.id} | online=${track.isOnlineTrack} | uri=${track.uri}")
             val currentUri = if (track.isOnlineTrack) {
-                getCachedOrResolveStreamUrl(track.id) ?: track.uri
+                val resolved = getCachedOrResolveStreamUrl(track.id)
+                if (resolved == null) {
+                    android.util.Log.e("PlayerController", "Failed to resolve stream URL for ${track.id}")
+                    _isPlaying.value = false
+                    stopPositionUpdates()
+                    return@launch
+                }
+                android.util.Log.d("PlayerController", "playTrack: resolved URL for ${track.id}: ${resolved.toString().take(80)}...")
+                resolved
             } else {
                 track.uri
             }
 
-            val mediaItem = MediaItem.Builder()
-                .setMediaId(track.id)
-                .setUri(currentUri)
-                .setMediaMetadata(
-                    MediaMetadata.Builder()
-                        .setTitle(track.title)
-                        .setArtist(track.artist)
-                        .setAlbumArtist(track.artist)
-                        .setArtworkUri(track.displayArtUri)
-                        .build()
-                )
-                .build()
+            // Build MediaItem list for the entire queue
+            // Current track gets resolved URL, others get placeholder (will be resolved on transition)
+            val mediaItems = queue.mapIndexed { i, t ->
+                val uri = if (i == index) {
+                    currentUri
+                } else {
+                    // For upcoming tracks: use cached URL if available, else placeholder
+                    if (t.isOnlineTrack) {
+                        val cached = getCachedStreamUrl(t.id)
+                        cached ?: t.uri
+                    } else {
+                        t.uri
+                    }
+                }
+                val mimeType = when {
+                    uri.toString().contains("/api/partner/audio/") -> androidx.media3.common.MimeTypes.AUDIO_MP4
+                    uri.toString().endsWith(".m4a", ignoreCase = true) -> androidx.media3.common.MimeTypes.AUDIO_MP4
+                    uri.toString().endsWith(".mp3", ignoreCase = true) -> androidx.media3.common.MimeTypes.AUDIO_MPEG
+                    else -> null // auto-detect
+                }
+                val mediaItemBuilder = MediaItem.Builder()
+                    .setMediaId(t.id)
+                    .setUri(uri)
+                    .setMediaMetadata(
+                        MediaMetadata.Builder()
+                            .setTitle(t.title)
+                            .setArtist(t.artist)
+                            .setAlbumArtist(t.artist)
+                            .setArtworkUri(t.displayArtUri)
+                            .build()
+                    )
+                if (mimeType != null) {
+                    mediaItemBuilder.setMimeType(mimeType)
+                }
+                mediaItemBuilder.build()
+            }
 
             // Try MediaController first, fallback to direct ExoPlayer
             val playerController = obtainController(context)
+            android.util.Log.d("PlayerController", "playTrack: MediaController=${playerController != null}, companionPlayer=${AudioService.companionPlayer != null}")
             if (playerController != null) {
-                playerController.setMediaItem(mediaItem)
+                android.util.Log.d("PlayerController", "playTrack: using MediaController")
+                playerController.setMediaItems(mediaItems, index, 0L)
                 playerController.prepare()
                 playerController.play()
             } else {
                 val exo = AudioService.companionPlayer
                 if (exo != null) {
-                    exo.setMediaItem(mediaItem)
+                    android.util.Log.d("PlayerController", "playTrack: using direct ExoPlayer")
+                    exo.setMediaItems(mediaItems, index, 0L)
                     exo.prepare()
                     exo.play()
+                } else {
+                    android.util.Log.e("PlayerController", "playTrack: NO PLAYER AVAILABLE")
+                    _isPlaying.value = false
+                    stopPositionUpdates()
+                    return@launch
                 }
             }
 
@@ -480,6 +527,16 @@ object PlayerController {
 
             AudioService.companionService?.notifyManualNavigation()
         }
+    }
+
+    /**
+     * Get cached stream URL without triggering a network request.
+     */
+    private fun getCachedStreamUrl(trackId: String): android.net.Uri? {
+        val now = System.currentTimeMillis()
+        val cached = streamUrlCache[trackId]
+        val expiry = streamUrlCacheExpiry[trackId] ?: 0L
+        return if (cached != null && now < expiry) cached else null
     }
 
     /**
@@ -497,20 +554,25 @@ object PlayerController {
         }
 
         return try {
-            kotlinx.coroutines.withTimeout(8_000) {
+            kotlinx.coroutines.withTimeout(15_000) {
+                android.util.Log.d("PlayerController", "Resolving stream URL for $trackId...")
                 val url = com.liquidmusicglass.api.icm.IcmRepository.getStreamUrl(trackId)
-                url?.let {
-                    val uri = android.net.Uri.parse(it)
+                if (url != null) {
+                    val uri = android.net.Uri.parse(url)
                     streamUrlCache[trackId] = uri
                     streamUrlCacheExpiry[trackId] = now + STREAM_CACHE_TTL_MS
-                    android.util.Log.d("PlayerController", "Stream URL resolved for $trackId")
+                    android.util.Log.d("PlayerController", "Stream URL resolved for $trackId: ${url.take(60)}...")
                     uri
+                } else {
+                    android.util.Log.e("PlayerController", "Stream URL resolve returned null for $trackId")
+                    null
                 }
             }
-        } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
-            android.util.Log.w("PlayerController", "Stream URL resolve timeout for $trackId")
+        } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+            android.util.Log.e("PlayerController", "Stream URL resolve timeout for $trackId")
             null
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            android.util.Log.e("PlayerController", "Stream URL resolve error for $trackId: ${e.message}")
             null
         }
     }
