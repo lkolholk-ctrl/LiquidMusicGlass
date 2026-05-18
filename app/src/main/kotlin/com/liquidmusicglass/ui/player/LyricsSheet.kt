@@ -137,8 +137,6 @@ fun LyricsSheet(
 
     // Высота компактной шапки
     val headerHeight = 96.dp
-    // Цвет обложки — для шапки и градиентов (не чёрный)
-    val coverColor = lerp(albumColors.dominant, Color.Black, 0.32f)
 
     // ── Full screen ──
     Box(
@@ -256,7 +254,7 @@ fun LyricsSheet(
                 }
             }
 
-            // ─── Top fade под шапкой ───
+            // ─── Top blur overlay ───
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -265,14 +263,14 @@ fun LyricsSheet(
                     .background(
                         Brush.verticalGradient(
                             colors = listOf(
-                                coverColor.copy(alpha = 0.55f),
+                                Color.Black.copy(alpha = 0.35f),
                                 Color.Transparent
                             )
                         )
                     )
             )
 
-            // ─── Bottom fade ───
+            // ─── Bottom blur overlay ───
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -282,28 +280,28 @@ fun LyricsSheet(
                         Brush.verticalGradient(
                             colors = listOf(
                                 Color.Transparent,
-                                coverColor.copy(alpha = 0.7f)
+                                Color.Black.copy(alpha = 0.45f)
                             )
                         )
                     )
             )
 
             // ─── Компактная шапка: мини-обложка + название + артист ───
-            // Непрозрачная подложка, чтобы текст лирики не просвечивал.
+            // Полупрозрачная подложка — blur под обложку, не сплошной цвет.
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .align(Alignment.TopCenter)
             ) {
-                // Сплошной фон шапки + мягкий переход вниз
+                // Полупрозрачный тёмный фон для читаемости текста
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(headerHeight + 28.dp)
                         .background(
                             Brush.verticalGradient(
-                                0.00f to coverColor,
-                                0.72f to coverColor,
+                                0.00f to Color.Black.copy(alpha = 0.42f),
+                                0.72f to Color.Black.copy(alpha = 0.28f),
                                 1.00f to Color.Transparent
                             )
                         )
