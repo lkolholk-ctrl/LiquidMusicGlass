@@ -182,10 +182,15 @@ data class IcmArtistResponse(
     val genre: String? = null,
     val url: String? = null,
     val image: String? = null,
+    val cover: String? = null,
+    val bio: String? = null,
+    val followers: Long? = null,
     @SerialName("editorialVideoUrl") val editorialVideoUrl: String? = null,
     @SerialName("topSongs") val topSongs: List<IcmArtistSong> = emptyList(),
     @SerialName("latestRelease") val latestRelease: IcmArtistAlbum? = null,
     val albums: List<IcmArtistAlbum> = emptyList(),
+    val singles: List<IcmArtistAlbum> = emptyList(),
+    val featuring: List<IcmArtistAlbum> = emptyList(),
     @SerialName("similarArtists") val similarArtists: List<IcmSimilarArtist> = emptyList(),
     val playlists: List<IcmArtistPlaylist> = emptyList(),
     @SerialName("appearsOn") val appearsOn: List<IcmArtistAlbum> = emptyList(),
@@ -484,6 +489,20 @@ object IcmStreamQuality {
     const val K320 = "320K"
     const val ALAC = "ALAC"
 }
+
+// ─── Personal Cabinet (/me/*) ───
+
+@Serializable
+data class IcmUserQualityRequest(
+    val quality: String
+)
+
+@Serializable
+data class IcmUserQualityResponse(
+    val quality: String,
+    @SerialName("max_allowed") val maxAllowed: String? = null,
+    val source: String? = null
+)
 
 // ─── Wave (Personal Radio) ───
 

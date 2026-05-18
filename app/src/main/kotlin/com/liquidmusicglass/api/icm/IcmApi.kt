@@ -290,10 +290,12 @@ class IcmApi private constructor() {
 
     /**
      * Song lyrics.
-     * GET /lyrics?track_id={trackId}
+     * Primary: GET /track/{id}/lyrics?region={region}
+     * Mirror:  GET /lyrics?track_id={trackId}
      */
-    suspend fun getLyrics(trackId: String): Result<IcmLyricsResponse> {
-        return execute("/lyrics?track_id=$trackId")
+    suspend fun getLyrics(trackId: String, region: String? = null): Result<IcmLyricsResponse> {
+        val r = region ?: defaultRegion
+        return execute("/track/$trackId/lyrics?region=$r")
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -409,6 +411,27 @@ class IcmApi private constructor() {
             if (!seedTrackId.isNullOrBlank()) append("?seed_track_id=$seedTrackId")
         }
         return execute(params)
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  Personal Cabinet (/me/*) — requires linked user + subscription
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * Get user's preferred stream quality.
+     * Requires linked user with active subscription.
+     */
+    suspend fun getUserQuality(): Result<IcmUserQualityResponse> {
+        return execute("/me/quality")
+    }
+
+    /**
+     * Set user's preferred stream quality.
+     * Requires linked user with active subscription.
+     */
+    suspend fun setUserQuality(quality: String): Result<IcmUserQualityResponse> {
+        val body = json.encodeToString(IcmUserQualityRequest(quality = quality))
+        return execute("/me/quality", method = "POST", body = body)
     }
 }
 
