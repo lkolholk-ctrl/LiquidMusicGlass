@@ -69,7 +69,10 @@ object LyricsParser {
         artist: String
     ): Lyrics = withContext(Dispatchers.IO) {
         try {
-            val response = com.liquidmusicglass.api.icm.IcmRepository.getLyrics(trackId)
+            // Docs: "На холодных Apple-треках первый запрос может занять до 10 секунд"
+            val response = kotlinx.coroutines.withTimeout(15_000) {
+                com.liquidmusicglass.api.icm.IcmRepository.getLyrics(trackId)
+            }
             if (response != null && !response.lyrics.isNullOrBlank()) {
                 val parsed = parseLyrics(response.lyrics)
                 if (parsed.lines.isNotEmpty()) {
@@ -80,6 +83,9 @@ object LyricsParser {
                     )
                 }
             }
+            Lyrics.EMPTY
+        } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
+            android.util.Log.w("LyricsParser", "Lyrics fetch timeout for $trackId")
             Lyrics.EMPTY
         } catch (_: Exception) {
             Lyrics.EMPTY
