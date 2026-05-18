@@ -379,7 +379,7 @@ fun SearchScreen(
                         }
                         items(artists, key = { "artist_${it.id}" }) { item ->
                             SearchResultRow(
-                                title = item.displayArtist,
+                                title = item.title.takeIf { it.isNotBlank() } ?: item.displayArtist,
                                 subtitle = "Artist",
                                 icon = Icons.Rounded.Person,
                                 coverUrl = item.cover,
