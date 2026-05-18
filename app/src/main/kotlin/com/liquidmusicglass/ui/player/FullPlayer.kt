@@ -52,7 +52,6 @@ import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.StarBorder
-import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -382,8 +381,8 @@ fun FullPlayer(
         // Подложка под контролами — только когда открыта лирика.
         // Цвет — из палитры обложки (не чёрный), чтобы совпадал с фоном.
         if (showLyrics) {
-            // Цвет обложки, притемнённый — совпадает с затемнённым низом фона
-            val scrimColor = lerp(albumColors.dominant, Color.Black, 0.55f)
+            // Цвет обложки — светлее (меньше чёрного), непрозрачный книзу
+            val scrimColor = lerp(albumColors.dominant, Color.Black, 0.3f)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -392,8 +391,8 @@ fun FullPlayer(
                     .background(
                         Brush.verticalGradient(
                             0.00f to Color.Transparent,
-                            0.32f to scrimColor.copy(alpha = 0.88f),
-                            1.00f to scrimColor.copy(alpha = 0.97f)
+                            0.32f to scrimColor.copy(alpha = 0.9f),
+                            1.00f to scrimColor
                         )
                     )
             )
@@ -484,7 +483,7 @@ fun FullPlayer(
                     Box(
                         modifier = Modifier
                             .size(44.dp)
-                            .pressScale { PlayerController.shareCurrentTrack(context) },
+                            .pressScale { onOpenSettings() },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
@@ -683,26 +682,6 @@ fun FullPlayer(
                     }
                     BottomIcon(Icons.Rounded.Cast) { showAirPlay = true }
                     BottomIcon(Icons.AutoMirrored.Rounded.QueueMusic) { showQueue = true }
-                    val isPremium by com.liquidmusicglass.api.icm.IcmAuthRepository.isPremium.collectAsState()
-                    if (isPremium) {
-                        BottomIcon(Icons.Rounded.Download) {
-                            // Download current track
-                            val track = PlayerController.currentTrack.value
-                            if (track != null) {
-                                scope.launch {
-                                    com.liquidmusicglass.api.icm.IcmRepository.getStreamUrl(track.id)?.let { url ->
-                                        val request = android.app.DownloadManager.Request(android.net.Uri.parse(url))
-                                            .setTitle(track.title)
-                                            .setDescription("${track.artist} - ${track.title}")
-                                            .setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                                            .setDestinationInExternalPublicDir(android.os.Environment.DIRECTORY_MUSIC, "${track.artist} - ${track.title}.m4a")
-                                        val dm = context.getSystemService(android.content.Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
-                                        dm.enqueue(request)
-                                    }
-                                }
-                            }
-                        }
-                    }
                 }
             }
         }
