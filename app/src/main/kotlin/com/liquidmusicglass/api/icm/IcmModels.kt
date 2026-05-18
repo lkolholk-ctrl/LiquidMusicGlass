@@ -64,6 +64,7 @@ data class IcmSessionResponse(
 data class IcmSearchResponse(
     val query: String,
     val region: String,
+    val source: String? = null,
     val items: List<IcmSearchItem>
 )
 
@@ -83,13 +84,18 @@ data class IcmSearchItem(
     @SerialName("isArtist") val isArtist: Boolean = false,
     @SerialName("isAlbum") val isAlbum: Boolean = false,
     @SerialName("isCustom") val isCustom: Boolean = false,
-    val duration: Long? = null
+    val duration: Long? = null,
+    val source: String? = null,
+    @SerialName("trackId") val trackId: String? = null
 ) {
     val displayArtist: String
         get() = artist ?: artistName ?: "Unknown"
 
     val isTrack: Boolean
         get() = !isArtist && !isAlbum
+
+    val isVk: Boolean
+        get() = id.startsWith("vk_") || source == "vk"
 }
 
 // ─── Track (Playback URL) ───
@@ -104,7 +110,7 @@ data class IcmTrackRequest(
 @Serializable
 data class IcmTrackResponse(
     @SerialName("track_id") val trackId: String,
-    @SerialName("file_id") val fileId: String,
+    @SerialName("file_id") val fileId: String? = null,
     val source: String,
     val quality: String,
     @SerialName("artist_id") val artistId: String? = null,
@@ -130,7 +136,9 @@ data class IcmAlbum(
     @SerialName("motionCoverUrl") val motionCoverUrl: String? = null,
     @SerialName("releaseDate") val releaseDate: String? = null,
     val year: String? = null,
-    val type: String? = null
+    val type: String? = null,
+    val description: String? = null,
+    @SerialName("trackCount") val trackCount: Int? = null
 )
 
 @Serializable
@@ -142,11 +150,12 @@ data class IcmAlbumTrack(
     val cover: String,
     @SerialName("collectionId") val collectionId: String? = null,
     @SerialName("is_explicit") val isExplicit: Boolean = false,
-    val region: String? = null
+    val region: String? = null,
+    @SerialName("trackNumber") val trackNumber: Int? = null,
+    val duration: Long? = null
 )
 
 // ─── Artist ───
-// Real API returns: image (not cover), topSongs (not topTracks), artists array, genre, url, editorialVideoUrl, latestRelease, playlists, appearsOn
 
 @Serializable
 data class IcmArtistResponse(
@@ -175,8 +184,13 @@ data class IcmArtistSong(
     @SerialName("albumName") val albumName: String? = null,
     @SerialName("isAlbum") val isAlbum: Boolean = false,
     @SerialName("is_explicit") val isExplicit: Boolean = false,
-    val region: String? = null
-)
+    val region: String? = null,
+    val source: String? = null,
+    val duration: Long? = null
+) {
+    val isVk: Boolean
+        get() = id.startsWith("vk_") || source == "vk"
+}
 
 @Serializable
 data class IcmMiniArtist(
@@ -368,7 +382,7 @@ fun IcmAlbumTrack.toTrack(): com.liquidmusicglass.engine.Track {
         artist = artist,
         albumName = "",
         uri = android.net.Uri.parse("https://byicloud.online/track/$id"),
-        durationMs = 0L,
+        durationMs = duration ?: 0L,
         albumId = collectionId?.hashCode()?.toLong() ?: id.hashCode().toLong(),
         coverUrl = cover.replace("1000x1000", "600x600")
     )
@@ -381,7 +395,7 @@ fun IcmArtistSong.toTrack(): com.liquidmusicglass.engine.Track {
         artist = artists.firstOrNull()?.name ?: artist,
         albumName = albumName ?: "",
         uri = android.net.Uri.parse("https://byicloud.online/track/$id"),
-        durationMs = 0L,
+        durationMs = duration ?: 0L,
         albumId = 0L,
         coverUrl = cover.replace("300x300", "600x600")
     )
@@ -414,6 +428,17 @@ object IcmErrorCodes {
     const val RATE_LIMITED = "rate_limited"
     const val REGION_UNAVAILABLE = "region_unavailable"
     const val NOT_FOUND = "not_found"
+    const val QUERY_TOO_SHORT = "query_too_short"
+    const val QUERY_SPAM_DETECTED = "query_spam_detected"
+    const val EARLY_ACCESS = "early_access"
+}
+
+// ─── Search Source ───
+
+object IcmSearchSource {
+    const val APPLE = "apple"
+    const val VK = "vk"
+    const val ALL = "all"
 }
 
 // ─── Stream Quality ───

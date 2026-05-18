@@ -6,8 +6,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /**
- * Repository для ICM Music Partner API.
- * Абстрагирует вызовы API, кеширование и конвертацию моделей.
+ * Repository for ICM Music Partner API.
+ * Abstracts API calls, caching, and model conversion.
  */
 object IcmRepository {
 
@@ -21,19 +21,19 @@ object IcmRepository {
 
     private var _lastException: Exception? = null
 
-    /** Регион по умолчанию */
+    /** Default region */
     var region: String
         get() = api.defaultRegion
         set(value) { api.defaultRegion = value }
 
-    /** Качество стрима */
+    /** Stream quality */
     var streamQuality: String?
         get() = api.streamQuality
         set(value) { api.streamQuality = value }
 
     /**
-     * Инициализация с API-ключом.
-     * Получить ключ: https://byicloud.online/partners
+     * Initialize with API key.
+     * Get key: https://byicloud.online/partners
      */
     fun init(apiKey: String, partnerUserId: String? = null) {
         api.apiKey = apiKey
@@ -44,7 +44,7 @@ object IcmRepository {
     }
 
     /**
-     * Инициализация с session token (для клиентских запросов).
+     * Initialize with session token (for client requests).
      */
     fun initWithToken(sessionToken: String, partnerUserId: String? = null) {
         api.apiKey = null
@@ -55,7 +55,7 @@ object IcmRepository {
     }
 
     /**
-     * Сброс инициализации.
+     * Reset initialization.
      */
     fun reset() {
         api.apiKey = null
@@ -67,7 +67,7 @@ object IcmRepository {
     }
 
     /**
-     * Проверить здоровье API.
+     * Check API health.
      */
     suspend fun health(): Result<IcmHealthResponse> {
         return api.health().also { result ->
@@ -79,12 +79,20 @@ object IcmRepository {
     }
 
     /**
-     * Поиск треков, альбомов, артистов.
-     * @return Список треков (только isTrack=true) или все результаты
+     * Search tracks only (isTrack=true).
+     * @param query Search string
+     * @param region Region override
+     * @param source Music source: "apple", "vk", "all"
+     * @param limit Max results
      */
-    suspend fun searchTracks(query: String, region: String? = null): List<Track> {
+    suspend fun searchTracks(
+        query: String,
+        region: String? = null,
+        source: String? = null,
+        limit: Int? = null
+    ): List<Track> {
         if (query.isBlank()) return emptyList()
-        val result = api.search(query, region)
+        val result = api.search(query, region, source, limit)
         result.exceptionOrNull()?.let {
             _lastException = it as? Exception
             _lastError.value = it.message
@@ -97,10 +105,19 @@ object IcmRepository {
     }
 
     /**
-     * Поиск — все результаты (треки + альбомы + артисты).
+     * Search — all results (tracks + albums + artists).
+     * @param query Search string
+     * @param region Region override
+     * @param source Music source: "apple", "vk", "all"
+     * @param limit Max results
      */
-    suspend fun searchAll(query: String, region: String? = null): IcmSearchResponse? {
-        val result = api.search(query, region)
+    suspend fun searchAll(
+        query: String,
+        region: String? = null,
+        source: String? = null,
+        limit: Int? = null
+    ): IcmSearchResponse? {
+        val result = api.search(query, region, source, limit)
         result.exceptionOrNull()?.let {
             _lastException = it as? Exception
             _lastError.value = it.message
@@ -109,7 +126,29 @@ object IcmRepository {
     }
 
     /**
-     * Получить подписанный URL для стрима.
+     * Search VK tracks only.
+     */
+    suspend fun searchVkTracks(
+        query: String,
+        region: String? = null,
+        limit: Int? = null
+    ): List<Track> {
+        return searchTracks(query, region, IcmSearchSource.VK, limit)
+    }
+
+    /**
+     * Search from all sources (Apple + VK).
+     */
+    suspend fun searchAllSources(
+        query: String,
+        region: String? = null,
+        limit: Int? = null
+    ): IcmSearchResponse? {
+        return searchAll(query, region, IcmSearchSource.ALL, limit)
+    }
+
+    /**
+     * Get signed stream URL.
      */
     suspend fun getStreamUrl(trackId: String, region: String? = null): String? {
         val result = api.getTrack(trackId, region)
@@ -121,7 +160,7 @@ object IcmRepository {
     }
 
     /**
-     * Получить полный TrackResponse (включая expires_at).
+     * Get full TrackResponse (including expires_at).
      */
     suspend fun getTrackInfo(trackId: String, region: String? = null): IcmTrackResponse? {
         val result = api.getTrack(trackId, region)
@@ -133,7 +172,7 @@ object IcmRepository {
     }
 
     /**
-     * Треки альбома как Track.
+     * Album tracks as Track list.
      */
     suspend fun getAlbumTracks(albumId: String, region: String? = null): List<Track> {
         val result = api.getAlbum(albumId, region)
@@ -145,7 +184,7 @@ object IcmRepository {
     }
 
     /**
-     * Информация об альбоме.
+     * Album info.
      */
     suspend fun getAlbum(albumId: String, region: String? = null): IcmAlbumResponse? {
         val result = api.getAlbum(albumId, region)
@@ -157,7 +196,7 @@ object IcmRepository {
     }
 
     /**
-     * Топ-треки артиста.
+     * Artist top tracks.
      */
     suspend fun getArtistTopTracks(artistId: String, region: String? = null): List<Track> {
         val result = api.getArtist(artistId, region)
@@ -169,7 +208,7 @@ object IcmRepository {
     }
 
     /**
-     * Информация об артисте.
+     * Artist info.
      */
     suspend fun getArtist(artistId: String, region: String? = null): IcmArtistResponse? {
         val result = api.getArtist(artistId, region)
@@ -181,7 +220,7 @@ object IcmRepository {
     }
 
     /**
-     * Метаданные трека.
+     * Track metadata.
      */
     suspend fun getTrackMeta(trackId: String): IcmTrackMeta? {
         val result = api.getTrackMeta(trackId)
@@ -193,8 +232,8 @@ object IcmRepository {
     }
 
     /**
-     * Плейлист редакционный Apple Music (id начинается с pl.).
-     * ICM API использует тот же эндпоинт /album/{id} для плейлистов.
+     * Editorial Apple Music playlist (id starts with pl.).
+     * ICM API uses the same /album/{id} endpoint for playlists.
      */
     suspend fun getPlaylist(playlistId: String, region: String? = null): IcmAlbumResponse? {
         val result = api.getPlaylist(playlistId, region)
@@ -206,7 +245,7 @@ object IcmRepository {
     }
 
     /**
-     * Текст песни.
+     * Song lyrics.
      */
     suspend fun getLyrics(trackId: String): IcmLyricsResponse? {
         val result = api.getLyrics(trackId)
@@ -222,8 +261,8 @@ object IcmRepository {
     // ═══════════════════════════════════════════════════════════
 
     /**
-     * Batch метаданные треков — до 50 за запрос.
-     * Экономит rate-limit и убирает round-trip.
+     * Batch track metadata — up to 50 per request.
+     * Saves rate-limit and removes round-trip.
      */
     suspend fun getBatchTrackMeta(trackIds: List<String>): IcmBatchTrackMetaResponse? {
         if (trackIds.isEmpty()) {
@@ -243,10 +282,10 @@ object IcmRepository {
     }
 
     /**
-     * Получить URL для стрима с async fallback.
-     * Если трек холодный — автоматически poll'ит job до готовности.
-     * @param maxPollAttempts Максимум попыток polling (по умолчанию 30 = ~60 сек)
-     * @param pollIntervalMs Интервал между попытками (по умолчанию 2000мс)
+     * Get stream URL with async fallback.
+     * If track is cold — automatically polls job until ready.
+     * @param maxPollAttempts Max polling attempts (default 30 = ~60 sec)
+     * @param pollIntervalMs Interval between attempts (default 2000ms)
      */
     suspend fun getStreamUrlAsync(
         trackId: String,
@@ -258,23 +297,20 @@ object IcmRepository {
         val result = api.getTrackAsync(trackId, region, quality)
         val exception = result.exceptionOrNull()
 
-        // Если пришёл async pending — poll'им
         if (exception is IcmAsyncPendingException) {
             return pollAsyncJob(exception.pending, maxPollAttempts, pollIntervalMs)
         }
 
-        // Обычная ошибка
         exception?.let {
             _lastException = it as? Exception
             _lastError.value = it.message
         }
 
-        // Успешный ответ (трек тёплый)
         return result.getOrNull()?.url
     }
 
     /**
-     * Полный TrackResponse с async fallback.
+     * Full TrackResponse with async fallback.
      */
     suspend fun getTrackInfoAsync(
         trackId: String,
@@ -361,8 +397,8 @@ object IcmRepository {
     // ═══════════════════════════════════════════════════════════
 
     /**
-     * Сгенерировать URL для привязки аккаунта пользователя к ICM.
-     * Требует partnerId — твой ID в системе ICM (из /health ответа partnerId).
+     * Generate URL for linking user account to ICM.
+     * Requires partnerId — your ID in ICM system (from /health response partnerId).
      */
     fun buildAccountLinkUrl(
         partnerId: String,
@@ -374,8 +410,8 @@ object IcmRepository {
     }
 
     /**
-     * Парсить callback от ICM после линковки.
-     * Проверяй state на совпадение с тем, что отправлял.
+     * Parse callback from ICM after linking.
+     * Verify state matches what was sent.
      */
     fun parseAccountLinkCallback(
         state: String,
@@ -390,66 +426,73 @@ object IcmRepository {
     //  Error Handling Helpers
     // ═══════════════════════════════════════════════════════════
 
-    /**
-     * Проверить, является ли последняя ошибка — region unavailable (451).
-     * Если да — requiredRegion содержит нужный регион.
-     */
+    /** Check if last error is region unavailable (451). */
     fun isRegionUnavailable(): Boolean {
         val error = _lastError.value ?: return false
         return error.contains(IcmErrorCodes.REGION_UNAVAILABLE)
     }
 
-    /**
-     * Проверить, является ли последняя ошибка — rate limited (429).
-     */
+    /** Check if last error is rate limited (429). */
     fun isRateLimited(): Boolean {
         val error = _lastError.value ?: return false
         return error.contains(IcmErrorCodes.RATE_LIMITED)
     }
 
-    /**
-     * Получить recommended region из последней ошибки (451 region_unavailable).
-     */
+    /** Check if last error is query too short (400). */
+    fun isQueryTooShort(): Boolean {
+        val error = _lastError.value ?: return false
+        return error.contains(IcmErrorCodes.QUERY_TOO_SHORT)
+    }
+
+    /** Check if last error is query spam detected (429). */
+    fun isQuerySpamDetected(): Boolean {
+        val error = _lastError.value ?: return false
+        return error.contains(IcmErrorCodes.QUERY_SPAM_DETECTED)
+    }
+
+    /** Check if last error is source not allowed (403). */
+    fun isSourceNotAllowed(): Boolean {
+        val error = _lastError.value ?: return false
+        return error.contains(IcmErrorCodes.SOURCE_NOT_ALLOWED)
+    }
+
+    /** Check if last error is early access (presave). */
+    fun isEarlyAccess(): Boolean {
+        val error = _lastError.value ?: return false
+        return error.contains(IcmErrorCodes.EARLY_ACCESS)
+    }
+
+    /** Get recommended region from last error (451 region_unavailable). */
     fun getRequiredRegion(): String? {
         val ex = _lastException as? IcmApiException ?: return null
         return ex.requiredRegion
     }
 
-    /**
-     * Получить retry-after из последней ошибки 429 (rate_limited).
-     */
+    /** Get retry-after from last error 429 (rate_limited). */
     fun getRetryAfter(): Int? {
         val ex = _lastException as? IcmApiException ?: return null
         return ex.retryAfter
     }
 
-    /**
-     * Получить error code из последней ошибки.
-     */
+    /** Get error code from last error. */
     fun getLastErrorCode(): String? {
         val ex = _lastException as? IcmApiException ?: return null
         return ex.errorCode
     }
 
-    /**
-     * Получить source из последней ошибки (403 source_not_allowed).
-     */
+    /** Get source from last error (403 source_not_allowed). */
     fun getLastErrorSource(): String? {
         val ex = _lastException as? IcmApiException ?: return null
         return ex.source
     }
 
-    /**
-     * Получить полный HTTP код последней ошибки.
-     */
+    /** Get full HTTP code from last error. */
     fun getLastHttpCode(): Int? {
         val ex = _lastException as? IcmApiException ?: return null
         return ex.code
     }
 
-    /**
-     * Очистить последнюю ошибку.
-     */
+    /** Clear last error. */
     fun clearError() {
         _lastException = null
         _lastError.value = null

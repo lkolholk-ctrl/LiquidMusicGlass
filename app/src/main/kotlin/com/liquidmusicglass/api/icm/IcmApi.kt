@@ -12,12 +12,12 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.TimeUnit
 
 /**
- * ICM Music Partner API клиент.
- * Документация: https://byicloud.online/partners/api-docs
+ * ICM Music Partner API client.
+ * Documentation: https://byicloud.online/partners/api-docs
  *
- * Использует API-ключ (X-Partner-Key) или session token (Authorization: Bearer).
+ * Uses API key (X-Partner-Key) or session token (Authorization: Bearer).
  *
- * Для получения ключа: https://byicloud.online/partners
+ * Get key: https://byicloud.online/partners
  */
 class IcmApi private constructor() {
 
@@ -54,22 +54,22 @@ class IcmApi private constructor() {
 
     private val mediaTypeJson = "application/json; charset=utf-8".toMediaType()
 
-    /** API-ключ партнера (pk_<id>_<random>) */
+    /** Partner API key (pk_<id>_<random>) */
     var apiKey: String? = null
 
-    /** Session token (JWT) — альтернатива apiKey для клиентских запросов */
+    /** Session token (JWT) — alternative to apiKey for client requests */
     var sessionToken: String? = null
 
-    /** Регион по умолчанию для поиска */
+    /** Default search region */
     var defaultRegion: String = "us"
 
-    /** Качество стрима: "128K", "256K", "320K", "ALAC" или null для дефолта */
+    /** Stream quality: "128K", "256K", "320K", "ALAC" or null for default */
     var streamQuality: String? = IcmStreamQuality.K256
 
-    /** Partner user id для аналитики и per-user настроек (X-Partner-User-Id) */
+    /** Partner user id for analytics and per-user settings (X-Partner-User-Id) */
     var partnerUserId: String? = null
 
-    /** Callback для X-Request-Id tracing */
+    /** Callback for X-Request-Id tracing */
     var onRequestId: ((String) -> Unit)? = null
 
     private inline fun <reified T> parseResponse(body: okhttp3.ResponseBody?): T {
@@ -87,7 +87,7 @@ class IcmApi private constructor() {
             .header("User-Agent", "LiquidMusicGlass/1.0")
             .header("Accept", "application/json")
 
-        // Авторизация: приоритет у session token
+        // Auth: session token takes priority
         sessionToken?.let {
             builder.header("Authorization", "Bearer $it")
         } ?: apiKey?.let {
@@ -159,14 +159,14 @@ class IcmApi private constructor() {
     // ═══════════════════════════════════════════════════════════
 
     /**
-     * Проверка здоровья API и конфигурации ключа.
+     * Check API health and key configuration.
      */
     suspend fun health(): Result<IcmHealthResponse> = execute("/health")
 
     /**
-     * Выпуск session token для клиентских запросов.
-     * Требует apiKey.
-     * После успешной авторизации через Telegram — вызываем этот метод для получения JWT.
+     * Issue session token for client requests.
+     * Requires apiKey.
+     * Call after Telegram auth to get JWT.
      */
     suspend fun issueSession(
         partnerUserId: String,
@@ -179,42 +179,50 @@ class IcmApi private constructor() {
     }
 
     /**
-     * Проверить статус сессии и обновить токен если нужно.
+     * Check session status and refresh token if needed.
      */
     suspend fun refreshSessionIfNeeded(
         partnerUserId: String,
         hideExplicit: Boolean = false
     ): Result<IcmSessionResponse> {
-        // Check if current token is still valid
         val currentToken = sessionToken
         if (currentToken != null) {
-            // Token exists, assume valid for now
-            // In production: decode JWT and check exp claim
             return Result.failure(IcmApiException(401, "Token refresh needed"))
         }
         return issueSession(partnerUserId, hideExplicit)
     }
 
     /**
-     * Поиск треков, альбомов и артистов.
-     * @param query Строка поиска (до 200 символов)
-     * @param region Регион (us/ru/nz), null — используется defaultRegion
+     * Search tracks, albums, and artists.
+     * @param query Search string (up to 200 chars, min 2 alphanumeric)
+     * @param region Region (us/ru/nz), null uses defaultRegion
+     * @param source Music source: "apple" (default), "vk", "all". See VK Music docs.
+     * @param limit Max results (clamped to partner.config.search.max_results)
+     * @return Search response with mixed items (artists, albums, tracks)
      */
     suspend fun search(
         query: String,
-        region: String? = null
+        region: String? = null,
+        source: String? = null,
+        limit: Int? = null
     ): Result<IcmSearchResponse> {
         val r = region ?: defaultRegion
         val encQuery = java.net.URLEncoder.encode(query, "UTF-8")
-        return execute("/search?q=$encQuery&region=$r")
+        val params = buildString {
+            append("?q=$encQuery")
+            append("&region=$r")
+            if (!source.isNullOrBlank()) append("&source=$source")
+            if (limit != null && limit > 0) append("&limit=$limit")
+        }
+        return execute("/search$params")
     }
 
     /**
-     * Получить подписанный URL для проигрывания трека.
-     * @param trackId ID трека из поиска/альбома
-     * @param region Регион
-     * @param quality Качество: "256K", "128K" или null
-     * @return IcmTrackResponse с полем url для стрима
+     * Get signed playback URL for a track.
+     * @param trackId Track ID from search/album
+     * @param region Region
+     * @param quality Quality: "256K", "128K" or null
+     * @return IcmTrackResponse with url field for streaming
      */
     suspend fun getTrack(
         trackId: String,
@@ -232,7 +240,7 @@ class IcmApi private constructor() {
     }
 
     /**
-     * Информация об альбоме + список треков.
+     * Album info + track list.
      */
     suspend fun getAlbum(
         albumId: String,
@@ -243,7 +251,7 @@ class IcmApi private constructor() {
     }
 
     /**
-     * Информация об артисте: топ-треки, альбомы, похожие.
+     * Artist info: top tracks, albums, similar artists.
      */
     suspend fun getArtist(
         artistId: String,
@@ -254,14 +262,14 @@ class IcmApi private constructor() {
     }
 
     /**
-     * Метаданные трека (без получения URL).
+     * Track metadata (without playback URL).
      */
     suspend fun getTrackMeta(trackId: String): Result<IcmTrackMeta> =
         execute("/track/$trackId/meta")
 
     /**
-     * Плейлист редакционный Apple Music (Today Hits, etc).
-     * ICM API использует тот же эндпоинт /album/{id} для плейлистов (id начинается с pl.).
+     * Editorial Apple Music playlist (Today Hits, etc).
+     * ICM API uses the same /album/{id} endpoint for playlists (id starts with pl.).
      */
     suspend fun getPlaylist(
         playlistId: String,
@@ -272,8 +280,8 @@ class IcmApi private constructor() {
     }
 
     /**
-     * Подписать URL обложки (для custom-обложек).
-     * Для Apple Music обложек подпись не нужна — cover URL можно использовать напрямую.
+     * Sign cover URL (for custom covers).
+     * Apple Music covers don't need signing — use URL directly.
      */
     suspend fun signCover(fileId: String): Result<IcmCoverSignResponse> {
         val encFileId = java.net.URLEncoder.encode(fileId, "UTF-8")
@@ -281,7 +289,7 @@ class IcmApi private constructor() {
     }
 
     /**
-     * Текст песни.
+     * Song lyrics.
      * NOTE: endpoint currently unavailable (scope_not_allowed). Will be enabled by API provider soon.
      */
     suspend fun getLyrics(trackId: String): Result<IcmLyricsResponse> =
@@ -292,7 +300,7 @@ class IcmApi private constructor() {
     // ═══════════════════════════════════════════════════════════
 
     /**
-     * Batch метаданные треков — до 50 за запрос.
+     * Batch track metadata — up to 50 per request.
      */
     suspend fun getBatchTrackMeta(trackIds: List<String>): Result<IcmBatchTrackMetaResponse> {
         if (trackIds.isEmpty()) return Result.failure(IllegalArgumentException("trackIds must not be empty"))
@@ -302,8 +310,8 @@ class IcmApi private constructor() {
     }
 
     /**
-     * Получить трек в async-режиме.
-     * Если трек холодный — вернёт 202 с job_id для polling.
+     * Get track in async mode.
+     * If track is cold — returns 202 with job_id for polling.
      */
     suspend fun getTrackAsync(
         trackId: String,
@@ -321,7 +329,7 @@ class IcmApi private constructor() {
     }
 
     /**
-     * Проверить статус async job.
+     * Check async job status.
      */
     suspend fun pollAsyncJob(jobId: String): Result<IcmAsyncTrackReady> {
         return execute("/track/job/$jobId")
@@ -332,10 +340,10 @@ class IcmApi private constructor() {
     // ═══════════════════════════════════════════════════════════
 
     /**
-     * Сгенерировать URL для привязки аккаунта пользователя к ICM.
-     * @param partnerUserId ID пользователя в твоей системе
-     * @param redirectUri URI для callback после авторизации
-     * @param state Случайная строка для защиты от CSRF
+     * Generate URL for linking user account to ICM.
+     * @param partnerUserId User ID in your system
+     * @param redirectUri Callback URI after authorization
+     * @param state Random string for CSRF protection
      */
     fun buildAccountLinkUrl(
         partnerId: String,
@@ -350,7 +358,7 @@ class IcmApi private constructor() {
     }
 
     /**
-     * Парсить callback от ICM после линковки.
+     * Parse callback from ICM after linking.
      */
     fun parseAccountLinkCallback(
         state: String,
@@ -368,7 +376,7 @@ class IcmApi private constructor() {
 }
 
 /**
- * Исключение API с HTTP-кодом.
+ * API exception with HTTP code.
  */
 class IcmApiException(
     val code: Int,
@@ -380,7 +388,7 @@ class IcmApiException(
 ) : Exception("HTTP $code: $message")
 
 /**
- * Async pending exception — трек ещё готовится.
+ * Async pending exception — track is still being prepared.
  */
 class IcmAsyncPendingException(
     val pending: IcmAsyncTrackPending

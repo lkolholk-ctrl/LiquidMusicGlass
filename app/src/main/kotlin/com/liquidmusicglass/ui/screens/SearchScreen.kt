@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.api.icm.IcmSearchItem
+import com.liquidmusicglass.api.icm.IcmSearchSource
 import com.liquidmusicglass.api.icm.toTrack
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.Track
@@ -75,6 +76,7 @@ fun SearchScreen(
     var searchResults by remember { mutableStateOf<List<IcmSearchItem>>(emptyList()) }
     var isLoading by remember { mutableStateOf(false) }
     var lastError by remember { mutableStateOf<String?>(null) }
+    var selectedSource by remember { mutableStateOf(IcmSearchSource.APPLE) }
     val searchMutex = remember { Mutex() }
 
     // Load search history
@@ -87,7 +89,6 @@ fun SearchScreen(
         if (q.isBlank()) return
         val current = prefs.getStringSet("queries", emptySet())?.toMutableSet() ?: mutableSetOf()
         current.add(q)
-        // Keep max 20 items
         val trimmed = if (current.size > 20) current.drop(current.size - 20).toSet() else current
         prefs.edit().putStringSet("queries", trimmed).apply()
         history = trimmed.toList().sortedDescending()
@@ -98,7 +99,7 @@ fun SearchScreen(
     }
 
     // Debounce search: 500ms after user stops typing + mutex serialization
-    LaunchedEffect(query) {
+    LaunchedEffect(query, selectedSource) {
         if (query.isBlank()) {
             searchResults = emptyList()
             return@LaunchedEffect
@@ -108,7 +109,7 @@ fun SearchScreen(
         lastError = null
         searchMutex.withLock {
             try {
-                val result = IcmRepository.searchAll(query)
+                val result = IcmRepository.searchAll(query, source = selectedSource)
                 searchResults = result?.items ?: emptyList()
                 if (result != null) {
                     saveQuery(query)
@@ -143,7 +144,33 @@ fun SearchScreen(
                 modifier = Modifier.padding(horizontal = 20.dp)
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Source selector
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                SourceChip(
+                    text = "Apple Music",
+                    selected = selectedSource == IcmSearchSource.APPLE,
+                    onClick = { selectedSource = IcmSearchSource.APPLE }
+                )
+                SourceChip(
+                    text = "VK",
+                    selected = selectedSource == IcmSearchSource.VK,
+                    onClick = { selectedSource = IcmSearchSource.VK }
+                )
+                SourceChip(
+                    text = "All",
+                    selected = selectedSource == IcmSearchSource.ALL,
+                    onClick = { selectedSource = IcmSearchSource.ALL }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
 
             // Search field — solid dark background
             Row(
@@ -356,7 +383,6 @@ fun SearchScreen(
                                 subtitle = "Artist",
                                 icon = Icons.Rounded.Person,
                                 coverUrl = item.cover,
-                                
                                 onClick = { onNavigateToArtist(item.id) }
                             )
                         }
@@ -373,8 +399,7 @@ fun SearchScreen(
                                 subtitle = item.displayArtist,
                                 icon = Icons.Rounded.Album,
                                 coverUrl = item.cover,
-                                
-                                onClick = { /* TODO: navigate to album */ }
+                                onClick = { onNavigateToAlbum(item.id) }
                             )
                         }
                     }
@@ -391,9 +416,7 @@ fun SearchScreen(
                                 subtitle = item.displayArtist,
                                 icon = Icons.Rounded.MusicNote,
                                 coverUrl = item.cover,
-                                
                                 onClick = {
-                                    // Add to queue and play next without clearing existing queue
                                     PlayerController.playNext(track, context)
                                 }
                             )
@@ -421,6 +444,34 @@ fun SearchScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SourceChip(
+    text: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(
+                if (selected) Color(0xFFFC3C44) else Color(0xFF1A1A1A)
+            )
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick
+            )
+            .padding(horizontal = 14.dp, vertical = 6.dp)
+    ) {
+        Text(
+            text = text,
+            color = if (selected) Color.White else LiquidTheme.colors.textSecondary,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium
+        )
     }
 }
 
