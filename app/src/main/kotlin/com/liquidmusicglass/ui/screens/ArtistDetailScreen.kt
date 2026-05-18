@@ -513,6 +513,7 @@ fun ArtistDetailScreen(
                                     indication = null,
                                     onClick = {
                                         // Play immediately without replacing current queue
+                                        PlayerController.setAutoRefillContext("artist", artistId, artist?.name)
                                         PlayerController.playNext(track, context)
                                     }
                                 )
