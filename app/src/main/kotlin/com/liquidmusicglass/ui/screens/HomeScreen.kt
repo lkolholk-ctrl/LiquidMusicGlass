@@ -100,6 +100,7 @@ fun HomeScreen(
     }
 
     fun playMoodStation(moodId: String) {
+        PlayerController.setAutoRefillContext("wave", moodId, moodCategories.find { it.id == moodId }?.title)
         val existing = moodTracks[moodId]
         if (!existing.isNullOrEmpty()) {
             // Already loaded — start playing immediately
@@ -207,7 +208,7 @@ fun HomeScreen(
                                 // Stop / collapse
                                 activeMoodId = null
                                 isPlayingMood = false
-                                PlayerController.setActiveWaveMood(null)
+                                PlayerController.clearAutoRefillContext()
                             } else {
                                 playMoodStation(mood.id)
                             }
