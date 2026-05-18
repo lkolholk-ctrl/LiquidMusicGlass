@@ -31,7 +31,9 @@ import com.liquidmusicglass.api.icm.IcmLibraryTrack
 import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.Track
+import android.content.Context
 import android.net.Uri
+import androidx.compose.ui.platform.LocalContext
 import com.liquidmusicglass.ui.theme.LiquidTheme
 import kotlinx.coroutines.launch
 
@@ -43,6 +45,7 @@ fun LibraryScreen(
     onNavigateToAlbum: (String) -> Unit = {},
     onNavigateToArtist: (String) -> Unit = {}
 ) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var selectedTab by remember { mutableStateOf(LibraryTab.LIKES) }
 
@@ -167,11 +170,8 @@ fun LibraryScreen(
                                 LikedTrackItem(
                                     track = track,
                                     onClick = {
-                                        val ctx = context
-                                        scope.launch {
-                                            playLibraryTrack(ctx, track)
-                                        }
-                                    },
+                                    playLibraryTrack(context, track)
+                                },
                                     onNavigateToAlbum = onNavigateToAlbum
                                 )
                             }

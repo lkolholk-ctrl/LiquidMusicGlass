@@ -111,10 +111,11 @@ fun EqualizerScreen(onBack: () -> Unit) {
                         fontSize = 16.sp,
                         fontWeight = FontWeight.SemiBold
                     )
+                    val toggleBackdrop = com.kyant.backdrop.backdrops.rememberLayerBackdrop()
                     LiquidToggle(
                         selected = { eqEnabled },
                         onSelect = { AudioEffectsEngine.setEnabled(it) },
-                        backdrop = screenBackdrop
+                        backdrop = toggleBackdrop
                     )
                 }
             }
