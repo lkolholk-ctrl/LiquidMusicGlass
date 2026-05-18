@@ -93,7 +93,8 @@ fun AuthScreen(
                 prefs.edit().putString("partner_user_id", partnerUserId).apply()
             }
             // Use ICM partner linking endpoint with our redirect
-            val telegramAuthUrl = "https://byicloud.online/partner/msng/link?partner_user_id=$partnerUserId&redirect_uri=https://liquid.glassfiles.ru/auth/telegram&state=android&bot_username=https://t.me/byicmbot"
+            // Docs: /partner/<partner_id>/link?partner_user_id=...&redirect_uri=...&state=...
+            val telegramAuthUrl = "https://byicloud.online/partner/msng/link?partner_user_id=$partnerUserId&redirect_uri=liquidmusicglass://oauth/icm&state=android"
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -104,11 +105,21 @@ fun AuthScreen(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null
                     ) {
-                        val intent = android.content.Intent(
-                            android.content.Intent.ACTION_VIEW,
-                            android.net.Uri.parse(telegramAuthUrl)
-                        )
-                        context.startActivity(intent)
+                        // Use Chrome Custom Tabs for proper Telegram widget support
+                        try {
+                            val builder = androidx.browser.customtabs.CustomTabsIntent.Builder()
+                            builder.setShowTitle(true)
+                            builder.setToolbarColor(TelegramBlue.value.toInt())
+                            val customTabsIntent = builder.build()
+                            customTabsIntent.launchUrl(context, android.net.Uri.parse(telegramAuthUrl))
+                        } catch (e: Exception) {
+                            // Fallback to regular browser if Custom Tabs unavailable
+                            val intent = android.content.Intent(
+                                android.content.Intent.ACTION_VIEW,
+                                android.net.Uri.parse(telegramAuthUrl)
+                            )
+                            context.startActivity(intent)
+                        }
                     },
                 contentAlignment = Alignment.Center
             ) {

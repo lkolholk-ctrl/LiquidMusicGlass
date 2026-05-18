@@ -151,6 +151,9 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
 
+    // Chrome Custom Tabs (Telegram Login Widget requires real browser)
+    implementation("androidx.browser:browser:1.8.0")
+
     // Ktor (Internal API client)
     implementation("io.ktor:ktor-client-core:3.0.0")
     implementation("io.ktor:ktor-client-okhttp:3.0.0")
