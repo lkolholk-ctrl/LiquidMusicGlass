@@ -395,6 +395,25 @@ object IcmRepository {
         return result.getOrNull()?.ok == true
     }
 
+    /**
+     * Log playback event for wave ranking improvement.
+     * Call when user finishes/skips/switches a wave track.
+     */
+    suspend fun logWavePlayback(
+        trackId: String,
+        playedSeconds: Double,
+        totalSeconds: Double? = null,
+        completed: Boolean? = null,
+        skipped: Boolean? = null
+    ): Boolean {
+        val result = api.logWavePlayback(trackId, playedSeconds, totalSeconds, completed, skipped)
+        result.exceptionOrNull()?.let {
+            _lastException = it as? Exception
+            _lastError.value = it.message
+        }
+        return result.getOrNull()?.logged == true
+    }
+
     // ═══════════════════════════════════════════════════════════
     //  Personal Cabinet (/me/*)
     // ═══════════════════════════════════════════════════════════

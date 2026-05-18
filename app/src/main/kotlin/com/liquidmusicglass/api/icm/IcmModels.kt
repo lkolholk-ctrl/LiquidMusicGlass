@@ -640,6 +640,23 @@ data class IcmWaveOnboardingSaveResponse(
     val saved: Int? = null
 )
 
+// ─── Wave Playback Logging ───
+
+@Serializable
+data class IcmWavePlaybackRequest(
+    @SerialName("track_id") val trackId: String,
+    @SerialName("played_seconds") val playedSeconds: Double,
+    @SerialName("total_seconds") val totalSeconds: Double? = null,
+    val completed: Boolean? = null,
+    val skipped: Boolean? = null
+)
+
+@Serializable
+data class IcmWavePlaybackResponse(
+    val status: String,
+    val logged: Boolean = false
+)
+
 // ─── Email Account Linking ───
 
 @Serializable
