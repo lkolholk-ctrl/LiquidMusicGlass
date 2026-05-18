@@ -488,7 +488,14 @@ object IcmStreamQuality {
 // ─── Wave (Personal Radio) ───
 
 @Serializable
-data class IcmWaveTrackResponse(
+data class IcmWaveResponse(
+    val track: IcmWaveTrack,
+    val status: String,
+    val region: String? = null
+)
+
+@Serializable
+data class IcmWaveTrack(
     val id: String,
     val title: String,
     val artist: String? = null,

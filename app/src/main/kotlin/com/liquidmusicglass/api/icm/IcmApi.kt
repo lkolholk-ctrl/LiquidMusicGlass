@@ -400,9 +400,15 @@ class IcmApi private constructor() {
      * Get next track from user's personal wave (radio).
      * Requires partnerUserId to be set and user to be linked.
      * Call repeatedly to get continuous stream of personalized tracks.
+     *
+     * @param seedTrackId Optional track ID to create a "station based on track"
      */
-    suspend fun getWaveNext(): Result<IcmWaveTrackResponse> {
-        return execute("/library/wave/next")
+    suspend fun getWaveNext(seedTrackId: String? = null): Result<IcmWaveResponse> {
+        val params = buildString {
+            append("/library/wave/next")
+            if (!seedTrackId.isNullOrBlank()) append("?seed_track_id=$seedTrackId")
+        }
+        return execute(params)
     }
 }
 
