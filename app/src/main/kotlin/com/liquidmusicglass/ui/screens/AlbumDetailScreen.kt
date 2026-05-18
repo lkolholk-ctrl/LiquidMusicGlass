@@ -333,6 +333,7 @@ fun AlbumDetailScreen(
                                     indication = null,
                                     onClick = {
                                         // Play immediately without replacing current queue
+                                        PlayerController.setAutoRefillContext("album", albumId, albumName)
                                         PlayerController.playNext(track, context)
                                     }
                                 )
