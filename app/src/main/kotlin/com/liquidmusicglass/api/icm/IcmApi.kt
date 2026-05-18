@@ -290,10 +290,11 @@ class IcmApi private constructor() {
 
     /**
      * Song lyrics.
-     * NOTE: endpoint currently unavailable (scope_not_allowed). Will be enabled by API provider soon.
+     * GET /lyrics?track_id={trackId}
      */
-    suspend fun getLyrics(trackId: String): Result<IcmLyricsResponse> =
-        Result.failure(IcmApiException(403, "Lyrics endpoint not available yet"))
+    suspend fun getLyrics(trackId: String): Result<IcmLyricsResponse> {
+        return execute("/lyrics?track_id=$trackId")
+    }
 
     // ═══════════════════════════════════════════════════════════
     //  Batch & Async
@@ -372,6 +373,27 @@ class IcmApi private constructor() {
             icmUserId = icmUserId,
             error = error
         )
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  Library (likes, subscriptions)
+    //  Requires X-Partner-User-Id header and linked user
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * Get user's liked tracks.
+     * Requires partnerUserId to be set.
+     */
+    suspend fun getLibraryLikes(): Result<IcmLibraryLikesResponse> {
+        return execute("/library/likes")
+    }
+
+    /**
+     * Get user's artist subscriptions.
+     * Requires partnerUserId to be set.
+     */
+    suspend fun getLibrarySubscriptions(): Result<IcmLibrarySubscriptionsResponse> {
+        return execute("/library/subscriptions")
     }
 }
 
