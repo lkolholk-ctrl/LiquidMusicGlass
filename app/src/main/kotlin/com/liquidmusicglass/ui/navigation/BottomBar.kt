@@ -112,7 +112,7 @@ fun BottomBar(
         backdrop = backdrop,
         tabsCount = items.size,
         modifier = Modifier
-            .fillMaxWidth(0.92f)
+            .fillMaxWidth(0.94f)
             .padding(bottom = 8.dp)
     ) {
         items.forEachIndexed { index, item ->
