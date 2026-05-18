@@ -129,11 +129,19 @@ fun HomeScreen(
             // Already loaded — start playing immediately
             activeMoodId = moodId
             isPlayingMood = true
-            val tracks = existing.map { waveTrackToTrack(it) }
-            PlayerController.setQueue(tracks)
-            PlayerController.playTrack(context, 0)
-            // Preload more in background
-            loadMoreMoodTracks(moodId, existing)
+            scope.launch {
+                val tracks = existing.map { waveTrackToTrack(it) }
+                // Resolve first track URL immediately for fast start
+                val firstResolved = resolveTrackUrl(tracks.firstOrNull())
+                if (firstResolved != null) {
+                    val resolvedTracks = tracks.toMutableList()
+                    resolvedTracks[0] = firstResolved
+                    PlayerController.setQueue(resolvedTracks)
+                    PlayerController.playTrack(context, 0)
+                }
+                // Preload more in background
+                loadMoreMoodTracks(moodId, existing)
+            }
             return
         }
 
@@ -158,11 +166,31 @@ fun HomeScreen(
 
             if (waveTracks.isNotEmpty()) {
                 val tracks = waveTracks.map { waveTrackToTrack(it) }
-                PlayerController.setQueue(tracks)
-                PlayerController.playTrack(context, 0)
+                // Resolve first track URL immediately for fast start
+                val firstResolved = resolveTrackUrl(tracks.firstOrNull())
+                if (firstResolved != null) {
+                    val resolvedTracks = tracks.toMutableList()
+                    resolvedTracks[0] = firstResolved
+                    PlayerController.setQueue(resolvedTracks)
+                    PlayerController.playTrack(context, 0)
+                }
                 // Preload next batch
                 loadMoreMoodTracks(moodId, waveTracks)
             }
+        }
+    }
+
+    private suspend fun resolveTrackUrl(track: Track?): Track? {
+        if (track == null) return null
+        return try {
+            val url = IcmRepository.getStreamUrl(track.id)
+            if (url != null) {
+                track.copy(uri = Uri.parse(url))
+            } else {
+                track
+            }
+        } catch (_: Exception) {
+            track
         }
     }
 
