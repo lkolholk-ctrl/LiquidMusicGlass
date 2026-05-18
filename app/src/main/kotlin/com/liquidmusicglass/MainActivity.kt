@@ -47,7 +47,8 @@ class MainActivity : ComponentActivity() {
         
         // Handle ICM Telegram link redirect (liquidmusicglass://oauth/icm)
         if (data.scheme == "liquidmusicglass" && data.host == "oauth" && data.path == "/icm") {
-            val linked = data.getQueryParameter("linked")?.toBoolean() ?: false
+            val linkedParam = data.getQueryParameter("linked")
+            val linked = linkedParam == "1" || linkedParam.equals("true", ignoreCase = true)
             val icmUserId = data.getQueryParameter("icm_user_id")
             val state = data.getQueryParameter("state")
             val error = data.getQueryParameter("error")
