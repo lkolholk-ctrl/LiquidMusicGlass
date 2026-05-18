@@ -3,6 +3,7 @@ package com.liquidmusicglass.engine
 import android.content.ComponentName
 import android.content.Context
 import android.media.AudioManager
+import android.net.Uri
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
@@ -302,7 +303,12 @@ object PlayerController {
                 val response = com.liquidmusicglass.api.icm.IcmRepository.getArtist(artistId)
                 response?.topSongs?.shuffled()?.take(5)?.forEach { song ->
                     if (song.id !in exclude && song.id !in newTracks.map { it.id }) {
-                        newTracks.add(song.toTrack())
+                        newTracks.add(Track(
+                            id = song.id, title = song.title, artist = song.artist ?: "Unknown Artist",
+                            albumName = "", durationMs = song.durationMs,
+                            uri = Uri.parse("https://byicloud.online/track/${song.id}"),
+                            coverUrl = song.cover, albumId = song.collectionId?.hashCode()?.toLong() ?: -1L
+                        ))
                     }
                 }
             }
@@ -312,7 +318,12 @@ object PlayerController {
                 val response = com.liquidmusicglass.api.icm.IcmRepository.getAlbum(albumId)
                 response?.tracks?.shuffled()?.take(5)?.forEach { track ->
                     if (track.id !in exclude && track.id !in newTracks.map { it.id }) {
-                        newTracks.add(track.toTrack())
+                        newTracks.add(Track(
+                            id = track.id, title = track.title, artist = track.artist ?: "Unknown Artist",
+                            albumName = "", durationMs = track.durationMs,
+                            uri = Uri.parse("https://byicloud.online/track/${track.id}"),
+                            coverUrl = track.cover, albumId = track.collectionId?.hashCode()?.toLong() ?: -1L
+                        ))
                     }
                 }
             }
