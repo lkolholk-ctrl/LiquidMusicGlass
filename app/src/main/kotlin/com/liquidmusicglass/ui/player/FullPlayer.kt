@@ -364,6 +364,7 @@ fun FullPlayer(
                 albumArtUri = albumArtUri,
                 coverUrl = coverUrl,
                 albumId = albumId,
+                trackId = currentTrackObj?.id,
                 albumColors = albumColors,
                 onRequestControls = { controlsVisible = true }
             )

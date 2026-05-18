@@ -476,13 +476,7 @@ object PlayerController {
                         t.uri
                     }
                 }
-                val mimeType = when {
-                    uri.toString().contains("/api/partner/audio/") -> androidx.media3.common.MimeTypes.AUDIO_MP4
-                    uri.toString().endsWith(".m4a", ignoreCase = true) -> androidx.media3.common.MimeTypes.AUDIO_MP4
-                    uri.toString().endsWith(".mp3", ignoreCase = true) -> androidx.media3.common.MimeTypes.AUDIO_MPEG
-                    else -> null // auto-detect
-                }
-                val mediaItemBuilder = MediaItem.Builder()
+                MediaItem.Builder()
                     .setMediaId(t.id)
                     .setUri(uri)
                     .setMediaMetadata(
@@ -493,10 +487,7 @@ object PlayerController {
                             .setArtworkUri(t.displayArtUri)
                             .build()
                     )
-                if (mimeType != null) {
-                    mediaItemBuilder.setMimeType(mimeType)
-                }
-                mediaItemBuilder.build()
+                    .build()
             }
 
             // Try MediaController first, fallback to direct ExoPlayer

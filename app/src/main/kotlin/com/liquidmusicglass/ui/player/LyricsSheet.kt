@@ -74,6 +74,7 @@ fun LyricsSheet(
     albumArtUri: Uri? = null,
     coverUrl: String? = null,
     albumId: Long = -1L,
+    trackId: String? = null,
     albumColors: AlbumColors,
     onRequestControls: () -> Unit
 ) {
@@ -85,17 +86,19 @@ fun LyricsSheet(
     var isLoading by remember { mutableStateOf(false) }
 
     // Track ID for ICM lyrics lookup
-    // Online tracks: https://byicloud.online/track/{id} -> extract {id}
-    val trackId = remember(audioFileUri) {
-        val path = audioFileUri?.toString() ?: ""
-        when {
-            path.startsWith("https://byicloud.online/track/") ->
-                path.removePrefix("https://byicloud.online/track/").takeWhile { it != '?' }
-            else -> audioFileUri?.lastPathSegment ?: ""
+    // Prefer explicit trackId param, fallback to URI parsing for legacy
+    val resolvedTrackId = remember(trackId, audioFileUri) {
+        trackId ?: run {
+            val path = audioFileUri?.toString() ?: ""
+            when {
+                path.startsWith("https://byicloud.online/track/") ->
+                    path.removePrefix("https://byicloud.online/track/").takeWhile { it != '?' }
+                else -> audioFileUri?.lastPathSegment ?: ""
+            }
         }
     }
 
-    LaunchedEffect(audioFileUri, lrcText, trackTitle, trackArtist, trackId) {
+    LaunchedEffect(audioFileUri, lrcText, trackTitle, trackArtist, resolvedTrackId) {
         isLoading = true
         lyrics = withContext(Dispatchers.IO) {
             when {
@@ -106,7 +109,7 @@ fun LyricsSheet(
                     title = trackTitle,
                     artist = trackArtist,
                     durationMs = trackDurationMs,
-                    trackId = trackId
+                    trackId = resolvedTrackId
                 )
             }
         }
