@@ -14,8 +14,8 @@ import java.net.URLEncoder
  * Lyrics Parser — извлечение и разбор текстов песен.
  *
  * Источники (по приоритету):
- * 1. Embedded lyrics из тегов аудиофайлов
- * 2. LRCLIB.net — бесплатный онлайн API (синхронизированные тексты)
+ * 1. ICM API lyrics — официальный текст от партнёра
+ * 2. Embedded lyrics из тегов аудиофайлов
  * 3. Plain text fallback
  */
 object LyricsParser {
@@ -60,28 +60,26 @@ object LyricsParser {
     }
 
     /**
-     * Ищет lyrics онлайн через LRCLIB.
-     * Бесплатный API, без ключа.
+     * Ищет lyrics онлайн через ICM API.
+     * Официальный источник текстов от партнёра.
      */
     suspend fun fetchOnlineLyrics(
+        trackId: String,
         title: String,
-        artist: String,
-        durationSec: Int = 0
+        artist: String
     ): Lyrics = withContext(Dispatchers.IO) {
         try {
-            // Попытка 1: точный поиск по get
-            val exact = fetchLrclib(
-                "$LRCLIB_BASE/get?" +
-                "artist_name=${enc(artist)}" +
-                "&track_name=${enc(title)}" +
-                if (durationSec > 0) "&duration=$durationSec" else ""
-            )
-            if (exact != Lyrics.EMPTY) return@withContext exact
-
-            // Попытка 2: поиск search
-            val search = fetchLrclibSearch(title, artist)
-            if (search != Lyrics.EMPTY) return@withContext search
-
+            val response = com.liquidmusicglass.api.icm.IcmRepository.getLyrics(trackId)
+            if (response != null && !response.lyrics.isNullOrBlank()) {
+                val parsed = parseLyrics(response.lyrics)
+                if (parsed.lines.isNotEmpty()) {
+                    return@withContext parsed.copy(
+                        title = title,
+                        artist = artist,
+                        source = "icm"
+                    )
+                }
+            }
             Lyrics.EMPTY
         } catch (_: Exception) {
             Lyrics.EMPTY
@@ -89,107 +87,27 @@ object LyricsParser {
     }
 
     /**
-     * Полный поиск: сначала embedded, потом онлайн.
+     * Полный поиск: сначала ICM API, потом embedded.
      */
     suspend fun loadLyrics(
         context: Context,
         uri: Uri?,
         title: String,
         artist: String,
-        durationMs: Long
+        durationMs: Long,
+        trackId: String? = null
     ): Lyrics {
-        // 1. Try embedded
+        // 1. Try ICM API lyrics (primary source)
+        if (!trackId.isNullOrBlank()) {
+            val icm = fetchOnlineLyrics(trackId, title, artist)
+            if (icm.lines.isNotEmpty()) return icm
+        }
+
+        // 2. Try embedded
         if (uri != null) {
             val embedded = extractLyrics(context, uri)
             if (embedded.lines.isNotEmpty()) return embedded
         }
-
-        // 2. Try online
-        val online = fetchOnlineLyrics(title, artist, (durationMs / 1000).toInt())
-        if (online.lines.isNotEmpty()) return online
-
-        return Lyrics.EMPTY
-    }
-
-    // ═══════════════════════════════════════════════════════════
-    //  LRCLIB API
-    // ═══════════════════════════════════════════════════════════
-
-    private fun fetchLrclib(url: String): Lyrics {
-        val conn = URL(url).openConnection() as HttpURLConnection
-        conn.setRequestProperty("User-Agent", "LiquidMusicGlass/1.0")
-        conn.connectTimeout = 8000
-        conn.readTimeout = 8000
-
-        if (conn.responseCode != 200) {
-            conn.disconnect()
-            return Lyrics.EMPTY
-        }
-
-        val response = conn.inputStream.bufferedReader().readText()
-        conn.disconnect()
-
-        return parseLrclibResponse(response)
-    }
-
-    private fun fetchLrclibSearch(title: String, artist: String): Lyrics {
-        val url = "$LRCLIB_BASE/search?q=${enc("$artist $title")}"
-        val conn = URL(url).openConnection() as HttpURLConnection
-        conn.setRequestProperty("User-Agent", "LiquidMusicGlass/1.0")
-        conn.connectTimeout = 8000
-        conn.readTimeout = 8000
-
-        if (conn.responseCode != 200) {
-            conn.disconnect()
-            return Lyrics.EMPTY
-        }
-
-        val response = conn.inputStream.bufferedReader().readText()
-        conn.disconnect()
-
-        // Search returns array — take first result
-        try {
-            val arr = org.json.JSONArray(response)
-            if (arr.length() > 0) {
-                return parseLrclibResponse(arr.getJSONObject(0).toString())
-            }
-        } catch (_: Exception) {}
-
-        return Lyrics.EMPTY
-    }
-
-    private fun parseLrclibResponse(json: String): Lyrics {
-        try {
-            val obj = JSONObject(json)
-
-            // Prefer synced lyrics
-            val syncedLyrics = obj.optString("syncedLyrics", "")
-            if (syncedLyrics.isNotBlank()) {
-                val parsed = parseLyrics(syncedLyrics)
-                if (parsed.lines.isNotEmpty()) {
-                    return parsed.copy(
-                        title = obj.optString("trackName", ""),
-                        artist = obj.optString("artistName", ""),
-                        source = "lrclib"
-                    )
-                }
-            }
-
-            // Fallback to plain lyrics
-            val plainLyrics = obj.optString("plainLyrics", "")
-            if (plainLyrics.isNotBlank()) {
-                val lines = plainLyrics.lines()
-                    .filter { it.isNotBlank() }
-                    .map { LyricLine(-1L, it.trim()) }
-                return Lyrics(
-                    lines = lines,
-                    isSynced = false,
-                    title = obj.optString("trackName", ""),
-                    artist = obj.optString("artistName", ""),
-                    source = "lrclib"
-                )
-            }
-        } catch (_: Exception) {}
 
         return Lyrics.EMPTY
     }
