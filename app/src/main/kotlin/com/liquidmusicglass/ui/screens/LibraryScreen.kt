@@ -87,7 +87,7 @@ fun LibraryScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color(0xFF1C1C1E))
+                .background(Color.Black)
                 .padding(top = 48.dp, bottom = 16.dp, start = 20.dp, end = 20.dp)
         ) {
             Column {
@@ -210,7 +210,7 @@ private fun TabButton(
 ) {
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(8.dp))
+            .clip(androidx.compose.foundation.shape.CircleShape)
             .background(
                 if (isSelected) Color(0xFFFC3C44).copy(alpha = 0.3f)
                 else Color.Transparent
