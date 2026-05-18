@@ -315,6 +315,36 @@ object IcmRepository {
     }
 
     // ═══════════════════════════════════════════════════════════
+    //  Personal Cabinet (/me/*)
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * Get user's preferred stream quality.
+     * Requires linked user with active subscription.
+     */
+    suspend fun getUserQuality(): IcmUserQualityResponse? {
+        val result = api.getUserQuality()
+        result.exceptionOrNull()?.let {
+            _lastException = it as? Exception
+            _lastError.value = it.message
+        }
+        return result.getOrNull()
+    }
+
+    /**
+     * Set user's preferred stream quality.
+     * Requires linked user with active subscription.
+     */
+    suspend fun setUserQuality(quality: String): IcmUserQualityResponse? {
+        val result = api.setUserQuality(quality)
+        result.exceptionOrNull()?.let {
+            _lastException = it as? Exception
+            _lastError.value = it.message
+        }
+        return result.getOrNull()
+    }
+
+    // ═══════════════════════════════════════════════════════════
     //  Batch & Async
     // ═══════════════════════════════════════════════════════════
 
