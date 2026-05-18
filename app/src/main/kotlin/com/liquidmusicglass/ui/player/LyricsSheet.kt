@@ -84,7 +84,12 @@ fun LyricsSheet(
     var lyrics by remember { mutableStateOf(LyricsParser.Lyrics.EMPTY) }
     var isLoading by remember { mutableStateOf(false) }
 
-    LaunchedEffect(audioFileUri, lrcText, trackTitle, trackArtist) {
+    // Track ID for ICM lyrics lookup
+    val trackId = remember(audioFileUri) {
+        audioFileUri?.lastPathSegment ?: ""
+    }
+
+    LaunchedEffect(audioFileUri, lrcText, trackTitle, trackArtist, trackId) {
         isLoading = true
         lyrics = withContext(Dispatchers.IO) {
             when {
@@ -94,7 +99,8 @@ fun LyricsSheet(
                     uri = audioFileUri,
                     title = trackTitle,
                     artist = trackArtist,
-                    durationMs = trackDurationMs
+                    durationMs = trackDurationMs,
+                    trackId = trackId
                 )
             }
         }
