@@ -540,7 +540,7 @@ fun ArtistDetailScreen(
                                 )
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
-                                    text = track.artists.firstOrNull()?.displayName ?: track.artist,
+                                    text = track.artist,
                                     color = Color.White.copy(alpha = 0.45f),
                                     fontSize = 12.sp,
                                     maxLines = 1,
