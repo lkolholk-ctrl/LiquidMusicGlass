@@ -144,7 +144,7 @@ fun FullPlayer(
     isFavorite = currentTrackObj?.let { it.id in favoriteIds } ?: false
 
     // ── Mood/Color from album art ──
-    val albumColors = rememberAlbumColors(albumArtUri)
+    val albumColors = rememberAlbumColors(albumArtUri, coverUrl)
 
     // ── Gesture: horizontal swipe for skip ──
     val swipeOffsetX = remember { Animatable(0f) }
