@@ -551,13 +551,19 @@ data class IcmWaveTrack(
 @Serializable
 data class IcmLibraryLikesResponse(
     val items: List<IcmLibraryTrack> = emptyList(),
-    val count: Int? = null
+    val count: Int? = null,
+    val total: Int? = null,
+    val offset: Int? = null,
+    val limit: Int? = null
 )
 
 @Serializable
 data class IcmLibrarySubscriptionsResponse(
     val items: List<IcmLibraryArtist> = emptyList(),
-    val count: Int? = null
+    val count: Int? = null,
+    val total: Int? = null,
+    val offset: Int? = null,
+    val limit: Int? = null
 )
 
 @Serializable
@@ -590,3 +596,98 @@ data class IcmLibraryArtist(
     val displayName: String
         get() = name ?: "Unknown Artist"
 }
+
+// ─── Wave Feedback & Onboarding ───
+
+@Serializable
+data class IcmWaveFeedbackRequest(
+    @SerialName("feedback_type") val feedbackType: String,
+    val value: String
+)
+
+@Serializable
+data class IcmWaveFeedbackResponse(
+    val ok: Boolean = false
+)
+
+@Serializable
+data class IcmWaveOnboardingResponse(
+    val artists: List<IcmWaveOnboardingArtist> = emptyList(),
+    val completed: Boolean = false
+)
+
+@Serializable
+data class IcmWaveOnboardingArtist(
+    val id: String,
+    val name: String,
+    val image: String? = null
+)
+
+@Serializable
+data class IcmWaveOnboardingSaveRequest(
+    val artists: List<IcmWaveOnboardingArtistSave>
+)
+
+@Serializable
+data class IcmWaveOnboardingArtistSave(
+    val id: String,
+    val name: String
+)
+
+@Serializable
+data class IcmWaveOnboardingSaveResponse(
+    val ok: Boolean = false,
+    val saved: Int? = null
+)
+
+// ─── Email Account Linking ───
+
+@Serializable
+data class IcmEmailLinkRequest(
+    @SerialName("partner_user_id") val partnerUserId: String,
+    val email: String,
+    val state: String? = null
+)
+
+@Serializable
+data class IcmEmailLinkResponse(
+    val sent: Boolean = false,
+    val nonce: String,
+    @SerialName("expires_in") val expiresIn: Int
+)
+
+@Serializable
+data class IcmEmailVerifyRequest(
+    val nonce: String,
+    val otp: String
+)
+
+@Serializable
+data class IcmEmailVerifyResponse(
+    val linked: Boolean = false,
+    @SerialName("icm_user_id") val icmUserId: Long? = null,
+    val state: String? = null,
+    @SerialName("password_issued") val passwordIssued: Boolean = false
+)
+
+@Serializable
+data class IcmPasswordChangeRequest(
+    @SerialName("partner_user_id") val partnerUserId: String,
+    @SerialName("current_password") val currentPassword: String,
+    @SerialName("new_password") val newPassword: String
+)
+
+@Serializable
+data class IcmPasswordChangeResponse(
+    val changed: Boolean = false
+)
+
+@Serializable
+data class IcmPasswordResetRequest(
+    @SerialName("partner_user_id") val partnerUserId: String
+)
+
+@Serializable
+data class IcmPasswordResetResponse(
+    val reset: Boolean = false
+)

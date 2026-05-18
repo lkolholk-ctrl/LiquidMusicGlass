@@ -343,7 +343,7 @@ class IcmApi private constructor() {
     // ═══════════════════════════════════════════════════════════
 
     /**
-     * Generate URL for linking user account to ICM.
+     * Generate URL for linking user account to ICM via Telegram.
      * @param partnerUserId User ID in your system
      * @param redirectUri Callback URI after authorization
      * @param state Random string for CSRF protection
@@ -378,6 +378,67 @@ class IcmApi private constructor() {
     }
 
     // ═══════════════════════════════════════════════════════════
+    //  Email Account Linking (S2S only, requires X-Partner-Key)
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * Request email OTP for account linking.
+     * Auto-registers new ICM account if email doesn't exist.
+     * S2S only — requires X-Partner-Key.
+     */
+    suspend fun requestEmailLink(
+        partnerUserId: String,
+        email: String,
+        state: String? = null
+    ): Result<IcmEmailLinkResponse> {
+        val body = json.encodeToString(IcmEmailLinkRequest(
+            partnerUserId = partnerUserId,
+            email = email,
+            state = state
+        ))
+        return execute("/link/email/request", method = "POST", body = body)
+    }
+
+    /**
+     * Verify email OTP and link account.
+     */
+    suspend fun verifyEmailLink(
+        nonce: String,
+        otp: String
+    ): Result<IcmEmailVerifyResponse> {
+        val body = json.encodeToString(IcmEmailVerifyRequest(nonce = nonce, otp = otp))
+        return execute("/link/email/verify", method = "POST", body = body)
+    }
+
+    /**
+     * Change password for linked user.
+     * S2S only. User must be linked to YOUR partner_id.
+     */
+    suspend fun changePassword(
+        partnerUserId: String,
+        currentPassword: String,
+        newPassword: String
+    ): Result<IcmPasswordChangeResponse> {
+        val body = json.encodeToString(IcmPasswordChangeRequest(
+            partnerUserId = partnerUserId,
+            currentPassword = currentPassword,
+            newPassword = newPassword
+        ))
+        return execute("/link/email/password/change", method = "POST", body = body)
+    }
+
+    /**
+     * Reset password for linked user.
+     * S2S only. New password sent to user's email.
+     */
+    suspend fun resetPassword(
+        partnerUserId: String
+    ): Result<IcmPasswordResetResponse> {
+        val body = json.encodeToString(IcmPasswordResetRequest(partnerUserId = partnerUserId))
+        return execute("/link/email/password/reset", method = "POST", body = body)
+    }
+
+    // ═══════════════════════════════════════════════════════════
     //  Library (likes, subscriptions)
     //  Requires X-Partner-User-Id header and linked user
     // ═══════════════════════════════════════════════════════════
@@ -386,16 +447,38 @@ class IcmApi private constructor() {
      * Get user's liked tracks.
      * Requires partnerUserId to be set.
      */
-    suspend fun getLibraryLikes(): Result<IcmLibraryLikesResponse> {
-        return execute("/library/likes")
+    suspend fun getLibraryLikes(
+        source: String? = null,
+        limit: Int? = null,
+        offset: Int? = null
+    ): Result<IcmLibraryLikesResponse> {
+        val params = buildString {
+            val query = mutableListOf<String>()
+            if (!source.isNullOrBlank()) query.add("source=$source")
+            if (limit != null) query.add("limit=$limit")
+            if (offset != null) query.add("offset=$offset")
+            if (query.isNotEmpty()) append("?${query.joinToString("&")}")
+        }
+        return execute("/library/likes$params")
     }
 
     /**
      * Get user's artist subscriptions.
      * Requires partnerUserId to be set.
      */
-    suspend fun getLibrarySubscriptions(): Result<IcmLibrarySubscriptionsResponse> {
-        return execute("/library/subscriptions")
+    suspend fun getLibrarySubscriptions(
+        source: String? = null,
+        limit: Int? = null,
+        offset: Int? = null
+    ): Result<IcmLibrarySubscriptionsResponse> {
+        val params = buildString {
+            val query = mutableListOf<String>()
+            if (!source.isNullOrBlank()) query.add("source=$source")
+            if (limit != null) query.add("limit=$limit")
+            if (offset != null) query.add("offset=$offset")
+            if (query.isNotEmpty()) append("?${query.joinToString("&")}")
+        }
+        return execute("/library/subscriptions$params")
     }
 
     /**
@@ -404,13 +487,74 @@ class IcmApi private constructor() {
      * Call repeatedly to get continuous stream of personalized tracks.
      *
      * @param seedTrackId Optional track ID to create a "station based on track"
+     * @param exclude Comma-separated track IDs to exclude (current queue)
+     * @param recentSkips Number of consecutive skipped tracks (skip-streak fallback)
+     * @param region Region override
      */
-    suspend fun getWaveNext(seedTrackId: String? = null): Result<IcmWaveResponse> {
+    suspend fun getWaveNext(
+        seedTrackId: String? = null,
+        exclude: List<String>? = null,
+        recentSkips: Int? = null,
+        region: String? = null
+    ): Result<IcmWaveResponse> {
         val params = buildString {
             append("/library/wave/next")
-            if (!seedTrackId.isNullOrBlank()) append("?seed_track_id=$seedTrackId")
+            val query = mutableListOf<String>()
+            if (!seedTrackId.isNullOrBlank()) query.add("seed_track_id=$seedTrackId")
+            if (!exclude.isNullOrEmpty()) query.add("exclude=${exclude.joinToString(",")}")
+            if (recentSkips != null) query.add("recent_skips=$recentSkips")
+            if (region != null) query.add("region=$region")
+            if (query.isNotEmpty()) append("?${query.joinToString("&")}")
         }
         return execute(params)
+    }
+
+    /**
+     * Send feedback about wave track.
+     * feedback_type: less_track / less_artist / less_genre / more_track / more_artist / more_genre
+     * value: track ID, artist ID, or genre name
+     */
+    suspend fun sendWaveFeedback(
+        feedbackType: String,
+        value: String
+    ): Result<IcmWaveFeedbackResponse> {
+        val body = json.encodeToString(IcmWaveFeedbackRequest(feedbackType = feedbackType, value = value))
+        return execute("/library/wave/feedback", method = "POST", body = body)
+    }
+
+    /**
+     * Reset wave history, seed artists, and preferences.
+     * Likes are preserved.
+     */
+    suspend fun resetWave(): Result<IcmWaveFeedbackResponse> {
+        return execute("/library/wave/reset", method = "POST")
+    }
+
+    /**
+     * Get popular artists for wave onboarding.
+     * Does NOT require partnerUserId — can be called before linking.
+     * Cached 24h on server.
+     */
+    suspend fun getWavePopularArtists(): Result<List<IcmWaveOnboardingArtist>> {
+        return execute("/library/wave/popular-artists")
+    }
+
+    /**
+     * Check wave onboarding status.
+     */
+    suspend fun getWaveOnboarding(): Result<IcmWaveOnboardingResponse> {
+        return execute("/library/wave/onboarding")
+    }
+
+    /**
+     * Save user's artist selection for wave onboarding.
+     * Minimum 1 artist, recommended 3-5.
+     */
+    suspend fun saveWaveOnboarding(
+        artists: List<IcmWaveOnboardingArtistSave>
+    ): Result<IcmWaveOnboardingSaveResponse> {
+        val body = json.encodeToString(IcmWaveOnboardingSaveRequest(artists = artists))
+        return execute("/library/wave/onboarding", method = "POST", body = body)
     }
 
     // ═══════════════════════════════════════════════════════════

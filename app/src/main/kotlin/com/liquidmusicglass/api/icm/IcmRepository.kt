@@ -260,8 +260,12 @@ object IcmRepository {
      * Get user's liked tracks from library.
      * Requires partnerUserId to be set and user to be linked.
      */
-    suspend fun getLibraryLikes(): IcmLibraryLikesResponse? {
-        val result = api.getLibraryLikes()
+    suspend fun getLibraryLikes(
+        source: String? = null,
+        limit: Int? = null,
+        offset: Int? = null
+    ): IcmLibraryLikesResponse? {
+        val result = api.getLibraryLikes(source, limit, offset)
         result.exceptionOrNull()?.let {
             _lastException = it as? Exception
             _lastError.value = it.message
@@ -273,8 +277,12 @@ object IcmRepository {
      * Get user's artist subscriptions from library.
      * Requires partnerUserId to be set and user to be linked.
      */
-    suspend fun getLibrarySubscriptions(): IcmLibrarySubscriptionsResponse? {
-        val result = api.getLibrarySubscriptions()
+    suspend fun getLibrarySubscriptions(
+        source: String? = null,
+        limit: Int? = null,
+        offset: Int? = null
+    ): IcmLibrarySubscriptionsResponse? {
+        val result = api.getLibrarySubscriptions(source, limit, offset)
         result.exceptionOrNull()?.let {
             _lastException = it as? Exception
             _lastError.value = it.message
@@ -290,9 +298,17 @@ object IcmRepository {
      * Preload 3-5 tracks ahead for seamless playback.
      *
      * @param seedTrackId Optional track ID to create a "station based on track"
+     * @param exclude Track IDs to exclude (current queue)
+     * @param recentSkips Number of consecutive skips (skip-streak fallback)
+     * @param region Region override
      */
-    suspend fun getWaveNext(seedTrackId: String? = null): IcmWaveResponse? {
-        val result = api.getWaveNext(seedTrackId)
+    suspend fun getWaveNext(
+        seedTrackId: String? = null,
+        exclude: List<String>? = null,
+        recentSkips: Int? = null,
+        region: String? = null
+    ): IcmWaveResponse? {
+        val result = api.getWaveNext(seedTrackId, exclude, recentSkips, region)
         result.exceptionOrNull()?.let {
             _lastException = it as? Exception
             _lastError.value = it.message
@@ -306,12 +322,77 @@ object IcmRepository {
      */
     suspend fun buildWaveQueue(count: Int = 5, seedTrackId: String? = null): List<com.liquidmusicglass.engine.Track> {
         val tracks = mutableListOf<com.liquidmusicglass.engine.Track>()
+        val exclude = mutableListOf<String>()
         repeat(count) {
-            val response = getWaveNext(seedTrackId)
-            val track = response?.track?.toTrack()
-            if (track != null) tracks.add(track)
+            val response = getWaveNext(seedTrackId, exclude.takeIf { it.isNotEmpty() })
+            val track = response?.track
+            if (track != null) {
+                tracks.add(track.toTrack())
+                exclude.add(track.id)
+            }
         }
         return tracks
+    }
+
+    /**
+     * Send wave feedback (less/more track/artist/genre).
+     */
+    suspend fun sendWaveFeedback(feedbackType: String, value: String): Boolean {
+        val result = api.sendWaveFeedback(feedbackType, value)
+        result.exceptionOrNull()?.let {
+            _lastException = it as? Exception
+            _lastError.value = it.message
+        }
+        return result.getOrNull()?.ok == true
+    }
+
+    /**
+     * Reset wave history and preferences.
+     */
+    suspend fun resetWave(): Boolean {
+        val result = api.resetWave()
+        result.exceptionOrNull()?.let {
+            _lastException = it as? Exception
+            _lastError.value = it.message
+        }
+        return result.getOrNull()?.ok == true
+    }
+
+    /**
+     * Get popular artists for wave onboarding.
+     * Does NOT require partnerUserId.
+     */
+    suspend fun getWavePopularArtists(): List<IcmWaveOnboardingArtist> {
+        val result = api.getWavePopularArtists()
+        result.exceptionOrNull()?.let {
+            _lastException = it as? Exception
+            _lastError.value = it.message
+        }
+        return result.getOrNull() ?: emptyList()
+    }
+
+    /**
+     * Check wave onboarding status.
+     */
+    suspend fun getWaveOnboarding(): IcmWaveOnboardingResponse? {
+        val result = api.getWaveOnboarding()
+        result.exceptionOrNull()?.let {
+            _lastException = it as? Exception
+            _lastError.value = it.message
+        }
+        return result.getOrNull()
+    }
+
+    /**
+     * Save user's artist selection for wave onboarding.
+     */
+    suspend fun saveWaveOnboarding(artists: List<IcmWaveOnboardingArtistSave>): Boolean {
+        val result = api.saveWaveOnboarding(artists)
+        result.exceptionOrNull()?.let {
+            _lastException = it as? Exception
+            _lastError.value = it.message
+        }
+        return result.getOrNull()?.ok == true
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -508,6 +589,67 @@ object IcmRepository {
         error: String? = null
     ): IcmAccountLinkCallback {
         return api.parseAccountLinkCallback(state, linked, icmUserId, error)
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  Email Account Linking (S2S only)
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * Request email OTP for account linking.
+     * Auto-registers new ICM account if email doesn't exist.
+     */
+    suspend fun requestEmailLink(
+        partnerUserId: String,
+        email: String,
+        state: String? = null
+    ): IcmEmailLinkResponse? {
+        val result = api.requestEmailLink(partnerUserId, email, state)
+        result.exceptionOrNull()?.let {
+            _lastException = it as? Exception
+            _lastError.value = it.message
+        }
+        return result.getOrNull()
+    }
+
+    /**
+     * Verify email OTP and link account.
+     */
+    suspend fun verifyEmailLink(nonce: String, otp: String): IcmEmailVerifyResponse? {
+        val result = api.verifyEmailLink(nonce, otp)
+        result.exceptionOrNull()?.let {
+            _lastException = it as? Exception
+            _lastError.value = it.message
+        }
+        return result.getOrNull()
+    }
+
+    /**
+     * Change password for linked user.
+     */
+    suspend fun changePassword(
+        partnerUserId: String,
+        currentPassword: String,
+        newPassword: String
+    ): Boolean {
+        val result = api.changePassword(partnerUserId, currentPassword, newPassword)
+        result.exceptionOrNull()?.let {
+            _lastException = it as? Exception
+            _lastError.value = it.message
+        }
+        return result.getOrNull()?.changed == true
+    }
+
+    /**
+     * Reset password for linked user.
+     */
+    suspend fun resetPassword(partnerUserId: String): Boolean {
+        val result = api.resetPassword(partnerUserId)
+        result.exceptionOrNull()?.let {
+            _lastException = it as? Exception
+            _lastError.value = it.message
+        }
+        return result.getOrNull()?.reset == true
     }
 
     // ═══════════════════════════════════════════════════════════
