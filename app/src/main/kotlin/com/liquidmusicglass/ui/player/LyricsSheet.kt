@@ -39,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -121,6 +122,8 @@ fun LyricsSheet(
 
     // Высота компактной шапки
     val headerHeight = 96.dp
+    // Цвет обложки — для шапки и градиентов (не чёрный)
+    val coverColor = lerp(albumColors.dominant, Color.Black, 0.32f)
 
     // ── Full screen ──
     Box(
@@ -247,7 +250,7 @@ fun LyricsSheet(
                     .background(
                         Brush.verticalGradient(
                             colors = listOf(
-                                Color.Black.copy(alpha = 0.55f),
+                                coverColor.copy(alpha = 0.55f),
                                 Color.Transparent
                             )
                         )
@@ -264,7 +267,7 @@ fun LyricsSheet(
                         Brush.verticalGradient(
                             colors = listOf(
                                 Color.Transparent,
-                                Color.Black.copy(alpha = 0.6f)
+                                coverColor.copy(alpha = 0.7f)
                             )
                         )
                     )
@@ -284,8 +287,8 @@ fun LyricsSheet(
                         .height(headerHeight + 28.dp)
                         .background(
                             Brush.verticalGradient(
-                                0.00f to Color.Black.copy(alpha = 0.92f),
-                                0.72f to Color.Black.copy(alpha = 0.92f),
+                                0.00f to coverColor,
+                                0.72f to coverColor,
                                 1.00f to Color.Transparent
                             )
                         )
