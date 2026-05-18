@@ -89,10 +89,17 @@ data class IcmSearchItem(
     @SerialName("trackId") val trackId: String? = null
 ) {
     val displayArtist: String
-        get() = artist?.takeIf { it.isNotBlank() }
-            ?: artistName?.takeIf { it.isNotBlank() }
+        get() = artist?.takeIf { it.isNotBlank() && it != "Исполнитель" }
+            ?: artistName?.takeIf { it.isNotBlank() && it != "Исполнитель" }
             ?: title.takeIf { isArtist }
             ?: "Unknown Artist"
+
+    /** VK returns duration in seconds, Apple in milliseconds. Normalized to ms. */
+    val durationMs: Long
+        get() {
+            val d = duration ?: return 0L
+            return if (d < 1000) d * 1000L else d
+        }
 
     val isTrack: Boolean
         get() = !isArtist && !isAlbum
@@ -155,8 +162,16 @@ data class IcmAlbumTrack(
     @SerialName("is_explicit") val isExplicit: Boolean = false,
     val region: String? = null,
     @SerialName("trackNumber") val trackNumber: Int? = null,
-    val duration: Long? = null
-)
+    val duration: Long? = null,
+    val source: String? = null
+) {
+    /** VK returns duration in seconds, Apple in milliseconds. Normalized to ms. */
+    val durationMs: Long
+        get() {
+            val d = duration ?: return 0L
+            return if (d < 1000) d * 1000L else d
+        }
+}
 
 // ─── Artist ───
 
@@ -173,8 +188,12 @@ data class IcmArtistResponse(
     val albums: List<IcmArtistAlbum> = emptyList(),
     @SerialName("similarArtists") val similarArtists: List<IcmSimilarArtist> = emptyList(),
     val playlists: List<IcmArtistPlaylist> = emptyList(),
-    @SerialName("appearsOn") val appearsOn: List<IcmArtistAlbum> = emptyList()
-)
+    @SerialName("appearsOn") val appearsOn: List<IcmArtistAlbum> = emptyList(),
+    @SerialName("source") val source: String? = null
+) {
+    val isVk: Boolean
+        get() = id.startsWith("vk_") || source == "vk"
+}
 
 @Serializable
 data class IcmArtistSong(
@@ -193,6 +212,13 @@ data class IcmArtistSong(
 ) {
     val isVk: Boolean
         get() = id.startsWith("vk_") || source == "vk"
+
+    /** VK returns duration in seconds, Apple in milliseconds. Normalized to ms. */
+    val durationMs: Long
+        get() {
+            val d = duration ?: return 0L
+            return if (d < 1000) d * 1000L else d
+        }
 }
 
 @Serializable
@@ -391,7 +417,7 @@ fun IcmAlbumTrack.toTrack(): com.liquidmusicglass.engine.Track {
         artist = artist,
         albumName = "",
         uri = android.net.Uri.parse("https://byicloud.online/track/$id"),
-        durationMs = duration ?: 0L,
+        durationMs = durationMs,
         albumId = collectionId?.hashCode()?.toLong() ?: id.hashCode().toLong(),
         coverUrl = cover.replace("1000x1000", "600x600")
     )
@@ -401,10 +427,10 @@ fun IcmArtistSong.toTrack(): com.liquidmusicglass.engine.Track {
     return com.liquidmusicglass.engine.Track(
         id = id,
         title = title,
-        artist = artists.firstOrNull()?.name ?: artist,
+        artist = artists.firstOrNull()?.displayName ?: artist.takeIf { it.isNotBlank() } ?: "Unknown Artist",
         albumName = albumName ?: "",
         uri = android.net.Uri.parse("https://byicloud.online/track/$id"),
-        durationMs = duration ?: 0L,
+        durationMs = durationMs,
         albumId = 0L,
         coverUrl = cover.replace("300x300", "600x600")
     )
