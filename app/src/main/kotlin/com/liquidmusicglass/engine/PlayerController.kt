@@ -413,12 +413,17 @@ object PlayerController {
         scope.launch {
             val track = queue[index]
 
-            // Always resolve stream URL for online tracks via ICM API
-            val prefs = context.getSharedPreferences("icm", Context.MODE_PRIVATE)
-            val apiKey = prefs.getString("api_key", null)
-            val streamUri = if (track.isOnlineTrack && !apiKey.isNullOrBlank()) {
-                val url = com.liquidmusicglass.api.icm.IcmRepository.getStreamUrl(track.id)
-                if (url != null) android.net.Uri.parse(url) else track.uri
+            // Start playback immediately with placeholder URI, resolve stream async
+            currentIndex = index
+            _currentTrack.value = track
+            _durationMs.value = track.durationMs
+            _currentPositionMs.value = 0L
+            _isPlaying.value = true
+            startPositionUpdates()
+
+            // Resolve stream URL asynchronously for online tracks
+            val streamUri = if (track.isOnlineTrack) {
+                resolveStreamUrlAsync(track.id) ?: track.uri
             } else {
                 track.uri
             }
@@ -435,11 +440,6 @@ object PlayerController {
                         .build()
                 )
                 .build()
-
-            currentIndex = index
-            _currentTrack.value = track
-            _durationMs.value = track.durationMs
-            _currentPositionMs.value = 0L
 
             // Try MediaController first, fallback to direct ExoPlayer
             val playerController = obtainController(context)
@@ -459,11 +459,26 @@ object PlayerController {
             }
 
             addToRecent(track)
-            _isPlaying.value = true
-            startPositionUpdates()
             preloadNextTrack()
 
             AudioService.companionService?.notifyManualNavigation()
+        }
+    }
+
+    /**
+     * Resolve stream URL with timeout to prevent blocking playback.
+     */
+    private suspend fun resolveStreamUrlAsync(trackId: String): android.net.Uri? {
+        return try {
+            kotlinx.coroutines.withTimeout(8_000) {
+                val url = com.liquidmusicglass.api.icm.IcmRepository.getStreamUrl(trackId)
+                url?.let { android.net.Uri.parse(it) }
+            }
+        } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
+            android.util.Log.w("PlayerController", "Stream URL resolve timeout for $trackId")
+            null
+        } catch (_: Exception) {
+            null
         }
     }
 

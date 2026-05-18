@@ -417,7 +417,7 @@ fun ArtistDetailScreen(
                                         }
                                         Spacer(modifier = Modifier.height(6.dp))
                                         Text(
-                                            text = sim.name,
+                                            text = sim.displayName,
                                             color = Color.White,
                                             fontSize = 12.sp,
                                             fontWeight = FontWeight.Medium,
@@ -540,7 +540,7 @@ fun ArtistDetailScreen(
                                 )
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
-                                    text = track.artist,
+                                    text = track.artists.firstOrNull()?.displayName ?: track.artist,
                                     color = Color.White.copy(alpha = 0.45f),
                                     fontSize = 12.sp,
                                     maxLines = 1,
