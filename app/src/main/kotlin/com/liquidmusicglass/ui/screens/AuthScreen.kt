@@ -23,6 +23,9 @@ import androidx.compose.material.icons.rounded.Send
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -43,6 +46,13 @@ fun AuthScreen(
 ) {
     val context = LocalContext.current
 
+    // ICM auth completes in MainActivity (deep link). When the login state
+    // flips to true, leave the auth screen.
+    val isLoggedIn by com.liquidmusicglass.api.icm.IcmAuthRepository.isLoggedIn.collectAsState()
+    LaunchedEffect(isLoggedIn) {
+        if (isLoggedIn) onAuthSuccess()
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -55,7 +65,7 @@ fun AuthScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Spacer(modifier = Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
-            Spacer(modifier = Modifier.height(40.dp))
+            Spacer(modifier = Modifier.weight(1f))
 
             // Logo
             Text(
@@ -82,6 +92,15 @@ fun AuthScreen(
                 textAlign = TextAlign.Center
             )
 
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Text(
+                text = "powered by ICM Music",
+                color = Color.White.copy(alpha = 0.3f),
+                fontSize = 12.sp,
+                textAlign = TextAlign.Center
+            )
+
             Spacer(modifier = Modifier.height(40.dp))
 
             // Telegram auth via ICM API
@@ -96,7 +115,7 @@ fun AuthScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp)
-                    .clip(RoundedCornerShape(16.dp))
+                    .clip(RoundedCornerShape(percent = 50))
                     .background(TelegramBlue)
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
