@@ -282,6 +282,20 @@ object IcmRepository {
         return result.getOrNull()
     }
 
+    /**
+     * Get next track from user's personal wave (radio).
+     * Requires partnerUserId to be set and user to be linked.
+     * Call repeatedly to build a personalized radio queue.
+     */
+    suspend fun getWaveNext(): IcmWaveTrackResponse? {
+        val result = api.getWaveNext()
+        result.exceptionOrNull()?.let {
+            _lastException = it as? Exception
+            _lastError.value = it.message
+        }
+        return result.getOrNull()
+    }
+
     // ═══════════════════════════════════════════════════════════
     //  Batch & Async
     // ═══════════════════════════════════════════════════════════

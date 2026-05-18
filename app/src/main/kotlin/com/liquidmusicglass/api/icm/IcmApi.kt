@@ -395,6 +395,15 @@ class IcmApi private constructor() {
     suspend fun getLibrarySubscriptions(): Result<IcmLibrarySubscriptionsResponse> {
         return execute("/library/subscriptions")
     }
+
+    /**
+     * Get next track from user's personal wave (radio).
+     * Requires partnerUserId to be set and user to be linked.
+     * Call repeatedly to get continuous stream of personalized tracks.
+     */
+    suspend fun getWaveNext(): Result<IcmWaveTrackResponse> {
+        return execute("/library/wave/next")
+    }
 }
 
 /**
