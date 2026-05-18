@@ -72,9 +72,6 @@ fun LyricsSheet(
     val context = LocalContext.current
     val lc = LiquidTheme.colors
 
-    var lyrics by remember { mutableStateOf(LyricsParser.Lyrics.EMPTY) }
-    var isLoading by remember { mutableStateOf(false) }
-
     val resolvedTrackId = remember(trackId, audioFileUri) {
         trackId ?: run {
             val path = audioFileUri?.toString() ?: ""
@@ -86,20 +83,38 @@ fun LyricsSheet(
         }
     }
 
+    // Check cache first for instant display
+    val cachedLyrics = remember(resolvedTrackId) {
+        LyricsParser.getCachedLyrics(resolvedTrackId)
+    }
+
+    var lyrics by remember { mutableStateOf(cachedLyrics ?: LyricsParser.Lyrics.EMPTY) }
+    var isLoading by remember { mutableStateOf(cachedLyrics == null && lrcText.isNullOrBlank()) }
+
     LaunchedEffect(audioFileUri, lrcText, trackTitle, trackArtist, resolvedTrackId) {
+        if (!lrcText.isNullOrBlank()) {
+            lyrics = LyricsParser.parseLyrics(lrcText)
+            isLoading = false
+            return@LaunchedEffect
+        }
+
+        // Use cached lyrics if available
+        LyricsParser.getCachedLyrics(resolvedTrackId)?.let {
+            lyrics = it
+            isLoading = false
+            return@LaunchedEffect
+        }
+
         isLoading = true
         lyrics = withContext(Dispatchers.IO) {
-            when {
-                !lrcText.isNullOrBlank() -> LyricsParser.parseLyrics(lrcText)
-                else -> LyricsParser.loadLyrics(
-                    context = context,
-                    uri = audioFileUri,
-                    title = trackTitle,
-                    artist = trackArtist,
-                    durationMs = trackDurationMs,
-                    trackId = resolvedTrackId
-                )
-            }
+            LyricsParser.loadLyrics(
+                context = context,
+                uri = audioFileUri,
+                title = trackTitle,
+                artist = trackArtist,
+                durationMs = trackDurationMs,
+                trackId = resolvedTrackId
+            )
         }
         isLoading = false
     }

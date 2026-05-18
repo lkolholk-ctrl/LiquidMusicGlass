@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
 
 @OptIn(UnstableApi::class)
@@ -276,6 +277,15 @@ object PlayerController {
                 if (remainingTracks < 3 && autoRefillContext != null) {
                     scope.launch {
                         autoRefillQueue()
+                    }
+                }
+
+                // Pre-fetch lyrics for current track in background
+                scope.launch(Dispatchers.IO) {
+                    if (track.isOnlineTrack && LyricsParser.getCachedLyrics(track.id) == null) {
+                        try {
+                            LyricsParser.fetchOnlineLyrics(track.id, track.title, track.artist)
+                        } catch (_: Exception) {}
                     }
                 }
             }

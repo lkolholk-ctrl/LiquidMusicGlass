@@ -22,6 +22,18 @@ object LyricsParser {
 
     private const val LRCLIB_BASE = "https://lrclib.net/api"
 
+    // In-memory lyrics cache — key: trackId
+    private val lyricsCache = mutableMapOf<String, Lyrics>()
+
+    fun getCachedLyrics(trackId: String?): Lyrics? {
+        if (trackId.isNullOrBlank()) return null
+        return lyricsCache[trackId]
+    }
+
+    fun cacheLyrics(trackId: String, lyrics: Lyrics) {
+        lyricsCache[trackId] = lyrics
+    }
+
     data class LyricLine(
         val timeMs: Long,    // -1 если нет таймстампа
         val text: String
@@ -68,19 +80,24 @@ object LyricsParser {
         title: String,
         artist: String
     ): Lyrics = withContext(Dispatchers.IO) {
+        // Return cached lyrics instantly if available
+        getCachedLyrics(trackId)?.let { return@withContext it }
+
         try {
             // Docs: "На холодных Apple-треках первый запрос может занять до 10 секунд"
-            val response = kotlinx.coroutines.withTimeout(15_000) {
+            val response = kotlinx.coroutines.withTimeout(12_000) {
                 com.liquidmusicglass.api.icm.IcmRepository.getLyrics(trackId)
             }
             if (response != null && !response.lyrics.isNullOrBlank()) {
                 val parsed = parseLyrics(response.lyrics)
                 if (parsed.lines.isNotEmpty()) {
-                    return@withContext parsed.copy(
+                    val result = parsed.copy(
                         title = title,
                         artist = artist,
                         source = "icm"
                     )
+                    cacheLyrics(trackId, result)
+                    return@withContext result
                 }
             }
             Lyrics.EMPTY
