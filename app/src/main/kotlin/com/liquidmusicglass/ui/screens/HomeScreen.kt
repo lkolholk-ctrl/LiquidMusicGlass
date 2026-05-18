@@ -43,6 +43,20 @@ import kotlinx.coroutines.launch
 
 private val AppleRed = Color(0xFFFC3C44)
 
+private suspend fun resolveWaveTrackUrl(track: Track?): Track? {
+    if (track == null) return null
+    return try {
+        val url = IcmRepository.getStreamUrl(track.id)
+        if (url != null) {
+            track.copy(uri = Uri.parse(url))
+        } else {
+            track
+        }
+    } catch (_: Exception) {
+        track
+    }
+}
+
 // Mood categories with gradient colors (like Apple Music screenshot)
 private data class MoodCategory(
     val id: String,
@@ -132,7 +146,7 @@ fun HomeScreen(
             scope.launch {
                 val tracks = existing.map { waveTrackToTrack(it) }
                 // Resolve first track URL immediately for fast start
-                val firstResolved = resolveTrackUrl(tracks.firstOrNull())
+                val firstResolved = resolveWaveTrackUrl(tracks.firstOrNull())
                 if (firstResolved != null) {
                     val resolvedTracks = tracks.toMutableList()
                     resolvedTracks[0] = firstResolved
@@ -167,7 +181,7 @@ fun HomeScreen(
             if (waveTracks.isNotEmpty()) {
                 val tracks = waveTracks.map { waveTrackToTrack(it) }
                 // Resolve first track URL immediately for fast start
-                val firstResolved = resolveTrackUrl(tracks.firstOrNull())
+                val firstResolved = resolveWaveTrackUrl(tracks.firstOrNull())
                 if (firstResolved != null) {
                     val resolvedTracks = tracks.toMutableList()
                     resolvedTracks[0] = firstResolved
@@ -177,20 +191,6 @@ fun HomeScreen(
                 // Preload next batch
                 loadMoreMoodTracks(moodId, waveTracks)
             }
-        }
-    }
-
-    private suspend fun resolveTrackUrl(track: Track?): Track? {
-        if (track == null) return null
-        return try {
-            val url = IcmRepository.getStreamUrl(track.id)
-            if (url != null) {
-                track.copy(uri = Uri.parse(url))
-            } else {
-                track
-            }
-        } catch (_: Exception) {
-            track
         }
     }
 
