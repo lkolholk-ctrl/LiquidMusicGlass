@@ -44,22 +44,38 @@ private fun boostDarkColor(color: Int, minBrightness: Float = 0.15f): Color {
 }
 
 @Composable
-fun rememberAlbumColors(uri: Uri?): AlbumColors {
+fun rememberAlbumColors(uri: Uri?, coverUrl: String? = null): AlbumColors {
     val context = LocalContext.current
     var colors by remember { mutableStateOf(AlbumColors()) }
 
-    LaunchedEffect(uri) {
-        if (uri == null) {
+    LaunchedEffect(uri, coverUrl) {
+        if (uri == null && coverUrl.isNullOrBlank()) {
             colors = AlbumColors()
             return@LaunchedEffect
         }
         colors = withContext(Dispatchers.IO) {
             try {
-                val bitmap = context.contentResolver.openInputStream(uri)?.use { stream ->
-                    val options = BitmapFactory.Options().apply {
-                        inSampleSize = 8
+                val bitmap = when {
+                    // Online cover: download via HTTP
+                    !coverUrl.isNullOrBlank() -> {
+                        val url = java.net.URL(coverUrl)
+                        url.openStream().use { stream ->
+                            val options = BitmapFactory.Options().apply {
+                                inSampleSize = 8
+                            }
+                            BitmapFactory.decodeStream(stream, null, options)
+                        }
                     }
-                    BitmapFactory.decodeStream(stream, null, options)
+                    // Local album art via ContentResolver
+                    uri != null -> {
+                        context.contentResolver.openInputStream(uri)?.use { stream ->
+                            val options = BitmapFactory.Options().apply {
+                                inSampleSize = 8
+                            }
+                            BitmapFactory.decodeStream(stream, null, options)
+                        }
+                    }
+                    else -> null
                 } ?: return@withContext AlbumColors()
 
                 val palette = Palette.from(bitmap)
