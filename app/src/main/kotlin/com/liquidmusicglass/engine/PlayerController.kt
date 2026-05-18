@@ -404,8 +404,8 @@ object PlayerController {
 
     /**
      * Воспроизвести трек из очереди по индексу.
-     * Получает stream URL через ICM API если нужно.
-     * Загружает всю очередь для непрерывного воспроизведения.
+     * Получает stream URL через ICM API для онлайн-треков.
+     * Загружает всю очередь с resolved URLs для непрерывного воспроизведения.
      */
     fun playTrack(context: Context, index: Int) {
         if (index !in queue.indices) return
@@ -413,7 +413,7 @@ object PlayerController {
         scope.launch {
             val track = queue[index]
 
-            // Start playback immediately with placeholder URI, resolve stream async
+            // Update UI state immediately
             currentIndex = index
             _currentTrack.value = track
             _durationMs.value = track.durationMs
@@ -421,38 +421,34 @@ object PlayerController {
             _isPlaying.value = true
             startPositionUpdates()
 
-            // Resolve stream URL asynchronously for online tracks
-            val streamUri = if (track.isOnlineTrack) {
-                resolveStreamUrlAsync(track.id) ?: track.uri
-            } else {
-                track.uri
-            }
+            // Resolve stream URLs for all online tracks in queue
+            val resolvedQueue = resolveQueueStreamUrls(queue)
 
-            val mediaItem = MediaItem.Builder()
-                .setMediaId(track.id)
-                .setUri(streamUri)
-                .setMediaMetadata(
-                    MediaMetadata.Builder()
-                        .setTitle(track.title)
-                        .setArtist(track.artist)
-                        .setAlbumArtist(track.artist)
-                        .setArtworkUri(track.displayArtUri)
-                        .build()
-                )
-                .build()
+            val mediaItems = resolvedQueue.mapIndexed { i, t ->
+                MediaItem.Builder()
+                    .setMediaId(t.id)
+                    .setUri(t.uri)
+                    .setMediaMetadata(
+                        MediaMetadata.Builder()
+                            .setTitle(t.title)
+                            .setArtist(t.artist)
+                            .setAlbumArtist(t.artist)
+                            .setArtworkUri(t.displayArtUri)
+                            .build()
+                    )
+                    .build()
+            }
 
             // Try MediaController first, fallback to direct ExoPlayer
             val playerController = obtainController(context)
             if (playerController != null) {
-                // Load entire queue for continuous playback
-                val mediaItems = queue.map { buildMediaItem(it) }
                 playerController.setMediaItems(mediaItems, index, 0L)
                 playerController.prepare()
                 playerController.play()
             } else {
                 val exo = AudioService.companionPlayer
                 if (exo != null) {
-                    exo.setMediaItem(mediaItem)
+                    exo.setMediaItems(mediaItems, index, 0L)
                     exo.prepare()
                     exo.play()
                 }
@@ -462,6 +458,27 @@ object PlayerController {
             preloadNextTrack()
 
             AudioService.companionService?.notifyManualNavigation()
+        }
+    }
+
+    /**
+     * Resolve stream URLs for all online tracks in queue.
+     * Uses cached URLs when possible, resolves unknown ones in parallel.
+     */
+    private suspend fun resolveQueueStreamUrls(tracks: List<Track>): List<Track> {
+        if (tracks.isEmpty()) return tracks
+
+        return tracks.map { track ->
+            if (!track.isOnlineTrack) {
+                track // Local track — use as-is
+            } else {
+                val resolvedUri = resolveStreamUrlAsync(track.id)
+                if (resolvedUri != null) {
+                    track.copy(uri = resolvedUri)
+                } else {
+                    track // Fallback to placeholder URI (will fail gracefully in ExoPlayer)
+                }
+            }
         }
     }
 
