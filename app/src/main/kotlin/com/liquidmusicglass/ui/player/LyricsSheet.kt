@@ -9,7 +9,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,14 +16,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -36,20 +32,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.liquidmusicglass.engine.LyricsParser
-import com.liquidmusicglass.ui.glass.AlbumArtImage
 import com.liquidmusicglass.ui.glass.AlbumColors
 import com.liquidmusicglass.ui.theme.LiquidTheme
 import kotlinx.coroutines.Dispatchers
@@ -58,10 +48,10 @@ import kotlinx.coroutines.withContext
 /**
  * LyricsSheet — полноэкранный экран лирики (стиль Apple Music).
  *
- * - Фон: размытая обложка трека (AnimatedPlayerBackground, статичный)
- * - Компактная шапка сверху: мини-обложка + название + артист
- * - Текст песни на весь экран, активная строка подсвечена
- * - Тап по экрану показывает контролы плеера (закрытие — кнопкой лирики)
+ * - Фон: размытая обложка трека
+ * - Шапка: только название трека и артист (центр, без мини-обложки)
+ * - Текст по центру экрана
+ * - Активная строка белая, остальные полупрозрачные
  */
 @Composable
 fun LyricsSheet(
@@ -81,12 +71,9 @@ fun LyricsSheet(
     val context = LocalContext.current
     val lc = LiquidTheme.colors
 
-    // Загрузка lyrics (embedded -> online)
     var lyrics by remember { mutableStateOf(LyricsParser.Lyrics.EMPTY) }
     var isLoading by remember { mutableStateOf(false) }
 
-    // Track ID for ICM lyrics lookup
-    // Prefer explicit trackId param, fallback to URI parsing for legacy
     val resolvedTrackId = remember(trackId, audioFileUri) {
         trackId ?: run {
             val path = audioFileUri?.toString() ?: ""
@@ -116,7 +103,6 @@ fun LyricsSheet(
         isLoading = false
     }
 
-    // Текущая строка
     var currentLineIndex by remember { mutableIntStateOf(-1) }
     LaunchedEffect(lyrics, currentPositionMs) {
         if (lyrics.isSynced) {
@@ -124,21 +110,16 @@ fun LyricsSheet(
         }
     }
 
-    // Auto-scroll
     val listState = rememberLazyListState()
     LaunchedEffect(currentLineIndex) {
         if (currentLineIndex >= 0 && lyrics.isSynced) {
             listState.animateScrollToItem(
                 index = currentLineIndex,
-                scrollOffset = -300
+                scrollOffset = -250
             )
         }
     }
 
-    // Высота компактной шапки
-    val headerHeight = 96.dp
-
-    // ── Full screen ──
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -148,7 +129,7 @@ fun LyricsSheet(
                 onClick = onRequestControls
             )
     ) {
-        // ── Фон: размытая обложка трека ──
+        // ── Background: blurred album art ──
         AnimatedPlayerBackground(
             albumArtUri = albumArtUri,
             coverUrl = coverUrl,
@@ -158,39 +139,30 @@ fun LyricsSheet(
             modifier = Modifier.fillMaxSize()
         )
 
-        // ── Затемнение для читаемости текста ──
+        // ── Light darkening overlay (Apple Music style) ──
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.35f))
+                .background(Color.Black.copy(alpha = 0.25f))
         )
 
-        // ── Контент ──
+        // ── Content ──
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .windowInsetsPadding(WindowInsets.statusBars)
                 .windowInsetsPadding(WindowInsets.navigationBars)
         ) {
-            // ─── Текст лирики ───
             if (isLoading) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator(
-                            color = Color.White.copy(alpha = 0.6f),
-                            strokeWidth = 2.dp,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Spacer(Modifier.height(12.dp))
-                        Text(
-                            text = "Searching lyrics...",
-                            color = lc.textTertiary,
-                            fontSize = 15.sp
-                        )
-                    }
+                    CircularProgressIndicator(
+                        color = Color.White.copy(alpha = 0.5f),
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(24.dp)
+                    )
                 }
             } else if (lyrics.lines.isEmpty()) {
                 Box(
@@ -199,153 +171,83 @@ fun LyricsSheet(
                 ) {
                     Text(
                         text = "No lyrics available",
-                        color = lc.textTertiary,
-                        fontSize = 18.sp,
+                        color = Color.White.copy(alpha = 0.5f),
+                        fontSize = 20.sp,
                         fontWeight = FontWeight.Medium
                     )
                 }
             } else {
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 28.dp)
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    // Отступ сверху — под компактную шапку
-                    item { Spacer(Modifier.height(headerHeight + 24.dp)) }
+                    // Top spacer for header
+                    item { Spacer(Modifier.height(80.dp)) }
 
                     itemsIndexed(lyrics.lines) { index, line ->
                         val isCurrent = index == currentLineIndex
-                        val isPast = lyrics.isSynced && index < currentLineIndex
 
                         val textColor by animateColorAsState(
-                            targetValue = when {
-                                isCurrent -> Color.White
-                                isPast -> Color.Transparent          // спетые строки скрыты
-                                !lyrics.isSynced -> Color.White.copy(alpha = 0.8f)
-                                else -> Color.White.copy(alpha = 0.45f)
+                            targetValue = if (isCurrent) {
+                                Color.White
+                            } else {
+                                Color.White.copy(alpha = 0.35f)
                             },
-                            animationSpec = tween(300),
+                            animationSpec = tween(400),
                             label = "lyricColor"
                         )
 
                         val scale by animateFloatAsState(
-                            targetValue = if (isCurrent) 1.05f else 1f,
-                            animationSpec = tween(300),
+                            targetValue = if (isCurrent) 1.08f else 1f,
+                            animationSpec = tween(400),
                             label = "lyricScale"
                         )
 
                         Text(
                             text = line.text,
                             color = textColor,
-                            fontSize = if (isCurrent) 26.sp else 22.sp,
-                            fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium,
-                            textAlign = TextAlign.Start,
-                            lineHeight = 34.sp,
+                            fontSize = if (isCurrent) 28.sp else 26.sp,
+                            fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.SemiBold,
+                            textAlign = TextAlign.Center,
+                            lineHeight = 38.sp,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 8.dp)
-                                .graphicsLayer { scaleX = scale; scaleY = scale }
+                                .padding(horizontal = 32.dp, vertical = 10.dp)
+                                .graphicsLayer {
+                                    scaleX = scale
+                                    scaleY = scale
+                                    alpha = if (isCurrent) 1f else 0.5f
+                                }
                         )
                     }
 
-                    // Отступ снизу — чтобы текст не уходил под контролы плеера
-                    item { Spacer(Modifier.height(220.dp)) }
+                    // Bottom spacer
+                    item { Spacer(Modifier.height(200.dp)) }
                 }
             }
 
-            // ─── Top blur overlay ───
-            Box(
+            // ── Header: track title + artist (centered, no album art) ──
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(headerHeight + 40.dp)
-                    .align(Alignment.TopCenter)
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                Color.Black.copy(alpha = 0.35f),
-                                Color.Transparent
-                            )
-                        )
-                    )
-            )
-
-            // ─── Bottom blur overlay ───
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(160.dp)
-                    .align(Alignment.BottomCenter)
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                Color.Transparent,
-                                Color.Black.copy(alpha = 0.45f)
-                            )
-                        )
-                    )
-            )
-
-            // ─── Компактная шапка: мини-обложка + название + артист ───
-            // Полупрозрачная подложка — blur под обложку, не сплошной цвет.
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .align(Alignment.TopCenter)
+                    .padding(top = 16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Полупрозрачный тёмный фон для читаемости текста
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(headerHeight + 28.dp)
-                        .background(
-                            Brush.verticalGradient(
-                                0.00f to Color.Black.copy(alpha = 0.42f),
-                                0.72f to Color.Black.copy(alpha = 0.28f),
-                                1.00f to Color.Transparent
-                            )
-                        )
+                Text(
+                    text = trackTitle,
+                    color = Color.White,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1
                 )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(56.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                    ) {
-                        AlbumArtImage(
-                            uri = albumArtUri,
-                            coverUrl = coverUrl,
-                            audioFileUri = audioFileUri,
-                            albumId = albumId,
-                            contentDescription = null,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
-                    Spacer(Modifier.width(14.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = trackTitle,
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 18.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = trackArtist,
-                            color = Color.White.copy(alpha = 0.65f),
-                            fontSize = 14.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = trackArtist,
+                    color = Color.White.copy(alpha = 0.6f),
+                    fontSize = 13.sp,
+                    maxLines = 1
+                )
             }
         }
     }
