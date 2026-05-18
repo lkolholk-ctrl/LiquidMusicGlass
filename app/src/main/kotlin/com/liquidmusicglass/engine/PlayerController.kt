@@ -228,6 +228,19 @@ object PlayerController {
             if (playbackState == Player.STATE_READY) {
                 _durationMs.value = current.duration.coerceAtLeast(0L)
             }
+            if (playbackState == Player.STATE_ENDED) {
+                // Queue ended — auto-refill if context is set
+                val remainingTracks = queue.size - currentIndex - 1
+                if (remainingTracks < 1 && autoRefillContext != null) {
+                    scope.launch {
+                        autoRefillQueue()
+                        // Play next track if available
+                        if (currentIndex + 1 < queue.size) {
+                            playTrack(appContext ?: return@launch, currentIndex + 1)
+                        }
+                    }
+                }
+            }
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
@@ -485,6 +498,7 @@ object PlayerController {
     /**
      * Добавить трек в конец очереди.
      * Если очередь пуста — устанавливает как текущий.
+     * Также добавляет в ExoPlayer для бесшовного воспроизведения.
      */
     fun addToQueue(track: Track) {
         queue = queue + track
@@ -493,6 +507,14 @@ object PlayerController {
             currentIndex = 0
             _currentTrack.value = track
             _durationMs.value = track.durationMs
+        }
+        // Add to ExoPlayer for seamless playback
+        val playerController = controller
+        if (playerController != null) {
+            val mediaItem = buildMediaItem(track)
+            playerController.addMediaItem(mediaItem)
+        } else {
+            AudioService.companionPlayer?.addMediaItem(buildMediaItem(track))
         }
     }
 
