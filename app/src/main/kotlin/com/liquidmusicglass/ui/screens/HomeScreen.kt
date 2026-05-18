@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -17,7 +16,6 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.ThumbDown
 import androidx.compose.material.icons.rounded.ThumbUp
-import androidx.compose.material.icons.rounded.Waves
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -26,6 +24,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -43,6 +42,25 @@ import com.liquidmusicglass.ui.theme.LiquidTheme
 import kotlinx.coroutines.launch
 
 private val AppleRed = Color(0xFFFC3C44)
+
+// Mood categories with gradient colors (like Apple Music screenshot)
+private data class MoodCategory(
+    val id: String,
+    val title: String,
+    val gradientColors: List<Color>,
+    val icon: String // Simple unicode/icon identifier
+)
+
+private val moodCategories = listOf(
+    MoodCategory("melancholy", "Меланхолия", listOf(Color(0xFF1E3A5F), Color(0xFF2D5A87)), "🌊"),
+    MoodCategory("good_mood", "Хорошее настроение", listOf(Color(0xFFD4730E), Color(0xFFF5A623)), "✦"),
+    MoodCategory("broken_heart", "Для разбитых сердец", listOf(Color(0xFF8B1538), Color(0xFFC41E3A)), "💔"),
+    MoodCategory("focus", "Концентрация", listOf(Color(0xFF2D5016), Color(0xFF4A7C23)), "◎"),
+    MoodCategory("energy", "Энергия", listOf(Color(0xFF8B4513), Color(0xFFD2691E)), "⚡"),
+    MoodCategory("night", "Ночная волна", listOf(Color(0xFF1A1A2E), Color(0xFF16213E)), "🌙"),
+    MoodCategory("workout", "Тренировка", listOf(Color(0xFF4A0000), Color(0xFF8B0000)), "💪"),
+    MoodCategory("chill", "Чилл", listOf(Color(0xFF483D8B), Color(0xFF6A5ACD)), "☁"),
+)
 
 @Composable
 fun HomeScreen(
@@ -62,29 +80,28 @@ fun HomeScreen(
         allTracks.filter { it.id in favoriteIds }
     }
 
-    // Wave state
-    var waveTracks by remember { mutableStateOf<List<IcmWaveTrack>>(emptyList()) }
-    var waveLoading by remember { mutableStateOf(false) }
-    var waveError by remember { mutableStateOf<String?>(null) }
+    // Wave state - active mood station
+    var activeMoodId by remember { mutableStateOf<String?>(null) }
+    var moodTracks by remember { mutableStateOf<Map<String, List<IcmWaveTrack>>>(emptyMap()) }
+    var moodLoading by remember { mutableStateOf<Set<String>>(emptySet()) }
 
-    fun loadWave() {
-        if (waveLoading) return
-        waveLoading = true
-        waveError = null
+    fun loadMoodTracks(moodId: String) {
+        if (moodId in moodLoading) return
+        moodLoading = moodLoading + moodId
         scope.launch {
-            val exclude = waveTracks.map { it.id }
-            val response = IcmRepository.getWaveNext(
-                exclude = exclude.takeIf { it.isNotEmpty() },
-                recentSkips = 0
-            )
-            if (response != null && response.status == "ok" && response.track != null) {
-                waveTracks = waveTracks + response.track
-            } else if (response?.status == "empty") {
-                waveError = "empty"
-            } else {
-                waveError = "Failed to load"
+            val tracks = mutableListOf<IcmWaveTrack>()
+            repeat(10) {
+                val exclude = tracks.map { it.id }
+                val response = IcmRepository.getWaveNext(
+                    exclude = exclude.takeIf { it.isNotEmpty() },
+                    recentSkips = 0
+                )
+                if (response != null && response.status == "ok" && response.track != null) {
+                    tracks.add(response.track)
+                }
             }
-            waveLoading = false
+            moodTracks = moodTracks + (moodId to tracks)
+            moodLoading = moodLoading - moodId
         }
     }
 
@@ -106,9 +123,9 @@ fun HomeScreen(
         scope.launch { IcmRepository.sendWaveFeedback(feedbackType, value) }
     }
 
-    // Load initial wave tracks
+    // Preload first 3 moods
     LaunchedEffect(Unit) {
-        repeat(5) { loadWave() }
+        moodCategories.take(3).forEach { loadMoodTracks(it.id) }
     }
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
@@ -130,80 +147,94 @@ fun HomeScreen(
 
             Spacer(modifier = Modifier.height(28.dp))
 
-            // ─── My Wave ───
-            SectionHeader(title = "My Wave")
+            // ─── My Wave - Mood Categories ───
+            SectionHeader(title = "Под настроение")
             Spacer(modifier = Modifier.height(12.dp))
 
-            if (waveTracks.isNotEmpty()) {
-                Box(modifier = Modifier.height(210.dp)) {
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = 20.dp),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                items(moodCategories, key = { it.id }) { mood ->
+                    MoodCard(
+                        mood = mood,
+                        isActive = activeMoodId == mood.id,
+                        onClick = {
+                            if (activeMoodId == mood.id) {
+                                activeMoodId = null
+                            } else {
+                                activeMoodId = mood.id
+                                if (mood.id !in moodTracks) {
+                                    loadMoodTracks(mood.id)
+                                }
+                            }
+                        }
+                    )
+                }
+            }
+
+            // Show tracks for active mood
+            activeMoodId?.let { moodId ->
+                val tracks = moodTracks[moodId]
+                val isLoading = moodId in moodLoading
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                if (isLoading || tracks == null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(80.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        items(waveTracks.distinctBy { it.id }, key = { "wave_${it.id}" }) { track ->
-                            WaveTrackCard(
+                        CircularProgressIndicator(color = AppleRed, modifier = Modifier.size(28.dp))
+                    }
+                } else if (tracks.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xFF1C1C1E))
+                            .clickable { loadMoodTracks(moodId) }
+                            .padding(16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("Tap to load tracks", color = Color.Gray, fontSize = 14.sp)
+                    }
+                } else {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 20.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        tracks.take(5).forEach { track ->
+                            WaveTrackRow(
                                 track = track,
                                 onPlay = { playWaveTrack(track) },
                                 onLike = { sendWaveFeedback("more_track", track.id) },
                                 onDislike = { sendWaveFeedback("less_track", track.id) }
                             )
                         }
-                        if (!waveLoading) {
-                            item {
-                                Box(
-                                    modifier = Modifier
-                                        .width(130.dp)
-                                        .height(210.dp)
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(Color(0xFF1C1C1E))
-                                        .clickable { loadWave() },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                        Icon(
-                                            Icons.Rounded.Refresh,
-                                            null,
-                                            tint = AppleRed,
-                                            modifier = Modifier.size(32.dp)
-                                        )
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                        Text(
-                                            "More",
-                                            color = AppleRed,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                    }
-                                }
+                        if (tracks.size >= 5) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 8.dp)
+                                    .clip(RoundedCornerShape(50))
+                                    .background(Color(0xFF1C1C1E))
+                                    .clickable { loadMoodTracks(moodId) }
+                                    .padding(vertical = 10.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    "More like this",
+                                    color = AppleRed,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
                             }
                         }
                     }
-                }
-            } else if (waveLoading) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(120.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(color = AppleRed, modifier = Modifier.size(32.dp))
-                }
-            } else if (waveError != null) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(120.dp)
-                        .padding(horizontal = 20.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Color(0xFF1C1C1E))
-                        .clickable { loadWave() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = if (waveError == "empty") "Select artists to start your wave" else "Tap to retry",
-                        color = Color.Gray,
-                        fontSize = 14.sp
-                    )
                 }
             }
 
@@ -325,6 +356,121 @@ fun HomeScreen(
 }
 
 @Composable
+private fun MoodCard(
+    mood: MoodCategory,
+    isActive: Boolean,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .width(160.dp)
+            .height(100.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(
+                brush = Brush.linearGradient(
+                    colors = mood.gradientColors,
+                    start = androidx.compose.ui.geometry.Offset(0f, 0f),
+                    end = androidx.compose.ui.geometry.Offset(160f, 100f)
+                )
+            )
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick
+            )
+            .padding(12.dp)
+    ) {
+        // Decorative icon (top-right)
+        Text(
+            text = mood.icon,
+            fontSize = 24.sp,
+            modifier = Modifier.align(Alignment.TopEnd),
+            color = Color.White.copy(alpha = 0.6f)
+        )
+
+        // Title (bottom-left)
+        Text(
+            text = mood.title,
+            color = Color.White,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.align(Alignment.BottomStart)
+        )
+
+        // Active indicator
+        if (isActive) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .size(8.dp)
+                    .background(AppleRed, RoundedCornerShape(50))
+            )
+        }
+    }
+}
+
+@Composable
+private fun WaveTrackRow(
+    track: IcmWaveTrack,
+    onPlay: () -> Unit,
+    onLike: () -> Unit,
+    onDislike: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(56.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color(0xFF1C1C1E))
+            .clickable(onClick = onPlay)
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color.DarkGray)
+        ) {
+            if (!track.cover.isNullOrBlank()) {
+                AsyncImage(
+                    model = track.cover.replace("1000x1000", "300x300"),
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            }
+        }
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = track.title,
+                color = Color.White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = track.artist ?: "Unknown Artist",
+                color = Color.Gray,
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        IconButton(onClick = onDislike, modifier = Modifier.size(32.dp)) {
+            Icon(Icons.Rounded.ThumbDown, null, tint = Color.Gray, modifier = Modifier.size(18.dp))
+        }
+        IconButton(onClick = onLike, modifier = Modifier.size(32.dp)) {
+            Icon(Icons.Rounded.ThumbUp, null, tint = Color.Gray, modifier = Modifier.size(18.dp))
+        }
+    }
+}
+
+@Composable
 private fun SectionHeader(title: String) {
     Text(
         text = title,
@@ -333,100 +479,6 @@ private fun SectionHeader(title: String) {
         fontWeight = FontWeight.SemiBold,
         modifier = Modifier.padding(horizontal = 20.dp)
     )
-}
-
-@Composable
-private fun WaveTrackCard(
-    track: IcmWaveTrack,
-    onPlay: () -> Unit,
-    onLike: () -> Unit,
-    onDislike: () -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .width(150.dp)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onPlay
-            )
-    ) {
-        Box(
-            modifier = Modifier
-                .size(150.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(Color(0xFF1A1A1A))
-        ) {
-            if (!track.cover.isNullOrBlank()) {
-                AsyncImage(
-                    model = track.cover.replace("1000x1000", "600x600"),
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
-            }
-            // Gradient overlay
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        brush = androidx.compose.ui.graphics.Brush.verticalGradient(
-                            colors = listOf(
-                                Color.Transparent,
-                                Color.Black.copy(alpha = 0.7f)
-                            ),
-                            startY = 80f
-                        )
-                    )
-            )
-            // Action buttons at bottom
-            Row(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                IconButton(
-                    onClick = onDislike,
-                    modifier = Modifier.size(28.dp)
-                ) {
-                    Icon(
-                        Icons.Rounded.ThumbDown,
-                        null,
-                        tint = Color.White.copy(alpha = 0.8f),
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-                IconButton(
-                    onClick = onLike,
-                    modifier = Modifier.size(28.dp)
-                ) {
-                    Icon(
-                        Icons.Rounded.ThumbUp,
-                        null,
-                        tint = Color.White.copy(alpha = 0.8f),
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-            }
-        }
-        Spacer(modifier = Modifier.height(6.dp))
-        Text(
-            text = track.title,
-            color = LiquidTheme.colors.textPrimary,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Medium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-        Text(
-            text = track.artist ?: "Unknown Artist",
-            color = LiquidTheme.colors.textSecondary,
-            fontSize = 11.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-    }
 }
 
 @Composable
