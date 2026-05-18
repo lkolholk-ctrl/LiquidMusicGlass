@@ -33,6 +33,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -59,16 +60,25 @@ fun ProfileScreen(
     onOpenAuth: () -> Unit = {}
 ) {
     val scroll = rememberScrollState()
+    val context = LocalContext.current
 
-    val isLoggedIn = LocalAuthManager.isLoggedIn()
+    val isLoggedIn by IcmAuthRepository.isLoggedIn.collectAsState()
     val isPremium by IcmAuthRepository.isPremium.collectAsState()
-    val userEmail = LocalAuthManager.getEmail()
+    val userEmail by IcmAuthRepository.userEmail.collectAsState()
+    val telegramId by IcmAuthRepository.telegramId.collectAsState()
     val premiumExpiresAt by IcmAuthRepository.premiumExpiresAt.collectAsState()
 
-    val displayName = userEmail?.substringBefore("@")?.replaceFirstChar { it.uppercase() }
-        ?: "Guest"
+    val displayName = when {
+        userEmail != null -> userEmail!!.substringBefore("@").replaceFirstChar { it.uppercase() }
+        telegramId != null -> "Telegram user"
+        else -> "Guest"
+    }
 
-    val emailDisplay = userEmail ?: "Not signed in"
+    val emailDisplay = when {
+        userEmail != null -> userEmail!!
+        isLoggedIn -> "Signed in via Telegram"
+        else -> "Not signed in"
+    }
 
     Box(
         modifier = Modifier
@@ -181,10 +191,6 @@ fun ProfileScreen(
                         .height(80.dp)
                         .clip(RoundedCornerShape(16.dp))
                         .background(Color(0xFF1A1A1A))
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null
-                        ) { /* Open subscription page */ }
                         .padding(horizontal = 16.dp),
                     contentAlignment = Alignment.CenterStart
                 ) {
@@ -211,6 +217,28 @@ fun ProfileScreen(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(20.dp))
                                 .background(AppleRed)
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null
+                                ) {
+                                    // Open the ICM premium bot in Telegram
+                                    try {
+                                        val builder = androidx.browser.customtabs.CustomTabsIntent.Builder()
+                                        builder.setShowTitle(true)
+                                        builder.setToolbarColor(android.graphics.Color.parseColor("#0088CC"))
+                                        builder.build().launchUrl(
+                                            context,
+                                            android.net.Uri.parse("https://t.me/byicmbot")
+                                        )
+                                    } catch (e: Exception) {
+                                        context.startActivity(
+                                            android.content.Intent(
+                                                android.content.Intent.ACTION_VIEW,
+                                                android.net.Uri.parse("https://t.me/byicmbot")
+                                            )
+                                        )
+                                    }
+                                }
                                 .padding(horizontal = 12.dp, vertical = 6.dp)
                         ) {
                             Text(
@@ -253,7 +281,7 @@ fun ProfileScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(52.dp)
-                        .clip(RoundedCornerShape(16.dp))
+                        .clip(RoundedCornerShape(percent = 50))
                         .background(AppleRed)
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
