@@ -113,7 +113,8 @@ fun EqualizerScreen(onBack: () -> Unit) {
                     )
                     LiquidToggle(
                         selected = { eqEnabled },
-                        onSelect = { AudioEffectsEngine.setEnabled(it) }
+                        onSelect = { AudioEffectsEngine.setEnabled(it) },
+                        backdrop = screenBackdrop
                     )
                 }
             }

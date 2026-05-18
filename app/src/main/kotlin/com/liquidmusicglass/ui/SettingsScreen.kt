@@ -119,22 +119,22 @@ fun SettingsScreen(
                 SettingsToggleItem(
                     title = "AutoMix",
                     subtitle = "ML-powered DJ transitions",
-                    checked = autoMixEnabled,
-                    onCheckedChange = onAutoMixChange
+                    selected = autoMixEnabled,
+                    onSelect = onAutoMixChange
                 )
                 PlainDivider()
                 SettingsToggleItem(
                     title = "Gapless Playback",
                     subtitle = "No silence between tracks",
-                    checked = gaplessEnabled,
-                    onCheckedChange = { AppSettings.setGapless(it) }
+                    selected = gaplessEnabled,
+                    onSelect = { AppSettings.setGapless(it) }
                 )
                 PlainDivider()
                 SettingsToggleItem(
                     title = "Hide Explicit",
                     subtitle = "Filter explicit content from search & artist",
-                    checked = hideExplicit,
-                    onCheckedChange = { AppSettings.setHideExplicit(it) }
+                    selected = hideExplicit,
+                    onSelect = { AppSettings.setHideExplicit(it) }
                 )
                 PlainDivider()
                 SettingsActionItem(
@@ -323,16 +323,17 @@ private fun PlainDivider() {
 private fun SettingsToggleItem(
     title: String,
     subtitle: String,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
+    selected: Boolean,
+    onSelect: (Boolean) -> Unit
 ) {
+    val screenBackdrop = com.kyant.backdrop.backdrops.rememberLayerBackdrop()
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null
-            ) { onCheckedChange(!checked) }
+            ) { onSelect(!selected) }
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -349,7 +350,7 @@ private fun SettingsToggleItem(
                 fontSize = 12.sp
             )
         }
-        LiquidToggle(checked = checked, onCheckedChange = onCheckedChange)
+        LiquidToggle(selected = { selected }, onSelect = onSelect, backdrop = screenBackdrop)
     }
 }
 
