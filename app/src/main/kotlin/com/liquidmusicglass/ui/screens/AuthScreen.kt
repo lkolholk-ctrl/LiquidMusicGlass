@@ -109,7 +109,7 @@ fun AuthScreen(
                         try {
                             val builder = androidx.browser.customtabs.CustomTabsIntent.Builder()
                             builder.setShowTitle(true)
-                            builder.setToolbarColor(TelegramBlue.value.toInt())
+                            builder.setToolbarColor(android.graphics.Color.parseColor("#0088CC"))
                             val customTabsIntent = builder.build()
                             customTabsIntent.launchUrl(context, android.net.Uri.parse(telegramAuthUrl))
                         } catch (e: Exception) {
