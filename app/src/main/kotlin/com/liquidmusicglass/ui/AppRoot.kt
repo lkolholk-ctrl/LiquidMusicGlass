@@ -433,7 +433,11 @@ fun AppRoot() {
             ) + fadeOut(tween(150))
         ) {
             AuthScreen(
-                onAuthSuccess = { authOpen = false }
+                onAuthSuccess = {
+                    authOpen = false
+                    selectedIndex = 3
+                    AppSettings.setLastScreen(3)
+                }
             )
         }
 
