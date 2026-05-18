@@ -85,8 +85,8 @@ class AudioService : MediaSessionService() {
                     .setBufferDurationsMs(
                         15_000, // minBufferMs
                         50_000, // maxBufferMs
-                        2_500,  // bufferForPlaybackMs
-                        5_000   // bufferForPlaybackAfterRebufferMs
+                        1_000,  // bufferForPlaybackMs — faster start
+                        2_000   // bufferForPlaybackAfterRebufferMs
                     )
                     .build()
             )
