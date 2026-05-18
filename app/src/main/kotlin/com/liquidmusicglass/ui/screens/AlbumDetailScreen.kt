@@ -264,6 +264,7 @@ fun AlbumDetailScreen(
                                         indication = null,
                                         onClick = {
                                             if (albumTracks.isNotEmpty()) {
+                                                PlayerController.setAutoRefillContext("album", albumId, album?.title)
                                                 PlayerController.setQueue(albumTracks)
                                                 PlayerController.playTrack(context, 0)
                                             }
@@ -294,6 +295,7 @@ fun AlbumDetailScreen(
                                         indication = null,
                                         onClick = {
                                             if (albumTracks.isNotEmpty()) {
+                                                PlayerController.setAutoRefillContext("album", albumId, album?.title)
                                                 val shuffled = albumTracks.shuffled()
                                                 PlayerController.setQueue(shuffled)
                                                 PlayerController.playTrack(context, 0)

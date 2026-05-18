@@ -417,6 +417,7 @@ fun SearchScreen(
                                 icon = Icons.Rounded.MusicNote,
                                 coverUrl = item.cover,
                                 onClick = {
+                                    PlayerController.setAutoRefillContext("search", query, query)
                                     PlayerController.playNext(track, context)
                                 }
                             )

@@ -331,6 +331,7 @@ fun ArtistDetailScreen(
                                         indication = null,
                                         onClick = {
                                             if (artistTracks.isNotEmpty()) {
+                                                PlayerController.setAutoRefillContext("artist", artistId, artist?.name)
                                                 PlayerController.setQueue(artistTracks)
                                                 PlayerController.playTrack(context, 0)
                                             }
@@ -355,6 +356,7 @@ fun ArtistDetailScreen(
                                         indication = null,
                                         onClick = {
                                             if (artistTracks.isNotEmpty()) {
+                                                PlayerController.setAutoRefillContext("artist", artistId, artist?.name)
                                                 val shuffled = artistTracks.shuffled()
                                                 PlayerController.setQueue(shuffled)
                                                 PlayerController.playTrack(context, 0)

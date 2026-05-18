@@ -195,11 +195,21 @@ object PlayerController {
         }
     }
 
-    // Active wave mood for auto-refill
-    private var activeWaveMoodId: String? = null
+    // Auto-refill context
+    private var autoRefillContext: AutoRefillContext? = null
 
-    fun setActiveWaveMood(moodId: String?) {
-        activeWaveMoodId = moodId
+    data class AutoRefillContext(
+        val type: String, // "wave", "artist", "album", "search", "genre"
+        val id: String?, // artistId, albumId, moodId, query
+        val name: String? = null
+    )
+
+    fun setAutoRefillContext(type: String, id: String? = null, name: String? = null) {
+        autoRefillContext = AutoRefillContext(type, id, name)
+    }
+
+    fun clearAutoRefillContext() {
+        autoRefillContext = null
     }
 
     private val playerListener = object : Player.Listener {
@@ -247,11 +257,11 @@ object PlayerController {
                     }
                 }
 
-                // Auto-refill queue from wave when running low
+                // Auto-refill queue when running low
                 val remainingTracks = queue.size - index - 1
-                if (remainingTracks < 3 && activeWaveMoodId != null) {
+                if (remainingTracks < 3 && autoRefillContext != null) {
                     scope.launch {
-                        refillWaveQueue()
+                        autoRefillQueue()
                     }
                 }
             }
@@ -259,35 +269,69 @@ object PlayerController {
     }
 
     /**
-     * Auto-refill queue with wave tracks when running low.
+     * Auto-refill queue based on current context when running low.
      * Called from player listener when remaining tracks < 3.
      */
-    private suspend fun refillWaveQueue() {
-        val moodId = activeWaveMoodId ?: return
+    private suspend fun autoRefillQueue() {
+        val ctx = autoRefillContext ?: return
         val exclude = queue.map { it.id }
-        val newWaveTracks = mutableListOf<com.liquidmusicglass.api.icm.IcmWaveTrack>()
-        repeat(5) {
-            val response = com.liquidmusicglass.api.icm.IcmRepository.getWaveNext(
-                exclude = (exclude + newWaveTracks.map { it.id }).takeIf { it.isNotEmpty() },
-                recentSkips = 0
-            )
-            if (response != null && response.status == "ok" && response.track != null) {
-                newWaveTracks.add(response.track)
+        val newTracks = mutableListOf<Track>()
+
+        when (ctx.type) {
+            "wave" -> {
+                // Personal wave
+                repeat(5) {
+                    val response = com.liquidmusicglass.api.icm.IcmRepository.getWaveNext(
+                        exclude = (exclude + newTracks.map { it.id }).takeIf { it.isNotEmpty() },
+                        recentSkips = 0
+                    )
+                    if (response != null && response.status == "ok" && response.track != null) {
+                        val wt = response.track
+                        newTracks.add(Track(
+                            id = wt.id, title = wt.title, artist = wt.artist ?: "Unknown Artist",
+                            albumName = "", durationMs = wt.durationMs,
+                            uri = Uri.parse("https://byicloud.online/track/${wt.id}"),
+                            coverUrl = wt.cover, albumId = wt.collectionId?.hashCode()?.toLong() ?: -1L
+                        ))
+                    }
+                }
+            }
+            "artist" -> {
+                // More tracks from same artist
+                val artistId = ctx.id ?: return
+                val response = com.liquidmusicglass.api.icm.IcmRepository.getArtist(artistId)
+                response?.topSongs?.shuffled()?.take(5)?.forEach { song ->
+                    if (song.id !in exclude && song.id !in newTracks.map { it.id }) {
+                        newTracks.add(song.toTrack())
+                    }
+                }
+            }
+            "album" -> {
+                // More tracks from same album (shouldn't happen often, but handle)
+                val albumId = ctx.id ?: return
+                val response = com.liquidmusicglass.api.icm.IcmRepository.getAlbum(albumId)
+                response?.tracks?.shuffled()?.take(5)?.forEach { track ->
+                    if (track.id !in exclude && track.id !in newTracks.map { it.id }) {
+                        newTracks.add(track.toTrack())
+                    }
+                }
+            }
+            "search", "genre" -> {
+                // Similar tracks by search query
+                val query = ctx.name ?: ctx.id ?: return
+                val result = com.liquidmusicglass.api.icm.IcmRepository.searchAll(query)
+                result?.items?.filter { it.isTrack && it.id !in exclude }?.shuffled()?.take(5)?.forEach { item ->
+                    newTracks.add(Track(
+                        id = item.id, title = item.title, artist = item.displayArtist,
+                        albumName = item.album ?: "", durationMs = item.durationMs,
+                        uri = Uri.parse("https://byicloud.online/track/${item.id}"),
+                        coverUrl = item.cover, albumId = item.collectionId?.toLongOrNull() ?: 0L
+                    ))
+                }
             }
         }
-        newWaveTracks.forEach { waveTrack ->
-            val track = Track(
-                id = waveTrack.id,
-                title = waveTrack.title,
-                artist = waveTrack.artist ?: "Unknown Artist",
-                albumName = "",
-                durationMs = waveTrack.durationMs,
-                uri = Uri.parse("https://byicloud.online/track/${waveTrack.id}"),
-                coverUrl = waveTrack.cover,
-                albumId = waveTrack.collectionId?.hashCode()?.toLong() ?: -1L
-            )
-            addToQueue(track)
-        }
+
+        newTracks.forEach { addToQueue(it) }
     }
 
     fun init(context: Context) {
