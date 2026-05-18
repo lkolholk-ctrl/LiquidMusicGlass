@@ -115,7 +115,7 @@ fun HomeScreen(
             if (allTracks.isNotEmpty()) {
                 SectionHeader(title = "For You")
                 Spacer(modifier = Modifier.height(12.dp))
-                val recs = remember(allTracks) { allTracks.shuffled().take(15) }
+                val recs = remember(allTracks) { allTracks.distinctBy { it.id }.shuffled().take(15) }
                 Box(modifier = Modifier.height(190.dp)) {
                     LazyRow(
                         contentPadding = PaddingValues(horizontal = 20.dp),
