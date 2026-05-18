@@ -31,6 +31,7 @@ import com.liquidmusicglass.api.icm.IcmLibraryTrack
 import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.Track
+import android.net.Uri
 import com.liquidmusicglass.ui.theme.LiquidTheme
 import kotlinx.coroutines.launch
 
@@ -55,19 +56,19 @@ fun LibraryScreen(
         errorMessage = null
         when (selectedTab) {
             LibraryTab.LIKES -> {
-                val result = IcmRepository.getLibraryLikes(limit = 200)
-                result.onSuccess { response ->
+                val response = IcmRepository.getLibraryLikes(limit = 200)
+                if (response != null) {
                     likedTracks = response.items
-                }.onFailure { e ->
-                    errorMessage = e.message
+                } else {
+                    errorMessage = "Failed to load likes"
                 }
             }
             LibraryTab.SUBSCRIPTIONS -> {
-                val result = IcmRepository.getLibrarySubscriptions(limit = 200)
-                result.onSuccess { response ->
+                val response = IcmRepository.getLibrarySubscriptions(limit = 200)
+                if (response != null) {
                     subscriptions = response.items
-                }.onFailure { e ->
-                    errorMessage = e.message
+                } else {
+                    errorMessage = "Failed to load subscriptions"
                 }
             }
         }
@@ -124,7 +125,7 @@ fun LibraryScreen(
                 isLoading -> {
                     CircularProgressIndicator(
                         modifier = Modifier.align(Alignment.Center),
-                        color = LiquidTheme.colors.primary
+                        color = Color(0xFFFC3C44)
                     )
                 }
                 errorMessage != null -> {
@@ -166,8 +167,9 @@ fun LibraryScreen(
                                 LikedTrackItem(
                                     track = track,
                                     onClick = {
+                                        val ctx = context
                                         scope.launch {
-                                            playLibraryTrack(track)
+                                            playLibraryTrack(ctx, track)
                                         }
                                     },
                                     onNavigateToAlbum = onNavigateToAlbum
@@ -210,7 +212,7 @@ private fun TabButton(
         modifier = modifier
             .clip(RoundedCornerShape(8.dp))
             .background(
-                if (isSelected) LiquidTheme.colors.primary.copy(alpha = 0.3f)
+                if (isSelected) Color(0xFFFC3C44).copy(alpha = 0.3f)
                 else Color.Transparent
             )
             .clickable(onClick = onClick)
@@ -384,16 +386,16 @@ private fun formatDuration(ms: Long): String {
     return "%d:%02d".format(minutes, seconds)
 }
 
-private suspend fun playLibraryTrack(libraryTrack: IcmLibraryTrack) {
+private fun playLibraryTrack(context: android.content.Context, libraryTrack: IcmLibraryTrack) {
     val track = Track(
-        id = libraryTrack.id.hashCode().toLong(),
+        id = libraryTrack.id,
         title = libraryTrack.title,
         artist = libraryTrack.artist ?: "Unknown Artist",
-        album = "",
-        duration = libraryTrack.durationMs,
-        uri = "https://byicloud.online/track/${libraryTrack.id}",
+        albumName = "",
+        durationMs = libraryTrack.durationMs,
+        uri = Uri.parse("https://byicloud.online/track/${libraryTrack.id}"),
         coverUrl = libraryTrack.cover,
         albumId = libraryTrack.collectionId?.hashCode()?.toLong() ?: -1L
     )
-    PlayerController.playTrack(track)
+    PlayerController.playNext(track, context)
 }
