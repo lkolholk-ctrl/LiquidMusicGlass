@@ -85,8 +85,14 @@ fun LyricsSheet(
     var isLoading by remember { mutableStateOf(false) }
 
     // Track ID for ICM lyrics lookup
+    // Online tracks: https://byicloud.online/track/{id} -> extract {id}
     val trackId = remember(audioFileUri) {
-        audioFileUri?.lastPathSegment ?: ""
+        val path = audioFileUri?.toString() ?: ""
+        when {
+            path.startsWith("https://byicloud.online/track/") ->
+                path.removePrefix("https://byicloud.online/track/").takeWhile { it != '?' }
+            else -> audioFileUri?.lastPathSegment ?: ""
+        }
     }
 
     LaunchedEffect(audioFileUri, lrcText, trackTitle, trackArtist, trackId) {
