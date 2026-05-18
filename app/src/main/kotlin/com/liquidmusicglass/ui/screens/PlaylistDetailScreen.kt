@@ -144,6 +144,7 @@ fun PlaylistDetailScreen(
                             .clip(RoundedCornerShape(50))
                             .clickable(remember { MutableInteractionSource() }, null) {
                                 if (tracks.isNotEmpty()) {
+                                    PlayerController.setAutoRefillContext("playlist", playlistId, playlist.name)
                                     val idx = allTracks.indexOfFirst { it.id == tracks[0].id }
                                     if (idx >= 0) PlayerController.playTrack(context, idx)
                                 }
