@@ -115,11 +115,11 @@ fun ArtistDetailScreen(
     }
 
     val albums = remember(artist) {
-        artist?.albums ?: emptyList()
+        (artist?.albums ?: emptyList()).distinctBy { it.id }
     }
 
     val similarArtistsList = remember(artist) {
-        artist?.similarArtists ?: emptyList()
+        (artist?.similarArtists ?: emptyList()).distinctBy { it.id }
     }
 
     val artistName = artist?.name ?: "Unknown Artist"
