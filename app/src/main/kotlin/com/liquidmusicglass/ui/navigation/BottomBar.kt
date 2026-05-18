@@ -25,6 +25,7 @@ import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.Waves
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -102,6 +103,7 @@ fun BottomBar(
     val items = listOf(
         BottomNavItem(Icons.Rounded.Home, "Home"),
         BottomNavItem(Icons.Rounded.Search, "Search"),
+        BottomNavItem(Icons.Rounded.Waves, "Wave"),
         BottomNavItem(Icons.AutoMirrored.Rounded.PlaylistPlay, "Library"),
         BottomNavItem(Icons.Rounded.Person, "Profile")
     )
