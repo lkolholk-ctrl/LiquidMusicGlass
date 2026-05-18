@@ -89,7 +89,10 @@ data class IcmSearchItem(
     @SerialName("trackId") val trackId: String? = null
 ) {
     val displayArtist: String
-        get() = artist ?: artistName ?: "Unknown"
+        get() = artist?.takeIf { it.isNotBlank() }
+            ?: artistName?.takeIf { it.isNotBlank() }
+            ?: title.takeIf { isArtist }
+            ?: "Unknown Artist"
 
     val isTrack: Boolean
         get() = !isArtist && !isAlbum
@@ -195,8 +198,11 @@ data class IcmArtistSong(
 @Serializable
 data class IcmMiniArtist(
     val id: String? = null,
-    val name: String
-)
+    val name: String? = null
+) {
+    val displayName: String
+        get() = name ?: "Unknown Artist"
+}
 
 @Serializable
 data class IcmArtistAlbum(
@@ -214,10 +220,13 @@ data class IcmArtistAlbum(
 @Serializable
 data class IcmSimilarArtist(
     val id: String,
-    val name: String,
+    val name: String? = null,
     val url: String? = null,
     val cover: String? = null
-)
+) {
+    val displayName: String
+        get() = name ?: "Unknown Artist"
+}
 
 @Serializable
 data class IcmArtistPlaylist(
