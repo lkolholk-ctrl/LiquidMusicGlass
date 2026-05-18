@@ -87,15 +87,11 @@ fun AuthScreen(
             // Telegram auth via ICM API
             // Generate stable partner_user_id per device
             val prefs = context.getSharedPreferences("icm_auth", android.content.Context.MODE_PRIVATE)
-            var partnerUserId = prefs.getString("partner_user_id", null)
-            if (partnerUserId == null) {
-                partnerUserId = "lg_${java.util.UUID.randomUUID().toString().replace("-", "").take(16)}"
-                prefs.edit().putString("partner_user_id", partnerUserId).apply()
+            val partnerUserId = prefs.getString("partner_user_id", null) ?: run {
+                val id = "lg_${java.util.UUID.randomUUID().toString().replace("-", "").take(16)}"
+                prefs.edit().putString("partner_user_id", id).apply()
+                id
             }
-            // Use ICM partner linking endpoint with our redirect
-            // Docs: /partner/<partner_id>/link?partner_user_id=...&redirect_uri=...&state=...
-            // Server (liquid.glassfiles.ru) is whitelisted and will redirect to app
-            val telegramAuthUrl = "https://byicloud.online/partner/msng/link?partner_user_id=$partnerUserId&redirect_uri=https://liquid.glassfiles.ru/auth/telegram&state=android"
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -106,6 +102,22 @@ fun AuthScreen(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null
                     ) {
+                        // Fresh random state per attempt — for CSRF protection.
+                        // Saved so MainActivity can verify it on callback.
+                        val state = java.util.UUID.randomUUID().toString()
+                        prefs.edit().putString("oauth_state", state).apply()
+
+                        // Build link URL via IcmApi (handles URL-encoding)
+                        // Docs: /partner/<partner_id>/link?partner_user_id=...&redirect_uri=...&state=...
+                        // Server (liquid.glassfiles.ru) is whitelisted and will redirect to app
+                        val telegramAuthUrl = com.liquidmusicglass.api.icm.IcmApi.getInstance()
+                            .buildAccountLinkUrl(
+                                partnerId = "msng",
+                                partnerUserId = partnerUserId,
+                                redirectUri = "https://liquid.glassfiles.ru/auth/telegram",
+                                state = state
+                            )
+
                         // Use Chrome Custom Tabs for proper Telegram widget support
                         try {
                             val builder = androidx.browser.customtabs.CustomTabsIntent.Builder()
