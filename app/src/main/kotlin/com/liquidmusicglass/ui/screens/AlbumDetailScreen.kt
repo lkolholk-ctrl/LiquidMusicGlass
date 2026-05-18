@@ -79,7 +79,7 @@ fun AlbumDetailScreen(
     }
 
     val albumTracks = remember(album) {
-        album?.tracks?.map { it.toTrack() } ?: emptyList()
+        album?.tracks?.map { it.toTrack() }?.distinctBy { it.id } ?: emptyList()
     }
 
     val albumName = album?.album?.title ?: "Unknown Album"

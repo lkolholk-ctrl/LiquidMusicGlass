@@ -79,7 +79,7 @@ fun PlaylistDetailScreen(
     }
 
     val tracks = remember(playlist.trackIds, allTracks) {
-        PlaylistManager.getPlaylistTracks(playlistId, allTracks)
+        PlaylistManager.getPlaylistTracks(playlistId, allTracks).distinctBy { it.id }
     }
 
     LazyColumn(
