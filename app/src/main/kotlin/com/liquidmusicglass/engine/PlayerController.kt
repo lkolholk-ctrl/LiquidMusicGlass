@@ -307,7 +307,7 @@ object PlayerController {
                             id = song.id, title = song.title, artist = song.artist ?: "Unknown Artist",
                             albumName = "", durationMs = song.durationMs,
                             uri = Uri.parse("https://byicloud.online/track/${song.id}"),
-                            coverUrl = song.cover, albumId = song.collectionId?.hashCode()?.toLong() ?: -1L
+                            coverUrl = song.cover, albumId = song.id.hashCode().toLong()
                         ))
                     }
                 }
