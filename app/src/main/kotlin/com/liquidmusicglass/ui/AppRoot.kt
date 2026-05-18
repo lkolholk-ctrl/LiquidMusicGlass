@@ -53,7 +53,6 @@ import com.liquidmusicglass.ui.player.MiniPlayer
 import com.liquidmusicglass.ui.screens.HomeScreen
 import com.liquidmusicglass.ui.screens.SearchScreen
 import com.liquidmusicglass.ui.screens.LibraryScreen
-import com.liquidmusicglass.ui.screens.WaveScreen
 import com.liquidmusicglass.ui.screens.AlbumDetailScreen
 import com.liquidmusicglass.ui.screens.ArtistDetailScreen
 import com.liquidmusicglass.ui.screens.EqualizerScreen
@@ -188,16 +187,11 @@ fun AppRoot() {
                     onNavigateToAlbum = { detailAlbumId = it },
                     onNavigateToArtist = { detailArtistId = it }
                 )
-                2 -> WaveScreen(
-                    onBack = {},
+                2 -> LibraryScreen(
                     onNavigateToAlbum = { detailAlbumId = it },
                     onNavigateToArtist = { detailArtistId = it }
                 )
-                3 -> LibraryScreen(
-                    onNavigateToAlbum = { detailAlbumId = it },
-                    onNavigateToArtist = { detailArtistId = it }
-                )
-                4 -> ProfileScreen(
+                3 -> ProfileScreen(
                     onOpenSettings = { settingsOpen = true },
                     onLogout = { selectedIndex = 0 },
                     onOpenAuth = { authOpen = true }
