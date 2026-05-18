@@ -84,29 +84,10 @@ fun HomeScreen(
     var activeMoodId by remember { mutableStateOf<String?>(null) }
     var moodTracks by remember { mutableStateOf<Map<String, List<IcmWaveTrack>>>(emptyMap()) }
     var moodLoading by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var isPlayingMood by remember { mutableStateOf(false) }
 
-    fun loadMoodTracks(moodId: String) {
-        if (moodId in moodLoading) return
-        moodLoading = moodLoading + moodId
-        scope.launch {
-            val tracks = mutableListOf<IcmWaveTrack>()
-            repeat(10) {
-                val exclude = tracks.map { it.id }
-                val response = IcmRepository.getWaveNext(
-                    exclude = exclude.takeIf { it.isNotEmpty() },
-                    recentSkips = 0
-                )
-                if (response != null && response.status == "ok" && response.track != null) {
-                    tracks.add(response.track)
-                }
-            }
-            moodTracks = moodTracks + (moodId to tracks)
-            moodLoading = moodLoading - moodId
-        }
-    }
-
-    fun playWaveTrack(waveTrack: IcmWaveTrack) {
-        val track = Track(
+    fun waveTrackToTrack(waveTrack: IcmWaveTrack): Track {
+        return Track(
             id = waveTrack.id,
             title = waveTrack.title,
             artist = waveTrack.artist ?: "Unknown Artist",
@@ -116,16 +97,76 @@ fun HomeScreen(
             coverUrl = waveTrack.cover,
             albumId = waveTrack.collectionId?.hashCode()?.toLong() ?: -1L
         )
-        PlayerController.playNext(track, context)
+    }
+
+    fun playMoodStation(moodId: String) {
+        val existing = moodTracks[moodId]
+        if (!existing.isNullOrEmpty()) {
+            // Already loaded — start playing immediately
+            activeMoodId = moodId
+            isPlayingMood = true
+            val tracks = existing.map { waveTrackToTrack(it) }
+            PlayerController.setQueue(tracks)
+            PlayerController.playTrack(context, 0)
+            // Preload more in background
+            loadMoreMoodTracks(moodId, existing)
+            return
+        }
+
+        // Need to load first
+        activeMoodId = moodId
+        isPlayingMood = true
+        moodLoading = moodLoading + moodId
+        scope.launch {
+            val waveTracks = mutableListOf<IcmWaveTrack>()
+            repeat(5) {
+                val exclude = waveTracks.map { it.id }
+                val response = IcmRepository.getWaveNext(
+                    exclude = exclude.takeIf { it.isNotEmpty() },
+                    recentSkips = 0
+                )
+                if (response != null && response.status == "ok" && response.track != null) {
+                    waveTracks.add(response.track)
+                }
+            }
+            moodTracks = moodTracks + (moodId to waveTracks)
+            moodLoading = moodLoading - moodId
+
+            if (waveTracks.isNotEmpty()) {
+                val tracks = waveTracks.map { waveTrackToTrack(it) }
+                PlayerController.setQueue(tracks)
+                PlayerController.playTrack(context, 0)
+                // Preload next batch
+                loadMoreMoodTracks(moodId, waveTracks)
+            }
+        }
+    }
+
+    fun loadMoreMoodTracks(moodId: String, existing: List<IcmWaveTrack>) {
+        if (moodId in moodLoading) return
+        moodLoading = moodLoading + moodId
+        scope.launch {
+            val waveTracks = existing.toMutableList()
+            repeat(5) {
+                val exclude = waveTracks.map { it.id }
+                val response = IcmRepository.getWaveNext(
+                    exclude = exclude.takeIf { it.isNotEmpty() },
+                    recentSkips = 0
+                )
+                if (response != null && response.status == "ok" && response.track != null) {
+                    waveTracks.add(response.track)
+                }
+            }
+            moodTracks = moodTracks + (moodId to waveTracks)
+            // Append new tracks to player queue
+            val newTracks = waveTracks.drop(existing.size).map { waveTrackToTrack(it) }
+            newTracks.forEach { PlayerController.addToQueue(it) }
+            moodLoading = moodLoading - moodId
+        }
     }
 
     fun sendWaveFeedback(feedbackType: String, value: String) {
         scope.launch { IcmRepository.sendWaveFeedback(feedbackType, value) }
-    }
-
-    // Preload first 3 moods
-    LaunchedEffect(Unit) {
-        moodCategories.take(3).forEach { loadMoodTracks(it.id) }
     }
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
@@ -156,84 +197,49 @@ fun HomeScreen(
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 items(moodCategories, key = { it.id }) { mood ->
+                    val isLoading = mood.id in moodLoading && moodTracks[mood.id].isNullOrEmpty()
                     MoodCard(
                         mood = mood,
                         isActive = activeMoodId == mood.id,
+                        isLoading = isLoading,
                         onClick = {
                             if (activeMoodId == mood.id) {
+                                // Stop / collapse
                                 activeMoodId = null
+                                isPlayingMood = false
                             } else {
-                                activeMoodId = mood.id
-                                if (mood.id !in moodTracks) {
-                                    loadMoodTracks(mood.id)
-                                }
+                                playMoodStation(mood.id)
                             }
                         }
                     )
                 }
             }
 
-            // Show tracks for active mood
-            activeMoodId?.let { moodId ->
-                val tracks = moodTracks[moodId]
-                val isLoading = moodId in moodLoading
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                if (isLoading || tracks == null) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(80.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CircularProgressIndicator(color = AppleRed, modifier = Modifier.size(28.dp))
-                    }
-                } else if (tracks.isEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 20.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color(0xFF1C1C1E))
-                            .clickable { loadMoodTracks(moodId) }
-                            .padding(16.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text("Tap to load tracks", color = Color.Gray, fontSize = 14.sp)
-                    }
-                } else {
-                    Column(
-                        modifier = Modifier.padding(horizontal = 20.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        tracks.take(5).forEach { track ->
-                            WaveTrackRow(
-                                track = track,
-                                onPlay = { playWaveTrack(track) },
-                                onLike = { sendWaveFeedback("more_track", track.id) },
-                                onDislike = { sendWaveFeedback("less_track", track.id) }
-                            )
-                        }
-                        if (tracks.size >= 5) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 8.dp)
-                                    .clip(RoundedCornerShape(50))
-                                    .background(Color(0xFF1C1C1E))
-                                    .clickable { loadMoodTracks(moodId) }
-                                    .padding(vertical = 10.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    "More like this",
-                                    color = AppleRed,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
-                            }
-                        }
+            // Playing indicator
+            if (isPlayingMood && activeMoodId != null) {
+                Spacer(modifier = Modifier.height(12.dp))
+                val moodTitle = moodCategories.find { it.id == activeMoodId }?.title ?: ""
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(Color(0xFF1C1C1E))
+                        .padding(horizontal = 16.dp, vertical = 10.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .background(AppleRed, RoundedCornerShape(50))
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Playing: $moodTitle",
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium
+                        )
                     }
                 }
             }
@@ -359,6 +365,7 @@ fun HomeScreen(
 private fun MoodCard(
     mood: MoodCategory,
     isActive: Boolean,
+    isLoading: Boolean,
     onClick: () -> Unit
 ) {
     Box(
@@ -399,73 +406,23 @@ private fun MoodCard(
             modifier = Modifier.align(Alignment.BottomStart)
         )
 
-        // Active indicator
-        if (isActive) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .size(8.dp)
-                    .background(AppleRed, RoundedCornerShape(50))
-            )
-        }
-    }
-}
-
-@Composable
-private fun WaveTrackRow(
-    track: IcmWaveTrack,
-    onPlay: () -> Unit,
-    onLike: () -> Unit,
-    onDislike: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(56.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(Color(0xFF1C1C1E))
-            .clickable(onClick = onPlay)
-            .padding(horizontal = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
+        // Active / loading indicator
         Box(
-            modifier = Modifier
-                .size(44.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(Color.DarkGray)
+            modifier = Modifier.align(Alignment.BottomEnd)
         ) {
-            if (!track.cover.isNullOrBlank()) {
-                AsyncImage(
-                    model = track.cover.replace("1000x1000", "300x300"),
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
+            if (isLoading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    color = Color.White,
+                    strokeWidth = 2.dp
+                )
+            } else if (isActive) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .background(AppleRed, RoundedCornerShape(50))
                 )
             }
-        }
-        Spacer(modifier = Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = track.title,
-                color = Color.White,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = track.artist ?: "Unknown Artist",
-                color = Color.Gray,
-                fontSize = 12.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-        IconButton(onClick = onDislike, modifier = Modifier.size(32.dp)) {
-            Icon(Icons.Rounded.ThumbDown, null, tint = Color.Gray, modifier = Modifier.size(18.dp))
-        }
-        IconButton(onClick = onLike, modifier = Modifier.size(32.dp)) {
-            Icon(Icons.Rounded.ThumbUp, null, tint = Color.Gray, modifier = Modifier.size(18.dp))
         }
     }
 }
