@@ -31,6 +31,8 @@ object PlayerController {
 
     private var controller: MediaController? = null
     private var isConnectingController = false
+    // Once MediaController fails to build, stop retrying it — use direct player.
+    private var mediaControllerUnavailable = false
     private var positionJob: Job? = null
 
     private var queue = listOf<Track>()
@@ -297,6 +299,7 @@ object PlayerController {
 
     private suspend fun obtainController(context: Context): MediaController? {
         controller?.let { return it }
+        if (mediaControllerUnavailable) return null
 
         while (isConnectingController) {
             delay(50)
@@ -311,27 +314,35 @@ object PlayerController {
                 ComponentName(context.applicationContext, AudioService::class.java)
             )
 
-            val builtController = suspendCancellableCoroutine<MediaController?> { continuation ->
-                val future = MediaController.Builder(
-                    context.applicationContext,
-                    sessionToken
-                ).buildAsync()
+            val builtController = try {
+                kotlinx.coroutines.withTimeout(6_000) {
+                    suspendCancellableCoroutine<MediaController?> { continuation ->
+                        val future = MediaController.Builder(
+                            context.applicationContext,
+                            sessionToken
+                        ).buildAsync()
 
-                future.addListener(
-                    {
-                        try {
-                            val result = future.get()
-                            if (continuation.isActive) {
-                                continuation.resume(result)
-                            }
-                        } catch (_: Throwable) {
-                            if (continuation.isActive) {
-                                continuation.resume(null)
-                            }
-                        }
-                    },
-                    MoreExecutors.directExecutor()
-                )
+                        future.addListener(
+                            {
+                                try {
+                                    val result = future.get()
+                                    if (continuation.isActive) {
+                                        continuation.resume(result)
+                                    }
+                                } catch (_: Throwable) {
+                                    if (continuation.isActive) {
+                                        continuation.resume(null)
+                                    }
+                                }
+                            },
+                            MoreExecutors.directExecutor()
+                        )
+                    }
+                }
+            } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                android.util.Log.e("PlayerController", "obtainController timed out — falling back to direct player")
+                mediaControllerUnavailable = true
+                null
             }
 
             builtController?.let { newController ->
