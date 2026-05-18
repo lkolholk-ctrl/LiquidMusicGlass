@@ -557,6 +557,29 @@ class IcmApi private constructor() {
         return execute("/library/wave/onboarding", method = "POST", body = body)
     }
 
+    /**
+     * Log playback event for wave ranking improvement.
+     * Called when user finishes/skips/switches a wave track.
+     */
+    suspend fun logWavePlayback(
+        trackId: String,
+        playedSeconds: Double,
+        totalSeconds: Double? = null,
+        completed: Boolean? = null,
+        skipped: Boolean? = null
+    ): Result<IcmWavePlaybackResponse> {
+        val body = json.encodeToString(
+            IcmWavePlaybackRequest(
+                trackId = trackId,
+                playedSeconds = playedSeconds,
+                totalSeconds = totalSeconds,
+                completed = completed,
+                skipped = skipped
+            )
+        )
+        return execute("/library/wave/playback", method = "POST", body = body)
+    }
+
     // ═══════════════════════════════════════════════════════════
     //  Personal Cabinet (/me/*) — requires linked user + subscription
     // ═══════════════════════════════════════════════════════════

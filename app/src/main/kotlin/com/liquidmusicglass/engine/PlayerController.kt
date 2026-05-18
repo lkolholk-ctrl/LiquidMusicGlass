@@ -40,6 +40,11 @@ object PlayerController {
 
     private const val POSITION_UPDATE_MS = 200L
 
+    // ── Wave playback tracking ──
+    private var waveTrackStartTimeMs: Long = 0L
+    private var waveTrackPlayedMs: Long = 0L
+    private var waveTrackId: String? = null
+
     // ── Stream URL cache (trackId -> resolved Uri) ──
     // Docs: "file_id — cache for a day+ by (trackId + region + quality)"
     private val streamUrlCache = mutableMapOf<String, android.net.Uri>()
@@ -445,6 +450,9 @@ object PlayerController {
     fun playTrack(context: Context, index: Int) {
         if (index !in queue.indices) return
 
+        // Log previous wave track before switching
+        logWavePlaybackOnSwitch()
+
         scope.launch {
             val track = queue[index]
 
@@ -455,6 +463,11 @@ object PlayerController {
             _currentPositionMs.value = 0L
             _isPlaying.value = true
             startPositionUpdates()
+
+            // Start wave playback tracking
+            waveTrackId = track.id
+            waveTrackStartTimeMs = System.currentTimeMillis()
+            waveTrackPlayedMs = 0L
 
             // Resolve current track URL immediately (fast start)
             // Docs: "URL из поля url ответа /track подставляй прямо в плеер."
@@ -614,6 +627,8 @@ object PlayerController {
     }
 
     fun skipNext(context: Context) {
+        logWavePlaybackOnSwitch()
+
         val playerController = controller
         if (playerController != null && playerController.hasNextMediaItem()) {
             playerController.seekToNextMediaItem()
@@ -628,6 +643,7 @@ object PlayerController {
     }
 
     fun skipPrevious(context: Context) {
+        logWavePlaybackOnSwitch()
         val playerController = controller
         if (playerController != null && playerController.currentPosition > 3000L) {
             playerController.seekTo(0L)
@@ -897,5 +913,43 @@ object PlayerController {
     private fun stopPositionUpdates() {
         positionJob?.cancel()
         positionJob = null
+    }
+
+    // ── Wave Playback Logging ──
+
+    /**
+     * Log playback when switching away from a wave track.
+     * Called automatically on skipNext/skipPrevious/playTrack.
+     */
+    private fun logWavePlaybackOnSwitch() {
+        val trackId = waveTrackId ?: return
+        val startTime = waveTrackStartTimeMs
+        if (startTime <= 0) return
+
+        val playedMs = waveTrackPlayedMs + (System.currentTimeMillis() - startTime)
+        val playedSeconds = playedMs / 1000.0
+        val totalSeconds = (_currentTrack.value?.durationMs ?: 0L) / 1000.0
+
+        if (playedSeconds < 3.0) return // Skip very short plays
+
+        val completed = if (totalSeconds > 0) playedSeconds >= totalSeconds * 0.85 else null
+        val skipped = if (totalSeconds > 0) playedSeconds < totalSeconds * 0.15 else null
+
+        scope.launch {
+            try {
+                com.liquidmusicglass.api.icm.IcmRepository.logWavePlayback(
+                    trackId = trackId,
+                    playedSeconds = playedSeconds,
+                    totalSeconds = totalSeconds.takeIf { it > 0 },
+                    completed = completed,
+                    skipped = skipped
+                )
+            } catch (_: Exception) {}
+        }
+
+        // Reset tracking
+        waveTrackId = null
+        waveTrackStartTimeMs = 0L
+        waveTrackPlayedMs = 0L
     }
 }
