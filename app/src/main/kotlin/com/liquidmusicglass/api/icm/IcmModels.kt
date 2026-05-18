@@ -313,6 +313,7 @@ data class IcmCoverSignResponse(
 // ─── Lyrics ───
 
 @Serializable
+@Serializable
 data class IcmLyricsResponse(
     val trackId: String,
     val lyrics: String? = null,
