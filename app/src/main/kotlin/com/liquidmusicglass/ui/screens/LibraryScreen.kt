@@ -31,7 +31,6 @@ import com.liquidmusicglass.api.icm.IcmLibraryTrack
 import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.Track
-import com.liquidmusicglass.ui.glass.rememberAlbumColors
 import com.liquidmusicglass.ui.theme.LiquidTheme
 import kotlinx.coroutines.launch
 
@@ -75,12 +74,6 @@ fun LibraryScreen(
         isLoading = false
     }
 
-    val dominantColor = rememberAlbumColors(
-        albumId = -1L,
-        coverUrl = null,
-        defaultColor = LiquidTheme.colors.primary
-    )
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -90,7 +83,7 @@ fun LibraryScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(dominantColor.copy(alpha = 0.3f))
+                .background(Color(0xFF1C1C1E))
                 .padding(top = 48.dp, bottom = 16.dp, start = 20.dp, end = 20.dp)
         ) {
             Column {
