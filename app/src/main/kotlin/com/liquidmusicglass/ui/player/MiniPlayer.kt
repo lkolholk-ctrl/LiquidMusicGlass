@@ -62,7 +62,7 @@ fun MiniPlayer(
 
     Row(
         modifier = Modifier
-            .fillMaxWidth()
+            .fillMaxWidth(0.94f)
             .padding(horizontal = 6.dp, vertical = 2.dp)
             .height(52.dp)
             .drawBackdrop(

@@ -335,27 +335,28 @@ fun AppRoot() {
                         )
                     }
             ) {
-                MiniPlayer(
-                    trackTitle = trackTitle,
-                    artistName = artistName,
-                    isPlaying = isPlaying,
-                    albumArtUri = currentTrack?.displayArtUri,
-                    coverUrl = currentTrack?.coverUrl,
-                    backdrop = rootBackdrop,
-                    onExpand = { animateExpand() },
-                    onPlayPause = { PlayerController.togglePlayPause(context) },
-                    onSkipNext = { PlayerController.skipNext(context) }
-                )
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    MiniPlayer(
+                        trackTitle = trackTitle,
+                        artistName = artistName,
+                        isPlaying = isPlaying,
+                        albumArtUri = currentTrack?.displayArtUri,
+                        coverUrl = currentTrack?.coverUrl,
+                        backdrop = rootBackdrop,
+                        onExpand = { animateExpand() },
+                        onPlayPause = { PlayerController.togglePlayPause(context) },
+                        onSkipNext = { PlayerController.skipNext(context) }
+                    )
 
-                BottomBar(
-                    selectedIndex = selectedIndex,
-                    onItemSelected = { selectedIndex = it; AppSettings.setLastScreen(it) },
-                    backdrop = rootBackdrop
-                )
-
-                Spacer(
-                    modifier = Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)
-                )
+                    BottomBar(
+                        selectedIndex = selectedIndex,
+                        onItemSelected = { selectedIndex = it; AppSettings.setLastScreen(it) },
+                        backdrop = rootBackdrop
+                    )
+                }
 
                 Spacer(
                     modifier = Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)
