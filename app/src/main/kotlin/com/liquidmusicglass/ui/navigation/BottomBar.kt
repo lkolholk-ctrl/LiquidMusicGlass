@@ -114,7 +114,7 @@ fun BottomBar(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 8.dp)
-            .padding(bottom = 12.dp)
+            .padding(bottom = 8.dp)
     ) {
         items.forEachIndexed { index, item ->
             LiquidBottomTab {
@@ -272,7 +272,7 @@ private fun NavigationCapsule(
                     }
                 )
                 .then(interactiveHighlight.modifier)
-                .height(56f.dp)
+                .height(48f.dp)
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -387,7 +387,7 @@ private fun NavigationCapsule(
                         drawRect(Color.Black.copy(alpha = 0.03f * progress))
                     }
                 )
-                .height(48f.dp)
+                .height(40f.dp)
                 .fillMaxWidth(1f / tabsCount)
         )
     }
@@ -412,14 +412,14 @@ private fun NavItemContent(item: BottomNavItem, isSelected: Boolean = false) {
         Icon(
             imageVector = item.icon,
             contentDescription = null,
-            modifier = Modifier.size(24.dp),
+            modifier = Modifier.size(20.dp),
             tint = contentColor
         )
-        Spacer(modifier = Modifier.height(2.dp))
+        Spacer(modifier = Modifier.height(1.dp))
         Text(
             text = item.label,
             color = contentColor,
-            fontSize = 10.sp,
+            fontSize = 9.sp,
             fontWeight = FontWeight.Medium
         )
     }
