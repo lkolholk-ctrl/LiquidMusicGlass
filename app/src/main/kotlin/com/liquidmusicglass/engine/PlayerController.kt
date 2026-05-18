@@ -692,6 +692,15 @@ object PlayerController {
             addToRecent(track)
             preloadNextTrack()
 
+            // Pre-fetch lyrics for current track immediately
+            scope.launch(Dispatchers.IO) {
+                if (track.isOnlineTrack && LyricsParser.getCachedLyrics(track.id) == null) {
+                    try {
+                        LyricsParser.fetchOnlineLyrics(track.id, track.title, track.artist)
+                    } catch (_: Exception) {}
+                }
+            }
+
             AudioService.companionService?.notifyManualNavigation()
         }
     }
