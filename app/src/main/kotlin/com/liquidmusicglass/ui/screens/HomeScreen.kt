@@ -207,6 +207,7 @@ fun HomeScreen(
                                 // Stop / collapse
                                 activeMoodId = null
                                 isPlayingMood = false
+                                PlayerController.setActiveWaveMood(null)
                             } else {
                                 playMoodStation(mood.id)
                             }

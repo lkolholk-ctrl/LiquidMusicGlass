@@ -195,6 +195,13 @@ object PlayerController {
         }
     }
 
+    // Active wave mood for auto-refill
+    private var activeWaveMoodId: String? = null
+
+    fun setActiveWaveMood(moodId: String?) {
+        activeWaveMoodId = moodId
+    }
+
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             _isPlaying.value = isPlaying
@@ -239,7 +246,47 @@ object PlayerController {
                         preloadNextTrack()
                     }
                 }
+
+                // Auto-refill queue from wave when running low
+                val remainingTracks = queue.size - index - 1
+                if (remainingTracks < 3 && activeWaveMoodId != null) {
+                    scope.launch {
+                        refillWaveQueue()
+                    }
+                }
             }
+        }
+    }
+
+    /**
+     * Auto-refill queue with wave tracks when running low.
+     * Called from player listener when remaining tracks < 3.
+     */
+    private suspend fun refillWaveQueue() {
+        val moodId = activeWaveMoodId ?: return
+        val exclude = queue.map { it.id }
+        val newWaveTracks = mutableListOf<com.liquidmusicglass.api.icm.IcmWaveTrack>()
+        repeat(5) {
+            val response = com.liquidmusicglass.api.icm.IcmRepository.getWaveNext(
+                exclude = (exclude + newWaveTracks.map { it.id }).takeIf { it.isNotEmpty() },
+                recentSkips = 0
+            )
+            if (response != null && response.status == "ok" && response.track != null) {
+                newWaveTracks.add(response.track)
+            }
+        }
+        newWaveTracks.forEach { waveTrack ->
+            val track = Track(
+                id = waveTrack.id,
+                title = waveTrack.title,
+                artist = waveTrack.artist ?: "Unknown Artist",
+                albumName = "",
+                durationMs = waveTrack.durationMs,
+                uri = Uri.parse("https://byicloud.online/track/${waveTrack.id}"),
+                coverUrl = waveTrack.cover,
+                albumId = waveTrack.collectionId?.hashCode()?.toLong() ?: -1L
+            )
+            addToQueue(track)
         }
     }
 
