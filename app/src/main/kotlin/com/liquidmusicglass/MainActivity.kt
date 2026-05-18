@@ -53,6 +53,20 @@ class MainActivity : ComponentActivity() {
             val state = data.getQueryParameter("state")
             val error = data.getQueryParameter("error")
 
+            // CSRF check: returned state must match the one we sent
+            val prefs = getSharedPreferences("icm_auth", android.content.Context.MODE_PRIVATE)
+            val expectedState = prefs.getString("oauth_state", null)
+            if (expectedState == null || state != expectedState) {
+                android.widget.Toast.makeText(
+                    this,
+                    "Auth failed: invalid state",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+                return
+            }
+            // State is single-use — clear it to prevent replay
+            prefs.edit().remove("oauth_state").apply()
+
             if (error != null) {
                 android.widget.Toast.makeText(
                     this,
