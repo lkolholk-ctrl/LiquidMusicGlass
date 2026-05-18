@@ -286,14 +286,32 @@ object IcmRepository {
      * Get next track from user's personal wave (radio).
      * Requires partnerUserId to be set and user to be linked.
      * Call repeatedly to build a personalized radio queue.
+     *
+     * Preload 3-5 tracks ahead for seamless playback.
+     *
+     * @param seedTrackId Optional track ID to create a "station based on track"
      */
-    suspend fun getWaveNext(): IcmWaveTrackResponse? {
-        val result = api.getWaveNext()
+    suspend fun getWaveNext(seedTrackId: String? = null): IcmWaveResponse? {
+        val result = api.getWaveNext(seedTrackId)
         result.exceptionOrNull()?.let {
             _lastException = it as? Exception
             _lastError.value = it.message
         }
         return result.getOrNull()
+    }
+
+    /**
+     * Build a wave queue by calling API multiple times.
+     * Recommended: preload 3-5 tracks for seamless playback.
+     */
+    suspend fun buildWaveQueue(count: Int = 5, seedTrackId: String? = null): List<com.liquidmusicglass.engine.Track> {
+        val tracks = mutableListOf<com.liquidmusicglass.engine.Track>()
+        repeat(count) {
+            val response = getWaveNext(seedTrackId)
+            val track = response?.track?.toTrack()
+            if (track != null) tracks.add(track)
+        }
+        return tracks
     }
 
     // ═══════════════════════════════════════════════════════════
