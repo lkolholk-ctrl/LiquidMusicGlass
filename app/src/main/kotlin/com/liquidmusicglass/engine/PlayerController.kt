@@ -353,6 +353,24 @@ object PlayerController {
                     ))
                 }
             }
+            "playlist" -> {
+                // For playlists — refill with wave tracks (personalized)
+                repeat(5) {
+                    val response = com.liquidmusicglass.api.icm.IcmRepository.getWaveNext(
+                        exclude = (exclude + newTracks.map { it.id }).takeIf { it.isNotEmpty() },
+                        recentSkips = 0
+                    )
+                    if (response != null && response.status == "ok" && response.track != null) {
+                        val wt = response.track
+                        newTracks.add(Track(
+                            id = wt.id, title = wt.title, artist = wt.artist ?: "Unknown Artist",
+                            albumName = "", durationMs = wt.durationMs,
+                            uri = Uri.parse("https://byicloud.online/track/${wt.id}"),
+                            coverUrl = wt.cover, albumId = wt.collectionId?.hashCode()?.toLong() ?: -1L
+                        ))
+                    }
+                }
+            }
         }
 
         newTracks.forEach { addToQueue(it) }
