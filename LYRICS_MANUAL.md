@@ -28,7 +28,7 @@ GET /api/partner/lyrics?track_id={id}&region={region}
 
 | Поле | Описание |
 |------|----------|
-| `track_id` | Apple ID (`123...`), `tidal_track_<n>`, или `custom_<n>` |
+| `track_id` | Числовой ID (`123...`), `tidal_track_<n>`, или `custom_<n>` |
 | `region` | Опционально. По умолчанию первый из `regions_allowed` ключа |
 
 ### Ответ
@@ -36,7 +36,7 @@ GET /api/partner/lyrics?track_id={id}&region={region}
 ```json
 {
   "track_id": "1411628233",
-  "source": "apple",
+  "source": "platform_a",
   "format": "lrc",
   "lyrics": "[00:07.92]First things first\n[00:09.40]I'ma say all the words..."
 }
@@ -54,7 +54,7 @@ GET /api/partner/lyrics?track_id={id}&region={region}
 - **На холодных треках первый запрос может занять до 10 секунд**
 - Последующие запросы — мгновенно из кеша
 - Не дёргать lyrics пачкой на 100 треков — lazy load при открытии плеера
-- VK-треки: lyrics **не поддерживаются** (всегда `404`)
+- Платформа B: lyrics **не поддерживаются** (всегда `404`)
 
 ---
 
@@ -76,7 +76,7 @@ curl "https://byicloud.online/api/partner/track/1411628233/lyrics?region=us" \
 
 **Примеры треков БЕЗ лирики:**
 - `1469882396` — Akon, Smack That
-- Большинство VK-треков
+- Большинство треков платформы B
 
 ### 2. Проблема с парсингом ответа
 
@@ -175,7 +175,7 @@ curl -s "https://byicloud.online/api/partner/track/1469882396/lyrics?region=us" 
 - [ ] `trackId` передаётся напрямую (не парсится из резолвленного URI)?
 - [ ] Таймаут в `fetchOnlineLyrics()` ≥ 15 секунд?
 - [ ] Scope `lyrics` включён в `/health`?
-- [ ] Это не VK-трек? (VK не поддерживает lyrics)
+- [ ] Это не трек платформы B? (платформа B не поддерживает lyrics)
 
 ---
 
@@ -202,4 +202,4 @@ curl -s "https://byicloud.online/api/partner/track/1469882396/lyrics?region=us" 
 | 2026-05-18 | Добавлен `@Serializable` к `IcmLyricsResponse` |
 | 2026-05-18 | `LyricsSheet` принимает `trackId` напрямую |
 | 2026-05-18 | Добавлен таймаут 15 секунд для lyrics fetch |
-| 2026-05-18 | Передизайн `LyricsSheet` под Apple Music стиль |
+| 2026-05-18 | Передизайн `LyricsSheet` под стиль Apple Music |
