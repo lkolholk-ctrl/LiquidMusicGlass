@@ -99,6 +99,29 @@ fun HomeScreen(
         )
     }
 
+    fun loadMoreMoodTracks(moodId: String, existing: List<IcmWaveTrack>) {
+        if (moodId in moodLoading) return
+        moodLoading = moodLoading + moodId
+        scope.launch {
+            val waveTracks = existing.toMutableList()
+            repeat(5) {
+                val exclude = waveTracks.map { it.id }
+                val response = IcmRepository.getWaveNext(
+                    exclude = exclude.takeIf { it.isNotEmpty() },
+                    recentSkips = 0
+                )
+                if (response != null && response.status == "ok" && response.track != null) {
+                    waveTracks.add(response.track)
+                }
+            }
+            moodTracks = moodTracks + (moodId to waveTracks)
+            // Append new tracks to player queue
+            val newTracks = waveTracks.drop(existing.size).map { waveTrackToTrack(it) }
+            newTracks.forEach { PlayerController.addToQueue(it) }
+            moodLoading = moodLoading - moodId
+        }
+    }
+
     fun playMoodStation(moodId: String) {
         PlayerController.setAutoRefillContext("wave", moodId, moodCategories.find { it.id == moodId }?.title)
         val existing = moodTracks[moodId]
@@ -140,29 +163,6 @@ fun HomeScreen(
                 // Preload next batch
                 loadMoreMoodTracks(moodId, waveTracks)
             }
-        }
-    }
-
-    fun loadMoreMoodTracks(moodId: String, existing: List<IcmWaveTrack>) {
-        if (moodId in moodLoading) return
-        moodLoading = moodLoading + moodId
-        scope.launch {
-            val waveTracks = existing.toMutableList()
-            repeat(5) {
-                val exclude = waveTracks.map { it.id }
-                val response = IcmRepository.getWaveNext(
-                    exclude = exclude.takeIf { it.isNotEmpty() },
-                    recentSkips = 0
-                )
-                if (response != null && response.status == "ok" && response.track != null) {
-                    waveTracks.add(response.track)
-                }
-            }
-            moodTracks = moodTracks + (moodId to waveTracks)
-            // Append new tracks to player queue
-            val newTracks = waveTracks.drop(existing.size).map { waveTrackToTrack(it) }
-            newTracks.forEach { PlayerController.addToQueue(it) }
-            moodLoading = moodLoading - moodId
         }
     }
 
