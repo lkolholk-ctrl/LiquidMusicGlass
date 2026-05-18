@@ -32,34 +32,16 @@ app.get('/auth/telegram', async (req, res) => {
       });
     }
     
-    const partnerUserId = `tg_${icm_user_id}`;
-    
-    // Issue ICM session token (server-side only, API key never exposed to client)
-    const sessionRes = await axios.post(
-      'https://byicloud.online/api/partner/session/issue',
-      {
-        partner_user_id: partnerUserId,
-        hide_explicit: false
-      },
-      {
-        headers: {
-          'X-Partner-Key': ICM_API_KEY,
-          'Content-Type': 'application/json'
-        },
-        timeout: 10000
-      }
-    );
-    
-    // Redirect back to app with session token
-    // Using custom URL scheme or deep link
-    const redirectUrl = `liquidmusicglass://auth/telegram?success=1&token=${encodeURIComponent(sessionRes.data.partner_session_token)}&expires_in=${sessionRes.data.expires_in}&icm_user_id=${icm_user_id}&state=${encodeURIComponent(state || '')}`;
+    // Redirect back to app via custom scheme
+    // App handles liquidmusicglass://oauth/icm?linked=1&icm_user_id=...
+    const redirectUrl = `liquidmusicglass://oauth/icm?linked=1&icm_user_id=${icm_user_id}&state=${encodeURIComponent(state || '')}`;
     
     res.redirect(redirectUrl);
   } catch (error) {
     console.error('Auth error:', error.message);
     
     // Redirect back to app with error
-    const errorUrl = `liquidmusicglass://auth/telegram?success=0&error=${encodeURIComponent(error.message)}`;
+    const errorUrl = `liquidmusicglass://oauth/icm?linked=0&error=${encodeURIComponent(error.message)}`;
     res.redirect(errorUrl);
   }
 });

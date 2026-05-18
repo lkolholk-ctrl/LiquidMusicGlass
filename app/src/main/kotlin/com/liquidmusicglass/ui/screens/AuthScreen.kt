@@ -94,7 +94,8 @@ fun AuthScreen(
             }
             // Use ICM partner linking endpoint with our redirect
             // Docs: /partner/<partner_id>/link?partner_user_id=...&redirect_uri=...&state=...
-            val telegramAuthUrl = "https://byicloud.online/partner/msng/link?partner_user_id=$partnerUserId&redirect_uri=liquidmusicglass://oauth/icm&state=android"
+            // Server (liquid.glassfiles.ru) is whitelisted and will redirect to app
+            val telegramAuthUrl = "https://byicloud.online/partner/msng/link?partner_user_id=$partnerUserId&redirect_uri=https://liquid.glassfiles.ru/auth/telegram&state=android"
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
