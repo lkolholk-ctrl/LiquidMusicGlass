@@ -1,5 +1,7 @@
 package com.liquidmusicglass.ui.screens
 
+import android.content.Context
+import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -13,6 +15,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -21,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -31,10 +35,6 @@ import com.liquidmusicglass.api.icm.IcmLibraryTrack
 import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.Track
-import android.content.Context
-import android.net.Uri
-import androidx.compose.ui.platform.LocalContext
-import com.liquidmusicglass.ui.theme.LiquidTheme
 import kotlinx.coroutines.launch
 
 private enum class LibraryTab { LIKES, SUBSCRIPTIONS }
@@ -49,33 +49,86 @@ fun LibraryScreen(
     val scope = rememberCoroutineScope()
     var selectedTab by remember { mutableStateOf(LibraryTab.LIKES) }
 
+    // Pagination state
     var likedTracks by remember { mutableStateOf<List<IcmLibraryTrack>>(emptyList()) }
     var subscriptions by remember { mutableStateOf<List<IcmLibraryArtist>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
+    var isLoading by remember { mutableStateOf(false) }
+    var isRefreshing by remember { mutableStateOf(false) }
+    var isLoadingMore by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var hasMore by remember { mutableStateOf(true) }
+    var currentOffset by remember { mutableStateOf(0) }
 
-    LaunchedEffect(selectedTab) {
-        isLoading = true
-        errorMessage = null
-        when (selectedTab) {
-            LibraryTab.LIKES -> {
-                val response = IcmRepository.getLibraryLikes(limit = 200)
-                if (response != null) {
-                    likedTracks = response.items
-                } else {
-                    errorMessage = "Failed to load likes"
-                }
-            }
-            LibraryTab.SUBSCRIPTIONS -> {
-                val response = IcmRepository.getLibrarySubscriptions(limit = 200)
-                if (response != null) {
-                    subscriptions = response.items
-                } else {
-                    errorMessage = "Failed to load subscriptions"
-                }
-            }
+    fun loadData(refresh: Boolean = false) {
+        if (isLoading || isLoadingMore) return
+        if (refresh) {
+            isRefreshing = true
+            currentOffset = 0
+            hasMore = true
+        } else if (currentOffset > 0) {
+            isLoadingMore = true
+        } else {
+            isLoading = true
         }
-        isLoading = false
+        errorMessage = null
+
+        scope.launch {
+            when (selectedTab) {
+                LibraryTab.LIKES -> {
+                    val response = IcmRepository.getLibraryLikes(
+                        limit = 50,
+                        offset = if (refresh) 0 else currentOffset
+                    )
+                    if (response != null) {
+                        val newItems = response.items
+                        likedTracks = if (refresh || currentOffset == 0) {
+                            newItems
+                        } else {
+                            likedTracks + newItems
+                        }
+                        hasMore = newItems.size >= 50
+                        if (newItems.isNotEmpty()) {
+                            currentOffset += newItems.size
+                        }
+                    } else {
+                        errorMessage = if (currentOffset == 0) "Failed to load likes" else null
+                    }
+                }
+                LibraryTab.SUBSCRIPTIONS -> {
+                    val response = IcmRepository.getLibrarySubscriptions(
+                        limit = 50,
+                        offset = if (refresh) 0 else currentOffset
+                    )
+                    if (response != null) {
+                        val newItems = response.items
+                        subscriptions = if (refresh || currentOffset == 0) {
+                            newItems
+                        } else {
+                            subscriptions + newItems
+                        }
+                        hasMore = newItems.size >= 50
+                        if (newItems.isNotEmpty()) {
+                            currentOffset += newItems.size
+                        }
+                    } else {
+                        errorMessage = if (currentOffset == 0) "Failed to load subscriptions" else null
+                    }
+                }
+            }
+            isLoading = false
+            isRefreshing = false
+            isLoadingMore = false
+        }
+    }
+
+    // Load initial data when tab changes
+    LaunchedEffect(selectedTab) {
+        likedTracks = emptyList()
+        subscriptions = emptyList()
+        currentOffset = 0
+        hasMore = true
+        errorMessage = null
+        loadData(refresh = true)
     }
 
     Column(
@@ -99,7 +152,6 @@ fun LibraryScreen(
                 )
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Tabs
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -125,41 +177,20 @@ fun LibraryScreen(
         // Content
         Box(modifier = Modifier.fillMaxSize()) {
             when {
-                isLoading -> {
+                isLoading && !isRefreshing -> {
                     CircularProgressIndicator(
                         modifier = Modifier.align(Alignment.Center),
                         color = Color(0xFFFC3C44)
                     )
                 }
-                errorMessage != null -> {
-                    Column(
-                        modifier = Modifier
-                            .align(Alignment.Center)
-                            .padding(32.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.FavoriteBorder,
-                            contentDescription = null,
-                            tint = Color.Gray,
-                            modifier = Modifier.size(48.dp)
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text(
-                            text = errorMessage ?: "Unknown error",
-                            color = Color.Gray,
-                            fontSize = 16.sp
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Link your account to see your library",
-                            color = Color.DarkGray,
-                            fontSize = 14.sp
-                        )
-                    }
+                errorMessage != null && likedTracks.isEmpty() && subscriptions.isEmpty() -> {
+                    ErrorState(
+                        message = errorMessage ?: "Unknown error",
+                        onRetry = { loadData(refresh = true) }
+                    )
                 }
                 selectedTab == LibraryTab.LIKES -> {
-                    if (likedTracks.isEmpty()) {
+                    if (likedTracks.isEmpty() && !isLoading) {
                         EmptyState("No liked tracks yet")
                     } else {
                         LazyColumn(
@@ -169,17 +200,48 @@ fun LibraryScreen(
                             items(likedTracks, key = { it.id }) { track ->
                                 LikedTrackItem(
                                     track = track,
-                                    onClick = {
-                                    playLibraryTrack(context, track)
-                                },
+                                    onClick = { playLibraryTrack(context, track) },
                                     onNavigateToAlbum = onNavigateToAlbum
                                 )
+                            }
+                            if (hasMore && !isLoadingMore) {
+                                item {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(16.dp)
+                                            .clickable { loadData() },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            "Load more",
+                                            color = Color(0xFFFC3C44),
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                }
+                            }
+                            if (isLoadingMore) {
+                                item {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(16.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        CircularProgressIndicator(
+                                            color = Color(0xFFFC3C44),
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
                 }
                 selectedTab == LibraryTab.SUBSCRIPTIONS -> {
-                    if (subscriptions.isEmpty()) {
+                    if (subscriptions.isEmpty() && !isLoading) {
                         EmptyState("No subscriptions yet")
                     } else {
                         LazyColumn(
@@ -191,6 +253,39 @@ fun LibraryScreen(
                                     artist = artist,
                                     onClick = { onNavigateToArtist(artist.id) }
                                 )
+                            }
+                            if (hasMore && !isLoadingMore) {
+                                item {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(16.dp)
+                                            .clickable { loadData() },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            "Load more",
+                                            color = Color(0xFFFC3C44),
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                }
+                            }
+                            if (isLoadingMore) {
+                                item {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(16.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        CircularProgressIndicator(
+                                            color = Color(0xFFFC3C44),
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -210,7 +305,7 @@ private fun TabButton(
 ) {
     Box(
         modifier = modifier
-            .clip(androidx.compose.foundation.shape.CircleShape)
+            .clip(CircleShape)
             .background(
                 if (isSelected) Color(0xFFFC3C44).copy(alpha = 0.3f)
                 else Color.Transparent
@@ -252,7 +347,6 @@ private fun LikedTrackItem(
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Cover
         Box(
             modifier = Modifier
                 .size(56.dp)
@@ -289,7 +383,6 @@ private fun LikedTrackItem(
             )
         }
 
-        // Duration
         track.durationMs.let { duration ->
             if (duration > 0) {
                 Text(
@@ -315,7 +408,6 @@ private fun ArtistSubscriptionItem(
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Avatar
         Box(
             modifier = Modifier
                 .size(56.dp)
@@ -379,6 +471,47 @@ private fun EmptyState(message: String) {
     }
 }
 
+@Composable
+private fun ErrorState(message: String, onRetry: () -> Unit) {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(32.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.FavoriteBorder,
+                contentDescription = null,
+                tint = Color.Gray,
+                modifier = Modifier.size(48.dp)
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = message,
+                color = Color.Gray,
+                fontSize = 16.sp
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(Color(0xFFFC3C44))
+                    .clickable(onClick = onRetry)
+                    .padding(horizontal = 24.dp, vertical = 10.dp)
+            ) {
+                Text(
+                    text = "Retry",
+                    color = Color.White,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+    }
+}
+
 private fun formatDuration(ms: Long): String {
     val totalSeconds = ms / 1000
     val minutes = totalSeconds / 60
@@ -386,7 +519,7 @@ private fun formatDuration(ms: Long): String {
     return "%d:%02d".format(minutes, seconds)
 }
 
-private fun playLibraryTrack(context: android.content.Context, libraryTrack: IcmLibraryTrack) {
+private fun playLibraryTrack(context: Context, libraryTrack: IcmLibraryTrack) {
     val track = Track(
         id = libraryTrack.id,
         title = libraryTrack.title,
