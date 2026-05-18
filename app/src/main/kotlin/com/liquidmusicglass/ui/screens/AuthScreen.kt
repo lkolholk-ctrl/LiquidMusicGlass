@@ -93,7 +93,7 @@ fun AuthScreen(
                 prefs.edit().putString("partner_user_id", partnerUserId).apply()
             }
             // Use ICM partner linking endpoint with our redirect
-            val telegramAuthUrl = "https://byicloud.online/partner/msng/link?partner_user_id=$partnerUserId&redirect_uri=https://liquid.glassfiles.ru/auth/telegram&state=android"
+            val telegramAuthUrl = "https://byicloud.online/partner/msng/link?partner_user_id=$partnerUserId&redirect_uri=https://liquid.glassfiles.ru/auth/telegram&state=android&bot_username=byicmbot"
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
