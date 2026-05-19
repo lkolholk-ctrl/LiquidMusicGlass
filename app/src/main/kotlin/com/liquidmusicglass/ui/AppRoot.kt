@@ -368,6 +368,7 @@ fun AppRoot() {
             expandProgress = expandProgress.value,
             trackTitle = trackTitle,
             artistName = artistName,
+            artists = currentTrack?.artists ?: emptyList(),
             isPlaying = isPlaying,
             albumArtUri = currentTrack?.displayArtUri,
             coverUrl = currentTrack?.coverUrl,
@@ -397,7 +398,10 @@ fun AppRoot() {
             onSkipPrevious = { PlayerController.skipPrevious(context) },
             onSeek = { PlayerController.seekTo(it) },
             onVolumeChange = { PlayerController.setVolume(it) },
-            onOpenSettings = { settingsOpen = true }
+            onOpenSettings = { settingsOpen = true },
+            onNavigateToArtist = { artistId ->
+                detailArtistId = artistId
+            }
         )
 
         AnimatedVisibility(

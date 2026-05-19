@@ -76,6 +76,7 @@ data class IcmSearchItem(
     val artist: String? = null,
     @SerialName("artistName") val artistName: String? = null,
     @SerialName("artistId") val artistId: String? = null,
+    val artists: List<IcmMiniArtist> = emptyList(),
     val cover: String? = null,
     val preview: String? = null,
     @SerialName("collectionId") val collectionId: String? = null,
@@ -423,7 +424,8 @@ fun IcmSearchItem.toTrack(uri: String? = null): com.liquidmusicglass.engine.Trac
         // Reuse the model's normalized accessor so the progress bar shows the right scale.
         durationMs = durationMs,
         albumId = collectionId?.hashCode()?.toLong() ?: id.hashCode().toLong(),
-        coverUrl = cover?.replace("1000x1000", "600x600") ?: cover
+        coverUrl = cover?.replace("1000x1000", "600x600") ?: cover,
+        artists = artists
     )
 }
 
@@ -436,7 +438,8 @@ fun IcmAlbumTrack.toTrack(): com.liquidmusicglass.engine.Track {
         uri = android.net.Uri.parse("https://byicloud.online/track/$id"),
         durationMs = durationMs,
         albumId = collectionId?.hashCode()?.toLong() ?: id.hashCode().toLong(),
-        coverUrl = cover.replace("1000x1000", "600x600")
+        coverUrl = cover.replace("1000x1000", "600x600"),
+        artists = emptyList()
     )
 }
 
@@ -449,7 +452,8 @@ fun IcmArtistSong.toTrack(): com.liquidmusicglass.engine.Track {
         uri = android.net.Uri.parse("https://byicloud.online/track/$id"),
         durationMs = durationMs,
         albumId = 0L,
-        coverUrl = cover.replace("300x300", "600x600")
+        coverUrl = cover.replace("300x300", "600x600"),
+        artists = artists
     )
 }
 
@@ -463,7 +467,8 @@ fun IcmPlaylistTrack.toTrack(): com.liquidmusicglass.engine.Track {
         // VK/secondary return seconds, Apple ms — normalize uniformly.
         durationMs = if (duration in 1..999) duration * 1000L else duration,
         albumId = collectionId.hashCode().toLong(),
-        coverUrl = cover.replace("1000x1000", "600x600")
+        coverUrl = cover.replace("1000x1000", "600x600"),
+        artists = emptyList()
     )
 }
 

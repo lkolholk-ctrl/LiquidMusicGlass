@@ -52,8 +52,13 @@ import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.StarBorder
+import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.rememberModalBottomSheetState
+import com.liquidmusicglass.api.icm.IcmMiniArtist
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -98,11 +103,13 @@ import com.liquidmusicglass.ui.glass.rememberAlbumColors
 import com.liquidmusicglass.ui.liquid.LiquidSlider
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FullPlayer(
     expandProgress: Float,
     trackTitle: String,
     artistName: String,
+    artists: List<IcmMiniArtist> = emptyList(),
     isPlaying: Boolean,
     albumArtUri: Uri?,
     coverUrl: String? = null,
@@ -120,7 +127,8 @@ fun FullPlayer(
     onSkipPrevious: () -> Unit,
     onSeek: (Long) -> Unit,
     onVolumeChange: (Float) -> Unit,
-    onOpenSettings: () -> Unit
+    onOpenSettings: () -> Unit,
+    onNavigateToArtist: (String) -> Unit = {}
 ) {
     if (expandProgress <= 0.005f) return
 
@@ -130,6 +138,10 @@ fun FullPlayer(
     var showAirPlay by remember { mutableStateOf(false) }
     var showQueue by remember { mutableStateOf(false) }
     var showLyrics by remember { mutableStateOf(false) }
+    var showArtistSheet by remember { mutableStateOf(false) }
+    val artistSheetState = rememberModalBottomSheetState(
+        skipPartiallyExpanded = true
+    )
     // Видимость контролов плеера. Когда открыта лирика — скрываются (как в Apple Music).
     // Тап по области лирики временно показывает их снова.
     var controlsVisible by remember { mutableStateOf(true) }
@@ -461,7 +473,20 @@ fun FullPlayer(
                             color = Color.White.copy(alpha = 0.60f),
                             fontSize = 16.sp,
                             maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) {
+                                when {
+                                    artists.size == 1 && artists[0].id != null -> {
+                                        artists[0].id?.let { onNavigateToArtist(it) }
+                                    }
+                                    artists.size > 1 -> {
+                                        showArtistSheet = true
+                                    }
+                                }
+                            }
                         )
                     }
                     Spacer(Modifier.width(12.dp))
@@ -704,6 +729,74 @@ fun FullPlayer(
             visible = showQueue,
             onDismiss = { showQueue = false }
         )
+
+        // ═══ Artist Selection BottomSheet (for multi-artist tracks) ═══
+        if (showArtistSheet) {
+            ModalBottomSheet(
+                onDismissRequest = { showArtistSheet = false },
+                sheetState = artistSheetState,
+                containerColor = Color(0xFF1C1C1E),
+                shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                        .padding(bottom = 32.dp)
+                ) {
+                    // Sheet title
+                    Text(
+                        text = "Artists",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 20.sp,
+                        modifier = Modifier.padding(vertical = 16.dp)
+                    )
+                    // Artist list
+                    artists.forEachIndexed { index, artist ->
+                        val artistId = artist.id
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    artistId?.let {
+                                        scope.launch {
+                                            artistSheetState.hide()
+                                            showArtistSheet = false
+                                            onNavigateToArtist(it)
+                                        }
+                                    }
+                                }
+                                .padding(vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = artist.displayName,
+                                color = Color.White,
+                                fontSize = 17.sp,
+                                modifier = Modifier.weight(1f)
+                            )
+                            if (artistId != null) {
+                                Icon(
+                                    imageVector = Icons.Rounded.ChevronRight,
+                                    contentDescription = null,
+                                    tint = Color.White.copy(alpha = 0.40f),
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                        }
+                        if (index < artists.lastIndex) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(0.5.dp)
+                                    .background(Color.White.copy(alpha = 0.10f))
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
