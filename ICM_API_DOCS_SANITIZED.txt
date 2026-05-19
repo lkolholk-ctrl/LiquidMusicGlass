@@ -1,57 +1,54 @@
 ================================================================================
   ICM MUSIC — PARTNER API DOCUMENTATION
-  Sanitized version — no third-party service names
+  Санитизированная версия — без упоминания сторонних сервисов
   Base URL: https://byicloud.online
+  API Prefix: /api/partner
   Updated: 2026-05-18
 ================================================================================
 
 
-1. OVERVIEW
+1. ОБЗОР
 --------------------------------------------------------------------------------
-API for embedding music search and playback into third-party applications.
+API для встраивания поиска и проигрывания музыки в сторонние приложения.
 
-Base URL: https://byicloud.online
-API Endpoint Prefix: /api/partner
+База: https://byicloud.online
+API-ключ: pk_<id>_<random> — выдаётся при подключении.
 
 
-2. AUTHENTICATION
+2. АВТОРИЗАЦИЯ
 --------------------------------------------------------------------------------
 
-2.1 API Key
-  Header: X-Partner-Key: pk_<partner_id>_<32-char-secret>
-  Format: pk_<id>_<random>
-  Issued on partner onboarding.
+2.1 API-ключ
+  Заголовок: X-Partner-Key: pk_...
+  Формат: pk_<partner_id>_<32-char-secret>
 
 2.2 Partner User ID
-  Header: X-Partner-User-Id: <stable-user-id>
-  Required for: /library/*, /me/*, analytics, per-user settings
-  Max 128 characters.
+  Заголовок: X-Partner-User-Id: <stable-user-id>
+  Нужен для: /library/*, /me/*, аналитика, per-user настройки.
+  Макс 128 символов.
 
-2.3 Session Token (for client-direct requests)
-  Issue endpoint: POST /session/issue
-  Headers for issuance: X-Partner-Key + Content-Type: application/json
-  Request body:
-    {
-      "partner_user_id": "u_42",
-      "hide_explicit": false
-    }
-  Response:
-    {
-      "partner_session_token": "<JWT>",
-      "expires_in": 3600,
-      "partner_user_id": "u_42",
-      "scopes": ["search", "stream", "album", "artist", "meta"]
-    }
-  Client usage: Authorization: Bearer <token>
-  Do NOT expose API key in frontend — use session tokens.
+2.3 Session-токен (для клиентских запросов)
+  Выпускается бэкендом партнёра через POST /session/issue.
+  Использование: Authorization: Bearer <token>
+  Жизнь: 1 час (expires_in секунд).
+  Не клади в localStorage — XSS-вектор.
+  Не дёргай /session/issue на каждый запрос — кешируй.
 
 2.4 CORS
-  Only needed for browser direct (client-direct) requests.
-  Server-to-server and mobile apps do NOT need CORS.
-  Provide full origin: https://yourdomain.com
+  Нужен ТОЛЬКО для browser direct (client-direct) запросов.
+  Для server-to-server и мобильных приложений CORS не нужен.
+  Указывай полный origin: https://yourdomain.com
+
+2.5 Модели авторизации
+
+  | Сценарий          | Кто стучится       | Авторизация           | CORS |
+  |-------------------|--------------------|-----------------------|------|
+  | Server-to-server  | Твой backend → API | X-Partner-Key         | Нет  |
+  | Client-direct     | Браузер → API      | partner_session_token | Да   |
+  | Мобильный/натив   | Приложение → API   | Token или API Key     | Нет  |
 
 
-3. ENDPOINTS
+3. ЭНДПОИНТЫ
 --------------------------------------------------------------------------------
 
 3.1 GET /health
@@ -59,7 +56,7 @@ API Endpoint Prefix: /api/partner
     {
       "partner_id": "yourname",
       "status": "active",
-      "scopes": ["search", "stream", "album", "artist", "meta"],
+      "scopes": ["search", "stream", "album", "artist", "meta", "lyrics"],
       "rate_limits": {
         "search": {"rpm": 600, "burst": 60},
         "stream": {"rpm": 1200, "burst": 120}
@@ -73,32 +70,43 @@ API Endpoint Prefix: /api/partner
       "server_time": 1747200000
     }
 
+  allowed_sources — источники, доступные партнёру.
+
 3.2 GET /search
-  Query parameters:
-    q           — Search string, max 200 chars, min 2 alphanumeric
-    region      — us/ru/nz (must be in regions_allowed)
-    source      — primary / secondary / all
-    limit       — Max results, clamped to config.search.max_results
+  Параметры:
+    q       — Строка поиска. Макс 200 символов. Минимум 2 alphanumeric.
+              Пустые запросы → 400 query_too_short.
+              Мусор ≥10/мин → 429 query_spam_detected.
+    region  — us/ru/nz. Должен быть в regions_allowed.
+    source  — primary (default) / secondary / all.
+              secondary/all требует чтобы secondary был в allowed_sources.
+    limit   — Макс результатов. Клампится до config.search.max_results.
 
-  Response items types (distinguish by flags):
-    isArtist=true   → Artist entity
-    isAlbum=true    → Album/playlist entity
-    both false      → Track entity
+  Response items — три типа сущностей. Различай по флагам:
+    isArtist=true   → Артист
+    isAlbum=true    → Альбом/плейлист
+    оба false       → Трек
 
-  Item fields:
-    id              — Entity ID
-    title           — Track/album title or artist name
-    artist          — Track artist name
-    artistId        — Artist identifier
-    cover           — Cover art URL template (resize: 1000x1000 → 300x300)
-    preview         — 30-second preview URL (tracks only)
-    collectionId    — Album ID (tracks) or same as id (albums)
-    album           — Album name (tracks only)
-    is_explicit     — true if explicit content
-    duration        — Duration in MILLISECONDS (tracks only)
-    region          — Actual region used (may differ from request)
+  Поля результата:
+    id            — ID сущности
+    title         — Название трека/альбома или имя артиста
+    artist        — Исполнитель трека
+    artistId      — ID артиста
+    cover         — URL шаблон обложки (1000x1000 → 300x300)
+    preview       — 30-секундное превью (треки только)
+    collectionId  — ID альбома (треки) или same-as-id (альбомы)
+    album         — Название альбома (треки)
+    is_explicit   — true если 18+
+    duration      — Длительность в МИЛЛИСЕКУНДАХ (треки)
+    isCustom      — true для собственных релизов инди-артистов
+    region        — Фактически использованный регион
 
-  Important: Use debounce 300ms. Cache by (q + region) for 60s.
+  Региональная подмена: если запрошенный регион не разрешён,
+  подменяется на первый из regions_allowed.
+
+  End-to-end:
+    1) GET /search?q=believer → берём track id
+    2) POST /track с trackId → получаем url для стрима
 
 3.3 POST /track
   Request body:
@@ -111,32 +119,33 @@ API Endpoint Prefix: /api/partner
   Response:
     {
       "track_id": "<id>",
-      "file_id": "<internal-file-id>",
+      "file_id": "<internal-id>",
       "source": "primary|secondary|custom|special",
       "quality": "256K",
       "artist_id": "<artist-id>",
-      "url": "https://byicloud.online/api/partner/audio/<file_id>?ps=<signature>&pid=<partner>",
+      "url": "https://byicloud.online/api/partner/audio/<file_id>?ps=<sig>&pid=<partner>",
       "expires_at": 1747200600
     }
 
-  Quality options: 128K, 256K, 320K, ALAC
-  Default region: us
-  URL validity: ~600 seconds (see signed_url_ttl_seconds in /health)
+  Quality: 128K / 256K / 320K / ALAC (первичный каталог)
+           MP3 256K / MP3 320K (вторичный каталог)
+  URL действует ~600 секунд.
 
-  Errors:
-    451 region_unavailable — retry with required_region from response
-    403 source_not_allowed — source disabled in partner config
-    404 track_not_found — not found in any region
+  Ошибки:
+    451 region_unavailable — retry с required_region
+    403 source_not_allowed — source отключён в конфиге
+    404 track_not_found — не найден ни в одном регионе
+    403 early_access — релиз ещё не вышел (пресейв)
 
 3.4 GET /audio/{file_id}
-  Direct stream URL from /track response.
-  No auth headers needed — signature is in query param.
-  Supports Range: bytes= requests (seeking).
-  Returns audio/mp4 or audio/mpeg depending on source.
-  Cache-Control: public, max-age=604800 (1 week)
+  Прямой стрим URL из поля url ответа /track.
+  Авторизация через query-параметр ps, заголовки не нужны.
+  Поддерживает Range: bytes= (seeking).
+  Content-Type: audio/mp4 (primary) или audio/mpeg (secondary).
+  Cache-Control: public, max-age=604800 (1 неделя).
 
-  When URL expires (403 invalid_or_expired_signature):
-    Re-call POST /track with same trackId — cache hit, response in milliseconds.
+  Когда URL истёк (403 invalid_or_expired_signature):
+    Перевызови POST /track с тем же trackId — кеш сработает, ответ мгновенно.
 
 3.5 GET /album/{id}
   Query: ?region=us
@@ -159,7 +168,6 @@ API Endpoint Prefix: /api/partner
           "id": "<track-id>",
           "title": "...",
           "artist": "...",
-          "artistId": "...",
           "cover": "...",
           "collectionId": "<album-id>",
           "duration": 199853,
@@ -169,77 +177,91 @@ API Endpoint Prefix: /api/partner
       ]
     }
 
-  Playlist IDs start with "pl." — same endpoint, type="playlist".
-  Custom releases: isCustom=true, id format custom_album_123.
+  type="playlist" — для редакционных плейлистов (id начинается с pl.)
+  motionCoverUrl — анимированная обложка mp4 (опционально)
 
 3.6 GET /artist/{id}
   Query: ?region=us
-  Response fields:
-    id, name, cover, bio, followers, genre
-    topSongs      — Array of tracks
-    singles       — Array of tracks
-    albums        — Array of albums (full-length, deduplicated)
-    featuring     — Albums where artist is featured
-    similarArtists — Related artists
-    latestRelease — Most recent release (any type)
+  Response:
+    {
+      "id": "<id>",
+      "name": "...",
+      "cover": "...",
+      "bio": "...",
+      "followers": 1234567,
+      "genre": "...",
+      "topSongs": [...],
+      "singles": [...],
+      "albums": [...],
+      "featuring": [...],
+      "similarArtists": [...],
+      "latestRelease": {...}
+    }
 
-  All nested IDs use same prefix system as search results.
+  Поля:
+    topSongs       — Топ-20 треков
+    singles        — Синглы
+    albums         — Полноформатные альбомы (дедуплицированы)
+    featuring      — Альбомы с фичером
+    similarArtists — Похожие артисты
+    latestRelease  — Самый свежий релиз (любого типа)
 
 3.7 GET /track/{id}/meta
-  Metadata without stream URL.
+  Метаданные без stream URL.
   Response: id, collectionId, title, artist, cover, duration
 
 3.8 GET /cover-sign
   Query: ?file_id=<id>
-  For custom covers that need signed URLs.
-  Response: { "url": "<signed-url>", "expires_at": <timestamp> }
-
-  Primary catalog covers use direct URLs — no signing needed.
+  Для custom-обложек, требующих подписи.
+  Response: { "url": "<signed>", "expires_at": <timestamp> }
 
 
-4. SECONDARY CATALOG
+4. ВТОРИЧНЫЙ КАТАЛОГ (Secondary Catalog)
 --------------------------------------------------------------------------------
 
-4.1 Enabling
-  Requires "secondary" in stream.allowed_sources (admin setting).
-  If disabled: 403 source_not_allowed for all secondary requests.
+4.1 Включение
+  Требуется "secondary" в stream.allowed_sources (настраивается админом).
+  Если отключён: 403 source_not_allowed.
 
-4.2 ID Prefixes
-  secondary_track_<id>    — Track
-  secondary_artist_<id>   — Artist
-  secondary_album_<id>    — Album
+4.2 ID-префиксы
+  secondary_track_<id>  — Трек
+  secondary_artist_<id> — Артист
+  secondary_album_<id>  — Альбом
 
-4.3 Search
-  ?source=secondary returns secondary catalog results.
-  ?source=all merges primary + secondary (primary first).
+  Префиксы выдаются в /search, /album, /artist.
+  Резолвер определяет каталог по префиксу автоматически.
 
-4.4 Track Stream
-  Same POST /track endpoint. Prefix tells resolver which catalog.
-  Quality: MP3 256K (default) or MP3 320K (for linked subscribers).
-  Region parameter is ignored for secondary catalog.
+4.3 Поиск
+  ?source=secondary — только вторичный каталог.
+  ?source=all — объединяет первичный + вторичный (первичный первым).
 
-4.5 Duration Units
-  IMPORTANT: Secondary catalog returns duration in SECONDS.
-  Primary catalog returns duration in MILLISECONDS.
-  Client MUST normalize: if duration < 1000, multiply by 1000.
+4.4 Stream
+  Тот же POST /track endpoint. Префикс определяет резолвер.
+  Quality: MP3 256K (default) или MP3 320K (для подписчиков).
+  Параметр region игнорируется.
 
-4.6 Artist Response Fields
-  Same structure as primary catalog artist, plus:
-    singles, featuring, bio, followers
+4.5 Единицы измерения duration
+  ВАЖНО: Первичный каталог возвращает duration в МИЛЛИСЕКУНДАХ.
+         Вторичный каталог возвращает duration в СЕКУНДАХ.
+  Клиент ДОЛЖЕН нормализовать: если duration < 1000, умножить на 1000.
 
-4.7 Limitations
-  - Lyrics and batch /tracks/meta not supported for secondary catalog.
-  - No regional binding.
-  - ALAC quality not available (max 320K MP3).
-  - First request for cold track: 3–10 seconds (file preparation).
-    Use ?async=1 to avoid blocking (see section 10).
+4.6 Альбом / Артист
+  Структура ответа идентична первичному каталогу.
+  Поля: topSongs, singles, albums, featuring, similarArtists, latestRelease.
+
+4.7 Ограничения
+  - Lyrics и batch /tracks/meta не поддерживаются.
+  - Нет региональной привязки.
+  - ALAC недоступен (макс MP3 320K).
+  - Первый запрос холодного трека: 3–10 сек (подготовка файла).
+    Используй ?async=1 (см. раздел 10).
 
 
-5. LYRICS
+5. ТЕКСТЫ ТРЕКОВ (LYRICS)
 --------------------------------------------------------------------------------
 
 5.1 GET /track/{id}/lyrics
-  Query: ?region=us (optional)
+  Query: ?region=us (опционально)
   Response:
     {
       "track_id": "<id>",
@@ -248,29 +270,25 @@ API Endpoint Prefix: /api/partner
       "lyrics": "[00:00.00] First line...\n[00:08.34] Second line..."
     }
 
-  Alternative: GET /lyrics?track_id=<id>&region=us
+  Альтернатива: GET /lyrics?track_id=<id>&region=us
 
-  Supported: primary catalog tracks (cached), some premium tracks.
-  Custom tracks: always 404 lyrics_not_found.
+  Поддерживается: первичный каталог, премиум треки.
+  Custom треки: всегда 404 lyrics_not_found.
 
-  First request for cold track: up to 10 seconds.
-  Subsequent: instant from cache.
-  Scope required: lyrics.
+  Первый запрос холодного трека: до 10 сек.
+  Последующие: мгновенно из кеша.
 
-5.2 LRC Format
-  Synced: [mm:ss.xx] Lyric text
-  Tags: [ti:title], [ar:artist], [al:album], [offset:ms]
+5.2 LRC-формат
+  [mm:ss.xx] Текст строки
+  Теги: [ti:title], [ar:artist], [al:album], [offset:ms]
 
 
-6. PERSONAL CABINET (/me/*)
+6. ЛИЧНЫЙ КАБИНЕТ (/me/*)
 --------------------------------------------------------------------------------
-  Requires: linked user + active subscription.
-  Scope: user_quality_choice, user_profile
+  Требует: linked user + active subscription.
+  Ошибки: 403 user_not_linked, 403 subscription_required.
 
-6.1 GET /me/quality  (DEPRECATED — see preferences)
-6.2 POST /me/quality (DEPRECATED)
-
-6.3 GET /me/preferences
+6.1 GET /me/preferences
   Response:
     {
       "partner_user_id": "u_42",
@@ -280,10 +298,10 @@ API Endpoint Prefix: /api/partner
       "updated_at": 1747200000
     }
 
-6.4 PUT /me/preferences
-  Body: {"quality": "320K"} or {"quality": null} to reset.
+6.2 PUT /me/preferences
+  Body: {"quality": "320K"} или {"quality": null} для сброса.
 
-6.5 GET /me/profile
+6.3 GET /me/profile
   Response:
     {
       "partner_user_id": "u_42",
@@ -292,33 +310,27 @@ API Endpoint Prefix: /api/partner
       "avatar_url": "https://..."
     }
 
-  Errors:
-    401 partner_user_required
-    403 user_not_linked
-    403 subscription_required
-    403 scope_not_allowed
+  Ошибки: 401 partner_user_required, 403 scope_not_allowed.
+
+6.4 GET /me/quality (DEPRECATED — см. /me/preferences)
+6.5 POST /me/quality (DEPRECATED)
 
 
-7. LIBRARY (/library/*)
+7. МЕДИАТЕКА (/library/*)
 --------------------------------------------------------------------------------
-  Requires: linked user (X-Partner-User-Id header).
-  Errors: 403 user_not_linked if not linked.
+  Требует: linked user (X-Partner-User-Id).
+  Ошибка: 403 user_not_linked если не привязан.
 
 7.1 GET /library/likes
   Query: ?source=primary|secondary|all&limit=50&offset=0
   Response:
     {
-      "count": 12,
-      "total": 12,
-      "offset": 0,
-      "limit": 50,
+      "count": 12, "total": 12, "offset": 0, "limit": 50,
       "items": [
         {
           "id": "<track-id>",
           "trackId": "<track-id>",
-          "title": "...",
-          "artist": "...",
-          "cover": "...",
+          "title": "...", "artist": "...", "cover": "...",
           "duration": 204347,
           "collectionId": "<album-id>",
           "artistId": "<artist-id>",
@@ -329,7 +341,7 @@ API Endpoint Prefix: /api/partner
     }
 
 7.2 GET /library/subscriptions
-  Query: ?source=... (same as likes)
+  Query: ?source=... (так же как likes)
   Response items:
     {
       "id": "<artist-id>",
@@ -340,35 +352,31 @@ API Endpoint Prefix: /api/partner
     }
 
 7.3 GET /library/wave/next
-  Personal radio / discovery station.
-  Query parameters:
-    exclude         — Comma-separated track IDs to exclude (current queue)
-    seed_track_id   — Create station based on this track
-    recent_skips    — Number of consecutive skips (skip-streak fallback)
-    region          — Region override
+  Персональная радиостанция / волна.
+  Query параметры:
+    exclude       — ID треков через запятую (текущая очередь)
+    seed_track_id — Создать станцию на основе этого трека
+    recent_skips  — Количество подряд пропущенных (skip-streak fallback)
+    region        — Регион
 
   Response:
     {
       "track": {
-        "id": "<track-id>",
-        "title": "...",
-        "artist": "...",
-        "cover": "...",
-        "duration": 204347,
-        "collectionId": "<album-id>",
-        "artistId": "<artist-id>",
+        "id": "<track-id>", "title": "...", "artist": "...",
+        "cover": "...", "duration": 204347,
+        "collectionId": "<album-id>", "artistId": "<artist-id>",
         "is_explicit": false
       },
       "status": "ok",
       "region": "us"
     }
 
-  status values:
-    ok     — Track found and ready
-    empty  — No candidates (user hasn't liked anything or all excluded)
+  status:
+    ok    — Трек найден и готов
+    empty — Нет кандидатов (юзер ничего не лайкал или всё исключено)
 
-  Call repeatedly to build continuous radio queue.
-  Preload 3-5 tracks ahead for seamless playback.
+  Вызывай повторно для построения непрерывной очереди.
+  Предзагружай 3-5 треков вперёд для бесшовного воспроизведения.
   Scope: library_wave.
 
 7.4 POST /library/wave/feedback
@@ -379,15 +387,15 @@ API Endpoint Prefix: /api/partner
     }
 
   UI mapping:
-    👍 More this track   → more_track + track_id
-    👎 Less this track   → less_track + track_id
-    👍 More this artist  → more_artist + artist_id
-    👎 Less this artist  → less_artist + artist_id
+    👍 Больше этого трека   → more_track + track_id
+    👎 Меньше этого трека  → less_track + track_id
+    👍 Больше этого артиста → more_artist + artist_id
+    👎 Меньше этого артиста → less_artist + artist_id
 
-  Decay: 30-day half-life. Repeated clicks are idempotent.
+  Забывание: half-life 30 дней. Повторные клики идемпотентны.
 
 7.5 POST /library/wave/playback
-  Log playback event for ranking improvement.
+  Логирование прослушивания для улучшения ранжирования.
   Body:
     {
       "track_id": "<id>",
@@ -397,45 +405,44 @@ API Endpoint Prefix: /api/partner
       "skipped": false
     }
 
-  Fields:
-    track_id        — Required. Track ID from /library/wave/next.
-    played_seconds  — Required. Actual listening time accumulated.
-    total_seconds   — Optional but recommended. Track duration.
-    completed       — Optional. Auto-calculated: played >= 0.85 * total
-    skipped         — Optional. Auto-calculated: played < 0.15 * total
+  Поля:
+    track_id        — Обязательно. ID трека из /library/wave/next.
+    played_seconds  — Обязательно. Фактическое время прослушивания.
+    total_seconds   — Рекомендуется. Длительность трека.
+    completed       — Авто: played >= 0.85 * total
+    skipped         — Авто: played < 0.15 * total
 
-  Call when: track ends, user skips, or switches tracks.
-  logged=true in response if signal recorded.
-  logged=false for non-primary track IDs (secondary catalog tracks ignored).
+  Вызывать при: окончании трека, скипе, переключении.
+  logged=true если записано. logged=false для треков не из первичного каталога.
   Scope: library_wave_playback.
 
 7.6 POST /library/wave/reset
-  Clears wave history, seed artists, preferences.
-  Likes are preserved.
+  Очищает историю волны, seed-артистов, предпочтения.
+  Лайки сохраняются.
   Response: { "status": "ok", "removed": 142 }
 
 7.7 GET /library/wave/popular-artists
-  For onboarding UI — list of popular artists to select from.
-  Does NOT require partner_user_id.
-  Cached 24h on server.
+  Для онбординга — список популярных артистов на выбор.
+  НЕ требует partner_user_id.
+  Кешируется 24ч на сервере.
   Response: [ { "id": "...", "name": "...", "image": "..." } ]
 
 7.8 GET /library/wave/onboarding
-  Check onboarding status.
+  Статус онбординга.
   Response: { "artists": [...], "completed": true }
 
 7.9 POST /library/wave/onboarding
-  Save user's artist selection.
+  Сохранение выбора артистов.
   Body: { "artists": [ { "id": "...", "name": "..." } ] }
-  Minimum 1, recommended 3-5.
+  Минимум 1, рекомендуется 3-5.
   Response: { "ok": true, "saved": 2 }
 
 
-8. BATCH REQUESTS
+8. BATCH-ЗАПРОСЫ
 --------------------------------------------------------------------------------
 POST /tracks/meta
   Body: { "track_ids": ["id1", "id2", "id3", ...] }
-  Max 50 track IDs per request.
+  Макс 50 track IDs за запрос.
   Response:
     {
       "count": 3,
@@ -446,46 +453,47 @@ POST /tracks/meta
       ]
     }
 
-  Consumes 1 meta rate-limit hit instead of N.
+  Занимает 1 meta rate-limit hit вместо N.
+  Не поддерживается для вторичного каталога.
 
 
-9. ASYNC MODE FOR /track
+9. ASYNC-РЕЖИМ ДЛЯ /track
 --------------------------------------------------------------------------------
-  Add ?async=1 to POST /track request.
-  For cold tracks that need file preparation (1-5 seconds, ALAC up to 1 minute).
+  Добавь ?async=1 к POST /track.
+  Для холодных треков, требующих подготовки файла (1-5 сек, ALAC до 1 мин).
 
-  Warm track → Normal 200 with url.
-  Cold track → 202 Accepted:
+  Тёплый трек → Обычный 200 с url.
+  Холодный трек → 202 Accepted:
     {
       "job_id": "a3f5b1c20d8e4f72",
       "status": "pending",
       "poll_after_seconds": 3
     }
 
-  Poll: GET /track/job/{job_id}
+  Проверка: GET /track/job/{job_id}
   Pending → { "status": "pending", "poll_after_seconds": 3 }
   Ready   → { "status": "ready", "track": { ...full /track response... } }
 
-  Job expires after 10 minutes.
-  Do NOT poll more frequently than poll_after_seconds.
+  Job истекает через 10 минут.
+  Не полли чаще чем poll_after_seconds.
 
 
-10. ACCOUNT LINKING
+10. ЛИНКОВКА АККАУНТОВ
 --------------------------------------------------------------------------------
 
-10.1 Method 1: Telegram HTML Redirect
-  Build URL:
+10.1 Способ 1: Telegram HTML-редирект
+  URL:
     https://byicloud.online/partner/<partner_id>/link
       ?partner_user_id=<id>
       &redirect_uri=<callback-url>
       &state=<csrf-token>
 
-  After auth, user redirected to:
+  После авторизации редирект на:
     <redirect_uri>?state=<same>&linked=true&icm_user_id=<id>
-    or
+    или
     <redirect_uri>?state=<same>&linked=false&error=<reason>
 
-10.2 Method 2: Email (JSON API, auto-registration)
+10.2 Способ 2: Email (JSON API, авто-регистрация)
   POST /link/email/request
     Body: { "partner_user_id": "...", "email": "...", "state": "..." }
     Response: { "nonce": "...", "email": "...", "expires_in": 900 }
@@ -494,150 +502,153 @@ POST /tracks/meta
     Body: { "nonce": "...", "otp": "<6-digit-code>" }
     Response: { "linked": true, "icm_user_id": "..." }
 
-  POST /link/email/password/change
+  POST /link/email/password/change (S2S only)
     Body: { "partner_user_id": "...", "current_password": "...", "new_password": "..." }
-    S2S only. Requires X-Partner-Key.
 
-  POST /link/email/password/reset
+  POST /link/email/password/reset (S2S only)
     Body: { "partner_user_id": "..." }
-    S2S only. New password sent to email.
+    Новый пароль отправляется на email.
+
+10.3 Что даёт линковка:
+  - Медиатека (лайки, подписки, волна)
+  - Выбор качества стрима (/me/preferences)
+  - Профиль юзера (/me/profile)
 
 
-11. ERRORS
+11. ОШИБКИ
 --------------------------------------------------------------------------------
 
 Code                              | Meaning
 ----------------------------------|-----------------------------------------
-401 missing_api_key               | No X-Partner-Key header
-401 invalid_session_token         | Session token expired/invalid
-401 invalid_api_key_format        | Key not in pk_<id>_<32-char> format
-401 token_revoked                 | Token was revoked
-401 partner_user_required         | Endpoint needs X-Partner-User-Id
-403 invalid_api_key               | Key not found
-403 partner_suspended             | Access suspended
-403 scope_not_allowed             | Feature disabled in config
-403 source_not_allowed            | Source disabled in config
-403 s2s_only                      | Endpoint requires API key, not session
-403 invalid_or_expired_signature  | Signed URL expired — re-request /track
-403 user_not_linked               | User not linked to ICM account
-403 subscription_required         | No active subscription for /me/*
-403 job_belongs_to_another_partner| Wrong partner for job_id
-400 query_too_short               | q < 2 alphanumeric chars after trim
-400 invalid_source                | source not in allowed values
-429 query_spam_detected           | >=10 garbage queries/minute
-429 rate_limited                  | Rate limit exceeded (Retry-After header)
-451 region_unavailable            | Track not in region (required_region in response)
-404 album_not_found               | Album not found
-404 artist_not_found              | Artist not found
-404 track_not_found               | Track not found
-404 lyrics_not_found              | Lyrics not found
-404 job_not_found_or_expired      | Async job >10 min old
-404 user_not_found                | Profile: linked but user missing
+401 missing_api_key               | Нет X-Partner-Key
+401 invalid_session_token         | Токен истёк/невалиден
+401 invalid_api_key_format        | Ключ не в формате pk_<id>_<32-char>
+401 token_revoked                 | Токен отозван
+401 partner_user_required         | Нужен X-Partner-User-Id
+403 invalid_api_key               | Ключ не найден
+403 partner_suspended             | Доступ приостановлен
+403 scope_not_allowed             | Фича отключена в конфиге
+403 source_not_allowed            | Источник отключён в конфиге
+403 s2s_only                      | Требуется API-ключ, не session token
+403 invalid_or_expired_signature  | Signed URL истёк — перевызови /track
+403 user_not_linked               | Юзер не привязан к ICM
+403 subscription_required         | Нет подписки для /me/*
+403 job_belongs_to_another_partner| Чужой job_id
+400 query_too_short               | q < 2 alphanumeric символов
+400 invalid_source                | source не из допустимых
+429 query_spam_detected           | ≥10 мусорных запросов/мин
+429 rate_limited                  | Rate limit превышен (Retry-After)
+451 region_unavailable            | Трек не в этом регионе (required_region в ответе)
+404 album_not_found               | Альбом не найден
+404 artist_not_found              | Артист не найден
+404 track_not_found               | Трек не найден
+404 lyrics_not_found              | Текст не найден
+404 job_not_found_or_expired      | Async job >10 мин
+404 user_not_found                | Профиль: привязан, но юзер отсутствует
 
 
-12. RATE LIMITS
+12. ЛИМИТЫ
 --------------------------------------------------------------------------------
 
-Groups (counted separately):
+Группы rate limits (считаются отдельно):
   search        — /search
   stream        — /track
   session_issue — /session/issue
   default       — /album, /artist, /meta, /cover-sign, /lyrics,
-                  /me/*, /library/* (including /library/wave/playback)
+                  /me/*, /library/* (включая /library/wave/playback)
 
-/audio and /cover streams do NOT count against limits.
-Exact values in /health response.
+/audio и /cover стримы НЕ считаются в лимиты.
+Точные значения в /health.
 
-12.1 What to Cache
-  /search              — 60 seconds by (query + region)
-  /album/{id}          — 24+ hours
-  /artist/{id}         — 24+ hours
-  /track/{id}/meta     — 24+ hours
-  file_id from /track  — 24+ hours by (trackId + region + quality)
-  partner_session_token — Until expires_in
+12.1 Что кешировать
+  /search              — 60 сек по (query + region)
+  /album/{id}          — 24+ часа
+  /artist/{id}         — 24+ часа
+  /track/{id}/meta     — 24+ часа
+  file_id из /track    — 24+ часа по (trackId + region + quality)
+  partner_session_token — До expires_in
 
-12.2 What NOT to Cache
-  url field from /track     — Expires in ~10 minutes
-  url field from /cover-sign — Expires in ~10 minutes
-  /audio/{file_id} files    — Browser caches automatically (1 week)
+12.2 Что НЕ кешировать
+  url из /track      — Живёт ~10 минут
+  url из /cover-sign — Живёт ~10 минут
+  /audio/{file_id}   — Браузер кеширует сам (1 неделя)
 
-12.3 Estimate for 100k DAU
-  /search:  1-2 rpm (cached)
-  /track:   10-20 rpm (spikes on player start)
-  /album, /artist, /meta: Single-digit rpm
+12.3 Расчёт на 100k DAU
+  /search:  1-2 rpm (кеш)
+  /track:   10-20 rpm (всплески при старте)
+  /album, /artist, /meta: Единицы rpm
 
 
-13. STREAMING BEST PRACTICES
+13. СТРИМИНГ: ЛУЧШИЕ ПРАКТИКИ
 --------------------------------------------------------------------------------
 
-13.1 URL Lifecycle
-  1. Call POST /track with trackId → get signed url + expires_at
-  2. Feed url directly to player
-  3. On 403/expired: re-call /track (cache hit, instant response)
+13.1 Жизненный цикл URL
+  1. POST /track с trackId → получаешь url + expires_at
+  2. Подставляешь url в плеер
+  3. На 403/expired: повторный POST /track (кеш, мгновенно)
 
-13.2 File ID Caching
-  file_id from /track response can be cached for 24+ hours.
-  Same trackId + region + quality always returns same file_id.
+13.2 File ID
+  file_id из /track можно кешировать на 24+ часа.
+  Одинаковый trackId + region + quality = одинаковый file_id.
 
-13.3 Quality Parameter
-  Partner config max_quality caps user requests.
-  Linked subscribers can override via /me/preferences.
-  Explicit quality param in /track takes highest priority.
+13.3 Quality
+  max_quality в /health капает запросы.
+  Подписчики могут переопределять через /me/preferences.
+  Явный quality в /track имеет наивысший приоритет.
 
-13.4 Region Handling
-  If requested region not in regions_allowed → auto-substituted.
-  Always check region field in response.
-  451 region_unavailable → retry with required_region.
+13.4 Region
+  Если регион не из regions_allowed → автозамена.
+  Проверяй поле region в ответе.
+  451 region_unavailable → retry с required_region.
 
-13.5 Player Integration
-  Supports HTTP Range requests (seeking).
-  Content-Type: audio/mp4 (primary) or audio/mpeg (secondary).
-  Let player auto-detect format — do NOT hardcode MIME type.
+13.5 Интеграция плеера
+  HTTP Range requests поддерживаются (seeking).
+  Content-Type: audio/mp4 (primary) или audio/mpeg (secondary).
+  Позволь плееру автоопределять формат — НЕ хардкодь MIME.
 
 
 14. X-REQUEST-ID
 --------------------------------------------------------------------------------
-  Every response includes X-Request-Id header.
-  Include this in support requests for debugging.
+  Каждый ответ содержит заголовок X-Request-Id.
+  Указывай его при обращении в поддержку.
 
 
-15. API VERSIONING
+15. ВЕРСИОНИРОВАНИЕ API
 --------------------------------------------------------------------------------
-  Current: v1 (implicit in /api/partner path)
-  Breaking changes announced 30 days in advance.
-  Additions (new fields, endpoints) are backward-compatible.
+  Текущая: v1 (неявно в /api/partner)
+  Breaking changes анонсируются за 30 дней.
+  Добавления (новые поля, эндпоинты) — backward-compatible.
 
 
-16. DATA MODEL NOTES
+16. ПРИМЕЧАНИЯ ПО ДАННЫМ
 --------------------------------------------------------------------------------
 
-16.1 Duration Normalization
-  Primary catalog: duration in MILLISECONDS
-  Secondary catalog: duration in SECONDS
-  Client normalization: if duration < 1000 → multiply by 1000
+16.1 Duration
+  Первичный каталог: МИЛЛИСЕКУНДЫ
+  Вторичный каталог: СЕКУНДЫ
+  Нормализация: if duration < 1000 → duration * 1000
 
-16.2 Cover URL Templates
-  Primary catalog covers use size templates:
-    1000x1000 → full resolution
-    600x600   → medium
-    300x300   → thumbnail
-  Replace in URL string directly.
+16.2 Cover URLs
+  Первичный каталог: шаблоны с размерами
+    1000x1000 — полное разрешение
+    600x600   — среднее
+    300x300   — thumbnail
+  Заменяй в строке URL напрямую.
 
-16.3 Explicit Content
-  is_explicit flag on tracks.
-  If partner config hide_explicit=true or user preference set,
-    filter explicit tracks from search and album listings.
+16.3 Explicit
+  is_explicit на треках.
+  Если hide_explicit=true — фильтруй из поиска и альбомов.
 
-16.4 Custom Releases
-  isCustom=true indicates independent artist releases.
-  IDs may be numeric or custom_album_123 / custom_track_123 format.
-  Work identically in /track, /album, /artist endpoints.
+16.4 Custom релизы
+  isCustom=true — собственные релизы инди-артистов.
+  ID формата custom_album_123 или просто число.
+  Работают так же — через /track.
 
 
-17. CONTACTS
+17. КОНТАКТЫ
 --------------------------------------------------------------------------------
-  Support: through partner dashboard or Telegram bot
-  Docs updates: announced in partner channel
+  Поддержка: через партнёрский дашборд или Telegram бот
+  Обновления: в партнёрском канале
 
 ================================================================================
 END OF DOCUMENTATION
