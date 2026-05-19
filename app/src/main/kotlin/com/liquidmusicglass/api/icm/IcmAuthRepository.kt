@@ -54,6 +54,20 @@ object IcmAuthRepository {
     private val _premiumExpiresAt = MutableStateFlow<Long>(0)
     val premiumExpiresAt: StateFlow<Long> = _premiumExpiresAt
 
+    // ─── Profile data from /me/profile ───
+    private val _profileName = MutableStateFlow<String?>(null)
+    val profileName: StateFlow<String?> = _profileName
+
+    private val _avatarUrl = MutableStateFlow<String?>(null)
+    val avatarUrl: StateFlow<String?> = _avatarUrl
+
+    // ─── Preferences from /me/preferences ───
+    private val _maxQuality = MutableStateFlow<String?>(null)
+    val maxQuality: StateFlow<String?> = _maxQuality
+
+    private val _allowedQualities = MutableStateFlow<List<String>>(emptyList())
+    val allowedQualities: StateFlow<List<String>> = _allowedQualities
+
     private var prefs: SharedPreferences? = null
 
     private val httpClient = OkHttpClient.Builder()
@@ -377,6 +391,10 @@ object IcmAuthRepository {
         _telegramId.value = null
         _partnerUserId.value = null
         _premiumExpiresAt.value = 0
+        _profileName.value = null
+        _avatarUrl.value = null
+        _maxQuality.value = null
+        _allowedQualities.value = emptyList()
         syncToIcmApi()
     }
 
@@ -393,6 +411,61 @@ object IcmAuthRepository {
         _partnerUserId.value = generated
         syncToIcmApi()
         return generated
+    }
+
+    /**
+     * Fetch user profile from /me/profile.
+     * Requires linked user. Updates profileName and avatarUrl StateFlows.
+     * Returns Result with IcmUserProfile or failure (401/403 if not linked).
+     */
+    suspend fun fetchProfile(): Result<IcmUserProfile> = withContext(Dispatchers.IO) {
+        val result = IcmRepository.getUserProfile()
+        result?.let { profile ->
+            _profileName.value = profile.name
+            _avatarUrl.value = profile.avatarUrl
+        }
+        result?.let { Result.success(it) }
+            ?: Result.failure(IOException("Failed to fetch profile"))
+    }
+
+    /**
+     * Fetch user preferences from /me/preferences.
+     * Requires linked user with active subscription.
+     * Updates maxQuality and allowedQualities StateFlows.
+     * Returns Result with IcmUserPreferences or failure (403 subscription_required).
+     */
+    suspend fun fetchPreferences(): Result<IcmUserPreferences> = withContext(Dispatchers.IO) {
+        val result = IcmRepository.getUserPreferences()
+        result?.let { prefs ->
+            _maxQuality.value = prefs.maxQuality
+            _allowedQualities.value = prefs.allowedQualities
+            // Infer premium status from allowed qualities
+            val hasPremium = prefs.allowedQualities.contains("ALAC") ||
+                    prefs.allowedQualities.contains("320K")
+            if (hasPremium != _isPremium.value) {
+                _isPremium.value = hasPremium
+            }
+        }
+        result?.let { Result.success(it) }
+            ?: Result.failure(IOException("Failed to fetch preferences"))
+    }
+
+    /**
+     * Fetch both profile and preferences after successful auth.
+     * Call this after Telegram redirect or email login completes.
+     */
+    suspend fun fetchUserData(): Result<Pair<IcmUserProfile?, IcmUserPreferences?>> = withContext(Dispatchers.IO) {
+        val profileResult = fetchProfile()
+        val prefsResult = fetchPreferences()
+
+        val profile = profileResult.getOrNull()
+        val preferences = prefsResult.getOrNull()
+
+        if (profile != null || preferences != null) {
+            Result.success(profile to preferences)
+        } else {
+            Result.failure(IOException("Failed to fetch user data"))
+        }
     }
 
     /**

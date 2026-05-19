@@ -179,8 +179,8 @@ object IcmRepository {
     /**
      * Get full TrackResponse (including expires_at).
      */
-    suspend fun getTrackInfo(trackId: String, region: String? = null): IcmTrackResponse? {
-        val result = api.getTrack(trackId, region)
+    suspend fun getTrackInfo(trackId: String, region: String? = null, quality: String? = null): IcmTrackResponse? {
+        val result = api.getTrack(trackId, region, quality)
         result.exceptionOrNull()?.let {
             _lastException = it as? Exception
             _lastError.value = it.message

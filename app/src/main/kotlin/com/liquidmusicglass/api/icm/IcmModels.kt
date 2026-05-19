@@ -484,6 +484,8 @@ object IcmErrorCodes {
     const val QUERY_TOO_SHORT = "query_too_short"
     const val QUERY_SPAM_DETECTED = "query_spam_detected"
     const val EARLY_ACCESS = "early_access"
+    const val SUBSCRIPTION_REQUIRED = "subscription_required"
+    const val USER_NOT_LINKED = "user_not_linked"
 }
 
 // ─── Search Source ───
@@ -519,24 +521,19 @@ data class IcmUserQualityResponse(
 
 @Serializable
 data class IcmUserPreferences(
-    val quality: String? = null,
-    val region: String? = null,
-    @SerialName("hide_explicit") val hideExplicit: Boolean? = null,
-    val source: String? = null
+    @SerialName("partner_user_id") val partnerUserId: String? = null,
+    @SerialName("quality_preference") val qualityPreference: String? = null,
+    @SerialName("max_quality") val maxQuality: String? = null,
+    @SerialName("allowed_qualities") val allowedQualities: List<String> = emptyList(),
+    @SerialName("updated_at") val updatedAt: Long? = null
 )
 
 @Serializable
 data class IcmUserProfile(
-    @SerialName("icm_user_id") val icmUserId: Long? = null,
-    val email: String? = null,
-    @SerialName("subscription") val subscription: IcmSubscription? = null
-)
-
-@Serializable
-data class IcmSubscription(
-    val active: Boolean = false,
-    val plan: String? = null,
-    @SerialName("expires_at") val expiresAt: Long? = null
+    @SerialName("partner_user_id") val partnerUserId: String? = null,
+    val name: String? = null,
+    val username: String? = null,
+    @SerialName("avatar_url") val avatarUrl: String? = null
 )
 
 // ─── Wave (Personal Radio) ───

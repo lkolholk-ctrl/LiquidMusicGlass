@@ -901,7 +901,48 @@ object PlayerController {
      * Docs: "file_id — cache for a day+ by (trackId + region + quality)"
      * Uses the API's expires_at when available, otherwise falls back to ~8 min.
      */
-    private suspend fun getCachedOrResolveStreamUrl(trackId: String): android.net.Uri? {
+    /**
+     * Determine the effective stream quality based on user subscription status.
+     * - If user has premium (ALAC or 320K in allowedQualities), use configured quality.
+     * - Otherwise, cap at maxQuality from /me/preferences (e.g., 128K or 256K).
+     * - For secondary_ tracks, ALAC and MP3 320K are only allowed with premium.
+     */
+    private fun getEffectiveQuality(requestedQuality: String? = null, trackId: String): String? {
+        val isSecondary = trackId.startsWith("secondary_")
+        val hasPremium = com.liquidmusicglass.api.icm.IcmAuthRepository.isPremium.value
+        val maxQuality = com.liquidmusicglass.api.icm.IcmAuthRepository.maxQuality.value
+        val allowedQualities = com.liquidmusicglass.api.icm.IcmAuthRepository.allowedQualities.value
+
+        val desired = requestedQuality
+            ?: com.liquidmusicglass.api.icm.IcmApi.getInstance().streamQuality
+            ?: com.liquidmusicglass.api.icm.IcmStreamQuality.K256
+
+        // If no premium, cap at maxQuality from preferences
+        if (!hasPremium && maxQuality != null) {
+            // Quality hierarchy: 128K < 256K < 320K < ALAC
+            val qualityRank = mapOf(
+                "128K" to 1, "256K" to 2, "320K" to 3, "ALAC" to 4,
+                "MP3 128K" to 1, "MP3 256K" to 2, "MP3 320K" to 3
+            )
+            val desiredRank = qualityRank[desired] ?: 2
+            val maxRank = qualityRank[maxQuality] ?: 2
+            if (desiredRank > maxRank) {
+                return maxQuality
+            }
+        }
+
+        // For secondary tracks, premium-only qualities
+        if (isSecondary && !hasPremium) {
+            // ALAC and MP3 320K require premium for secondary
+            if (desired == "ALAC" || desired == "MP3 320K" || desired == "320K") {
+                return "MP3 256K"
+            }
+        }
+
+        return desired
+    }
+
+    private suspend fun getCachedOrResolveStreamUrl(trackId: String, requestedQuality: String? = null): android.net.Uri? {
         val now = System.currentTimeMillis()
         val cached = streamUrlCache[trackId]
         val expiry = streamUrlCacheExpiry[trackId] ?: 0L
@@ -913,8 +954,9 @@ object PlayerController {
         return try {
             kotlinx.coroutines.withTimeout(15_000) {
                 android.util.Log.d("PlayerController", "Resolving stream URL for $trackId...")
-                // Use getTrackInfo to get both URL and expires_at
-                val trackInfo = com.liquidmusicglass.api.icm.IcmRepository.getTrackInfo(trackId)
+                val effectiveQuality = getEffectiveQuality(requestedQuality, trackId)
+                // Use getTrackInfo to get both URL and expires_at with quality restriction
+                val trackInfo = com.liquidmusicglass.api.icm.IcmRepository.getTrackInfo(trackId, quality = effectiveQuality)
                 if (trackInfo != null) {
                     val uri = android.net.Uri.parse(trackInfo.url)
                     streamUrlCache[trackId] = uri
@@ -926,7 +968,7 @@ object PlayerController {
                         STREAM_CACHE_TTL_MS
                     }
                     streamUrlCacheExpiry[trackId] = now + ttl
-                    android.util.Log.d("PlayerController", "Stream URL resolved for $trackId: ${trackInfo.url.take(60)}... (expires in ${ttl/1000}s)")
+                    android.util.Log.d("PlayerController", "Stream URL resolved for $trackId (quality=$effectiveQuality): ${trackInfo.url.take(60)}... (expires in ${ttl/1000}s)")
                     uri
                 } else {
                     android.util.Log.e("PlayerController", "Stream URL resolve returned null for $trackId")
@@ -945,8 +987,8 @@ object PlayerController {
     /**
      * Resolve stream URL for upcoming track (preload).
      */
-    private suspend fun preloadStreamUrl(trackId: String): android.net.Uri? {
-        return getCachedOrResolveStreamUrl(trackId)
+    private suspend fun preloadStreamUrl(trackId: String, requestedQuality: String? = null): android.net.Uri? {
+        return getCachedOrResolveStreamUrl(trackId, requestedQuality)
     }
 
     fun togglePlayPause(context: Context) {
