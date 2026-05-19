@@ -270,17 +270,8 @@ object PlayerController {
             if (playbackState == Player.STATE_READY) {
                 _durationMs.value = current.duration.coerceAtLeast(0L)
             }
-            if (playbackState == Player.STATE_ENDED) {
-                // ExoPlayer auto-advances to the next MediaItem automatically.
-                // EndlessPlaybackEngine handles auto-refill via global queue monitor.
-                // Only handle edge case where queue truly ran out.
-                val remaining = endlessEngine.getRemainingTracks()
-                if (remaining < 1) {
-                    scope.launch {
-                        endlessEngine.checkAndRefillIfNeeded()
-                    }
-                }
-            }
+            // STATE_ENDED: ExoPlayer auto-advances. Refill обрабатывается
+            // в onMediaItemTransition — здесь ничего не делаем.
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
@@ -322,20 +313,19 @@ object PlayerController {
                     }
                 }
 
-                // ── GLOBAL: Start equator prefetch for ML AutoMix ──
+                // ── Equator prefetch: resolve next track URL at 50% ──
                 endlessEngine.startEquatorPrefetch(
                     track = track,
                     onPrefetch = {
-                        // Aggressive prefetch at 50% — resolve URLs for upcoming tracks
+                        // Prefetch at 50% — resolve URLs for upcoming tracks
                         preloadUpcoming()
-                    },
-                    onRefillNeeded = {
-                        // If queue running low at equator, trigger refill
-                        scope.launch {
-                            endlessEngine.checkAndRefillIfNeeded()
-                        }
                     }
                 )
+
+                // ── Event-driven refill: check queue on every track transition ──
+                scope.launch {
+                    endlessEngine.checkAndRefillIfNeeded()
+                }
 
                 // Pre-fetch lyrics for current track in background
                 scope.launch(Dispatchers.IO) {
@@ -502,7 +492,7 @@ object PlayerController {
         loadAutoMixState(context)
 
         // ── Start global endless playback engine ──
-        endlessEngine.startGlobalQueueMonitor()
+        // REMOVED: startGlobalQueueMonitor() — event-driven refill via onMediaItemTransition
 
         scope.launch {
             obtainController(context)

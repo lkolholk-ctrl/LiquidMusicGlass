@@ -17,10 +17,14 @@ import java.util.concurrent.atomic.AtomicLong
  * Глобальное ядро бесконечного стриминга (Endless Loop Mode).
  *
  * Отвечает за:
- * 1. Постоянный мониторинг очереди ExoPlayer — когда остаётся < 3 треков, инициирует добор.
- * 2. Динамический добор треков через wave/recommendations API с дедупликацией.
- * 3. Агрессивный префетч на 50% экватора трека для ML AutoMix.
- * 4. Атомарную очистку очереди при смене контекста пользователем.
+ * 1. Добор треков через wave/recommendations API с дедупликацией.
+ * 2. Префетч на 50% экватора трека.
+ * 3. Атомарную очистку очереди при смене контекста пользователем.
+ *
+ * ПРИНЦИП: никакого фонового мониторинга. Refill вызывается строго:
+ *   - из onMediaItemTransition (когда плеер переключается на следующий трек)
+ *   - из playFromList (при ручном старте воспроизведения)
+ *   - из onPlaybackStateChanged(STATE_ENDED) как fallback
  *
  * Инкапсулировано в PlayerController — UI-экраны просто вызывают playFromList().
  */
@@ -42,13 +46,13 @@ internal class EndlessPlaybackEngine(
         const val MAX_PLAYED_HISTORY = 500
 
         /** Интервал проверки позиции для префетча (мс). */
-        const val POSITION_CHECK_INTERVAL_MS = 500L
+        const val POSITION_CHECK_INTERVAL_MS = 1000L
 
-        /** Порог экватора для агрессивного префетча (0.5 = 50%). */
+        /** Порог экватора для префетча (0.5 = 50%). */
         const val EQUATOR_THRESHOLD = 0.5
 
         /** Минимальный интервал между refill-запросами (мс) — защита от спама. */
-        const val MIN_REFILL_INTERVAL_MS = 3000L
+        const val MIN_REFILL_INTERVAL_MS = 5000L
     }
 
     // ── State ──
@@ -72,9 +76,6 @@ internal class EndlessPlaybackEngine(
     /** Job для мониторинга позиции трека (префетч на экваторе). */
     private var equatorPrefetchJob: Job? = null
 
-    /** Job для фонового мониторинга остатка очереди. */
-    private var queueMonitorJob: Job? = null
-
     /** Счётчик успешных refill-циклов (для метрик). */
     private val refillCounter = AtomicInteger(0)
 
@@ -82,48 +83,27 @@ internal class EndlessPlaybackEngine(
 
     /**
      * Контекст для автодобора треков.
-     * Определяет, откуда брать следующие треки когда очередь заканчивается.
      */
     data class RefillContext(
         val type: Type,
-        /** ID артиста, альбома, плейлиста, seed-трека и т.д. */
         val id: String? = null,
-        /** Имя/название для поисковых запросов. */
         val name: String? = null,
-        /** Seed track ID для wave-станции. */
         val seedTrackId: String? = null,
-        /** Жанр для жанрового добора. */
         val genre: String? = null,
-        /** Список артистов для артист-based добора. */
         val artistIds: List<String> = emptyList()
     ) {
         enum class Type {
-            WAVE,       // Персональная волна / радио
-            ARTIST,     // Треки того же артиста + похожие
-            ALBUM,      // Другие треки артиста альбома
-            SEARCH,     // Поисковый запрос
-            GENRE,      // Жанровой добор
-            PLAYLIST,   // Плейлист
-            LIBRARY,    // Медиатека (лайки)
-            SIMILAR     // Похожие на текущий трек
+            WAVE, ARTIST, ALBUM, SEARCH, GENRE, PLAYLIST, LIBRARY, SIMILAR
         }
     }
 
     // ── Public API ──
 
-    /**
-     * Установить контекст автодобора. Вызывается при старте воспроизведения
-     * из любого экрана (Album, Search, Artist, Library и т.д.).
-     */
     fun setRefillContext(context: RefillContext?) {
         _refillContext.value = context
         android.util.Log.d("EndlessEngine", "Refill context set: ${context?.type?.name ?: "null"}, id=${context?.id}")
     }
 
-    /**
-     * Полная очистка состояния движка.
-     * Вызывается при ручном переключении на другой альбом/трек пользователем.
-     */
     fun reset() {
         android.util.Log.d("EndlessEngine", "Resetting engine state")
         cancelAllJobs()
@@ -136,32 +116,21 @@ internal class EndlessPlaybackEngine(
     }
 
     /**
-     * Запустить глобальный мониторинг очереди.
-     * Должен вызываться один раз при инициализации PlayerController.
+     * УДАЛЕНО: глобальный мониторинг очереди.
+     * Refill теперь вызывается только из событий плеера (onMediaItemTransition).
      */
+    @Deprecated("No longer needed — refill is event-driven via onMediaItemTransition")
     fun startGlobalQueueMonitor() {
-        stopGlobalQueueMonitor()
-        queueMonitorJob = scope.launch {
-            while (isActive) {
-                checkAndRefillIfNeeded()
-                delay(1000) // Проверяем каждую секунду
-            }
-        }
-        android.util.Log.d("EndlessEngine", "Global queue monitor started")
+        // Intentionally empty — event-driven architecture
     }
 
+    @Deprecated("No longer needed")
     fun stopGlobalQueueMonitor() {
-        queueMonitorJob?.cancel()
-        queueMonitorJob = null
+        // Intentionally empty
     }
 
-    /**
-     * Зарегистрировать трек как "известный" — добавляет в playedIds.
-     * Вызывается при каждом добавлении трека в очередь.
-     */
     fun registerTrack(trackId: String) {
         playedIds.add(trackId)
-        // Ограничиваем размер истории
         if (playedIds.size > MAX_PLAYED_HISTORY) {
             val toRemove = playedIds.iterator()
             var removed = 0
@@ -173,21 +142,18 @@ internal class EndlessPlaybackEngine(
         }
     }
 
-    /**
-     * Зарегистрировать список треков как "известных".
-     */
     fun registerTracks(trackIds: List<String>) {
         playedIds.addAll(trackIds)
     }
 
     /**
-     * Запустить агрессивный префетч на экваторе текущего трека.
-     * Вызывается при смене трека.
+     * Префетч на экваторе текущего трека.
+     * Запускается один раз при смене трека. К 50% — префетчит URL следующего трека.
+     * Не инициирует refill — только префетч.
      */
     fun startEquatorPrefetch(
         track: Track,
-        onPrefetch: suspend () -> Unit,
-        onRefillNeeded: suspend () -> Unit
+        onPrefetch: suspend () -> Unit
     ) {
         equatorPrefetchJob?.cancel()
         equatorPrefetchJob = scope.launch {
@@ -195,8 +161,6 @@ internal class EndlessPlaybackEngine(
             if (duration <= 0) return@launch
 
             val equatorMs = (duration * EQUATOR_THRESHOLD).toLong()
-
-            // Получаем текущий плеер для мониторинга позиции
             val player = getController() ?: getCompanionPlayer() ?: return@launch
 
             // Ждём достижения экватора
@@ -208,21 +172,15 @@ internal class EndlessPlaybackEngine(
                 // Проверяем, не сменился ли трек
                 val currentMediaId = player.currentMediaItem?.mediaId
                 if (currentMediaId != track.id) {
-                    return@launch // Трек сменился — отменяем
+                    return@launch
                 }
                 delay(POSITION_CHECK_INTERVAL_MS)
             }
 
-            // Достигли экватора — запускаем префетч
+            // Достигли экватора — запускаем префетч (только 1 следующий трек)
             if (isActive) {
                 android.util.Log.d("EndlessEngine", "Equator reached for ${track.id}, triggering prefetch")
                 onPrefetch()
-
-                // Проверяем, не пора ли refill
-                val remaining = getRemainingTracks()
-                if (remaining < REFILL_THRESHOLD) {
-                    onRefillNeeded()
-                }
             }
         }
     }
@@ -234,7 +192,10 @@ internal class EndlessPlaybackEngine(
 
     /**
      * Проверить, нужен ли refill, и выполнить его.
-     * Публичный метод для ручного вызова (например, из UI).
+     * Вызывается строго из:
+     *   - onMediaItemTransition (PlayerController)
+     *   - playFromList (PlayerController)
+     *   - onPlaybackStateChanged(STATE_ENDED) как fallback
      */
     suspend fun checkAndRefillIfNeeded(): Boolean {
         val remaining = getRemainingTracks()
@@ -244,9 +205,6 @@ internal class EndlessPlaybackEngine(
         return false
     }
 
-    /**
-     * Получить количество оставшихся треков в очереди (включая текущий).
-     */
     fun getRemainingTracks(): Int {
         val player = getController() ?: getCompanionPlayer() ?: return 0
         val total = player.mediaItemCount
@@ -254,9 +212,6 @@ internal class EndlessPlaybackEngine(
         return if (total > 0 && current >= 0) (total - current) else 0
     }
 
-    /**
-     * Получить количество треков после текущего.
-     */
     fun getUpcomingTracks(): Int {
         val player = getController() ?: getCompanionPlayer() ?: return 0
         val total = player.mediaItemCount
@@ -269,6 +224,7 @@ internal class EndlessPlaybackEngine(
     /**
      * Выполнить refill очереди новыми треками.
      * Потокобезопасно — только один refill одновременно.
+     * Все тяжёлые операции (fetch, map, dedup) — в Dispatchers.IO.
      */
     private suspend fun performRefill(): Boolean {
         // Защита от одновременных refill
@@ -282,6 +238,7 @@ internal class EndlessPlaybackEngine(
         val last = lastRefillTime.get()
         if (now - last < MIN_REFILL_INTERVAL_MS) {
             isRefilling.set(false)
+            android.util.Log.d("EndlessEngine", "Refill throttled (${now - last}ms < ${MIN_REFILL_INTERVAL_MS}ms)")
             return false
         }
 
@@ -294,10 +251,16 @@ internal class EndlessPlaybackEngine(
                 android.util.Log.w("EndlessEngine", "No refill context set, using WAVE fallback")
             }
 
-            val newTracks = fetchRefillTracks(context)
+            // ВСЯ тяжёлая работа — в IO
+            val newTracks = withContext(Dispatchers.IO) {
+                fetchRefillTracks(context)
+            }
 
             if (newTracks.isNotEmpty()) {
-                addTracksToQueue(newTracks)
+                // Маппинг в MediaItems тоже в IO
+                withContext(Dispatchers.IO) {
+                    addTracksToQueue(newTracks)
+                }
                 refillCounter.incrementAndGet()
                 android.util.Log.d("EndlessEngine", "Refill complete: added ${newTracks.size} tracks")
                 true
@@ -315,6 +278,7 @@ internal class EndlessPlaybackEngine(
 
     /**
      * Запросить новые треки из API в зависимости от контекста.
+     * Выполняется в Dispatchers.IO.
      */
     private suspend fun fetchRefillTracks(context: RefillContext?): List<Track> {
         val effectiveContext = context ?: RefillContext(RefillContext.Type.WAVE)
@@ -362,7 +326,6 @@ internal class EndlessPlaybackEngine(
         exclude.addAll(playedIds)
         exclude.addAll(pendingRefillIds)
 
-        // Добавляем ID из текущей очереди ExoPlayer
         val player = getController() ?: getCompanionPlayer()
         player?.let { p ->
             for (i in 0 until p.mediaItemCount) {
@@ -373,12 +336,8 @@ internal class EndlessPlaybackEngine(
         return exclude
     }
 
-    // ── API Fetch Methods ──
+    // ── API Fetch Methods (все вызываются из Dispatchers.IO) ──
 
-    /**
-     * Запросить треки из персональной волны (wave).
-     * Главный fallback для всех контекстов.
-     */
     private suspend fun fetchWaveTracks(
         seedTrackId: String? = null,
         excludeIds: Set<String>
@@ -430,9 +389,6 @@ internal class EndlessPlaybackEngine(
         return tracks
     }
 
-    /**
-     * Запросить треки артиста + похожих.
-     */
     private suspend fun fetchArtistTracks(
         artistId: String?,
         artistName: String?,
@@ -441,7 +397,6 @@ internal class EndlessPlaybackEngine(
         val tracks = mutableListOf<Track>()
         val localExclude = excludeIds.toMutableSet()
 
-        // 1. Пробуем получить топ-треки артиста
         if (!artistId.isNullOrBlank()) {
             try {
                 val response = com.liquidmusicglass.api.icm.IcmRepository.getArtist(artistId)
@@ -468,7 +423,6 @@ internal class EndlessPlaybackEngine(
             }
         }
 
-        // 2. Добираем wave треками
         if (tracks.size < REFILL_BATCH_SIZE) {
             val waveTracks = fetchWaveTracks(
                 seedTrackId = artistId,
@@ -480,9 +434,6 @@ internal class EndlessPlaybackEngine(
         return tracks
     }
 
-    /**
-     * Добор для альбома — другие треки артиста.
-     */
     private suspend fun fetchAlbumRefill(
         albumId: String?,
         excludeIds: Set<String>
@@ -516,7 +467,6 @@ internal class EndlessPlaybackEngine(
             }
         }
 
-        // Fallback на wave
         if (tracks.isEmpty()) {
             tracks.addAll(fetchWaveTracks(excludeIds = localExclude))
         }
@@ -524,9 +474,6 @@ internal class EndlessPlaybackEngine(
         return tracks
     }
 
-    /**
-     * Добор для поискового запроса.
-     */
     private suspend fun fetchSearchRefill(
         query: String,
         excludeIds: Set<String>
@@ -557,7 +504,6 @@ internal class EndlessPlaybackEngine(
             android.util.Log.e("EndlessEngine", "Search refill error: ${e.message}")
         }
 
-        // Fallback на wave
         if (tracks.isEmpty()) {
             tracks.addAll(fetchWaveTracks(excludeIds = localExclude))
         }
@@ -565,9 +511,6 @@ internal class EndlessPlaybackEngine(
         return tracks
     }
 
-    /**
-     * Жанровой добор через поиск.
-     */
     private suspend fun fetchGenreRefill(
         genre: String,
         excludeIds: Set<String>
@@ -575,9 +518,6 @@ internal class EndlessPlaybackEngine(
         return fetchSearchRefill(query = genre, excludeIds = excludeIds)
     }
 
-    /**
-     * Добор из медиатеки (лайки) — shuffle лайкнутых треков.
-     */
     private suspend fun fetchLibraryRefill(excludeIds: Set<String>): List<Track> {
         val tracks = mutableListOf<Track>()
         try {
@@ -595,7 +535,6 @@ internal class EndlessPlaybackEngine(
             android.util.Log.e("EndlessEngine", "Library refill error: ${e.message}")
         }
 
-        // Fallback на wave
         if (tracks.isEmpty()) {
             tracks.addAll(fetchWaveTracks(excludeIds = excludeIds))
         }
@@ -607,12 +546,10 @@ internal class EndlessPlaybackEngine(
 
     /**
      * Атомарно добавить треки в конец очереди ExoPlayer.
-     * Не сбивает текущий индекс воспроизведения.
+     * Вызывается из Dispatchers.IO — переключаемся на Main для addMediaItems.
      */
-    private fun addTracksToQueue(tracks: List<Track>) {
+    private suspend fun addTracksToQueue(tracks: List<Track>) {
         if (tracks.isEmpty()) return
-
-        val player = getController() ?: getCompanionPlayer() ?: return
 
         val mediaItems = tracks.map { track ->
             MediaItem.Builder()
@@ -629,8 +566,11 @@ internal class EndlessPlaybackEngine(
                 .build()
         }
 
-        // Добавляем в конец очереди — текущий индекс не меняется
-        player.addMediaItems(mediaItems)
+        // ExoPlayer API — переключаемся на Main
+        withContext(Dispatchers.Main) {
+            val player = getController() ?: getCompanionPlayer() ?: return@withContext
+            player.addMediaItems(mediaItems)
+        }
 
         // Регистрируем треки
         tracks.forEach { registerTrack(it.id) }
@@ -643,18 +583,12 @@ internal class EndlessPlaybackEngine(
     private fun cancelAllJobs() {
         equatorPrefetchJob?.cancel()
         equatorPrefetchJob = null
-        queueMonitorJob?.cancel()
-        queueMonitorJob = null
     }
 
     private fun getAppContext(): android.content.Context? {
-        // Получаем контекст через PlayerController
         return com.liquidmusicglass.engine.PlayerController.getAppContext()
     }
 
-    /**
-     * Получить статистику движка (для дебага).
-     */
     fun getStats(): EngineStats {
         return EngineStats(
             playedHistorySize = playedIds.size,
