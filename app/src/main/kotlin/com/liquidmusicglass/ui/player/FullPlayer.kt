@@ -101,6 +101,7 @@ import com.liquidmusicglass.ui.glass.AlbumArtImage
 import com.liquidmusicglass.ui.glass.pressScale
 import com.liquidmusicglass.ui.glass.rememberAlbumColors
 import com.liquidmusicglass.ui.liquid.LiquidSlider
+import com.liquidmusicglass.ui.lyrics.LyricsScreen
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -372,7 +373,7 @@ fun FullPlayer(
             enter = fadeIn(tween(400, easing = FastOutSlowInEasing)),
             exit = fadeOut(tween(350, easing = FastOutSlowInEasing))
         ) {
-            LyricsSheet(
+            LyricsScreen(
                 audioFileUri = audioFileUri,
                 lrcText = null,
                 currentPositionMs = currentPositionMs,
@@ -384,7 +385,8 @@ fun FullPlayer(
                 albumId = albumId,
                 trackId = currentTrackObj?.id,
                 albumColors = albumColors,
-                onRequestControls = { controlsVisible = true }
+                onRequestControls = { controlsVisible = true },
+                onClose = { showLyrics = false }
             )
         }
 
