@@ -345,6 +345,9 @@ object PlayerController {
                         } catch (_: Exception) {}
                     }
                 }
+
+                // Sync metadata with MediaSession for lock screen / notification
+                AudioService.companionService?.syncCurrentMetadata()
             }
         }
     }
