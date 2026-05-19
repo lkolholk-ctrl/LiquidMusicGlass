@@ -8,15 +8,16 @@ import com.liquidmusicglass.engine.LyricsParser
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
 
 /**
  * Оптимизированный процессор синхронизации лирики.
  *
- * Разделяет слова активной строки на три Flow-стейта (past/current/upcoming)
- * для исключения тяжёлого перебора массива в UI-потоке.
- *
- * Anti-jitter: позиция никогда не уменьшается (Math.max(lastSaved, current)).
+ * Архитектура:
+ * - Monotonic Cursor Index: последовательный указатель на текущее слово,
+ *   никакого глобального поиска по всему массиву каждый кадр.
+ * - O(1) обновление: только сравнение с границами текущего слова.
+ * - Anti-jitter: позиция и индекс никогда не уменьшаются в обычном режиме.
+ *   Сброс только при ручном перемотке (>500мс скачок).
  */
 @Stable
 class LyricsTimeProcessor(
@@ -43,6 +44,9 @@ class LyricsTimeProcessor(
 
         /** Интерполятор для плавного наплыва цвета (PathInterpolator). */
         val LYRIC_PROGRESS_INTERPOLATOR = PathInterpolator(0.25f, 0.1f, 0.25f, 1.0f)
+
+        /** Порог скачка позиции для сброса курсора (ручная перемотка). */
+        const val SEEK_JUMP_THRESHOLD_MS = 500L
     }
 
     private val _pastWords = MutableStateFlow<List<WordToken>>(emptyList())
@@ -57,122 +61,150 @@ class LyricsTimeProcessor(
     private val _currentLineIndex = MutableStateFlow(-1)
     val currentLineIndex: StateFlow<Int> = _currentLineIndex.asStateFlow()
 
-    private var lastSavedPositionMs: Long = 0L
+    /** Monotonic cursor: индекс текущего слова во flat-списке всех слов. */
+    private var currentWordIndex: Int = 0
 
-    /** Парсим строки на слова с равномерным распределением времени. */
-    private val parsedLines: List<ParsedLine> = lyrics.lines.map { line ->
-        val words = line.text.split(" ").filter { it.isNotBlank() }
-        val wordDuration = if (words.isNotEmpty()) {
-            // Предполагаем равномерное распределение; точные тайминги
-            // слов в стандартном LRC отсутствуют — используем эвристику.
-            val nextLineTime = lyrics.lines
-                .dropWhile { it.timeMs <= line.timeMs }
-                .firstOrNull()?.timeMs ?: (line.timeMs + 5000)
-            (nextLineTime - line.timeMs).coerceAtLeast(500L) / words.size
-        } else 500L
+    /** Последняя обработанная позиция (для anti-jitter и детекции перемотки). */
+    private var lastProcessedPositionMs: Long = -1L
 
-        ParsedLine(
-            timeMs = line.timeMs,
-            words = words.mapIndexed { idx, text ->
-                WordToken(
-                    text = text,
-                    startMs = line.timeMs + idx * wordDuration,
-                    endMs = line.timeMs + (idx + 1) * wordDuration
+    /** Flat-список всех слов трека с глобальными таймингами. */
+    private val allWords: List<FlatWord>
+
+    /** Карта: индекс строки → диапазон индексов слов в allWords. */
+    private val lineWordRanges: List<IntRange>
+
+    init {
+        val words = mutableListOf<FlatWord>()
+        val ranges = mutableListOf<IntRange>()
+        var wordGlobalIdx = 0
+
+        for ((lineIdx, line) in lyrics.lines.withIndex()) {
+            val wordsInLine = line.text.split(" ").filter { it.isNotBlank() }
+            val lineStartMs = line.timeMs
+            val lineEndMs = lyrics.lines.getOrNull(lineIdx + 1)?.timeMs
+                ?: (line.timeMs + 5000L)
+            val wordDuration = if (wordsInLine.isNotEmpty()) {
+                (lineEndMs - lineStartMs).coerceAtLeast(500L) / wordsInLine.size
+            } else 500L
+
+            val rangeStart = wordGlobalIdx
+            for ((wordIdx, text) in wordsInLine.withIndex()) {
+                val startMs = lineStartMs + wordIdx * wordDuration
+                val endMs = lineStartMs + (wordIdx + 1) * wordDuration
+                words.add(
+                    FlatWord(
+                        text = text,
+                        startMs = startMs,
+                        endMs = endMs,
+                        lineIndex = lineIdx,
+                        wordIndexInLine = wordIdx
+                    )
                 )
+                wordGlobalIdx++
             }
-        )
+            ranges.add(rangeStart until wordGlobalIdx)
+        }
+
+        allWords = words
+        lineWordRanges = ranges
     }
 
     /**
      * Обновляет состояние на основе текущей позиции плеера.
-     * @param positionMs текущая позиция от ExoPlayer
+     * Использует Monotonic Cursor Index — O(1) вместо O(n).
+     *
+     * @param positionMs текущая позиция (уже интерполированная smooth time)
      */
     fun updatePosition(positionMs: Long) {
-        // Anti-jitter: позиция никогда не идёт назад
-        val safePosition = kotlin.math.max(lastSavedPositionMs, positionMs)
-        lastSavedPositionMs = safePosition
+        if (!lyrics.isSynced || allWords.isEmpty()) return
 
-        if (!lyrics.isSynced || parsedLines.isEmpty()) return
+        // Monotonic Time Guard: позиция никогда не идёт назад
+        val safePosition = if (lastProcessedPositionMs >= 0) {
+            kotlin.math.max(lastProcessedPositionMs, positionMs)
+        } else positionMs
 
-        // CRITICAL FIX: Binary search instead of linear scan — O(log n) vs O(n)
-        // Prevents UI jank when called frequently from Compose.
-        var lineIdx = -1
-        var low = 0
-        var high = parsedLines.size - 1
-        while (low <= high) {
-            val mid = (low + high) ushr 1
-            if (parsedLines[mid].timeMs <= safePosition) {
-                lineIdx = mid
-                low = mid + 1
-            } else {
-                high = mid - 1
-            }
+        // Детекция ручной перемотки: если скачок > 500мс — сбрасываем курсор
+        val isSeek = lastProcessedPositionMs >= 0 &&
+                kotlin.math.abs(safePosition - lastProcessedPositionMs) > SEEK_JUMP_THRESHOLD_MS
+
+        lastProcessedPositionMs = safePosition
+
+        if (isSeek) {
+            // При перемотке — binary search для быстрого позиционирования
+            currentWordIndex = findWordIndexByPosition(safePosition)
         }
 
-        // Skip update if same line — reduces unnecessary recompositions
-        if (_currentLineIndex.value == lineIdx && lineIdx >= 0) {
-            // Still need to update word progress within the line
-            val line = parsedLines[lineIdx]
-            val past = mutableListOf<WordToken>()
-            val current = mutableListOf<WordToken>()
-            val upcoming = mutableListOf<WordToken>()
-
-            for (word in line.words) {
-                when {
-                    safePosition >= word.endMs -> past.add(word)
-                    safePosition in word.startMs..word.endMs -> current.add(
-                        word.copy(
-                            progress = LYRIC_PROGRESS_INTERPOLATOR.getInterpolation(
-                                ((safePosition - word.startMs).toFloat() /
-                                        (word.endMs - word.startMs).toFloat()).coerceIn(0f, 1f)
-                            )
-                        )
-                    )
-                    else -> upcoming.add(word)
-                }
-            }
-
-            // Only emit if word states actually changed
-            if (_pastWords.value != past || _currentWords.value != current || _upcomingWords.value != upcoming) {
-                _pastWords.value = past
-                _currentWords.value = current
-                _upcomingWords.value = upcoming
-            }
-            return
+        // Последовательное движение курсора вперёд
+        while (currentWordIndex < allWords.size &&
+            safePosition > allWords[currentWordIndex].endMs
+        ) {
+            currentWordIndex++
         }
 
-        _currentLineIndex.value = lineIdx
+        // Определяем текущую строку
+        val currentLine = if (currentWordIndex < allWords.size) {
+            allWords[currentWordIndex].lineIndex
+        } else if (allWords.isNotEmpty()) {
+            allWords.last().lineIndex
+        } else -1
 
-        if (lineIdx < 0 || lineIdx >= parsedLines.size) {
+        _currentLineIndex.value = currentLine
+
+        if (currentLine < 0 || currentLine >= lineWordRanges.size) {
             _pastWords.value = emptyList()
             _currentWords.value = emptyList()
             _upcomingWords.value = emptyList()
             return
         }
 
-        val line = parsedLines[lineIdx]
+        val range = lineWordRanges[currentLine]
         val past = mutableListOf<WordToken>()
         val current = mutableListOf<WordToken>()
         val upcoming = mutableListOf<WordToken>()
 
-        for (word in line.words) {
+        for (idx in range) {
+            val word = allWords[idx]
             when {
-                safePosition >= word.endMs -> past.add(word)
-                safePosition in word.startMs..word.endMs -> current.add(
-                    word.copy(
-                        progress = LYRIC_PROGRESS_INTERPOLATOR.getInterpolation(
-                            ((safePosition - word.startMs).toFloat() /
-                                    (word.endMs - word.startMs).toFloat()).coerceIn(0f, 1f)
-                        )
+                safePosition >= word.endMs -> {
+                    past.add(word.toToken(progress = 1f))
+                }
+                safePosition in word.startMs..word.endMs -> {
+                    val rawProgress = (safePosition - word.startMs).toFloat() /
+                            (word.endMs - word.startMs).toFloat()
+                    val interpolated = LYRIC_PROGRESS_INTERPOLATOR.getInterpolation(
+                        rawProgress.coerceIn(0f, 1f)
                     )
-                )
-                else -> upcoming.add(word)
+                    current.add(word.toToken(progress = interpolated))
+                }
+                else -> {
+                    upcoming.add(word.toToken(progress = 0f))
+                }
             }
         }
 
         _pastWords.value = past
         _currentWords.value = current
         _upcomingWords.value = upcoming
+    }
+
+    /**
+     * Binary search для быстрого позиционирования при ручной перемотке.
+     * O(log n) — вызывается только при seek, не каждый кадр.
+     */
+    private fun findWordIndexByPosition(positionMs: Long): Int {
+        var low = 0
+        var high = allWords.size - 1
+        var result = 0
+        while (low <= high) {
+            val mid = (low + high) ushr 1
+            if (allWords[mid].startMs <= positionMs) {
+                result = mid
+                low = mid + 1
+            } else {
+                high = mid - 1
+            }
+        }
+        return result.coerceIn(0, allWords.size - 1)
     }
 
     /**
@@ -185,9 +217,10 @@ class LyricsTimeProcessor(
         return Color(android.graphics.Color.HSVToColor(hsv))
     }
 
-    /** Сброс anti-jitter состояния при смене трека. */
+    /** Сброс состояния при смене трека. */
     fun reset() {
-        lastSavedPositionMs = 0L
+        currentWordIndex = 0
+        lastProcessedPositionMs = -1L
         _currentLineIndex.value = -1
         _pastWords.value = emptyList()
         _currentWords.value = emptyList()
@@ -201,8 +234,19 @@ class LyricsTimeProcessor(
         val progress: Float = 0f
     )
 
-    private data class ParsedLine(
-        val timeMs: Long,
-        val words: List<WordToken>
-    )
+    /** Внутреннее представление слова с глобальными таймингами. */
+    private data class FlatWord(
+        val text: String,
+        val startMs: Long,
+        val endMs: Long,
+        val lineIndex: Int,
+        val wordIndexInLine: Int
+    ) {
+        fun toToken(progress: Float): WordToken = WordToken(
+            text = text,
+            startMs = startMs,
+            endMs = endMs,
+            progress = progress
+        )
+    }
 }

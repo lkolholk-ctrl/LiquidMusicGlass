@@ -1,13 +1,8 @@
 package com.liquidmusicglass.ui.lyrics
 
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
@@ -28,6 +23,7 @@ import androidx.compose.ui.unit.sp
  *
  * @param text текст слова
  * @param progress прогресс наплыва (0f..1f), уже интерполирован через PathInterpolator
+ *                 и вычислен на каждом кадре отрисовки (60/120 FPS)
  * @param color базовый цвет слова (для past/upcoming)
  * @param activeColor цвет активного наплыва (обычно белый)
  * @param fontSize размер шрифта
@@ -43,14 +39,9 @@ fun LyricsWord(
     fontWeight: FontWeight = FontWeight.SemiBold,
     modifier: Modifier = Modifier
 ) {
-    val animatedProgress by animateFloatAsState(
-        targetValue = progress.coerceIn(0f, 1f),
-        animationSpec = tween(
-            durationMillis = 80,
-            easing = LinearEasing
-        ),
-        label = "wordProgress"
-    )
+    // НЕ используем animateFloatAsState — progress уже плавный (60/120 FPS)
+    // Дополнительная анимация добавит лаг ~16мс и размытие движения
+    val clampedProgress = progress.coerceIn(0f, 1f)
 
     val textStyle = TextStyle(
         color = color,
@@ -70,9 +61,9 @@ fun LyricsWord(
                 drawContent()
 
                 // 2. Рисуем наплыв активного цвета через clipRect
-                if (animatedProgress > 0.005f) {
+                if (clampedProgress > 0.005f) {
                     val measured = textMeasurer.measure(text, textStyle)
-                    val clipWidth = measured.size.width.toFloat() * animatedProgress
+                    val clipWidth = measured.size.width.toFloat() * clampedProgress
                     clipRect(
                         left = 0f,
                         top = 0f,

@@ -3,6 +3,7 @@ package com.liquidmusicglass.engine
 import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
+import android.os.SystemClock
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
@@ -69,6 +70,21 @@ object PlayerController {
 
     private val _currentPositionMs = MutableStateFlow(0L)
     val currentPositionMs: StateFlow<Long> = _currentPositionMs
+
+    // ── Smooth time interpolation for 60/120 FPS lyrics ──
+    private var lastPlayerPositionMs: Long = 0L
+    private var lastSyncTimeMs: Long = 0L
+    private var lastIsPlaying: Boolean = false
+
+    /**
+     * Returns smoothly interpolated position for butter-smooth lyrics animation.
+     * Call this from UI frame callbacks (withFrameMillis) at display refresh rate.
+     */
+    fun getSmoothPositionMs(): Long {
+        if (!lastIsPlaying) return lastPlayerPositionMs
+        val elapsed = SystemClock.elapsedRealtime() - lastSyncTimeMs
+        return lastPlayerPositionMs + elapsed
+    }
 
     private val _durationMs = MutableStateFlow(0L)
     val durationMs: StateFlow<Long> = _durationMs
@@ -298,11 +314,14 @@ object PlayerController {
 
     fun setPlaying(playing: Boolean) {
         _isPlaying.value = playing
+        lastIsPlaying = playing
         if (!playing) _isBuffering.value = false
     }
 
     fun updatePosition(positionMs: Long) {
         _currentPositionMs.value = positionMs
+        lastPlayerPositionMs = positionMs
+        lastSyncTimeMs = SystemClock.elapsedRealtime()
         // Accumulate played time
         if (_isPlaying.value) {
             val delta = positionMs - lastPositionMs

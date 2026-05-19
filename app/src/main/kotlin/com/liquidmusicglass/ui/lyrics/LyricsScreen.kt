@@ -39,16 +39,20 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 
 /**
  * Полноэкранный караоке-экран лирики (Apple Music style).
  *
  * Фичи:
  * - Word-level synchronization с градиентным наплывом
+ * - 60/120 FPS smooth interpolation через withFrameMillis
+ * - Monotonic Cursor Index — O(1) обновление, никакого хаоса на высокой скорости
  * - HSV-boosted фон с blur + scrim
  * - Duet layout: мужской/женский вокал разными цветами
  * - WaitingDots до начала первой строки
- * - Anti-jitter: позиция никогда не уменьшается
  * - Auto-scroll к активной строке
  */
 @Composable
@@ -91,7 +95,6 @@ fun LyricsScreen(
 
     LaunchedEffect(audioFileUri, lrcText, trackTitle, trackArtist, resolvedTrackId) {
         if (!lrcText.isNullOrBlank()) {
-            // CRITICAL FIX: parse lyrics on Default, never Main
             lyrics = withContext(Dispatchers.Default) {
                 LyricsParser.parseLyrics(lrcText)
             }
@@ -124,11 +127,31 @@ fun LyricsScreen(
         if (lyrics.lines.isNotEmpty()) LyricsTimeProcessor(lyrics) else null
     }
 
-    // Anti-jitter position flow
-    var safePositionMs by remember { mutableLongStateOf(0L) }
+    // Reset processor when track changes
+    LaunchedEffect(resolvedTrackId) {
+        timeProcessor?.reset()
+    }
+
+    // ── Smooth 60/120 FPS position ticker ──
+    val isPlaying by PlayerController.isPlaying.collectAsState()
+    var smoothPositionMs by remember { mutableLongStateOf(0L) }
+
+    // Sync with coarse position when it changes (seek, track change)
     LaunchedEffect(currentPositionMs) {
-        safePositionMs = kotlin.math.max(safePositionMs, currentPositionMs)
-        timeProcessor?.updatePosition(safePositionMs)
+        smoothPositionMs = currentPositionMs
+        timeProcessor?.updatePosition(smoothPositionMs)
+    }
+
+    // High-frequency frame-synced ticker for butter-smooth animation
+    LaunchedEffect(isPlaying) {
+        if (isPlaying) {
+            while (isActive) {
+                withFrameMillis { _ ->
+                    smoothPositionMs = PlayerController.getSmoothPositionMs()
+                    timeProcessor?.updatePosition(smoothPositionMs)
+                }
+            }
+        }
     }
 
     val currentLineIndex by timeProcessor?.currentLineIndex?.collectAsState() ?: remember { mutableIntStateOf(-1) }
@@ -226,7 +249,7 @@ fun LyricsScreen(
                         item { Spacer(Modifier.height(100.dp)) }
 
                         // Waiting dots before first line starts
-                        if (lyrics.isSynced && safePositionMs < lyrics.lines.firstOrNull()?.timeMs ?: 0L) {
+                        if (lyrics.isSynced && smoothPositionMs < lyrics.lines.firstOrNull()?.timeMs ?: 0L) {
                             item {
                                 Box(
                                     modifier = Modifier
