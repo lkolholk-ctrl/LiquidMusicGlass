@@ -779,11 +779,30 @@ object PlayerController {
         }
     }
 
+    fun setShuffle(enabled: Boolean) {
+        _shuffleEnabled.value = enabled
+        mainScope.launch {
+            getPlayer(appContext ?: return@launch)?.shuffleModeEnabled = enabled
+        }
+    }
+
     fun cycleRepeatMode() {
         val next = (_repeatMode.value + 1) % 3
         _repeatMode.value = next
         mainScope.launch {
             getPlayer(appContext ?: return@launch)?.repeatMode = when (next) {
+                1 -> Player.REPEAT_MODE_ALL
+                2 -> Player.REPEAT_MODE_ONE
+                else -> Player.REPEAT_MODE_OFF
+            }
+        }
+    }
+
+    fun setRepeatMode(mode: Int) {
+        val clamped = mode.coerceIn(0, 2)
+        _repeatMode.value = clamped
+        mainScope.launch {
+            getPlayer(appContext ?: return@launch)?.repeatMode = when (clamped) {
                 1 -> Player.REPEAT_MODE_ALL
                 2 -> Player.REPEAT_MODE_ONE
                 else -> Player.REPEAT_MODE_OFF
