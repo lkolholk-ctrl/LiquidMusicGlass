@@ -74,6 +74,18 @@ object PlayerController {
     private val _autoMixEnabled = MutableStateFlow(false)
     val autoMixEnabled: StateFlow<Boolean> = _autoMixEnabled
 
+    // AutoMix persistence
+    private var autoMixPrefs: android.content.SharedPreferences? = null
+
+    fun loadAutoMixState(context: Context) {
+        autoMixPrefs = context.getSharedPreferences("auto_mix", Context.MODE_PRIVATE)
+        _autoMixEnabled.value = autoMixPrefs?.getBoolean("enabled", false) ?: false
+    }
+
+    private fun saveAutoMixState() {
+        autoMixPrefs?.edit()?.putBoolean("enabled", _autoMixEnabled.value)?.apply()
+    }
+
     private val _isMixing = MutableStateFlow(false)
     val isMixing: StateFlow<Boolean> = _isMixing
 
@@ -440,6 +452,9 @@ object PlayerController {
             _recentlyPlayed.value = recentHistory.toList()
         }
 
+        // Load persisted AutoMix state
+        loadAutoMixState(context)
+
         scope.launch {
             obtainController(context)
         }
@@ -590,6 +605,7 @@ object PlayerController {
 
     fun setAutoMix(enabled: Boolean) {
         _autoMixEnabled.value = enabled
+        saveAutoMixState()
         AudioService.setAutoMixEnabled(enabled)
     }
 
@@ -1010,8 +1026,10 @@ object PlayerController {
 
     /**
      * Auto-populate queue with similar genre tracks.
+     * Only runs when AutoMix is enabled by user.
      */
     private suspend fun populateSimilarTracks(track: Track, context: Context) {
+        if (!_autoMixEnabled.value) return
         val genre = detectGenre(track) ?: return
         try {
             val api = com.liquidmusicglass.api.icm.IcmApi.getInstance()

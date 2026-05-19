@@ -47,6 +47,8 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -70,6 +72,8 @@ fun SearchScreen(
     onNavigateToArtist: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     val prefs = remember { context.getSharedPreferences("search_history", android.content.Context.MODE_PRIVATE) }
 
     var query by remember { mutableStateOf("") }
@@ -78,6 +82,11 @@ fun SearchScreen(
     var lastError by remember { mutableStateOf<String?>(null) }
     var selectedSource by remember { mutableStateOf(IcmSearchSource.APPLE) }
     val searchMutex = remember { Mutex() }
+
+    fun hideKeyboard() {
+        focusManager.clearFocus()
+        keyboardController?.hide()
+    }
 
     // Load search history
     var history by remember {
@@ -190,7 +199,6 @@ fun SearchScreen(
                     modifier = Modifier.size(20.dp)
                 )
                 Spacer(modifier = Modifier.width(10.dp))
-                val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
                 BasicTextField(
                     value = query,
                     onValueChange = { query = it },
@@ -202,7 +210,7 @@ fun SearchScreen(
                     cursorBrush = SolidColor(Color(0xFFFC3C44)),
                     modifier = Modifier.weight(1f),
                     keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
-                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { focusManager.clearFocus() }),
+                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { hideKeyboard() }),
                     decorationBox = { innerTextField ->
                         Box {
                             if (query.isEmpty()) {
@@ -286,7 +294,7 @@ fun SearchScreen(
                                     .clickable(
                                         interactionSource = remember { MutableInteractionSource() },
                                         indication = null
-                                    ) { query = item }
+                                    ) { hideKeyboard(); query = item }
                                     .padding(horizontal = 14.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
@@ -383,7 +391,7 @@ fun SearchScreen(
                                 subtitle = "Artist",
                                 icon = Icons.Rounded.Person,
                                 coverUrl = item.cover,
-                                onClick = { onNavigateToArtist(item.id) }
+                                onClick = { hideKeyboard(); onNavigateToArtist(item.id) }
                             )
                         }
                     }
@@ -399,7 +407,7 @@ fun SearchScreen(
                                 subtitle = item.displayArtist,
                                 icon = Icons.Rounded.Album,
                                 coverUrl = item.cover,
-                                onClick = { onNavigateToAlbum(item.id) }
+                                onClick = { hideKeyboard(); onNavigateToAlbum(item.id) }
                             )
                         }
                     }
@@ -417,6 +425,7 @@ fun SearchScreen(
                                 icon = Icons.Rounded.MusicNote,
                                 coverUrl = item.cover,
                                 onClick = {
+                                    hideKeyboard()
                                     PlayerController.setAutoRefillContext("search", query, query)
                                     PlayerController.playNext(track, context)
                                 }
