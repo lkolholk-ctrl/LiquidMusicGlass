@@ -1,0 +1,235 @@
+name: Full Test Suite (Self-Hosted)
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+env:
+  ANDROID_HOME: /opt/android-sdk
+  ANDROID_SDK_ROOT: /opt/android-sdk
+
+jobs:
+  unit-tests:
+    name: Unit Tests
+    runs-on: self-hosted
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Run Unit Tests
+        run: ./gradlew testDebugUnitTest --stacktrace
+
+      - name: Upload Unit Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: app/build/reports/tests/
+          retention-days: 7
+
+  smoke-test:
+    name: Smoke Test (Emulator)
+    runs-on: self-hosted
+    timeout-minutes: 30
+    needs: unit-tests
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug
+
+      - name: Start Emulator
+        run: |
+          export PATH="$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH"
+          
+          # Kill any existing emulator
+          adb kill-server 2>/dev/null || true
+          pkill -f "emulator" 2>/dev/null || true
+          sleep 2
+          
+          # Start emulator without KVM (software emulation)
+          emulator -avd test -no-window -no-audio -gpu swiftshader_indirect -no-boot-anim -accel off -no-snapshot &
+          EMULATOR_PID=$!
+          
+          # Wait for boot
+          echo "Waiting for emulator to boot..."
+          adb wait-for-device
+          while [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" != "1" ]; do
+            echo -n "."
+            sleep 3
+          done
+          echo ""
+          echo "✅ Emulator booted!"
+          
+          # Save PID for cleanup
+          echo $EMULATOR_PID > /tmp/emulator.pid
+
+      - name: Run Smoke Tests
+        run: |
+          export PATH="$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH"
+          
+          echo "=== Smoke Test Started ==="
+          
+          # Install APK
+          APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
+          echo "Installing $APK_PATH..."
+          adb install -r -t "$APK_PATH"
+          echo "✅ APK installed."
+          
+          # Clear logcat
+          adb logcat -c
+          
+          # Launch app
+          echo "Launching MainActivity..."
+          adb shell am start -n "com.liquidmusicglass/com.liquidmusicglass.MainActivity"
+          sleep 5
+          
+          # Screenshot
+          echo "Taking screenshot..."
+          adb shell screencap -p /sdcard/screen.png
+          adb pull /sdcard/screen.png smoke-test-screenshot.png
+          adb shell rm /sdcard/screen.png
+          
+          # Collect logcat
+          echo "Collecting logcat..."
+          adb logcat -d > smoke-test-logcat.txt
+          
+          # Check for crashes
+          echo "=== Crash Analysis ==="
+          CRASH=0
+          if grep -q "FATAL EXCEPTION" smoke-test-logcat.txt; then
+            echo "❌ FATAL EXCEPTION found!"
+            grep -A 10 "FATAL EXCEPTION" smoke-test-logcat.txt
+            CRASH=1
+          fi
+          
+          if grep -q "UninitializedPropertyAccessException" smoke-test-logcat.txt; then
+            echo "❌ UninitializedPropertyAccessException found!"
+            grep -A 10 "UninitializedPropertyAccessException" smoke-test-logcat.txt
+            CRASH=1
+          fi
+          
+          if [ $CRASH -eq 0 ]; then
+            echo "✅ No crashes detected — SMOKE TEST PASSED"
+          else
+            echo "❌ SMOKE TEST FAILED"
+            exit 1
+          fi
+
+      - name: Cleanup Emulator
+        if: always()
+        run: |
+          export PATH="$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH"
+          if [ -f /tmp/emulator.pid ]; then
+            kill $(cat /tmp/emulator.pid) 2>/dev/null || true
+            rm -f /tmp/emulator.pid
+          fi
+          adb kill-server 2>/dev/null || true
+          pkill -f "emulator" 2>/dev/null || true
+
+      - name: Upload Smoke Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-test-results
+          path: |
+            smoke-test-screenshot.png
+            smoke-test-logcat.txt
+          retention-days: 7
+
+  ui-tests:
+    name: UI Tests (Espresso)
+    runs-on: self-hosted
+    timeout-minutes: 30
+    needs: smoke-test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Start Emulator
+        run: |
+          export PATH="$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH"
+          
+          # Kill any existing emulator
+          adb kill-server 2>/dev/null || true
+          pkill -f "emulator" 2>/dev/null || true
+          sleep 2
+          
+          # Start emulator without KVM (software emulation)
+          emulator -avd test -no-window -no-audio -gpu swiftshader_indirect -no-boot-anim -accel off -no-snapshot &
+          EMULATOR_PID=$!
+          
+          # Wait for boot
+          echo "Waiting for emulator to boot..."
+          adb wait-for-device
+          while [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" != "1" ]; do
+            echo -n "."
+            sleep 3
+          done
+          echo ""
+          echo "✅ Emulator booted!"
+          
+          # Save PID for cleanup
+          echo $EMULATOR_PID > /tmp/emulator.pid
+
+      - name: Run UI Tests
+        run: |
+          export PATH="$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH"
+          ./gradlew connectedDebugAndroidTest --stacktrace
+
+      - name: Cleanup Emulator
+        if: always()
+        run: |
+          export PATH="$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH"
+          if [ -f /tmp/emulator.pid ]; then
+            kill $(cat /tmp/emulator.pid) 2>/dev/null || true
+            rm -f /tmp/emulator.pid
+          fi
+          adb kill-server 2>/dev/null || true
+          pkill -f "emulator" 2>/dev/null || true
+
+      - name: Upload UI Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-test-results
+          path: app/build/reports/androidTests/
+          retention-days: 7
