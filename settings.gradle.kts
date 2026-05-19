@@ -4,6 +4,11 @@ pluginManagement {
         mavenCentral()
         gradlePluginPortal()
     }
+    plugins {
+        id("com.google.devtools.ksp") version "2.3.7"
+        id("org.jetbrains.kotlin.android") version "2.3.7"
+        id("org.jetbrains.kotlin.plugin.serialization") version "2.3.10"
+    }
 }
 
 dependencyResolutionManagement {

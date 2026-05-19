@@ -134,7 +134,10 @@ fun FullPlayer(
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var isFavorite by remember { mutableStateOf(false) }
+    val libraryRepo = remember { com.liquidmusicglass.data.local.db.LibraryRepository.getInstance(context) }
+    val currentTrackObj by PlayerController.currentTrack.collectAsState()
+    val trackId = currentTrackObj?.id ?: ""
+    val isFavorite by libraryRepo.isFavoriteFlow(trackId).collectAsState(initial = false)
     var showAirPlay by remember { mutableStateOf(false) }
     var showQueue by remember { mutableStateOf(false) }
     var showLyrics by remember { mutableStateOf(false) }
@@ -149,11 +152,10 @@ fun FullPlayer(
 
     val shuffleEnabled by PlayerController.shuffleEnabled.collectAsState()
     val repeatMode by PlayerController.repeatMode.collectAsState()
-    val favoriteIds by PlayerController.favoriteIds.collectAsState()
-    val currentTrackObj by PlayerController.currentTrack.collectAsState()
+    // currentTrackObj is declared above for Room reactive favorite state
 
-    // Sync favorite state with PlayerController
-    isFavorite = currentTrackObj?.let { it.id in favoriteIds } ?: false
+    // isFavorite is now reactive from Room DB via LibraryRepository Flow
+    // (declared above at composition start)
 
     // ── Mood/Color from album art ──
     val albumColors = rememberAlbumColors(albumArtUri, coverUrl)
@@ -353,7 +355,11 @@ fun FullPlayer(
                     if (expandProgress < 0.9f) return@pointerInput
                     detectTapGestures(
                         onDoubleTap = {
-                            currentTrackObj?.let { PlayerController.toggleFavorite(it.id) }
+                            currentTrackObj?.let { track ->
+                                scope.launch {
+                                    libraryRepo.toggleFavorite(track)
+                                }
+                            }
                         }
                     )
                 }
@@ -503,7 +509,11 @@ fun FullPlayer(
                         modifier = Modifier
                             .size(44.dp)
                             .pressScale {
-                                currentTrackObj?.let { PlayerController.toggleFavorite(it.id) }
+                                currentTrackObj?.let { track ->
+                                    scope.launch {
+                                        libraryRepo.toggleFavorite(track)
+                                    }
+                                }
                             },
                         contentAlignment = Alignment.Center
                     ) {

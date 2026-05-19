@@ -99,6 +99,8 @@ fun AppRoot() {
         PlayerController.init(context)
         com.liquidmusicglass.api.icm.IcmAuthRepository.init(context)
         com.liquidmusicglass.data.local.LocalAuthManager.init(context)
+        // Initialize LibraryRepository and sync favorites into PlayerController
+        com.liquidmusicglass.data.local.db.LibraryRepository.getInstance(context)
     }
 
     val currentTrack by PlayerController.currentTrack.collectAsState()

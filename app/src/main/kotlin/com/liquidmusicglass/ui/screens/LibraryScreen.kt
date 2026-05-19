@@ -15,7 +15,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -29,12 +31,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import coil.compose.AsyncImage
-import com.liquidmusicglass.api.icm.IcmLibraryArtist
-import com.liquidmusicglass.api.icm.IcmLibraryTrack
-import com.liquidmusicglass.api.icm.IcmRepository
+import com.liquidmusicglass.data.local.db.FavoriteTrackEntity
+import com.liquidmusicglass.data.local.db.LibraryRepository
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.Track
+import com.liquidmusicglass.ui.viewmodel.LibraryViewModel
 import kotlinx.coroutines.launch
 
 private enum class LibraryTab { LIKES, SUBSCRIPTIONS }
@@ -47,96 +51,21 @@ fun LibraryScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val viewModel = remember { LibraryViewModel(context) }
+
     var selectedTab by remember { mutableStateOf(LibraryTab.LIKES) }
 
-    // Pagination state
-    var likedTracks by remember { mutableStateOf<List<IcmLibraryTrack>>(emptyList()) }
-    var subscriptions by remember { mutableStateOf<List<IcmLibraryArtist>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(false) }
-    var isRefreshing by remember { mutableStateOf(false) }
-    var isLoadingMore by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-    var hasMore by remember { mutableStateOf(true) }
-    var currentOffset by remember { mutableStateOf(0) }
-
-    fun loadData(refresh: Boolean = false) {
-        if (isLoading || isLoadingMore) return
-        if (refresh) {
-            isRefreshing = true
-            currentOffset = 0
-            hasMore = true
-        } else if (currentOffset > 0) {
-            isLoadingMore = true
-        } else {
-            isLoading = true
-        }
-        errorMessage = null
-
-        scope.launch {
-            when (selectedTab) {
-                LibraryTab.LIKES -> {
-                    val response = IcmRepository.getLibraryLikes(
-                        limit = 50,
-                        offset = if (refresh) 0 else currentOffset
-                    )
-                    if (response != null) {
-                        val newItems = response.items
-                        likedTracks = if (refresh || currentOffset == 0) {
-                            newItems
-                        } else {
-                            likedTracks + newItems
-                        }
-                        hasMore = newItems.size >= 50
-                        if (newItems.isNotEmpty()) {
-                            currentOffset += newItems.size
-                        }
-                    } else {
-                        errorMessage = if (currentOffset == 0) "Failed to load likes" else null
-                    }
-                }
-                LibraryTab.SUBSCRIPTIONS -> {
-                    val response = IcmRepository.getLibrarySubscriptions(
-                        limit = 50,
-                        offset = if (refresh) 0 else currentOffset
-                    )
-                    if (response != null) {
-                        val newItems = response.items
-                        subscriptions = if (refresh || currentOffset == 0) {
-                            newItems
-                        } else {
-                            subscriptions + newItems
-                        }
-                        hasMore = newItems.size >= 50
-                        if (newItems.isNotEmpty()) {
-                            currentOffset += newItems.size
-                        }
-                    } else {
-                        errorMessage = if (currentOffset == 0) "Failed to load subscriptions" else null
-                    }
-                }
-            }
-            isLoading = false
-            isRefreshing = false
-            isLoadingMore = false
-        }
-    }
-
-    // Load initial data when tab changes
-    LaunchedEffect(selectedTab) {
-        likedTracks = emptyList()
-        subscriptions = emptyList()
-        currentOffset = 0
-        hasMore = true
-        errorMessage = null
-        loadData(refresh = true)
-    }
+    val favorites by viewModel.favorites.collectAsState()
+    val isSyncing by viewModel.isSyncing.collectAsState()
+    val errorMessage by viewModel.errorMessage.collectAsState()
+    val favoriteIds by viewModel.favoriteIds.collectAsState()
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
     ) {
-        // Header
+        // Header with refresh button
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -144,12 +73,37 @@ fun LibraryScreen(
                 .padding(top = 48.dp, bottom = 16.dp, start = 20.dp, end = 20.dp)
         ) {
             Column {
-                Text(
-                    text = "Library",
-                    fontSize = 34.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Library",
+                        fontSize = 34.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                    if (isSyncing) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            color = Color(0xFFFC3C44),
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        IconButton(
+                            onClick = { viewModel.syncWithCloud() },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Refresh,
+                                contentDescription = "Refresh",
+                                tint = Color.Gray,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                }
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Row(
@@ -174,123 +128,125 @@ fun LibraryScreen(
             }
         }
 
+        // Action buttons for Likes tab
+        if (selectedTab == LibraryTab.LIKES && favorites.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                ActionButton(
+                    text = "Play All",
+                    icon = Icons.Default.PlayArrow,
+                    onClick = { viewModel.playAll(context) },
+                    modifier = Modifier.weight(1f)
+                )
+                ActionButton(
+                    text = "Shuffle",
+                    icon = Icons.Default.Shuffle,
+                    onClick = { viewModel.shuffleAndPlay(context) },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+
         // Content
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier.fillMaxSize()
+        ) {
             when {
-                isLoading && !isRefreshing -> {
+                isSyncing && favorites.isEmpty() -> {
                     CircularProgressIndicator(
                         modifier = Modifier.align(Alignment.Center),
                         color = Color(0xFFFC3C44)
                     )
                 }
-                errorMessage != null && likedTracks.isEmpty() && subscriptions.isEmpty() -> {
-                    ErrorState(
-                        message = errorMessage ?: "Unknown error",
-                        onRetry = { loadData(refresh = true) }
-                    )
-                }
                 selectedTab == LibraryTab.LIKES -> {
-                    if (likedTracks.isEmpty() && !isLoading) {
+                    if (favorites.isEmpty() && !isSyncing) {
                         EmptyState("No liked tracks yet")
                     } else {
                         LazyColumn(
                             modifier = Modifier.fillMaxSize(),
                             contentPadding = PaddingValues(vertical = 8.dp)
                         ) {
-                            items(likedTracks, key = { it.id }) { track ->
-                                LikedTrackItem(
+                            items(favorites, key = { it.trackId }) { track ->
+                                FavoriteTrackItem(
                                     track = track,
-                                    onClick = { playLibraryTrack(context, track) },
+                                    isLiked = track.trackId in favoriteIds,
+                                    onClick = { viewModel.playTrack(context, track.trackId) },
+                                    onToggleLike = {
+                                        scope.launch {
+                                            val repo = LibraryRepository.getInstance(context)
+                                            val t = Track(
+                                                id = track.trackId,
+                                                title = track.title,
+                                                artist = track.artistName ?: "Unknown Artist",
+                                                albumName = track.albumTitle ?: "",
+                                                uri = Uri.parse("https://byicloud.online/track/${track.trackId}"),
+                                                durationMs = track.durationMs,
+                                                albumId = track.collectionId?.hashCode()?.toLong() ?: -1L,
+                                                coverUrl = track.imageUrl
+                                            )
+                                            repo.toggleFavorite(t)
+                                        }
+                                    },
                                     onNavigateToAlbum = onNavigateToAlbum
                                 )
-                            }
-                            if (hasMore && !isLoadingMore) {
-                                item {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(16.dp)
-                                            .clickable { loadData() },
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            "Load more",
-                                            color = Color(0xFFFC3C44),
-                                            fontSize = 14.sp,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                    }
-                                }
-                            }
-                            if (isLoadingMore) {
-                                item {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(16.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        CircularProgressIndicator(
-                                            color = Color(0xFFFC3C44),
-                                            modifier = Modifier.size(24.dp)
-                                        )
-                                    }
-                                }
                             }
                         }
                     }
                 }
                 selectedTab == LibraryTab.SUBSCRIPTIONS -> {
-                    if (subscriptions.isEmpty() && !isLoading) {
-                        EmptyState("No subscriptions yet")
-                    } else {
-                        LazyColumn(
-                            modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(vertical = 8.dp)
-                        ) {
-                            items(subscriptions, key = { it.id }) { artist ->
-                                ArtistSubscriptionItem(
-                                    artist = artist,
-                                    onClick = { onNavigateToArtist(artist.id) }
-                                )
-                            }
-                            if (hasMore && !isLoadingMore) {
-                                item {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(16.dp)
-                                            .clickable { loadData() },
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            "Load more",
-                                            color = Color(0xFFFC3C44),
-                                            fontSize = 14.sp,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                    }
-                                }
-                            }
-                            if (isLoadingMore) {
-                                item {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(16.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        CircularProgressIndicator(
-                                            color = Color(0xFFFC3C44),
-                                            modifier = Modifier.size(24.dp)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    // Subscriptions still loaded from cloud API directly
+                    SubscriptionsContent(
+                        onNavigateToArtist = onNavigateToArtist
+                    )
                 }
             }
+        }
+
+        // Error snackbar
+        if (errorMessage != null) {
+            LaunchedEffect(errorMessage) {
+                kotlinx.coroutines.delay(3000)
+                viewModel.clearError()
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActionButton(
+    text: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF1C1C1E))
+            .clickable(onClick = onClick)
+            .padding(vertical = 12.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = Color(0xFFFC3C44),
+                modifier = Modifier.size(20.dp)
+            )
+            Text(
+                text = text,
+                color = Color.White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold
+            )
         }
     }
 }
@@ -335,9 +291,11 @@ private fun TabButton(
 }
 
 @Composable
-private fun LikedTrackItem(
-    track: IcmLibraryTrack,
+private fun FavoriteTrackItem(
+    track: FavoriteTrackEntity,
+    isLiked: Boolean,
     onClick: () -> Unit,
+    onToggleLike: () -> Unit,
     onNavigateToAlbum: (String) -> Unit
 ) {
     Row(
@@ -353,9 +311,9 @@ private fun LikedTrackItem(
                 .clip(RoundedCornerShape(6.dp))
                 .background(Color.DarkGray)
         ) {
-            if (!track.cover.isNullOrBlank()) {
+            if (!track.imageUrl.isNullOrBlank()) {
                 AsyncImage(
-                    model = track.cover.replace("1000x1000", "300x300"),
+                    model = track.imageUrl.replace("1000x1000", "300x300"),
                     contentDescription = null,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop
@@ -375,7 +333,7 @@ private fun LikedTrackItem(
                 overflow = TextOverflow.Ellipsis
             )
             Text(
-                text = track.artist ?: "Unknown Artist",
+                text = track.artistName ?: "Unknown Artist",
                 color = Color.Gray,
                 fontSize = 13.sp,
                 maxLines = 1,
@@ -383,14 +341,88 @@ private fun LikedTrackItem(
             )
         }
 
-        track.durationMs.let { duration ->
-            if (duration > 0) {
-                Text(
-                    text = formatDuration(duration),
-                    color = Color.Gray,
-                    fontSize = 12.sp,
-                    modifier = Modifier.padding(start = 8.dp)
-                )
+        // Like button
+        IconButton(onClick = onToggleLike) {
+            Icon(
+                imageVector = if (isLiked) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+                contentDescription = if (isLiked) "Unlike" else "Like",
+                tint = if (isLiked) Color(0xFFFC3C44) else Color.Gray,
+                modifier = Modifier.size(22.dp)
+            )
+        }
+
+        if (track.durationMs > 0) {
+            Text(
+                text = formatDuration(track.durationMs),
+                color = Color.Gray,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(start = 4.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun SubscriptionsContent(
+    onNavigateToArtist: (String) -> Unit
+) {
+    // Keep existing subscriptions implementation
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var subscriptions by remember { mutableStateOf<List<com.liquidmusicglass.api.icm.IcmLibraryArtist>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        isLoading = true
+        scope.launch {
+            val response = com.liquidmusicglass.api.icm.IcmRepository.getLibrarySubscriptions(
+                limit = 50,
+                offset = 0
+            )
+            if (response != null) {
+                subscriptions = response.items
+            } else {
+                errorMessage = "Failed to load subscriptions"
+            }
+            isLoading = false
+        }
+    }
+
+    when {
+        isLoading -> {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = Color(0xFFFC3C44))
+            }
+        }
+        errorMessage != null -> {
+            ErrorState(message = errorMessage ?: "Unknown error", onRetry = {
+                errorMessage = null
+                isLoading = true
+                scope.launch {
+                    val response = com.liquidmusicglass.api.icm.IcmRepository.getLibrarySubscriptions(
+                        limit = 50, offset = 0
+                    )
+                    if (response != null) subscriptions = response.items
+                    else errorMessage = "Failed to load subscriptions"
+                    isLoading = false
+                }
+            })
+        }
+        subscriptions.isEmpty() -> {
+            EmptyState("No subscriptions yet")
+        }
+        else -> {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(vertical = 8.dp)
+            ) {
+                items(subscriptions, key = { it.id }) { artist ->
+                    ArtistSubscriptionItem(
+                        artist = artist,
+                        onClick = { onNavigateToArtist(artist.id) }
+                    )
+                }
             }
         }
     }
@@ -398,7 +430,7 @@ private fun LikedTrackItem(
 
 @Composable
 private fun ArtistSubscriptionItem(
-    artist: IcmLibraryArtist,
+    artist: com.liquidmusicglass.api.icm.IcmLibraryArtist,
     onClick: () -> Unit
 ) {
     Row(
@@ -414,9 +446,9 @@ private fun ArtistSubscriptionItem(
                 .clip(CircleShape)
                 .background(Color.DarkGray)
         ) {
-            if (!artist.cover.isNullOrBlank()) {
+            if (!artist.displayImage.isNullOrBlank()) {
                 AsyncImage(
-                    model = artist.cover,
+                    model = artist.displayImage,
                     contentDescription = null,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop
@@ -437,7 +469,7 @@ private fun ArtistSubscriptionItem(
 
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = artist.name ?: "Unknown Artist",
+                text = artist.displayName,
                 color = Color.White,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Medium,
@@ -517,18 +549,4 @@ private fun formatDuration(ms: Long): String {
     val minutes = totalSeconds / 60
     val seconds = totalSeconds % 60
     return "%d:%02d".format(minutes, seconds)
-}
-
-private fun playLibraryTrack(context: Context, libraryTrack: IcmLibraryTrack) {
-    val track = Track(
-        id = libraryTrack.id,
-        title = libraryTrack.title,
-        artist = libraryTrack.artist ?: "Unknown Artist",
-        albumName = "",
-        durationMs = libraryTrack.durationMs,
-        uri = Uri.parse("https://byicloud.online/track/${libraryTrack.id}"),
-        coverUrl = libraryTrack.cover,
-        albumId = libraryTrack.collectionId?.hashCode()?.toLong() ?: -1L
-    )
-    PlayerController.playNext(track, context)
 }

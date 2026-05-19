@@ -1320,12 +1320,23 @@ object PlayerController {
         }
     }
 
-    // ── Favorites ──
+    // ── Favorites (backed by Room DB via LibraryRepository) ──
     fun toggleFavorite(trackId: String) {
-        val current = _favoriteIds.value.toMutableSet()
-        if (current.contains(trackId)) current.remove(trackId)
-        else current.add(trackId)
-        _favoriteIds.value = current
+        scope.launch(Dispatchers.IO) {
+            val repo = appContext?.let {
+                com.liquidmusicglass.data.local.db.LibraryRepository.getInstance(it)
+            } ?: return@launch
+            val track = _currentTrack.value
+            if (track != null && track.id == trackId) {
+                repo.toggleFavorite(track)
+            } else {
+                repo.toggleFavoriteById(trackId)
+            }
+        }
+    }
+
+    fun setFavoriteIds(ids: Set<String>) {
+        _favoriteIds.value = ids
     }
 
     fun isFavorite(trackId: String): Boolean = _favoriteIds.value.contains(trackId)
