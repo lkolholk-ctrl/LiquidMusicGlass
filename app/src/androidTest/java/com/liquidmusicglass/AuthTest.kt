@@ -18,7 +18,10 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
- * UI-тесты авторизации
+ * UI-тесты авторизации.
+ *
+ * ВАЖНО: Используем mainClock.advanceTimeBy() вместо waitForIdle(),
+ * т.к. в приложении могут быть бесконечные анимации (плеер).
  */
 @RunWith(AndroidJUnit4::class)
 class AuthTest {
@@ -28,18 +31,19 @@ class AuthTest {
 
     @Test
     fun authScreenCanBeOpened() {
-        composeTestRule.waitForIdle()
+        composeTestRule.mainClock.autoAdvance = false
+        composeTestRule.mainClock.advanceTimeBy(100)
 
         // Переходим на Profile
         composeTestRule.onNodeWithContentDescription("Profile", ignoreCase = true)
             .performClick()
-        composeTestRule.waitForIdle()
+        composeTestRule.mainClock.advanceTimeBy(300)
 
         // Ищем кнопку входа/регистрации
         try {
             composeTestRule.onNodeWithText("Sign in", ignoreCase = true)
                 .performClick()
-            composeTestRule.waitForIdle()
+            composeTestRule.mainClock.advanceTimeBy(300)
 
             composeTestRule.onNodeWithText("Sign in", ignoreCase = true).assertExists()
         } catch (_: AssertionError) {
@@ -95,11 +99,12 @@ class AuthTest {
 
     @Test
     fun authScreenHasRequiredElements() {
-        composeTestRule.waitForIdle()
+        composeTestRule.mainClock.autoAdvance = false
+        composeTestRule.mainClock.advanceTimeBy(100)
 
         composeTestRule.onNodeWithContentDescription("Profile", ignoreCase = true)
             .performClick()
-        composeTestRule.waitForIdle()
+        composeTestRule.mainClock.advanceTimeBy(300)
 
         // Проверяем наличие основных элементов
         val hasSignIn = try {

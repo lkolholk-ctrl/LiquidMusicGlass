@@ -18,7 +18,10 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * Полные UI-тесты плеера — проверяют все элементы управления
+ * Полные UI-тесты плеера — проверяют все элементы управления.
+ *
+ * ВАЖНО: Используем mainClock.advanceTimeBy() вместо waitForIdle(),
+ * т.к. в приложении могут быть бесконечные анимации (плеер).
  */
 @RunWith(AndroidJUnit4::class)
 class PlayerFullTest {
@@ -30,7 +33,8 @@ class PlayerFullTest {
 
     @Before
     fun setup() {
-        composeTestRule.waitForIdle()
+        composeTestRule.mainClock.autoAdvance = false
+        composeTestRule.mainClock.advanceTimeBy(100)
     }
 
     @Test
@@ -118,7 +122,7 @@ class PlayerFullTest {
 
     @Test
     fun skipNextExists() {
-        composeTestRule.waitForIdle()
+        composeTestRule.mainClock.advanceTimeBy(100)
         try {
             composeTestRule.onNodeWithContentDescription("Next", ignoreCase = true).assertExists()
         } catch (_: AssertionError) {
@@ -128,7 +132,7 @@ class PlayerFullTest {
 
     @Test
     fun skipPreviousExists() {
-        composeTestRule.waitForIdle()
+        composeTestRule.mainClock.advanceTimeBy(100)
         try {
             composeTestRule.onNodeWithContentDescription("Previous", ignoreCase = true).assertExists()
         } catch (_: AssertionError) {
@@ -189,7 +193,7 @@ class PlayerFullTest {
 
     @Test
     fun miniPlayerVisibility() {
-        composeTestRule.waitForIdle()
+        composeTestRule.mainClock.advanceTimeBy(100)
 
         // Mini player должен быть виден, если есть текущий трек
         val hasTrack = runBlocking { PlayerController.currentTrack.first() != null }
@@ -206,13 +210,13 @@ class PlayerFullTest {
 
     @Test
     fun fullPlayerExpandAndCollapse() {
-        composeTestRule.waitForIdle()
+        composeTestRule.mainClock.advanceTimeBy(100)
 
         // Открыть полный плеер
         try {
             composeTestRule.onNodeWithContentDescription("Expand player", ignoreCase = true)
                 .performClick()
-            composeTestRule.waitForIdle()
+            composeTestRule.mainClock.advanceTimeBy(300)
 
             // Проверить, что открылся
             composeTestRule.onNodeWithContentDescription("Close player", ignoreCase = true)
@@ -221,7 +225,7 @@ class PlayerFullTest {
             // Закрыть
             composeTestRule.onNodeWithContentDescription("Close player", ignoreCase = true)
                 .performClick()
-            composeTestRule.waitForIdle()
+            composeTestRule.mainClock.advanceTimeBy(300)
 
         } catch (_: AssertionError) {
             // Если не получилось expand — возможно, нет трека

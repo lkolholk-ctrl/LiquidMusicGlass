@@ -15,7 +15,10 @@ import org.junit.runner.RunWith
 import kotlin.test.assertEquals
 
 /**
- * UI-тесты настроек
+ * UI-тесты настроек.
+ *
+ * ВАЖНО: Используем mainClock.advanceTimeBy() вместо waitForIdle(),
+ * т.к. в приложении могут быть бесконечные анимации (плеер).
  */
 @RunWith(AndroidJUnit4::class)
 class SettingsTest {
@@ -25,18 +28,19 @@ class SettingsTest {
 
     @Test
     fun settingsScreenOpensFromProfile() {
-        composeTestRule.waitForIdle()
+        composeTestRule.mainClock.autoAdvance = false
+        composeTestRule.mainClock.advanceTimeBy(100)
 
         // Переходим на Profile
         composeTestRule.onNodeWithContentDescription("Profile", ignoreCase = true)
             .performClick()
-        composeTestRule.waitForIdle()
+        composeTestRule.mainClock.advanceTimeBy(300)
 
         // Открываем настройки
         try {
             composeTestRule.onNodeWithContentDescription("Settings", ignoreCase = true)
                 .performClick()
-            composeTestRule.waitForIdle()
+            composeTestRule.mainClock.advanceTimeBy(300)
 
             composeTestRule.onNodeWithText("Settings", ignoreCase = true).assertExists()
         } catch (_: AssertionError) {
@@ -62,23 +66,24 @@ class SettingsTest {
 
     @Test
     fun equalizerCanBeOpened() {
-        composeTestRule.waitForIdle()
+        composeTestRule.mainClock.autoAdvance = false
+        composeTestRule.mainClock.advanceTimeBy(100)
 
         // Переходим на Profile
         composeTestRule.onNodeWithContentDescription("Profile", ignoreCase = true)
             .performClick()
-        composeTestRule.waitForIdle()
+        composeTestRule.mainClock.advanceTimeBy(300)
 
         // Открываем настройки
         try {
             composeTestRule.onNodeWithContentDescription("Settings", ignoreCase = true)
                 .performClick()
-            composeTestRule.waitForIdle()
+            composeTestRule.mainClock.advanceTimeBy(300)
 
             // Ищем кнопку эквалайзера
             composeTestRule.onNodeWithText("Equalizer", ignoreCase = true)
                 .performClick()
-            composeTestRule.waitForIdle()
+            composeTestRule.mainClock.advanceTimeBy(300)
 
             // Проверяем, что эквалайзер открылся
             composeTestRule.onNodeWithContentDescription("Back", ignoreCase = true).assertExists()
