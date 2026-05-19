@@ -242,14 +242,22 @@ object PlayerController {
                 _durationMs.value = current.duration.coerceAtLeast(0L)
             }
             if (playbackState == Player.STATE_ENDED) {
-                // Queue ended — auto-refill if context is set
                 val remainingTracks = queue.size - currentIndex - 1
-                if (remainingTracks < 1 && autoRefillContext != null) {
+                if (remainingTracks >= 1 && controller?.hasNextMediaItem() == true) {
+                    // Next track already in ExoPlayer — seamless transition
+                    controller?.seekToNextMediaItem()
+                    controller?.play()
+                } else if (autoRefillContext != null) {
                     scope.launch {
                         autoRefillQueue()
-                        // Play next track if available
                         if (currentIndex + 1 < queue.size) {
-                            playTrack(appContext ?: return@launch, currentIndex + 1)
+                            val pc = obtainController(appContext ?: return@launch)
+                            if (pc != null && pc.mediaItemCount > currentIndex + 1) {
+                                pc.seekTo(currentIndex + 1, 0L)
+                                pc.play()
+                            } else {
+                                playTrack(appContext ?: return@launch, currentIndex + 1)
+                            }
                         }
                     }
                 }
@@ -417,6 +425,11 @@ object PlayerController {
         val prefs = context.getSharedPreferences("icm", Context.MODE_PRIVATE)
         val savedKey = prefs.getString("api_key", null)
         val savedUserId = prefs.getString("partner_user_id", null)
+        val partnerUserId = savedUserId ?: run {
+            val generated = java.util.UUID.randomUUID().toString()
+            prefs.edit().putString("partner_user_id", generated).apply()
+            generated
+        }
 
         val activeKey = when {
             nativeKey.isNotBlank() && nativeKey.startsWith("pk_") -> nativeKey
@@ -426,7 +439,7 @@ object PlayerController {
         }
 
         if (activeKey != null) {
-            com.liquidmusicglass.api.icm.IcmRepository.init(activeKey, savedUserId)
+            com.liquidmusicglass.api.icm.IcmRepository.init(activeKey, partnerUserId)
         } else {
             android.util.Log.e("PlayerController", "ICM API key not available. Native: '${nativeKey.take(3)}...', BuildConfig: '${buildConfigKey.take(3)}...', Saved: '${savedKey?.take(3)}...'")
         }
@@ -527,6 +540,7 @@ object PlayerController {
 
     /**
      * Установить очередь треков из ICM API.
+     * Also syncs with ExoPlayer for seamless playback.
      */
     fun setQueue(tracks: List<Track>, startIndex: Int = 0) {
         queue = tracks.toMutableList()
@@ -535,6 +549,17 @@ object PlayerController {
             currentIndex = startIndex
             _currentTrack.value = tracks[startIndex]
             _durationMs.value = tracks[startIndex].durationMs
+        }
+        // Sync with ExoPlayer
+        val pc = controller
+        if (pc != null) {
+            val mediaItems = tracks.map { buildMediaItem(it) }
+            pc.setMediaItems(mediaItems, startIndex.coerceIn(0, tracks.size), 0L)
+        } else {
+            AudioService.companionPlayer?.let { exo ->
+                val mediaItems = tracks.map { buildMediaItem(it) }
+                exo.setMediaItems(mediaItems, startIndex.coerceIn(0, tracks.size), 0L)
+            }
         }
     }
 
@@ -581,6 +606,12 @@ object PlayerController {
         newQueue.add(insertIndex, track)
         queue = newQueue
         _queue.value = queue
+
+        // Sync insert with ExoPlayer for seamless transitions
+        val mediaItem = buildMediaItem(track)
+        controller?.addMediaItem(insertIndex, mediaItem)
+        AudioService.companionPlayer?.addMediaItem(insertIndex, mediaItem)
+
         playTrack(context, insertIndex)
         // Auto-populate with similar genre tracks
         scope.launch {
@@ -612,11 +643,33 @@ object PlayerController {
     /**
      * Воспроизвести трек из очереди по индексу.
      * Docs: "URL из поля url ответа /track подставляй прямо в плеер."
-     * Загружаем всю очередь в ExoPlayer как MediaItem list, с резолвленными URL.
+     * Если очередь уже загружена в ExoPlayer — просто seek, не перезагружаем.
      * Текущий трек резолвим сразу, остальные — с placeholder URI (резолвим lazy).
      */
     fun playTrack(context: Context, index: Int) {
         if (index !in queue.indices) return
+
+        // Fast path: if ExoPlayer already has this queue, just seek
+        val pc = controller
+        if (pc != null && pc.mediaItemCount == queue.size && index < pc.mediaItemCount) {
+            val allMatch = queue.withIndex().all { (i, t) ->
+                i < pc.mediaItemCount && pc.getMediaItemAt(i).mediaId == t.id
+            }
+            if (allMatch) {
+                logWavePlaybackOnSwitch()
+                pc.seekTo(index, 0L)
+                pc.play()
+                currentIndex = index
+                _currentTrack.value = queue[index]
+                _durationMs.value = queue[index].durationMs
+                _currentPositionMs.value = 0L
+                _isPlaying.value = true
+                startPositionUpdates()
+                addToRecent(queue[index])
+                preloadNextTrack()
+                return
+            }
+        }
 
         // Log previous wave track before switching
         logWavePlaybackOnSwitch()
