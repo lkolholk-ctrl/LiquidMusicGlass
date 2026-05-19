@@ -412,7 +412,9 @@ fun IcmSearchItem.toTrack(uri: String? = null): com.liquidmusicglass.engine.Trac
         artist = displayArtist,
         albumName = album ?: collectionId ?: "Single",
         uri = android.net.Uri.parse(uri ?: preview ?: "https://byicloud.online/track/$id"),
-        durationMs = duration ?: 0L,
+        // `secondary_*` / `vk_*` tracks come back with `duration` in seconds; Apple in ms.
+        // Reuse the model's normalized accessor so the progress bar shows the right scale.
+        durationMs = durationMs,
         albumId = collectionId?.hashCode()?.toLong() ?: id.hashCode().toLong(),
         coverUrl = cover?.replace("1000x1000", "600x600") ?: cover
     )
@@ -451,7 +453,8 @@ fun IcmPlaylistTrack.toTrack(): com.liquidmusicglass.engine.Track {
         artist = artist,
         albumName = "",
         uri = android.net.Uri.parse("https://byicloud.online/track/$id"),
-        durationMs = duration,
+        // VK/secondary return seconds, Apple ms — normalize uniformly.
+        durationMs = if (duration in 1..999) duration * 1000L else duration,
         albumId = collectionId.hashCode().toLong(),
         coverUrl = cover.replace("1000x1000", "600x600")
     )
