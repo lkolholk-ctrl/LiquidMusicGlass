@@ -215,11 +215,18 @@ object PlayerController {
     data class AutoRefillContext(
         val type: String, // "wave", "artist", "album", "search", "genre"
         val id: String?, // artistId, albumId, moodId, query
-        val name: String? = null
+        val name: String? = null,
+        /** For wave: an ICM trackId used as `seed_track_id` so the radio stays on-genre. */
+        val seedTrackId: String? = null
     )
 
-    fun setAutoRefillContext(type: String, id: String? = null, name: String? = null) {
-        autoRefillContext = AutoRefillContext(type, id, name)
+    fun setAutoRefillContext(
+        type: String,
+        id: String? = null,
+        name: String? = null,
+        seedTrackId: String? = null
+    ) {
+        autoRefillContext = AutoRefillContext(type, id, name, seedTrackId)
     }
 
     fun clearAutoRefillContext() {
@@ -323,21 +330,22 @@ object PlayerController {
 
         when (ctx.type) {
             "wave" -> {
-                // Personal wave
+                // Personal wave — keep mood-specific seed if one was set.
+                val seed = ctx.seedTrackId
                 repeat(5) {
                     val response = com.liquidmusicglass.api.icm.IcmRepository.getWaveNext(
+                        seedTrackId = seed,
                         exclude = (exclude + newTracks.map { it.id }).takeIf { it.isNotEmpty() },
                         recentSkips = 0
                     )
-                    if (response != null && response.status == "ok" && response.track != null) {
-                        val wt = response.track
-                        newTracks.add(Track(
-                            id = wt.id, title = wt.title, artist = wt.artist ?: "Unknown Artist",
-                            albumName = "", durationMs = wt.durationMs,
-                            uri = Uri.parse("https://byicloud.online/track/${wt.id}"),
-                            coverUrl = wt.cover, albumId = wt.collectionId?.hashCode()?.toLong() ?: -1L
-                        ))
-                    }
+                    if (response == null || response.status != "ok") return@repeat
+                    val wt = response.track ?: return@repeat
+                    newTracks.add(Track(
+                        id = wt.id, title = wt.title, artist = wt.artist ?: "Unknown Artist",
+                        albumName = "", durationMs = wt.durationMs,
+                        uri = Uri.parse("https://byicloud.online/track/${wt.id}"),
+                        coverUrl = wt.cover, albumId = wt.collectionId?.hashCode()?.toLong() ?: -1L
+                    ))
                 }
             }
             "artist" -> {
@@ -390,15 +398,14 @@ object PlayerController {
                         exclude = (exclude + newTracks.map { it.id }).takeIf { it.isNotEmpty() },
                         recentSkips = 0
                     )
-                    if (response != null && response.status == "ok" && response.track != null) {
-                        val wt = response.track
-                        newTracks.add(Track(
-                            id = wt.id, title = wt.title, artist = wt.artist ?: "Unknown Artist",
-                            albumName = "", durationMs = wt.durationMs,
-                            uri = Uri.parse("https://byicloud.online/track/${wt.id}"),
-                            coverUrl = wt.cover, albumId = wt.collectionId?.hashCode()?.toLong() ?: -1L
-                        ))
-                    }
+                    if (response == null || response.status != "ok") return@repeat
+                    val wt = response.track ?: return@repeat
+                    newTracks.add(Track(
+                        id = wt.id, title = wt.title, artist = wt.artist ?: "Unknown Artist",
+                        albumName = "", durationMs = wt.durationMs,
+                        uri = Uri.parse("https://byicloud.online/track/${wt.id}"),
+                        coverUrl = wt.cover, albumId = wt.collectionId?.hashCode()?.toLong() ?: -1L
+                    ))
                 }
             }
         }
@@ -424,12 +431,12 @@ object PlayerController {
         val buildConfigKey = com.liquidmusicglass.BuildConfig.ICM_API_KEY
         val prefs = context.getSharedPreferences("icm", Context.MODE_PRIVATE)
         val savedKey = prefs.getString("api_key", null)
-        val savedUserId = prefs.getString("partner_user_id", null)
-        val partnerUserId = savedUserId ?: run {
-            val generated = java.util.UUID.randomUUID().toString()
-            prefs.edit().putString("partner_user_id", generated).apply()
-            generated
-        }
+
+        // Make sure IcmAuthRepository is initialized so its partner_user_id
+        // is the single source of truth across the app. IcmAuthRepository.init()
+        // is idempotent and safe to call multiple times.
+        com.liquidmusicglass.api.icm.IcmAuthRepository.init(context)
+        val partnerUserId = com.liquidmusicglass.api.icm.IcmAuthRepository.ensurePartnerUserId()
 
         val activeKey = when {
             nativeKey.isNotBlank() && nativeKey.startsWith("pk_") -> nativeKey
@@ -440,6 +447,10 @@ object PlayerController {
 
         if (activeKey != null) {
             com.liquidmusicglass.api.icm.IcmRepository.init(activeKey, partnerUserId)
+            // Promote any cached session token into the API client too.
+            com.liquidmusicglass.api.icm.IcmAuthRepository.getSessionToken()?.let { token ->
+                com.liquidmusicglass.api.icm.IcmRepository.setSessionToken(token)
+            }
         } else {
             android.util.Log.e("PlayerController", "ICM API key not available. Native: '${nativeKey.take(3)}...', BuildConfig: '${buildConfigKey.take(3)}...', Saved: '${savedKey?.take(3)}...'")
         }
