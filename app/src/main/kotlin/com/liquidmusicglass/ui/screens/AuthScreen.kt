@@ -104,13 +104,13 @@ fun AuthScreen(
             Spacer(modifier = Modifier.height(40.dp))
 
             // Telegram auth via ICM API
-            // Generate stable partner_user_id per device
+            // Generate stable partner_user_id per device. Stored exclusively
+            // via IcmAuthRepository so the same value is used when ICM redirects
+            // back into the app — backend matches /link by partner_user_id and
+            // changing it post-link is what breaks the wave radio.
             val prefs = context.getSharedPreferences("icm_auth", android.content.Context.MODE_PRIVATE)
-            val partnerUserId = prefs.getString("partner_user_id", null) ?: run {
-                val id = "lg_${java.util.UUID.randomUUID().toString().replace("-", "").take(16)}"
-                prefs.edit().putString("partner_user_id", id).apply()
-                id
-            }
+            val partnerUserId = com.liquidmusicglass.api.icm.IcmAuthRepository
+                .ensurePartnerUserId()
             Box(
                 modifier = Modifier
                     .fillMaxWidth()

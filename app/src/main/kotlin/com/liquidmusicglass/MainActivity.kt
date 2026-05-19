@@ -12,8 +12,14 @@ import com.liquidmusicglass.logging.CrashHandler
 import com.liquidmusicglass.ui.AppRoot
 import com.liquidmusicglass.ui.crash.CrashActivity
 import com.liquidmusicglass.ui.theme.LiquidMusicGlassTheme
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+
+    private val authScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -90,6 +96,23 @@ class MainActivity : ComponentActivity() {
                 icmUserId = icmUserId,
                 state = state
             )
+
+            // Try to issue a Bearer session token so /me/* endpoints work
+            // without S2S API key. Best-effort — wave already works via
+            // X-Partner-Key + X-Partner-User-Id even if this fails.
+            val apiKey = try {
+                com.liquidmusicglass.api.icm.IcmKeyProvider.getApiKey()
+            } catch (_: Throwable) { "" }
+                .ifBlank { com.liquidmusicglass.BuildConfig.ICM_API_KEY }
+            if (apiKey.isNotBlank() && apiKey.startsWith("pk_")) {
+                authScope.launch {
+                    runCatching {
+                        com.liquidmusicglass.api.icm.IcmAuthRepository
+                            .issueSessionAfterTelegramAuth(apiKey)
+                    }
+                }
+            }
+
             android.widget.Toast.makeText(
                 this,
                 "Telegram auth successful",

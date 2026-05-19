@@ -331,9 +331,14 @@ fun ArtistDetailScreen(
                                         indication = null,
                                         onClick = {
                                             if (artistTracks.isNotEmpty()) {
-                                                PlayerController.setAutoRefillContext("artist", artistId, artist?.name)
-                                                PlayerController.setQueue(artistTracks)
-                                                PlayerController.playTrack(context, 0)
+                                                PlayerController.playFromList(
+                                                    context = context,
+                                                    tracks = artistTracks,
+                                                    startIndex = 0,
+                                                    autoRefillType = "artist",
+                                                    autoRefillId = artistId,
+                                                    autoRefillName = artist?.name
+                                                )
                                             }
                                         }
                                     ),
@@ -356,10 +361,15 @@ fun ArtistDetailScreen(
                                         indication = null,
                                         onClick = {
                                             if (artistTracks.isNotEmpty()) {
-                                                PlayerController.setAutoRefillContext("artist", artistId, artist?.name)
                                                 val shuffled = artistTracks.shuffled()
-                                                PlayerController.setQueue(shuffled)
-                                                PlayerController.playTrack(context, 0)
+                                                PlayerController.playFromList(
+                                                    context = context,
+                                                    tracks = shuffled,
+                                                    startIndex = 0,
+                                                    autoRefillType = "artist",
+                                                    autoRefillId = artistId,
+                                                    autoRefillName = artist?.name
+                                                )
                                                 if (!PlayerController.shuffleEnabled.value) {
                                                     PlayerController.toggleShuffle()
                                                 }
@@ -512,9 +522,18 @@ fun ArtistDetailScreen(
                                     interactionSource = remember { MutableInteractionSource() },
                                     indication = null,
                                     onClick = {
-                                        // Play immediately without replacing current queue
-                                        PlayerController.setAutoRefillContext("artist", artistId, artist?.name)
-                                        PlayerController.playNext(track, context)
+                                        // Load all artist tracks as the queue so the player
+                                        // continues to the next song after this one ends.
+                                        val startIdx = artistTracks.indexOfFirst { it.id == track.id }
+                                            .coerceAtLeast(0)
+                                        PlayerController.playFromList(
+                                            context = context,
+                                            tracks = artistTracks,
+                                            startIndex = startIdx,
+                                            autoRefillType = "artist",
+                                            autoRefillId = artistId,
+                                            autoRefillName = artist?.name
+                                        )
                                     }
                                 )
                                 .padding(horizontal = 12.dp),

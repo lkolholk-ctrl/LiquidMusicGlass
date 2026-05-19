@@ -48,10 +48,13 @@ object PlayerController {
     private var waveTrackId: String? = null
 
     // ── Stream URL cache (trackId -> resolved Uri) ──
-    // Docs: "file_id — cache for a day+ by (trackId + region + quality)"
+    // Docs: signed `url` lives ~10 minutes; we cache for 8 min to stay safe.
     private val streamUrlCache = mutableMapOf<String, android.net.Uri>()
     private val streamUrlCacheExpiry = mutableMapOf<String, Long>()
     private const val STREAM_CACHE_TTL_MS = 8 * 60 * 1000L // 8 min (URL valid ~10 min)
+
+    /** How many upcoming tracks to keep pre-resolved — docs 7.3 says 3–5. */
+    private const val PREFETCH_AHEAD = 3
 
     private val _currentTrack = MutableStateFlow<Track?>(null)
     val currentTrack: StateFlow<Track?> = _currentTrack
@@ -215,11 +218,18 @@ object PlayerController {
     data class AutoRefillContext(
         val type: String, // "wave", "artist", "album", "search", "genre"
         val id: String?, // artistId, albumId, moodId, query
-        val name: String? = null
+        val name: String? = null,
+        /** For wave: an ICM trackId used as `seed_track_id` so the radio stays on-genre. */
+        val seedTrackId: String? = null
     )
 
-    fun setAutoRefillContext(type: String, id: String? = null, name: String? = null) {
-        autoRefillContext = AutoRefillContext(type, id, name)
+    fun setAutoRefillContext(
+        type: String,
+        id: String? = null,
+        name: String? = null,
+        seedTrackId: String? = null
+    ) {
+        autoRefillContext = AutoRefillContext(type, id, name, seedTrackId)
     }
 
     fun clearAutoRefillContext() {
@@ -266,6 +276,12 @@ object PlayerController {
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             val mediaId = mediaItem?.mediaId ?: return
+            // Seamless transition: log the *previous* wave track as completed before
+            // we overwrite the tracking ids below (docs 8.4: `completed=true`).
+            if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
+                logWavePlaybackOnSwitch(autoCompleted = true)
+            }
+
             val index = queue.indexOfFirst { it.id == mediaId }
             if (index in queue.indices) {
                 currentIndex = index
@@ -275,20 +291,22 @@ object PlayerController {
                 _currentPositionMs.value = 0L
                 addToRecent(track)
 
+                // Start tracking the now-playing track for the next playback log.
+                waveTrackId = track.id
+                waveTrackStartTimeMs = System.currentTimeMillis()
+                waveTrackPlayedMs = 0L
+
                 // Lazy resolve stream URL for this track if online
                 // Docs: "Когда URL истёк — позови /track заново. У нас сработает свой кеш, ответ придёт за миллисекунды."
                 if (track.isOnlineTrack) {
                     scope.launch {
                         val resolvedUri = getCachedOrResolveStreamUrl(track.id)
                         if (resolvedUri != null && resolvedUri != track.uri) {
-                            // Update queue with resolved URI for continuous playback
-                            queue = queue.map { t ->
-                                if (t.id == track.id) t.copy(uri = resolvedUri) else t
-                            }
-                            _queue.value = queue
+                            updateQueueTrackUri(track.id, resolvedUri)
+                            replaceMediaItemUri(index, resolvedUri, track)
                         }
-                        // Preload next track after transition
-                        preloadNextTrack()
+                        // Preload upcoming tracks after transition
+                        preloadUpcoming()
                     }
                 }
 
@@ -312,6 +330,51 @@ object PlayerController {
         }
     }
 
+    /** Update the in-memory queue so a given track points at a resolved URI. */
+    private fun updateQueueTrackUri(trackId: String, uri: android.net.Uri) {
+        var changed = false
+        val updated = queue.map { t ->
+            if (t.id == trackId && t.uri != uri) {
+                changed = true
+                t.copy(uri = uri)
+            } else t
+        }
+        if (changed) {
+            queue = updated
+            _queue.value = updated
+        }
+    }
+
+    /**
+     * Replace the MediaItem at `index` so ExoPlayer picks up the freshly
+     * resolved signed URL on its next prepare/transition without restarting
+     * the whole timeline. Available since Media3 1.2.
+     */
+    private fun replaceMediaItemUri(index: Int, uri: android.net.Uri, track: Track) {
+        val item = MediaItem.Builder()
+            .setMediaId(track.id)
+            .setUri(uri)
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(track.title)
+                    .setArtist(track.artist)
+                    .setAlbumArtist(track.artist)
+                    .setArtworkUri(track.displayArtUri)
+                    .build()
+            )
+            .build()
+        try {
+            val pc = controller
+            if (pc != null && index in 0 until pc.mediaItemCount) {
+                pc.replaceMediaItem(index, item)
+                return
+            }
+            AudioService.companionPlayer?.let { exo ->
+                if (index in 0 until exo.mediaItemCount) exo.replaceMediaItem(index, item)
+            }
+        } catch (_: Throwable) { /* best effort */ }
+    }
+
     /**
      * Auto-refill queue based on current context when running low.
      * Called from player listener when remaining tracks < 3.
@@ -323,21 +386,22 @@ object PlayerController {
 
         when (ctx.type) {
             "wave" -> {
-                // Personal wave
+                // Personal wave — keep mood-specific seed if one was set.
+                val seed = ctx.seedTrackId
                 repeat(5) {
                     val response = com.liquidmusicglass.api.icm.IcmRepository.getWaveNext(
+                        seedTrackId = seed,
                         exclude = (exclude + newTracks.map { it.id }).takeIf { it.isNotEmpty() },
                         recentSkips = 0
                     )
-                    if (response != null && response.status == "ok" && response.track != null) {
-                        val wt = response.track
-                        newTracks.add(Track(
-                            id = wt.id, title = wt.title, artist = wt.artist ?: "Unknown Artist",
-                            albumName = "", durationMs = wt.durationMs,
-                            uri = Uri.parse("https://byicloud.online/track/${wt.id}"),
-                            coverUrl = wt.cover, albumId = wt.collectionId?.hashCode()?.toLong() ?: -1L
-                        ))
-                    }
+                    if (response == null || response.status != "ok") return@repeat
+                    val wt = response.track ?: return@repeat
+                    newTracks.add(Track(
+                        id = wt.id, title = wt.title, artist = wt.artist ?: "Unknown Artist",
+                        albumName = "", durationMs = wt.durationMs,
+                        uri = Uri.parse("https://byicloud.online/track/${wt.id}"),
+                        coverUrl = wt.cover, albumId = wt.collectionId?.hashCode()?.toLong() ?: -1L
+                    ))
                 }
             }
             "artist" -> {
@@ -390,15 +454,14 @@ object PlayerController {
                         exclude = (exclude + newTracks.map { it.id }).takeIf { it.isNotEmpty() },
                         recentSkips = 0
                     )
-                    if (response != null && response.status == "ok" && response.track != null) {
-                        val wt = response.track
-                        newTracks.add(Track(
-                            id = wt.id, title = wt.title, artist = wt.artist ?: "Unknown Artist",
-                            albumName = "", durationMs = wt.durationMs,
-                            uri = Uri.parse("https://byicloud.online/track/${wt.id}"),
-                            coverUrl = wt.cover, albumId = wt.collectionId?.hashCode()?.toLong() ?: -1L
-                        ))
-                    }
+                    if (response == null || response.status != "ok") return@repeat
+                    val wt = response.track ?: return@repeat
+                    newTracks.add(Track(
+                        id = wt.id, title = wt.title, artist = wt.artist ?: "Unknown Artist",
+                        albumName = "", durationMs = wt.durationMs,
+                        uri = Uri.parse("https://byicloud.online/track/${wt.id}"),
+                        coverUrl = wt.cover, albumId = wt.collectionId?.hashCode()?.toLong() ?: -1L
+                    ))
                 }
             }
         }
@@ -424,12 +487,12 @@ object PlayerController {
         val buildConfigKey = com.liquidmusicglass.BuildConfig.ICM_API_KEY
         val prefs = context.getSharedPreferences("icm", Context.MODE_PRIVATE)
         val savedKey = prefs.getString("api_key", null)
-        val savedUserId = prefs.getString("partner_user_id", null)
-        val partnerUserId = savedUserId ?: run {
-            val generated = java.util.UUID.randomUUID().toString()
-            prefs.edit().putString("partner_user_id", generated).apply()
-            generated
-        }
+
+        // Make sure IcmAuthRepository is initialized so its partner_user_id
+        // is the single source of truth across the app. IcmAuthRepository.init()
+        // is idempotent and safe to call multiple times.
+        com.liquidmusicglass.api.icm.IcmAuthRepository.init(context)
+        val partnerUserId = com.liquidmusicglass.api.icm.IcmAuthRepository.ensurePartnerUserId()
 
         val activeKey = when {
             nativeKey.isNotBlank() && nativeKey.startsWith("pk_") -> nativeKey
@@ -440,6 +503,10 @@ object PlayerController {
 
         if (activeKey != null) {
             com.liquidmusicglass.api.icm.IcmRepository.init(activeKey, partnerUserId)
+            // Promote any cached session token into the API client too.
+            com.liquidmusicglass.api.icm.IcmAuthRepository.getSessionToken()?.let { token ->
+                com.liquidmusicglass.api.icm.IcmRepository.setSessionToken(token)
+            }
         } else {
             android.util.Log.e("PlayerController", "ICM API key not available. Native: '${nativeKey.take(3)}...', BuildConfig: '${buildConfigKey.take(3)}...', Saved: '${savedKey?.take(3)}...'")
         }
@@ -551,14 +618,16 @@ object PlayerController {
             _durationMs.value = tracks[startIndex].durationMs
         }
         // Sync with ExoPlayer
+        if (tracks.isEmpty()) return
         val pc = controller
+        val safeIdx = startIndex.coerceIn(0, tracks.lastIndex)
         if (pc != null) {
             val mediaItems = tracks.map { buildMediaItem(it) }
-            pc.setMediaItems(mediaItems, startIndex.coerceIn(0, tracks.size), 0L)
+            pc.setMediaItems(mediaItems, safeIdx, 0L)
         } else {
             AudioService.companionPlayer?.let { exo ->
                 val mediaItems = tracks.map { buildMediaItem(it) }
-                exo.setMediaItems(mediaItems, startIndex.coerceIn(0, tracks.size), 0L)
+                exo.setMediaItems(mediaItems, safeIdx, 0L)
             }
         }
     }
@@ -583,6 +652,43 @@ object PlayerController {
             playerController.addMediaItem(mediaItem)
         } else {
             AudioService.companionPlayer?.addMediaItem(buildMediaItem(track))
+        }
+    }
+
+    /**
+     * Заменить очередь полным списком и сразу запустить выбранный индекс.
+     * Используется на Поиске/Альбоме/Артисте — клик по треку из списка
+     * формирует всю последующую очередь.
+     *
+     * Resolves the signed URL for [startIndex] up-front so ExoPlayer's first
+     * MediaItem contains a real CDN url (avoids the placeholder bug). The
+     * remaining items get their URLs pre-fetched via [preloadUpcoming].
+     */
+    fun playFromList(
+        context: Context,
+        tracks: List<Track>,
+        startIndex: Int,
+        autoRefillType: String? = null,
+        autoRefillId: String? = null,
+        autoRefillName: String? = null,
+        autoRefillSeedTrackId: String? = null
+    ) {
+        if (tracks.isEmpty()) return
+        val idx = startIndex.coerceIn(0, tracks.lastIndex)
+        if (autoRefillType != null) {
+            setAutoRefillContext(autoRefillType, autoRefillId, autoRefillName, autoRefillSeedTrackId)
+        }
+        scope.launch {
+            val start = tracks[idx]
+            val tracksToUse = if (start.isOnlineTrack) {
+                val resolved = try { getCachedOrResolveStreamUrl(start.id) } catch (_: Exception) { null }
+                if (resolved != null) {
+                    tracks.toMutableList().also { it[idx] = start.copy(uri = resolved) }
+                } else tracks
+            } else tracks
+            setQueue(tracksToUse, idx)
+            playTrack(context, idx)
+            preloadUpcoming()
         }
     }
 
@@ -1017,22 +1123,50 @@ object PlayerController {
     // ── Preload next track ──
     private var preloadJob: Job? = null
 
-    fun preloadNextTrack() {
+    /**
+     * Backwards-compatible alias: prefetches the next [PREFETCH_AHEAD] tracks
+     * so ExoPlayer has signed URLs and can start buffering before the
+     * current item finishes. Docs 7.3: «pre-fetch 3–5 tracks».
+     */
+    fun preloadNextTrack() = preloadUpcoming()
+
+    /**
+     * Resolve `POST /track` URLs for the next [PREFETCH_AHEAD] queue items and
+     * push them into ExoPlayer's MediaItems so the engine starts buffering
+     * the streams in the background.
+     */
+    fun preloadUpcoming() {
         preloadJob?.cancel()
-        if (queue.isEmpty()) return
-        val nextIdx = if (_shuffleEnabled.value) {
-            (queue.indices).random()
-        } else {
-            (currentIndex + 1).coerceAtMost(queue.lastIndex)
+        if (queue.isEmpty() || currentIndex < 0) return
+
+        // Collect up to PREFETCH_AHEAD upcoming online tracks that still need
+        // a resolved URL.
+        val upcoming = mutableListOf<Pair<Int, Track>>()
+        var idx = currentIndex + 1
+        while (idx < queue.size && upcoming.size < PREFETCH_AHEAD) {
+            val t = queue[idx]
+            if (t.isOnlineTrack && getCachedStreamUrl(t.id) == null) {
+                upcoming.add(idx to t)
+            }
+            idx++
         }
-        if (nextIdx !in queue.indices || nextIdx == currentIndex) return
-        val nextTrack = queue[nextIdx]
-        if (!nextTrack.isOnlineTrack) return
+        if (upcoming.isEmpty()) return
 
         preloadJob = scope.launch {
-            try {
-                preloadStreamUrl(nextTrack.id)
-            } catch (_: Exception) {}
+            for ((queueIndex, track) in upcoming) {
+                try {
+                    val uri = getCachedOrResolveStreamUrl(track.id) ?: continue
+                    // Persist the resolved URI in the kotlin queue and patch the
+                    // ExoPlayer MediaItem so it can buffer ahead.
+                    updateQueueTrackUri(track.id, uri)
+                    // Re-find the index in case the queue shifted while we were
+                    // awaiting the network call.
+                    val freshIndex = queue.indexOfFirst { it.id == track.id }
+                    if (freshIndex >= 0) {
+                        replaceMediaItemUri(freshIndex, uri, queue[freshIndex])
+                    }
+                } catch (_: Exception) { /* best effort */ }
+            }
         }
     }
 
@@ -1099,7 +1233,9 @@ object PlayerController {
                             artist = item.displayArtist,
                             albumName = item.album ?: "",
                             uri = android.net.Uri.parse("https://byicloud.online/track/${item.id}"),
-                            durationMs = 0L,
+                            // Use the model's normalized accessor; raw `duration` may be seconds
+                            // for `secondary_*` / `vk_*` items per docs 4.1.
+                            durationMs = item.durationMs,
                             albumId = item.collectionId?.toLongOrNull() ?: 0L,
                             coverUrl = item.cover
                         )
@@ -1151,9 +1287,15 @@ object PlayerController {
 
     /**
      * Log playback when switching away from a wave track.
-     * Called automatically on skipNext/skipPrevious/playTrack.
+     * Called automatically on skipNext / skipPrevious / playTrack and
+     * on seamless ExoPlayer transitions.
+     *
+     * @param autoCompleted true when the previous track ended on its own
+     *                      (ExoPlayer auto-advanced). In that case we force
+     *                      `completed=true` per docs 8.4 so the backend
+     *                      learns the user listened to the end.
      */
-    private fun logWavePlaybackOnSwitch() {
+    private fun logWavePlaybackOnSwitch(autoCompleted: Boolean = false) {
         val trackId = waveTrackId ?: return
         val startTime = waveTrackStartTimeMs
         if (startTime <= 0) return
@@ -1162,10 +1304,19 @@ object PlayerController {
         val playedSeconds = playedMs / 1000.0
         val totalSeconds = (_currentTrack.value?.durationMs ?: 0L) / 1000.0
 
-        if (playedSeconds < 3.0) return // Skip very short plays
+        // Skip extremely short plays unless this was a seamless completion.
+        if (!autoCompleted && playedSeconds < 3.0) return
 
-        val completed = if (totalSeconds > 0) playedSeconds >= totalSeconds * 0.85 else null
-        val skipped = if (totalSeconds > 0) playedSeconds < totalSeconds * 0.15 else null
+        val completed = when {
+            autoCompleted -> true
+            totalSeconds > 0 -> playedSeconds >= totalSeconds * 0.85
+            else -> null
+        }
+        val skipped = when {
+            autoCompleted -> false
+            totalSeconds > 0 -> playedSeconds < totalSeconds * 0.15
+            else -> null
+        }
 
         scope.launch {
             try {

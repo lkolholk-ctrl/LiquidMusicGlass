@@ -9,8 +9,8 @@ import kotlinx.serialization.Serializable
 data class IcmHealthResponse(
     @SerialName("partner_id") val partnerId: String,
     val status: String,
-    val scopes: List<String>,
-    val rateLimits: IcmRateLimits? = null,
+    val scopes: List<String> = emptyList(),
+    @SerialName("rate_limits") val rateLimits: IcmRateLimits? = null,
     val stream: IcmStreamConfig? = null,
     val search: IcmSearchConfig? = null,
     @SerialName("server_time") val serverTime: Long? = null
@@ -20,7 +20,8 @@ data class IcmHealthResponse(
 data class IcmRateLimits(
     val search: IcmRateLimit? = null,
     val stream: IcmRateLimit? = null,
-    val sessionIssue: IcmRateLimit? = null
+    @SerialName("session_issue") val sessionIssue: IcmRateLimit? = null,
+    val default: IcmRateLimit? = null
 )
 
 @Serializable
@@ -316,7 +317,9 @@ data class IcmCoverSignResponse(
 data class IcmLyricsResponse(
     @SerialName("track_id") val trackId: String,
     val lyrics: String? = null,
-    val synced: Boolean = false
+    val synced: Boolean = false,
+    val source: String? = null,
+    val format: String? = null
 )
 
 // ─── Errors ───
@@ -367,8 +370,8 @@ data class IcmBatchTrackMetaItem(
 data class IcmAsyncTrackPending(
     @SerialName("job_id") val jobId: String,
     val status: String = "pending",
-    @SerialName("poll_url") val pollUrl: String,
-    @SerialName("poll_after") val pollAfterSeconds: Int
+    @SerialName("poll_url") val pollUrl: String? = null,
+    @SerialName("poll_after_seconds") val pollAfterSeconds: Int = 3
 )
 
 @Serializable
@@ -409,7 +412,9 @@ fun IcmSearchItem.toTrack(uri: String? = null): com.liquidmusicglass.engine.Trac
         artist = displayArtist,
         albumName = album ?: collectionId ?: "Single",
         uri = android.net.Uri.parse(uri ?: preview ?: "https://byicloud.online/track/$id"),
-        durationMs = duration ?: 0L,
+        // `secondary_*` / `vk_*` tracks come back with `duration` in seconds; Apple in ms.
+        // Reuse the model's normalized accessor so the progress bar shows the right scale.
+        durationMs = durationMs,
         albumId = collectionId?.hashCode()?.toLong() ?: id.hashCode().toLong(),
         coverUrl = cover?.replace("1000x1000", "600x600") ?: cover
     )
@@ -448,7 +453,8 @@ fun IcmPlaylistTrack.toTrack(): com.liquidmusicglass.engine.Track {
         artist = artist,
         albumName = "",
         uri = android.net.Uri.parse("https://byicloud.online/track/$id"),
-        durationMs = duration,
+        // VK/secondary return seconds, Apple ms — normalize uniformly.
+        durationMs = if (duration in 1..999) duration * 1000L else duration,
         albumId = collectionId.hashCode().toLong(),
         coverUrl = cover.replace("1000x1000", "600x600")
     )
@@ -504,11 +510,33 @@ data class IcmUserQualityResponse(
     val source: String? = null
 )
 
+@Serializable
+data class IcmUserPreferences(
+    val quality: String? = null,
+    val region: String? = null,
+    @SerialName("hide_explicit") val hideExplicit: Boolean? = null,
+    val source: String? = null
+)
+
+@Serializable
+data class IcmUserProfile(
+    @SerialName("icm_user_id") val icmUserId: Long? = null,
+    val email: String? = null,
+    @SerialName("subscription") val subscription: IcmSubscription? = null
+)
+
+@Serializable
+data class IcmSubscription(
+    val active: Boolean = false,
+    val plan: String? = null,
+    @SerialName("expires_at") val expiresAt: Long? = null
+)
+
 // ─── Wave (Personal Radio) ───
 
 @Serializable
 data class IcmWaveResponse(
-    val track: IcmWaveTrack,
+    val track: IcmWaveTrack? = null,
     val status: String,
     val region: String? = null
 )
@@ -591,10 +619,17 @@ data class IcmLibraryArtist(
     val id: String,
     val name: String? = null,
     val cover: String? = null,
+    val image: String? = null,
+    @SerialName("isCustom") val isCustom: Boolean = false,
+    @SerialName("isPremium") val isPremium: Boolean = false,
     val source: String? = null
 ) {
     val displayName: String
         get() = name ?: "Unknown Artist"
+
+    /** Prefer Apple `image` field, fallback to legacy `cover`. */
+    val displayImage: String?
+        get() = image ?: cover
 }
 
 // ─── Wave Feedback & Onboarding ───
