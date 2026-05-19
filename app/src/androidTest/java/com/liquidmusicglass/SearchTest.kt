@@ -11,10 +11,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * UI-тесты поиска.
- *
- * ВАЖНО: Используем mainClock.advanceTimeBy() вместо waitForIdle(),
- * т.к. в приложении могут быть бесконечные анимации (плеер).
+ * UI-тесты поиска
  */
 @RunWith(AndroidJUnit4::class)
 class SearchTest {
@@ -24,13 +21,12 @@ class SearchTest {
 
     @Test
     fun searchScreenOpens() {
-        composeTestRule.mainClock.autoAdvance = false
-        composeTestRule.mainClock.advanceTimeBy(100)
+        composeTestRule.waitForIdle()
 
         // Переходим на Search
         composeTestRule.onNodeWithContentDescription("Search", ignoreCase = true)
             .performClick()
-        composeTestRule.mainClock.advanceTimeBy(300)
+        composeTestRule.waitForIdle()
 
         // Проверяем, что экран поиска открылся
         composeTestRule.onNodeWithText("Search", ignoreCase = true).assertExists()
@@ -38,12 +34,11 @@ class SearchTest {
 
     @Test
     fun searchFieldExists() {
-        composeTestRule.mainClock.autoAdvance = false
-        composeTestRule.mainClock.advanceTimeBy(100)
+        composeTestRule.waitForIdle()
 
         composeTestRule.onNodeWithContentDescription("Search", ignoreCase = true)
             .performClick()
-        composeTestRule.mainClock.advanceTimeBy(300)
+        composeTestRule.waitForIdle()
 
         // Ищем поле ввода
         try {
@@ -57,12 +52,11 @@ class SearchTest {
 
     @Test
     fun searchTextCanBeEntered() {
-        composeTestRule.mainClock.autoAdvance = false
-        composeTestRule.mainClock.advanceTimeBy(100)
+        composeTestRule.waitForIdle()
 
         composeTestRule.onNodeWithContentDescription("Search", ignoreCase = true)
             .performClick()
-        composeTestRule.mainClock.advanceTimeBy(300)
+        composeTestRule.waitForIdle()
 
         // Пытаемся ввести текст
         try {

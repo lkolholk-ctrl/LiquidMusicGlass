@@ -9,14 +9,11 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * UI-тесты плеера — проверяют элементы управления.
- *
- * ВАЖНО: В плеере есть бесконечные анимации (прогресс-бар, волна),
- * поэтому waitForIdle() НЕЛЬЗЯ использовать — Compose никогда не станет idle.
- * Вместо этого отключаем autoAdvance и управляем временем вручную.
+ * UI-тесты плеера — проверяют элементы управления
  */
 @RunWith(AndroidJUnit4::class)
 class PlayerUiTest {
@@ -26,14 +23,11 @@ class PlayerUiTest {
 
     @Test
     fun miniPlayerIsVisibleWhenTrackLoaded() {
-        // Отключаем автоматический ход часов — замораживаем анимации
-        composeTestRule.mainClock.autoAdvance = false
-
-        // Даём время на первый кадр
-        composeTestRule.mainClock.advanceTimeBy(100)
-
+        composeTestRule.waitForIdle()
+        
         // Проверяем, что mini player существует (если есть трек)
         val miniPlayer = composeTestRule.onNodeWithContentDescription("Mini player", ignoreCase = true)
+        // Не падаем, если не найден — просто проверяем наличие
         try {
             miniPlayer.assertExists()
         } catch (_: AssertionError) {
@@ -43,9 +37,8 @@ class PlayerUiTest {
 
     @Test
     fun playPauseButtonExists() {
-        composeTestRule.mainClock.autoAdvance = false
-        composeTestRule.mainClock.advanceTimeBy(100)
-
+        composeTestRule.waitForIdle()
+        
         // Проверяем наличие кнопки play/pause
         try {
             composeTestRule.onNodeWithContentDescription("Play", ignoreCase = true).assertExists()
@@ -56,16 +49,14 @@ class PlayerUiTest {
 
     @Test
     fun expandPlayerOnTap() {
-        composeTestRule.mainClock.autoAdvance = false
-        composeTestRule.mainClock.advanceTimeBy(100)
-
+        composeTestRule.waitForIdle()
+        
         // Пытаемся открыть полный плеер
         try {
             composeTestRule.onNodeWithContentDescription("Expand player", ignoreCase = true)
                 .performClick()
-            // Продвигаем время вручную вместо waitForIdle
-            composeTestRule.mainClock.advanceTimeBy(300)
-
+            composeTestRule.waitForIdle()
+            
             // Проверяем, что полный плеер открылся
             composeTestRule.onNodeWithContentDescription("Close player", ignoreCase = true)
                 .assertExists()
@@ -78,21 +69,21 @@ class PlayerUiTest {
     fun playerStateConsistency() = runBlocking {
         // Проверяем консистентность состояния плеера
         val initialState = PlayerController.isPlaying.value
-
+        
         // togglePlayPause должен инвертировать состояние
         // (но только если есть трек)
         if (PlayerController.currentTrack.value != null) {
             PlayerController.togglePlayPause(
                 androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
             )
-
+            
             // Даём время на обработку
             kotlinx.coroutines.delay(500)
-
+            
             // Состояние должно измениться
             // (но мы не проверяем точное значение, т.к. может не быть трека)
         }
-
+        
         assertTrue(true, "Player state test completed")
     }
 }

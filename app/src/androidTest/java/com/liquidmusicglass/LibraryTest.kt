@@ -10,10 +10,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * UI-тесты библиотеки.
- *
- * ВАЖНО: Используем mainClock.advanceTimeBy() вместо waitForIdle(),
- * т.к. в приложении могут быть бесконечные анимации (плеер).
+ * UI-тесты библиотеки
  */
 @RunWith(AndroidJUnit4::class)
 class LibraryTest {
@@ -23,24 +20,22 @@ class LibraryTest {
 
     @Test
     fun libraryScreenOpens() {
-        composeTestRule.mainClock.autoAdvance = false
-        composeTestRule.mainClock.advanceTimeBy(100)
+        composeTestRule.waitForIdle()
 
         composeTestRule.onNodeWithContentDescription("Library", ignoreCase = true)
             .performClick()
-        composeTestRule.mainClock.advanceTimeBy(300)
+        composeTestRule.waitForIdle()
 
         composeTestRule.onNodeWithText("Library", ignoreCase = true).assertExists()
     }
 
     @Test
     fun libraryHasContentOrEmptyState() {
-        composeTestRule.mainClock.autoAdvance = false
-        composeTestRule.mainClock.advanceTimeBy(100)
+        composeTestRule.waitForIdle()
 
         composeTestRule.onNodeWithContentDescription("Library", ignoreCase = true)
             .performClick()
-        composeTestRule.mainClock.advanceTimeBy(300)
+        composeTestRule.waitForIdle()
 
         // Проверяем, что на экране есть либо контент, либо empty state
         val hasContent = try {
@@ -62,18 +57,17 @@ class LibraryTest {
 
     @Test
     fun libraryToAlbumNavigation() {
-        composeTestRule.mainClock.autoAdvance = false
-        composeTestRule.mainClock.advanceTimeBy(100)
+        composeTestRule.waitForIdle()
 
         composeTestRule.onNodeWithContentDescription("Library", ignoreCase = true)
             .performClick()
-        composeTestRule.mainClock.advanceTimeBy(300)
+        composeTestRule.waitForIdle()
 
         // Пытаемся кликнуть на первый альбом
         try {
             composeTestRule.onNodeWithContentDescription("Album", substring = true)
                 .performClick()
-            composeTestRule.mainClock.advanceTimeBy(300)
+            composeTestRule.waitForIdle()
 
             // Проверяем, что открылся детальный экран
             composeTestRule.onNodeWithContentDescription("Back", ignoreCase = true).assertExists()
