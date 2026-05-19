@@ -83,7 +83,11 @@ fun AppRoot() {
         } catch (_: Exception) {}
     }
 
-    var selectedIndex by remember { mutableIntStateOf(AppSettings.lastScreenIndex.value) }
+    var selectedIndex by remember { 
+        mutableIntStateOf(
+            try { AppSettings.lastScreenIndex.value } catch (_: Exception) { 0 }
+        ) 
+    }
     var settingsOpen by remember { mutableStateOf(false) }
 
     // Detail screen navigation
@@ -94,14 +98,6 @@ fun AppRoot() {
     var playlistDetailId by remember { mutableStateOf<String?>(null) }
     var authOpen by remember { mutableStateOf(false) }
     var profileOpen by remember { mutableStateOf(false) }
-
-    LaunchedEffect(Unit) {
-        PlayerController.init(context)
-        com.liquidmusicglass.api.icm.IcmAuthRepository.init(context)
-        com.liquidmusicglass.data.local.LocalAuthManager.init(context)
-        // Initialize LibraryRepository and sync favorites into PlayerController
-        com.liquidmusicglass.data.local.db.LibraryRepository.getInstance(context)
-    }
 
     val currentTrack by PlayerController.currentTrack.collectAsState()
     val isPlaying by PlayerController.isPlaying.collectAsState()

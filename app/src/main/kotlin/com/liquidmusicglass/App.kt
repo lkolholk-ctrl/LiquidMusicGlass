@@ -4,10 +4,14 @@ import android.app.Application
 import com.kyant.fishnet.Fishnet
 import com.liquidmusicglass.api.icm.IcmAuthRepository
 import com.liquidmusicglass.api.icm.IcmRepository
+import com.liquidmusicglass.data.local.LocalAuthManager
+import com.liquidmusicglass.data.local.db.LibraryRepository
 import com.liquidmusicglass.engine.AppSettings
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.logging.CrashHandler
 import java.io.File
+
+import com.liquidmusicglass.engine.PlaylistManager
 
 class App : Application() {
 
@@ -23,9 +27,15 @@ class App : Application() {
         // Initialize PlayerController
         PlayerController.init(this)
 
-        // Initialize auth repo first so partner_user_id is available before the
-        // ICM API client is configured.
+        // Initialize PlaylistManager
+        PlaylistManager.init(this)
+
+        // Initialize auth repositories
         IcmAuthRepository.init(this)
+        LocalAuthManager.init(this)
+
+        // Initialize local database
+        LibraryRepository.getInstance(this)
 
         // Initialize ICM Music API if key is saved
         val prefs = getSharedPreferences("icm", MODE_PRIVATE)

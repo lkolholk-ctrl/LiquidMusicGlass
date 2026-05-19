@@ -17,6 +17,10 @@ object PlaylistManager {
     private lateinit var prefs: SharedPreferences
     private const val PREFS_NAME = "playlists"
 
+    private fun safePrefs(): SharedPreferences? {
+        return if (::prefs.isInitialized) prefs else null
+    }
+
     data class Playlist(
         val id: String,
         val name: String,
@@ -143,6 +147,7 @@ object PlaylistManager {
     // ── Persistence ──
 
     private fun saveToPrefs() {
+        val p = safePrefs() ?: return
         val arr = JSONArray()
         _playlists.value.forEach { pl ->
             arr.put(JSONObject().apply {
@@ -155,12 +160,13 @@ object PlaylistManager {
                 put("tracks", trackArr)
             })
         }
-        prefs.edit().putString("data", arr.toString()).apply()
+        p.edit().putString("data", arr.toString()).apply()
     }
 
     private fun loadFromPrefs() {
+        val p = safePrefs() ?: return
         try {
-            val str = prefs.getString("data", null) ?: return
+            val str = p.getString("data", null) ?: return
             val arr = JSONArray(str)
             val list = mutableListOf<Playlist>()
             for (i in 0 until arr.length()) {
