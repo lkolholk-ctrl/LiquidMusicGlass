@@ -44,13 +44,22 @@ jobs:
 
   smoke-test:
     name: Smoke Test (Emulator)
-    runs-on: self-hosted
-    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: unit-tests
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
 
       - name: Cache Gradle
         uses: actions/cache@v4
@@ -65,94 +74,101 @@ jobs:
       - name: Build Debug APK
         run: ./gradlew assembleDebug
 
-      - name: Start Emulator
+      - name: Enable KVM
         run: |
-          export PATH="$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH"
-          
-          # Kill any existing emulator
-          adb kill-server 2>/dev/null || true
-          pkill -f "emulator" 2>/dev/null || true
-          sleep 2
-          
-          # Start emulator without KVM (software emulation)
-          emulator -avd test -no-window -no-audio -gpu swiftshader_indirect -no-boot-anim -accel off -no-snapshot &
-          EMULATOR_PID=$!
-          
-          # Wait for boot
-          echo "Waiting for emulator to boot..."
-          adb wait-for-device
-          while [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" != "1" ]; do
-            echo -n "."
-            sleep 3
-          done
-          echo ""
-          echo "✅ Emulator booted!"
-          
-          # Save PID for cleanup
-          echo $EMULATOR_PID > /tmp/emulator.pid
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -la /dev/kvm
+
+      - name: AVD cache
+        uses: actions/cache@v4
+        id: avd-cache
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          key: avd-${{ runner.os }}-${{ hashFiles('.github/workflows/full-test-suite-selfhosted.yml') }}
+
+      - name: Create AVD snapshot
+        if: steps.avd-cache.outputs.cache-hit != 'true'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 33
+          arch: x86_64
+          profile: pixel_6
+          target: default
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: false
+          script: echo "Generated AVD snapshot for caching."
 
       - name: Run Smoke Tests
-        run: |
-          export PATH="$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH"
-          
-          echo "=== Smoke Test Started ==="
-          
-          # Install APK
-          APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
-          echo "Installing $APK_PATH..."
-          adb install -r -t "$APK_PATH"
-          echo "✅ APK installed."
-          
-          # Clear logcat
-          adb logcat -c
-          
-          # Launch app
-          echo "Launching MainActivity..."
-          adb shell am start -n "com.liquidmusicglass/com.liquidmusicglass.MainActivity"
-          sleep 5
-          
-          # Screenshot
-          echo "Taking screenshot..."
-          adb shell screencap -p /sdcard/screen.png
-          adb pull /sdcard/screen.png smoke-test-screenshot.png
-          adb shell rm /sdcard/screen.png
-          
-          # Collect logcat
-          echo "Collecting logcat..."
-          adb logcat -d > smoke-test-logcat.txt
-          
-          # Check for crashes
-          echo "=== Crash Analysis ==="
-          CRASH=0
-          if grep -q "FATAL EXCEPTION" smoke-test-logcat.txt; then
-            echo "❌ FATAL EXCEPTION found!"
-            grep -A 10 "FATAL EXCEPTION" smoke-test-logcat.txt
-            CRASH=1
-          fi
-          
-          if grep -q "UninitializedPropertyAccessException" smoke-test-logcat.txt; then
-            echo "❌ UninitializedPropertyAccessException found!"
-            grep -A 10 "UninitializedPropertyAccessException" smoke-test-logcat.txt
-            CRASH=1
-          fi
-          
-          if [ $CRASH -eq 0 ]; then
-            echo "✅ No crashes detected — SMOKE TEST PASSED"
-          else
-            echo "❌ SMOKE TEST FAILED"
-            exit 1
-          fi
-
-      - name: Cleanup Emulator
-        if: always()
-        run: |
-          export PATH="$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH"
-          if [ -f /tmp/emulator.pid ]; then
-            kill $(cat /tmp/emulator.pid) 2>/dev/null || true
-            rm -f /tmp/emulator.pid
-          fi
-          adb kill-server 2>/dev/null || true
-          pkill -f "emulator" 2>/dev/null || true
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 33
+          arch: x86_64
+          profile: pixel_6
+          target: default
+          force-avd-creation: false
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: |
+            echo "=== Smoke Test Started ==="
+            
+            adb wait-for-device
+            while [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" != "1" ]; do
+              echo -n "."
+              sleep 2
+            done
+            echo "Boot completed!"
+            sleep 5
+            
+            # Install APK
+            APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
+            echo "Installing $APK_PATH..."
+            adb install -r -t "$APK_PATH"
+            echo "APK installed."
+            
+            # Clear logcat
+            adb logcat -c
+            
+            # Launch app
+            echo "Launching MainActivity..."
+            adb shell am start -n "com.liquidmusicglass/com.liquidmusicglass.MainActivity"
+            sleep 5
+            
+            # Screenshot
+            echo "Taking screenshot..."
+            adb shell screencap -p /sdcard/screen.png
+            adb pull /sdcard/screen.png smoke-test-screenshot.png
+            adb shell rm /sdcard/screen.png
+            
+            # Collect logcat
+            echo "Collecting logcat..."
+            adb logcat -d > smoke-test-logcat.txt
+            
+            # Check for crashes
+            echo "=== Crash Analysis ==="
+            CRASH=0
+            if grep -q "FATAL EXCEPTION" smoke-test-logcat.txt; then
+              echo "❌ FATAL EXCEPTION found!"
+              grep -A 10 "FATAL EXCEPTION" smoke-test-logcat.txt
+              CRASH=1
+            fi
+            
+            if grep -q "UninitializedPropertyAccessException" smoke-test-logcat.txt; then
+              echo "❌ UninitializedPropertyAccessException found!"
+              grep -A 10 "UninitializedPropertyAccessException" smoke-test-logcat.txt
+              CRASH=1
+            fi
+            
+            if [ $CRASH -eq 0 ]; then
+              echo "✅ No crashes detected — SMOKE TEST PASSED"
+            else
+              echo "❌ SMOKE TEST FAILED"
+              exit 1
+            fi
 
       - name: Upload Smoke Test Results
         if: always()
@@ -166,13 +182,22 @@ jobs:
 
   ui-tests:
     name: UI Tests (Espresso)
-    runs-on: self-hosted
-    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: smoke-test
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
 
       - name: Cache Gradle
         uses: actions/cache@v4
@@ -184,47 +209,46 @@ jobs:
           restore-keys: |
             gradle-${{ runner.os }}-
 
-      - name: Start Emulator
+      - name: Enable KVM
         run: |
-          export PATH="$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH"
-          
-          # Kill any existing emulator
-          adb kill-server 2>/dev/null || true
-          pkill -f "emulator" 2>/dev/null || true
-          sleep 2
-          
-          # Start emulator without KVM (software emulation)
-          emulator -avd test -no-window -no-audio -gpu swiftshader_indirect -no-boot-anim -accel off -no-snapshot &
-          EMULATOR_PID=$!
-          
-          # Wait for boot
-          echo "Waiting for emulator to boot..."
-          adb wait-for-device
-          while [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" != "1" ]; do
-            echo -n "."
-            sleep 3
-          done
-          echo ""
-          echo "✅ Emulator booted!"
-          
-          # Save PID for cleanup
-          echo $EMULATOR_PID > /tmp/emulator.pid
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -la /dev/kvm
+
+      - name: AVD cache
+        uses: actions/cache@v4
+        id: avd-cache
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          key: avd-${{ runner.os }}-${{ hashFiles('.github/workflows/full-test-suite-selfhosted.yml') }}
+
+      - name: Create AVD snapshot
+        if: steps.avd-cache.outputs.cache-hit != 'true'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 33
+          arch: x86_64
+          profile: pixel_6
+          target: default
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: false
+          script: echo "Generated AVD snapshot for caching."
 
       - name: Run UI Tests
-        run: |
-          export PATH="$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH"
-          ./gradlew connectedDebugAndroidTest --stacktrace
-
-      - name: Cleanup Emulator
-        if: always()
-        run: |
-          export PATH="$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH"
-          if [ -f /tmp/emulator.pid ]; then
-            kill $(cat /tmp/emulator.pid) 2>/dev/null || true
-            rm -f /tmp/emulator.pid
-          fi
-          adb kill-server 2>/dev/null || true
-          pkill -f "emulator" 2>/dev/null || true
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 33
+          arch: x86_64
+          profile: pixel_6
+          target: default
+          force-avd-creation: false
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: ./gradlew connectedDebugAndroidTest --stacktrace
 
       - name: Upload UI Test Results
         if: always()
