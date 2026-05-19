@@ -236,6 +236,28 @@ object PlayerController {
         autoRefillContext = null
     }
 
+    /**
+     * Automatically set auto-refill context based on track metadata.
+     * Used when playing a single track (no explicit playlist context).
+     */
+    private fun setAutoRefillContextForTrack(track: Track) {
+        val genre = detectGenre(track)
+        when {
+            genre != null -> {
+                // Genre-based refill
+                setAutoRefillContext("genre", genre, genre)
+            }
+            track.artist.isNotBlank() -> {
+                // Artist-based refill as fallback
+                setAutoRefillContext("artist", track.artist, track.artist)
+            }
+            else -> {
+                // Wave as ultimate fallback
+                setAutoRefillContext("wave", track.id, track.title, track.id)
+            }
+        }
+    }
+
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             _isPlaying.value = isPlaying
@@ -384,6 +406,7 @@ object PlayerController {
     /**
      * Auto-refill queue based on current context when running low.
      * Called from player listener when remaining tracks < 3.
+     * Falls back to wave recommendations if primary refill yields no results.
      */
     private suspend fun autoRefillQueue() {
         val ctx = autoRefillContext ?: return
@@ -424,6 +447,23 @@ object PlayerController {
                         ))
                     }
                 }
+                // Fallback to wave if artist has no more tracks
+                if (newTracks.isEmpty()) {
+                    repeat(3) {
+                        val response = com.liquidmusicglass.api.icm.IcmRepository.getWaveNext(
+                            exclude = (exclude + newTracks.map { it.id }).takeIf { it.isNotEmpty() },
+                            recentSkips = 0
+                        )
+                        if (response == null || response.status != "ok") return@repeat
+                        val wt = response.track ?: return@repeat
+                        newTracks.add(Track(
+                            id = wt.id, title = wt.title, artist = wt.artist ?: "Unknown Artist",
+                            albumName = "", durationMs = wt.durationMs,
+                            uri = Uri.parse("https://byicloud.online/track/${wt.id}"),
+                            coverUrl = wt.cover, albumId = wt.collectionId?.hashCode()?.toLong() ?: -1L
+                        ))
+                    }
+                }
             }
             "album" -> {
                 // More tracks from same album (shouldn't happen often, but handle)
@@ -439,6 +479,23 @@ object PlayerController {
                         ))
                     }
                 }
+                // Fallback to wave
+                if (newTracks.isEmpty()) {
+                    repeat(3) {
+                        val response = com.liquidmusicglass.api.icm.IcmRepository.getWaveNext(
+                            exclude = (exclude + newTracks.map { it.id }).takeIf { it.isNotEmpty() },
+                            recentSkips = 0
+                        )
+                        if (response == null || response.status != "ok") return@repeat
+                        val wt = response.track ?: return@repeat
+                        newTracks.add(Track(
+                            id = wt.id, title = wt.title, artist = wt.artist ?: "Unknown Artist",
+                            albumName = "", durationMs = wt.durationMs,
+                            uri = Uri.parse("https://byicloud.online/track/${wt.id}"),
+                            coverUrl = wt.cover, albumId = wt.collectionId?.hashCode()?.toLong() ?: -1L
+                        ))
+                    }
+                }
             }
             "search", "genre" -> {
                 // Similar tracks by search query
@@ -451,6 +508,23 @@ object PlayerController {
                         uri = Uri.parse("https://byicloud.online/track/${item.id}"),
                         coverUrl = item.cover, albumId = item.collectionId?.toLongOrNull() ?: 0L
                     ))
+                }
+                // Fallback to wave if search yields no results
+                if (newTracks.isEmpty()) {
+                    repeat(3) {
+                        val response = com.liquidmusicglass.api.icm.IcmRepository.getWaveNext(
+                            exclude = (exclude + newTracks.map { it.id }).takeIf { it.isNotEmpty() },
+                            recentSkips = 0
+                        )
+                        if (response == null || response.status != "ok") return@repeat
+                        val wt = response.track ?: return@repeat
+                        newTracks.add(Track(
+                            id = wt.id, title = wt.title, artist = wt.artist ?: "Unknown Artist",
+                            albumName = "", durationMs = wt.durationMs,
+                            uri = Uri.parse("https://byicloud.online/track/${wt.id}"),
+                            coverUrl = wt.cover, albumId = wt.collectionId?.hashCode()?.toLong() ?: -1L
+                        ))
+                    }
                 }
             }
             "playlist" -> {
@@ -683,6 +757,9 @@ object PlayerController {
         val idx = startIndex.coerceIn(0, tracks.lastIndex)
         if (autoRefillType != null) {
             setAutoRefillContext(autoRefillType, autoRefillId, autoRefillName, autoRefillSeedTrackId)
+        } else if (tracks.size == 1) {
+            // Single track from HomeScreen — auto-set refill context
+            setAutoRefillContextForTrack(tracks[idx])
         }
         scope.launch {
             val start = tracks[idx]
@@ -695,6 +772,11 @@ object PlayerController {
             setQueue(tracksToUse, idx)
             playTrack(context, idx)
             preloadUpcoming()
+            // For single tracks, also populate similar tracks immediately
+            if (tracks.size == 1) {
+                populateSimilarTracks(start, context)
+                autoRefillQueue()
+            }
         }
     }
 
@@ -705,11 +787,16 @@ object PlayerController {
      */
     fun playNext(track: Track, context: Context) {
         if (queue.isEmpty()) {
+            // Single track — set up auto-refill based on artist/genre
+            setAutoRefillContextForTrack(track)
             setQueue(listOf(track), 0)
             playTrack(context, 0)
-            // Auto-populate with similar genre tracks
+            // Immediately populate with similar tracks
             scope.launch {
                 populateSimilarTracks(track, context)
+                // Also trigger auto-refill to ensure queue never runs dry
+                autoRefillQueue()
+                preloadUpcoming()
             }
             return
         }
@@ -1178,6 +1265,7 @@ object PlayerController {
 
     // ── Preload next track ──
     private var preloadJob: Job? = null
+    private var aggressivePrefetchJob: Job? = null
 
     /**
      * Backwards-compatible alias: prefetches the next [PREFETCH_AHEAD] tracks
@@ -1191,6 +1279,7 @@ object PlayerController {
      * push them into ExoPlayer's MediaItems so the engine starts buffering
      * the streams in the background.
      *
+     * Uses premium quality (320K/ALAC) if user has active subscription.
      * Also adds missing MediaItems to ExoPlayer so seamless auto-advance works.
      */
     fun preloadUpcoming() {
@@ -1216,8 +1305,9 @@ object PlayerController {
 
             for ((queueIndex, track) in upcoming) {
                 try {
-                    // Resolve stream URL (uses cache if available)
-                    val uri = getCachedOrResolveStreamUrl(track.id) ?: continue
+                    // Resolve stream URL with premium quality if available
+                    val effectiveQuality = getPremiumQualityForPreload()
+                    val uri = getCachedOrResolveStreamUrl(track.id, effectiveQuality) ?: continue
                     updateQueueTrackUri(track.id, uri)
 
                     val freshIndex = queue.indexOfFirst { it.id == track.id }
@@ -1239,11 +1329,57 @@ object PlayerController {
         }
     }
 
+    /**
+     * Returns premium quality string for preloading if user has subscription.
+     * Otherwise returns null (uses default quality).
+     */
+    private fun getPremiumQualityForPreload(): String? {
+        return if (com.liquidmusicglass.api.icm.IcmAuthRepository.isPremium.value) {
+            // Use highest available quality for premium users
+            val allowed = com.liquidmusicglass.api.icm.IcmAuthRepository.allowedQualities.value
+            when {
+                "ALAC" in allowed -> "ALAC"
+                "320K" in allowed -> "320K"
+                else -> "320K"
+            }
+        } else null
+    }
+
+    /**
+     * Start aggressive prefetch when track passes 50% (equator).
+     * This ensures the next track is fully buffered well before transition.
+     */
+    fun startAggressivePrefetch() {
+        aggressivePrefetchJob?.cancel()
+        aggressivePrefetchJob = scope.launch {
+            val track = _currentTrack.value ?: return@launch
+            val duration = track.durationMs
+            if (duration <= 0) return@launch
+
+            val equatorMs = duration / 2
+            // Wait until we reach equator
+            while (_currentPositionMs.value < equatorMs && _currentTrack.value?.id == track.id) {
+                delay(1000) // Check every second
+            }
+
+            // Only prefetch if we're still on the same track
+            if (_currentTrack.value?.id == track.id) {
+                android.util.Log.d("PlayerController", "Aggressive prefetch triggered at equator for ${track.id}")
+                preloadUpcoming()
+                // Also trigger auto-refill if running low
+                val remaining = queue.size - currentIndex - 1
+                if (remaining < 3 && autoRefillContext != null) {
+                    autoRefillQueue()
+                }
+            }
+        }
+    }
+
     // ── Current queue access ──
     fun getCurrentIndex(): Int = currentIndex
 
     private var prefetchJob: Job? = null
-    private const val PREFETCH_THRESHOLD_MS = 90_000L // 90 seconds before end
+    private const val PREFETCH_THRESHOLD_MS = 120_000L // 120 seconds before end (2 min)
 
     // Genre keywords for auto-track selection
     private val genreKeywords = mapOf(
@@ -1282,41 +1418,29 @@ object PlayerController {
 
     /**
      * Auto-populate queue with similar genre tracks.
-     * Only runs when AutoMix is enabled by user.
+     * Runs aggressively for single-track playback to ensure queue never runs dry.
      */
     private suspend fun populateSimilarTracks(track: Track, context: Context) {
-        if (!_autoMixEnabled.value) return
-        val genre = detectGenre(track) ?: return
+        val genre = detectGenre(track) ?: track.artist.takeIf { it.isNotBlank() } ?: return
         try {
-            val api = com.liquidmusicglass.api.icm.IcmApi.getInstance()
-            val result = api.search(query = genre)
-            result.onSuccess { response ->
-                val similarTracks = response.items
-                    .filter { it.id != track.id && it.isTrack }
-                    .shuffled()
-                    .take(5)
-                    .map { item ->
-                        Track(
-                            id = item.id,
-                            title = item.title,
-                            artist = item.displayArtist,
-                            albumName = item.album ?: "",
-                            uri = android.net.Uri.parse("https://byicloud.online/track/${item.id}"),
-                            // Use the model's normalized accessor; raw `duration` may be seconds
-                            // for `secondary_*` / `vk_*` items per docs 4.1.
-                            durationMs = item.durationMs,
-                            albumId = item.collectionId?.toLongOrNull() ?: 0L,
-                            coverUrl = item.cover
-                        )
-                    }
-                if (similarTracks.isNotEmpty()) {
-                    val newQueue = queue.toMutableList()
-                    val insertIdx = (currentIndex + 1).coerceAtMost(newQueue.size)
-                    newQueue.addAll(insertIdx, similarTracks)
-                    queue = newQueue
-                    _queue.value = queue
+            val result = com.liquidmusicglass.api.icm.IcmRepository.searchAll(genre)
+            result?.items
+                ?.filter { it.id != track.id && it.isTrack }
+                ?.shuffled()
+                ?.take(10)
+                ?.forEach { item ->
+                    val similarTrack = Track(
+                        id = item.id,
+                        title = item.title,
+                        artist = item.displayArtist,
+                        albumName = item.album ?: "",
+                        uri = android.net.Uri.parse("https://byicloud.online/track/${item.id}"),
+                        durationMs = item.durationMs,
+                        albumId = item.collectionId?.toLongOrNull() ?: 0L,
+                        coverUrl = item.cover
+                    )
+                    addToQueue(similarTrack)
                 }
-            }
         } catch (_: Exception) {}
     }
 
@@ -1333,8 +1457,16 @@ object PlayerController {
                         _durationMs.value = duration
                     }
 
-                    // Prefetch next track when 90 seconds remaining
+                    // Aggressive prefetch: trigger at equator (50%) AND 2 min before end
                     val remaining = duration - playerController.currentPosition
+                    val progress = if (duration > 0) playerController.currentPosition.toFloat() / duration else 0f
+
+                    // Start aggressive prefetch at equator
+                    if (progress >= 0.5f && aggressivePrefetchJob?.isActive != true) {
+                        startAggressivePrefetch()
+                    }
+
+                    // Also prefetch when 2 minutes remaining
                     if (remaining in 1..PREFETCH_THRESHOLD_MS && prefetchJob?.isActive != true) {
                         preloadNextTrack()
                     }
