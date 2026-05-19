@@ -305,8 +305,6 @@ object PlayerController {
                                 updateQueueTrackUri(track.id, resolvedUri)
                                 replaceMediaItemUri(index, resolvedUri, track)
                             }
-                            // Preload upcoming tracks after transition
-                            preloadUpcoming()
                         } else {
                             android.util.Log.e("PlayerController", "Failed to resolve URL on transition for ${track.id}")
                         }
@@ -1448,12 +1446,6 @@ object PlayerController {
                     val duration = playerController.duration
                     if (duration > 0) {
                         _durationMs.value = duration
-                    }
-
-                    // Also prefetch when 2 minutes remaining
-                    val remaining = duration - playerController.currentPosition
-                    if (remaining in 1..PREFETCH_THRESHOLD_MS && prefetchJob?.isActive != true) {
-                        preloadNextTrack()
                     }
                 }
 
