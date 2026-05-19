@@ -118,13 +118,22 @@ fun LiquidToggle(
     val currentFraction = rememberUpdatedState(fraction)
 
     Box(
-        modifier.pointerInput(Unit) {
-            detectTapGestures {
+        modifier
+            .pointerInput(Unit) {
+                detectTapGestures {
+                    val newFraction = if (currentFraction.value >= 0.5f) 0f else 1f
+                    fraction = newFraction
+                    onSelect(newFraction == 1f)
+                }
+            }
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) {
                 val newFraction = if (currentFraction.value >= 0.5f) 0f else 1f
                 fraction = newFraction
                 onSelect(newFraction == 1f)
-            }
-        },
+            },
         contentAlignment = Alignment.CenterStart
     ) {
         Box(
