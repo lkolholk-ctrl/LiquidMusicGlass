@@ -18,6 +18,7 @@ import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import androidx.media3.session.SessionCommand
@@ -44,11 +45,12 @@ import kotlinx.coroutines.launch
  *   1. Асинхронная инициализация кэша (не блокирует onCreate)
  *   2. CacheDataSource с fallback на чистый HTTP при ошибке
  *   3. Агрессивный LoadControl: 30s min / 60s max буфер
- *   4. MediaSessionService автоматически управляет foreground notification
+ *   4. DefaultMediaNotificationProvider — автоматическое медиа-уведомление
+ *      с обложкой, кнопками Play/Pause/Next/Prev, прогресс-баром
  *   5. Gapless playback через очередь (player.addMediaItem)
  *
  * Жизненный цикл:
- *   onCreate()    → player + mediaSession (кэш инициализируется async)
+ *   onCreate()    → player + mediaSession + notificationProvider (кэш async)
  *   onGetSession()→ возвращаем mediaSession
  *   onDestroy()   → player.release() + mediaSession.release()
  */
@@ -59,6 +61,7 @@ class AudioService : MediaSessionService() {
 
     private var _player: ExoPlayer? = null
     private var _session: MediaSession? = null
+    private var _notificationProvider: DefaultMediaNotificationProvider? = null
 
     // ── Notification channel ──
     private val channelId = "liquid_music_playback"
@@ -96,6 +99,18 @@ class AudioService : MediaSessionService() {
             .setCallback(SessionCallback())
             .build()
 
+        // Set up DefaultMediaNotificationProvider for rich media notification
+        val notificationProvider = DefaultMediaNotificationProvider.Builder(this)
+            .setChannelId(channelId)
+            .setChannelName(R.string.notification_channel_name)
+            .setNotificationId(1001)
+            .build()
+            .apply {
+                setSmallIcon(R.drawable.ic_notification_play)
+            }
+        _notificationProvider = notificationProvider
+        setMediaNotificationProvider(notificationProvider)
+
         player.addListener(PlayerEventForwarder())
 
         // Initialize AutoMix engine
@@ -108,6 +123,9 @@ class AudioService : MediaSessionService() {
 
         // Start position polling
         startPositionPolling(player)
+
+        // Ensure notification channel exists
+        ensureNotificationChannel()
     }
 
     /**
@@ -374,44 +392,8 @@ class AudioService : MediaSessionService() {
     }
 
     // ═══════════════════════════════════════════════════════════
-    //  Notification (MediaSessionService handles foreground)
+    //  Notification Channel
     // ═══════════════════════════════════════════════════════════
-
-    override fun onUpdateNotification(
-        session: MediaSession,
-        startInForegroundRequired: Boolean
-    ) {
-        ensureNotificationChannel()
-
-        val player = session.player
-        val metadata = player.currentMediaItem?.mediaMetadata
-
-        val notification = NotificationCompat.Builder(this, channelId)
-            .setSmallIcon(R.drawable.ic_notification_play)
-            .setContentTitle(metadata?.title ?: "LiquidMusicGlass")
-            .setContentText(metadata?.artist ?: "Unknown Artist")
-            .setSubText(metadata?.albumTitle)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setOngoing(player.isPlaying)
-            .setShowWhen(false)
-            .setOnlyAlertOnce(true)
-            .setContentIntent(
-                PendingIntent.getActivity(
-                    this, 0,
-                    Intent(this, MainActivity::class.java).apply {
-                        flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                        action = Intent.ACTION_MAIN
-                    },
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
-            )
-            .build()
-
-        if (startInForegroundRequired || player.isPlaying) {
-            startForeground(1001, notification)
-        }
-    }
 
     private fun ensureNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -420,10 +402,10 @@ class AudioService : MediaSessionService() {
                 nm.createNotificationChannel(
                     NotificationChannel(
                         channelId,
-                        "Music Playback",
+                        getString(R.string.notification_channel_name),
                         NotificationManager.IMPORTANCE_LOW
                     ).apply {
-                        description = "Shows current track and playback controls"
+                        description = getString(R.string.notification_channel_description)
                         setShowBadge(false)
                         enableLights(false)
                         enableVibration(false)
