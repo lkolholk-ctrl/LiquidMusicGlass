@@ -417,8 +417,11 @@ fun SearchScreen(
                         item(key = "tracks_label") {
                             SearchSectionLabel("Songs")
                         }
+                        // Build the playable queue once: only real tracks
+                        // (drop artist/album rows the API mixes in) and
+                        // honour the order the user sees.
+                        val playableTracks = tracks.map { it.toTrack() }
                         items(tracks, key = { "track_${it.id}" }) { item ->
-                            val track = item.toTrack()
                             SearchResultRow(
                                 title = item.title,
                                 subtitle = item.displayArtist,
@@ -426,8 +429,16 @@ fun SearchScreen(
                                 coverUrl = item.cover,
                                 onClick = {
                                     hideKeyboard()
-                                    PlayerController.setAutoRefillContext("search", query, query)
-                                    PlayerController.playNext(track, context)
+                                    val startIdx = playableTracks.indexOfFirst { it.id == item.id }
+                                        .coerceAtLeast(0)
+                                    PlayerController.playFromList(
+                                        context = context,
+                                        tracks = playableTracks,
+                                        startIndex = startIdx,
+                                        autoRefillType = "search",
+                                        autoRefillId = query,
+                                        autoRefillName = query
+                                    )
                                 }
                             )
                         }
