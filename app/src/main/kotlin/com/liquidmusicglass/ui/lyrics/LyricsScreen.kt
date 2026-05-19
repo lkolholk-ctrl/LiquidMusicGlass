@@ -91,7 +91,10 @@ fun LyricsScreen(
 
     LaunchedEffect(audioFileUri, lrcText, trackTitle, trackArtist, resolvedTrackId) {
         if (!lrcText.isNullOrBlank()) {
-            lyrics = LyricsParser.parseLyrics(lrcText)
+            // CRITICAL FIX: parse lyrics on Default, never Main
+            lyrics = withContext(Dispatchers.Default) {
+                LyricsParser.parseLyrics(lrcText)
+            }
             isLoading = false
             return@LaunchedEffect
         }

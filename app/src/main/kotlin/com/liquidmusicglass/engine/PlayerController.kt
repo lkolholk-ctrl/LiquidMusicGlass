@@ -26,6 +26,9 @@ import kotlin.coroutines.resume
 @OptIn(UnstableApi::class)
 object PlayerController {
 
+    /** IO scope for all network and heavy disk operations — NEVER block Main. */
+    private val ioScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    /** Main scope for UI state updates only. */
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     private var appContext: Context? = null
@@ -298,12 +301,14 @@ object PlayerController {
 
                 // For online tracks: ensure the stream URL is resolved.
                 if (track.isOnlineTrack) {
-                    scope.launch {
+                    ioScope.launch {
                         val resolvedUri = getCachedOrResolveStreamUrl(track.id)
                         if (resolvedUri != null) {
                             if (resolvedUri != track.uri) {
                                 updateQueueTrackUri(track.id, resolvedUri)
-                                replaceMediaItemUri(index, resolvedUri, track)
+                                withContext(Dispatchers.Main) {
+                                    replaceMediaItemUri(index, resolvedUri, track)
+                                }
                             }
                         } else {
                             android.util.Log.e("PlayerController", "Failed to resolve URL on transition for ${track.id}")
@@ -699,7 +704,7 @@ object PlayerController {
         }
         refillContext?.let { endlessEngine.setRefillContext(it) }
 
-        scope.launch {
+        ioScope.launch {
             android.util.Log.d("PlayerController", "playFromList: ${tracks.size} tracks, startIndex=$idx, context=${refillContext?.type?.name}")
 
             // ── Step 1: Resolve stream URL for START track only (fast path) ──
@@ -716,7 +721,9 @@ object PlayerController {
                     startTrack.copy(uri = resolvedUri)
                 } else {
                     android.util.Log.e("PlayerController", "CRITICAL: Start track ${startTrack.id} failed to resolve!")
-                    _isPlaying.value = false
+                    withContext(Dispatchers.Main) {
+                        _isPlaying.value = false
+                    }
                     return@launch
                 }
             } else startTrack
@@ -749,47 +756,55 @@ object PlayerController {
             }
 
             // ── Step 3: Update internal queue state ──
-            queue = tracks
-            _queue.value = tracks
-            currentIndex = idx
-            _currentTrack.value = resolvedStartTrack
-            _durationMs.value = resolvedStartTrack.durationMs
-            _currentPositionMs.value = 0L
-            _isPlaying.value = true
+            withContext(Dispatchers.Main) {
+                queue = tracks
+                _queue.value = tracks
+                currentIndex = idx
+                _currentTrack.value = resolvedStartTrack
+                _durationMs.value = resolvedStartTrack.durationMs
+                _currentPositionMs.value = 0L
+                _isPlaying.value = true
+            }
 
             // ── Step 4: Load into ExoPlayer and START playback ──
-            val playerController = obtainController(context)
-            if (playerController != null) {
-                android.util.Log.d("PlayerController", "Using MediaController: setMediaItems(${updatedMediaItems.size}, $idx, 0)")
-                playerController.setMediaItems(updatedMediaItems, idx, 0L)
-                playerController.prepare()
-                playerController.play()
-            } else {
-                val exo = AudioService.companionPlayer
-                if (exo != null) {
-                    android.util.Log.d("PlayerController", "Using direct ExoPlayer: setMediaItems(${updatedMediaItems.size}, $idx, 0)")
-                    exo.setMediaItems(updatedMediaItems, idx, 0L)
-                    exo.prepare()
-                    exo.play()
+            withContext(Dispatchers.Main) {
+                val playerController = obtainController(context)
+                if (playerController != null) {
+                    android.util.Log.d("PlayerController", "Using MediaController: setMediaItems(${updatedMediaItems.size}, $idx, 0)")
+                    playerController.setMediaItems(updatedMediaItems, idx, 0L)
+                    playerController.prepare()
+                    playerController.play()
                 } else {
-                    android.util.Log.e("PlayerController", "NO PLAYER AVAILABLE — cannot start playback")
-                    _isPlaying.value = false
-                    return@launch
+                    val exo = AudioService.companionPlayer
+                    if (exo != null) {
+                        android.util.Log.d("PlayerController", "Using direct ExoPlayer: setMediaItems(${updatedMediaItems.size}, $idx, 0)")
+                        exo.setMediaItems(updatedMediaItems, idx, 0L)
+                        exo.prepare()
+                        exo.play()
+                    } else {
+                        android.util.Log.e("PlayerController", "NO PLAYER AVAILABLE — cannot start playback")
+                        _isPlaying.value = false
+                        return@withContext
+                    }
                 }
             }
 
             // ── Step 5: Start position updates and tracking ──
-            startPositionUpdates()
-            addToRecent(resolvedStartTrack)
+            withContext(Dispatchers.Main) {
+                startPositionUpdates()
+                addToRecent(resolvedStartTrack)
+            }
 
             // ── Step 6: Log wave playback ──
-            logWavePlaybackOnSwitch()
+            withContext(Dispatchers.Main) {
+                logWavePlaybackOnSwitch()
+            }
             waveTrackId = resolvedStartTrack.id
             waveTrackStartTimeMs = System.currentTimeMillis()
             waveTrackPlayedMs = 0L
 
             // ── Step 7: Resolve remaining tracks in background (non-blocking) ──
-            scope.launch(Dispatchers.IO) {
+            ioScope.launch {
                 tracks.forEachIndexed { i, track ->
                     if (i != idx && track.isOnlineTrack) {
                         try {
@@ -802,7 +817,7 @@ object PlayerController {
             }
 
             // ── Step 8: Pre-fetch lyrics ──
-            scope.launch(Dispatchers.IO) {
+            ioScope.launch {
                 if (resolvedStartTrack.isOnlineTrack && LyricsParser.getCachedLyrics(resolvedStartTrack.id) == null) {
                     try {
                         LyricsParser.fetchOnlineLyrics(resolvedStartTrack.id, resolvedStartTrack.title, resolvedStartTrack.artist)
@@ -817,7 +832,9 @@ object PlayerController {
                 endlessEngine.checkAndRefillIfNeeded()
             }
 
-            AudioService.companionService?.notifyManualNavigation()
+            withContext(Dispatchers.Main) {
+                AudioService.companionService?.notifyManualNavigation()
+            }
         }
     }
 
@@ -927,30 +944,35 @@ object PlayerController {
         // Log previous wave track before switching
         logWavePlaybackOnSwitch()
 
-        scope.launch {
+        // CRITICAL FIX: All network + heavy work on IO, UI updates on Main
+        ioScope.launch {
             val track = queue[index]
 
-            // Update UI state immediately
-            currentIndex = index
-            _currentTrack.value = track
-            _durationMs.value = track.durationMs
-            _currentPositionMs.value = 0L
-            _isPlaying.value = true
-            startPositionUpdates()
+            // Update UI state immediately (switch to Main for state)
+            withContext(Dispatchers.Main) {
+                currentIndex = index
+                _currentTrack.value = track
+                _durationMs.value = track.durationMs
+                _currentPositionMs.value = 0L
+                _isPlaying.value = true
+                startPositionUpdates()
+            }
 
             // Start wave playback tracking
             waveTrackId = track.id
             waveTrackStartTimeMs = System.currentTimeMillis()
             waveTrackPlayedMs = 0L
 
-            // Resolve current track URL immediately (fast start)
+            // Resolve current track URL on IO (NETWORK — never Main!)
             android.util.Log.d("PlayerController", "playTrack: ${track.id} | online=${track.isOnlineTrack} | uri=${track.uri}")
             val currentUri = if (track.isOnlineTrack) {
                 val resolved = getCachedOrResolveStreamUrl(track.id)
                 if (resolved == null) {
                     android.util.Log.e("PlayerController", "Failed to resolve stream URL for ${track.id}")
-                    _isPlaying.value = false
-                    stopPositionUpdates()
+                    withContext(Dispatchers.Main) {
+                        _isPlaying.value = false
+                        stopPositionUpdates()
+                    }
                     return@launch
                 }
                 android.util.Log.d("PlayerController", "playTrack: resolved URL for ${track.id}: ${resolved.toString().take(80)}...")
@@ -959,7 +981,7 @@ object PlayerController {
                 track.uri
             }
 
-            // Build MediaItem list for the entire queue
+            // Build MediaItem list on IO (disk cache lookups)
             val mediaItems = queue.mapIndexed { i, t ->
                 val uri = if (i == index) {
                     currentUri
@@ -985,34 +1007,37 @@ object PlayerController {
                     .build()
             }
 
-            // Try MediaController first, fallback to direct ExoPlayer
-            val playerController = obtainController(context)
-            android.util.Log.d("PlayerController", "playTrack: MediaController=${playerController != null}, companionPlayer=${AudioService.companionPlayer != null}")
-            if (playerController != null) {
-                android.util.Log.d("PlayerController", "playTrack: using MediaController")
-                playerController.setMediaItems(mediaItems, index, 0L)
-                playerController.prepare()
-                playerController.play()
-            } else {
-                val exo = AudioService.companionPlayer
-                if (exo != null) {
-                    android.util.Log.d("PlayerController", "playTrack: using direct ExoPlayer")
-                    exo.setMediaItems(mediaItems, index, 0L)
-                    exo.prepare()
-                    exo.play()
+            // Switch to Main ONLY for ExoPlayer API calls
+            withContext(Dispatchers.Main) {
+                // Try MediaController first, fallback to direct ExoPlayer
+                val playerController = obtainController(context)
+                android.util.Log.d("PlayerController", "playTrack: MediaController=${playerController != null}, companionPlayer=${AudioService.companionPlayer != null}")
+                if (playerController != null) {
+                    android.util.Log.d("PlayerController", "playTrack: using MediaController")
+                    playerController.setMediaItems(mediaItems, index, 0L)
+                    playerController.prepare()
+                    playerController.play()
                 } else {
-                    android.util.Log.e("PlayerController", "playTrack: NO PLAYER AVAILABLE")
-                    _isPlaying.value = false
-                    stopPositionUpdates()
-                    return@launch
+                    val exo = AudioService.companionPlayer
+                    if (exo != null) {
+                        android.util.Log.d("PlayerController", "playTrack: using direct ExoPlayer")
+                        exo.setMediaItems(mediaItems, index, 0L)
+                        exo.prepare()
+                        exo.play()
+                    } else {
+                        android.util.Log.e("PlayerController", "playTrack: NO PLAYER AVAILABLE")
+                        _isPlaying.value = false
+                        stopPositionUpdates()
+                        return@withContext
+                    }
                 }
             }
 
             addToRecent(track)
             preloadNextTrack()
 
-            // Pre-fetch lyrics for current track immediately
-            scope.launch(Dispatchers.IO) {
+            // Pre-fetch lyrics async (already IO, but use ioScope for safety)
+            ioScope.launch {
                 if (track.isOnlineTrack && LyricsParser.getCachedLyrics(track.id) == null) {
                     try {
                         LyricsParser.fetchOnlineLyrics(track.id, track.title, track.artist)
@@ -1020,7 +1045,9 @@ object PlayerController {
                 }
             }
 
-            AudioService.companionService?.notifyManualNavigation()
+            withContext(Dispatchers.Main) {
+                AudioService.companionService?.notifyManualNavigation()
+            }
         }
     }
 
@@ -1339,14 +1366,14 @@ object PlayerController {
         }
         if (upcoming.isEmpty()) return
 
-        preloadJob = scope.launch {
+        preloadJob = ioScope.launch {
             val pc = controller
             val exo = AudioService.companionPlayer
             val player = pc ?: exo
 
             for ((queueIndex, track) in upcoming) {
                 try {
-                    // Resolve stream URL with premium quality if available
+                    // Resolve stream URL with premium quality if available (IO — network!)
                     val effectiveQuality = getPremiumQualityForPreload()
                     val uri = getCachedOrResolveStreamUrl(track.id, effectiveQuality) ?: continue
                     updateQueueTrackUri(track.id, uri)
@@ -1355,14 +1382,17 @@ object PlayerController {
                     if (freshIndex < 0) continue
                     val updatedTrack = queue[freshIndex]
 
+                    // ExoPlayer calls on Main
                     if (player != null) {
-                        if (freshIndex < player.mediaItemCount) {
-                            // MediaItem exists — update its URI so ExoPlayer can buffer
-                            replaceMediaItemUri(freshIndex, uri, updatedTrack)
-                        } else {
-                            // MediaItem missing — add it to ExoPlayer's timeline
-                            val mediaItem = buildMediaItem(updatedTrack)
-                            player.addMediaItem(mediaItem)
+                        withContext(Dispatchers.Main) {
+                            if (freshIndex < player.mediaItemCount) {
+                                // MediaItem exists — update its URI so ExoPlayer can buffer
+                                replaceMediaItemUri(freshIndex, uri, updatedTrack)
+                            } else {
+                                // MediaItem missing — add it to ExoPlayer's timeline
+                                val mediaItem = buildMediaItem(updatedTrack)
+                                player.addMediaItem(mediaItem)
+                            }
                         }
                     }
                 } catch (_: Exception) { /* best effort */ }
