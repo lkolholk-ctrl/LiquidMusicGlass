@@ -469,8 +469,33 @@ object IcmAuthRepository {
     }
 
     /**
-     * Temporary stub for partner key retrieval.
-     * In production this is fetched dynamically from a native .so module.
+     * Get partner API key from secure storage.
+     * First tries SharedPreferences (set during setup), then falls back to native .so.
+     * Returns empty string if not configured — caller must handle.
      */
-    fun getPartnerKey(): String = "YOUR_TEMPORARY_KEY_HERE"
+    fun getPartnerKey(): String {
+        // 1. Try SharedPreferences (set during app setup / onboarding)
+        val prefsKey = prefs?.getString("partner_api_key", null)
+        if (!prefsKey.isNullOrBlank() && prefsKey.startsWith("pk_")) {
+            return prefsKey
+        }
+
+        // 2. Fallback: native .so module (JNI) — production path
+        // val nativeKey = NativeLib.getPartnerKey()
+        // if (!nativeKey.isNullOrBlank()) return nativeKey
+
+        // 3. Development fallback — MUST be replaced in production
+        return ""
+    }
+
+    /**
+     * Save partner API key to secure storage.
+     * Call this after user enters key in setup flow.
+     */
+    fun setPartnerKey(key: String) {
+        prefs?.edit()?.apply {
+            putString("partner_api_key", key)
+            apply()
+        }
+    }
 }

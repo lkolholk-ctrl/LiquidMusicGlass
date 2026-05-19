@@ -91,10 +91,12 @@ class IcmApi private constructor() {
         sessionToken?.let {
             builder.header("Authorization", "Bearer $it")
         } ?: run {
+            // Dynamic partner key — NEVER hardcoded
             val partnerKey = com.liquidmusicglass.api.icm.IcmAuthRepository.getPartnerKey()
-            if (partnerKey.isNotBlank() && partnerKey != "YOUR_TEMPORARY_KEY_HERE") {
+            if (partnerKey.isNotBlank()) {
                 builder.header("X-Partner-Key", partnerKey)
             } else {
+                // Fallback to apiKey field (legacy compat)
                 apiKey?.let { key -> builder.header("X-Partner-Key", key) }
             }
         }
@@ -210,30 +212,37 @@ class IcmApi private constructor() {
         }
     }
 
-    /**
-     * Search tracks, albums, and artists.
-     * @param query Search string (up to 200 chars, min 2 alphanumeric)
-     * @param region Region (us/ru/nz), null uses defaultRegion
-     * @param source Music source: "apple" (default), "vk", "all". See VK Music docs.
-     * @param limit Max results (clamped to partner.config.search.max_results)
-     * @return Search response with mixed items (artists, albums, tracks)
-     */
-    suspend fun search(
-        query: String,
-        region: String? = null,
-        source: String? = null,
-        limit: Int? = null
-    ): Result<IcmSearchResponse> {
-        val r = region ?: defaultRegion
-        val encQuery = java.net.URLEncoder.encode(query, "UTF-8")
-        val params = buildString {
-            append("?q=$encQuery")
-            append("&region=$r")
-            if (!source.isNullOrBlank()) append("&source=$source")
-            if (limit != null && limit > 0) append("&limit=$limit")
+/**
+ * Search tracks, albums, and artists.
+ * @param query Search string (up to 200 chars, min 2 alphanumeric)
+ * @param region Region (us/ru/nz), null uses defaultRegion
+ * @param source Music source: "primary" (default), "secondary", "all". Per ICM API docs.
+ * @param limit Max results (clamped to partner.config.search.max_results)
+ * @return Search response with mixed items (artists, albums, tracks)
+ */
+suspend fun search(
+    query: String,
+    region: String? = null,
+    source: String? = null,
+    limit: Int? = null
+): Result<IcmSearchResponse> {
+    val r = region ?: defaultRegion
+    val encQuery = java.net.URLEncoder.encode(query, "UTF-8")
+    val params = buildString {
+        append("?q=$encQuery")
+        append("&region=$r")
+        // Normalize legacy source names to ICM API values
+        val normalizedSource = when (source) {
+            "apple", "primary" -> "primary"
+            "vk", "secondary" -> "secondary"
+            "all" -> "all"
+            else -> null
         }
-        return execute("/search$params")
+        if (normalizedSource != null) append("&source=$normalizedSource")
+        if (limit != null && limit > 0) append("&limit=$limit")
     }
+    return execute("/search$params")
+}
 
     /**
      * Get signed playback URL for a track.
@@ -513,7 +522,8 @@ class IcmApi private constructor() {
         seedTrackId: String? = null,
         exclude: List<String>? = null,
         recentSkips: Int? = null,
-        region: String? = null
+        region: String? = null,
+        source: String? = null
     ): Result<IcmWaveResponse> {
         if (partnerUserId.isNullOrBlank()) {
             return Result.failure(
@@ -532,6 +542,7 @@ class IcmApi private constructor() {
             }
             if (recentSkips != null) query.add("recent_skips=$recentSkips")
             if (region != null) query.add("region=$region")
+            if (source != null) query.add("source=$source")
             if (query.isNotEmpty()) append("?${query.joinToString("&")}")
         }
         return execute(params)

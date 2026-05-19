@@ -482,9 +482,10 @@ object IcmRepository {
         seedTrackId: String? = null,
         exclude: List<String>? = null,
         recentSkips: Int? = null,
-        region: String? = null
+        region: String? = null,
+        source: String? = null
     ): IcmWaveResponse? {
-        val result = api.getWaveNext(seedTrackId, exclude, recentSkips, region)
+        val result = api.getWaveNext(seedTrackId, exclude, recentSkips, region, source)
         result.exceptionOrNull()?.let {
             _lastException = it as? Exception
             _lastError.value = it.message

@@ -496,9 +496,13 @@ object IcmErrorCodes {
 // ─── Search Source ───
 
 object IcmSearchSource {
-    const val APPLE = "apple"
-    const val VK = "vk"
+    const val PRIMARY = "primary"
+    const val SECONDARY = "secondary"
     const val ALL = "all"
+
+    // Legacy aliases for backward compatibility
+    const val APPLE = PRIMARY
+    const val VK = SECONDARY
 }
 
 // ─── Stream Quality ───

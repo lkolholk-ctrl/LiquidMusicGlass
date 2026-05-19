@@ -342,7 +342,18 @@ object PlayerController {
         autoMixEngine?.onManualNavigation()
         if (queue.isEmpty()) return
         val nextIndex = if (currentIndex + 1 < queue.size) currentIndex + 1 else 0
-        playTrack(context, nextIndex)
+        // Gapless: используем seekToNextMediaItem вместо playTrack()
+        // Это сохраняет очередь и не сбрасывает предзагруженные треки
+        mainScope.launch {
+            val player = getPlayer(context)
+            if (player != null && nextIndex > currentIndex && player.mediaItemCount > nextIndex) {
+                // ExoPlayer уже имеет трек в очереди — просто переходим
+                player.seekToNextMediaItem()
+            } else {
+                // Очередь пуста или трек не предзагружен — запускаем с нуля
+                playTrack(context, nextIndex)
+            }
+        }
     }
 
     fun skipPrevious(context: Context) {
@@ -357,7 +368,12 @@ object PlayerController {
             autoMixEngine?.onManualNavigation()
             if (queue.isEmpty()) return@launch
             val prevIndex = if (currentIndex > 0) currentIndex - 1 else queue.lastIndex
-            playTrack(context, prevIndex)
+            // Gapless: используем seekToPreviousMediaItem если возможно
+            if (player != null && prevIndex < currentIndex && prevIndex >= 0) {
+                player.seekToPreviousMediaItem()
+            } else {
+                playTrack(context, prevIndex)
+            }
         }
     }
 
@@ -406,12 +422,16 @@ object PlayerController {
         logPlayback(completed = true, skipped = false)
         val nextIndex = currentIndex + 1
         if (nextIndex < queue.size) {
-            // ExoPlayer уже автоматически перешёл на следующий трек (addMediaItem)
-            // Обновляем индекс и предзагружаем следующие 3 трека
+            // ExoPlayer автоматически перешёл на следующий трек из очереди (addMediaItem)
+            // Но URL мог истечь (>600s). Проверяем и ре-резолвим если нужно.
             currentIndex = nextIndex
-            _currentTrack.value = queue[nextIndex]
-            _durationMs.value = queue[nextIndex].durationMs
+            val nextTrack = queue[nextIndex]
+            _currentTrack.value = nextTrack
+            _durationMs.value = nextTrack.durationMs
             _currentPositionMs.value = 0L
+            resetPlaybackLogging(nextTrack.durationMs)
+
+            // Предзагружаем следующие 3 трека
             appContext?.let { prefetchAhead(it, nextIndex, depth = 3) }
         }
     }
@@ -604,6 +624,18 @@ object PlayerController {
         val isCompleted = completed || (playedSec >= 0.85f * durationSec)
         val isSkipped = skipped || (playedSec < 0.15f * durationSec)
 
+        // POST /library/wave/playback — только для треков из Wave (радио)
+        // Обычные треки (альбомы, поиск, плейлисты) — не логируем
+        val isWaveTrack = track.id.startsWith("wave_") ||
+                (queue.isNotEmpty() && currentIndex >= 0 &&
+                        queue.getOrNull(currentIndex)?.let { it.id == track.id } != null &&
+                        autoMixEnabled.value)
+
+        if (!isWaveTrack) {
+            android.util.Log.d("PlayerController", "Skip wave playback log for non-wave track: ${track.id}")
+            return
+        }
+
         ioScope.launch {
             try {
                 IcmRepository.logWavePlayback(
@@ -613,9 +645,9 @@ object PlayerController {
                     completed = isCompleted,
                     skipped = isSkipped
                 )
-                android.util.Log.d("PlayerController", "Logged playback: ${track.id}, played=${playedSec}s, completed=$isCompleted")
+                android.util.Log.d("PlayerController", "Logged wave playback: ${track.id}, played=${playedSec}s, completed=$isCompleted")
             } catch (e: Exception) {
-                android.util.Log.e("PlayerController", "Playback log failed: ${e.message}")
+                android.util.Log.e("PlayerController", "Wave playback log failed: ${e.message}")
             }
         }
     }

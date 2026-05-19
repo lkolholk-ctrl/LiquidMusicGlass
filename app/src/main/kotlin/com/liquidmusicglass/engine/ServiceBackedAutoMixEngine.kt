@@ -218,13 +218,13 @@ class ServiceBackedAutoMixEngine(
                     simpleCrossfade(secondary, crossfadeDuration)
                 }
 
-                // Transition complete — tell PlayerController to switch to next track
+                // Transition complete — primary player уже на следующем треке
+                // (ExoPlayer auto-advanced через addMediaItem)
                 secondary.stop()
                 releaseSecondaryPlayer()
 
-                // Update PlayerController state to next track
-                PlayerController.skipNext(appContext)
-
+                // Не вызываем skipNext() — это сбросит очередь!
+                // Просто сбрасываем флаги и планируем анализ следующего трека
                 crossfadeActive = false
                 mixing = false
                 PlayerController.setMixing(false)
