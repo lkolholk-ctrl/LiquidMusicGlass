@@ -313,34 +313,6 @@ object PlayerController {
                     }
                 }
 
-                // ── Equator prefetch: resolve next track URL at 50% ──
-                endlessEngine.startEquatorPrefetch(
-                    track = track,
-                    onPrefetch = {
-                        // Prefetch at 50% — resolve URLs for upcoming tracks
-                        preloadUpcoming()
-                    }
-                )
-
-                // ── Event-driven refill: check queue on every track transition ──
-                // БЕЗОПАСНОСТЬ: задержка 1с + проверка STATE_READY чтобы не блокировать старт
-                scope.launch {
-                    delay(1000L)
-                    val player = controller ?: AudioService.companionPlayer ?: return@launch
-                    // Не проверяем refill если плеер ещё не готов или позиция = 0 (только стартовал)
-                    if (player.playbackState != Player.STATE_READY && 
-                        player.playbackState != Player.STATE_BUFFERING) {
-                        android.util.Log.d("PlayerDebug", "Skipping refill: playbackState=${player.playbackState}")
-                        return@launch
-                    }
-                    if (player.currentPosition <= 0) {
-                        android.util.Log.d("PlayerDebug", "Skipping refill: position=0, track just started")
-                        return@launch
-                    }
-                    android.util.Log.d("PlayerDebug", "Triggering refill check after 1s delay")
-                    endlessEngine.checkAndRefillIfNeeded()
-                }
-
                 // Pre-fetch lyrics for current track in background
                 scope.launch(Dispatchers.IO) {
                     if (track.isOnlineTrack && LyricsParser.getCachedLyrics(track.id) == null) {
@@ -732,48 +704,27 @@ object PlayerController {
         scope.launch {
             android.util.Log.d("PlayerController", "playFromList: ${tracks.size} tracks, startIndex=$idx, context=${refillContext?.type?.name}")
 
-            // ── Step 1: Resolve stream URLs for ALL tracks upfront ──
-            val resolvedTracks = tracks.mapIndexed { i, track ->
-                if (track.isOnlineTrack) {
-                    val resolvedUri = try {
-                        getCachedOrResolveStreamUrl(track.id)
-                    } catch (e: Exception) {
-                        android.util.Log.e("PlayerController", "Failed to resolve URL for ${track.id}: ${e.message}")
-                        null
-                    }
-                    if (resolvedUri != null) {
-                        android.util.Log.d("PlayerController", "Resolved track $i (${track.id}): ${resolvedUri.toString().take(60)}...")
-                        track.copy(uri = resolvedUri)
-                    } else {
-                        android.util.Log.w("PlayerController", "Could not resolve track $i (${track.id}), using placeholder")
-                        track
-                    }
-                } else {
-                    track
+            // ── Step 1: Resolve stream URL for START track only (fast path) ──
+            val startTrack = tracks[idx]
+            val resolvedStartTrack = if (startTrack.isOnlineTrack) {
+                val resolvedUri = try {
+                    getCachedOrResolveStreamUrl(startTrack.id)
+                } catch (e: Exception) {
+                    android.util.Log.e("PlayerController", "Failed to resolve URL for start track ${startTrack.id}: ${e.message}")
+                    null
                 }
-            }
+                if (resolvedUri != null) {
+                    android.util.Log.d("PlayerController", "Resolved start track ${startTrack.id}: ${resolvedUri.toString().take(60)}...")
+                    startTrack.copy(uri = resolvedUri)
+                } else {
+                    android.util.Log.e("PlayerController", "CRITICAL: Start track ${startTrack.id} failed to resolve!")
+                    _isPlaying.value = false
+                    return@launch
+                }
+            } else startTrack
 
-            // Filter out tracks that failed to resolve (keep at least the start track)
-            val playableTracks = if (resolvedTracks[idx].isOnlineTrack &&
-                !resolvedTracks[idx].uri.toString().startsWith("http")) {
-                android.util.Log.e("PlayerController", "CRITICAL: Start track ${tracks[idx].id} failed to resolve!")
-                _isPlaying.value = false
-                return@launch
-            } else {
-                resolvedTracks
-            }
-
-            // ── Step 2: Update internal queue state ──
-            queue = playableTracks
-            _queue.value = playableTracks
-            currentIndex = idx
-            _currentTrack.value = playableTracks[idx]
-            _durationMs.value = playableTracks[idx].durationMs
-            _currentPositionMs.value = 0L
-            _isPlaying.value = true
-
-            // ── Step 3: Build MediaItems with resolved URIs ──
-            val mediaItems = playableTracks.map { track ->
+            // ── Step 2: Build MediaItems for ALL tracks (use placeholder URIs for non-start) ──
+            val mediaItems = tracks.map { track ->
                 MediaItem.Builder()
                     .setMediaId(track.id)
                     .setUri(track.uri)
@@ -788,18 +739,38 @@ object PlayerController {
                     .build()
             }
 
+            // Update start track URI in mediaItems
+            val updatedMediaItems = mediaItems.mapIndexed { i, item ->
+                if (i == idx) {
+                    MediaItem.Builder()
+                        .setMediaId(resolvedStartTrack.id)
+                        .setUri(resolvedStartTrack.uri)
+                        .setMediaMetadata(item.mediaMetadata)
+                        .build()
+                } else item
+            }
+
+            // ── Step 3: Update internal queue state ──
+            queue = tracks
+            _queue.value = tracks
+            currentIndex = idx
+            _currentTrack.value = resolvedStartTrack
+            _durationMs.value = resolvedStartTrack.durationMs
+            _currentPositionMs.value = 0L
+            _isPlaying.value = true
+
             // ── Step 4: Load into ExoPlayer and START playback ──
             val playerController = obtainController(context)
             if (playerController != null) {
-                android.util.Log.d("PlayerController", "Using MediaController: setMediaItems(${mediaItems.size}, $idx, 0)")
-                playerController.setMediaItems(mediaItems, idx, 0L)
+                android.util.Log.d("PlayerController", "Using MediaController: setMediaItems(${updatedMediaItems.size}, $idx, 0)")
+                playerController.setMediaItems(updatedMediaItems, idx, 0L)
                 playerController.prepare()
                 playerController.play()
             } else {
                 val exo = AudioService.companionPlayer
                 if (exo != null) {
-                    android.util.Log.d("PlayerController", "Using direct ExoPlayer: setMediaItems(${mediaItems.size}, $idx, 0)")
-                    exo.setMediaItems(mediaItems, idx, 0L)
+                    android.util.Log.d("PlayerController", "Using direct ExoPlayer: setMediaItems(${updatedMediaItems.size}, $idx, 0)")
+                    exo.setMediaItems(updatedMediaItems, idx, 0L)
                     exo.prepare()
                     exo.play()
                 } else {
@@ -811,45 +782,41 @@ object PlayerController {
 
             // ── Step 5: Start position updates and tracking ──
             startPositionUpdates()
-            addToRecent(playableTracks[idx])
+            addToRecent(resolvedStartTrack)
 
             // ── Step 6: Log wave playback ──
             logWavePlaybackOnSwitch()
-            waveTrackId = playableTracks[idx].id
+            waveTrackId = resolvedStartTrack.id
             waveTrackStartTimeMs = System.currentTimeMillis()
             waveTrackPlayedMs = 0L
 
-            // ── Step 7: Aggressive prefetch for next track ──
-            if (idx + 1 < playableTracks.size) {
-                val nextTrack = playableTracks[idx + 1]
-                android.util.Log.d("PlayerController", "Pre-fetching next track: ${nextTrack.id}")
-                scope.launch(Dispatchers.IO) {
-                    try {
-                        getCachedOrResolveStreamUrl(nextTrack.id)
-                    } catch (e: Exception) {
-                        android.util.Log.e("PlayerController", "Pre-fetch failed for ${nextTrack.id}: ${e.message}")
+            // ── Step 7: Resolve remaining tracks in background (non-blocking) ──
+            scope.launch(Dispatchers.IO) {
+                tracks.forEachIndexed { i, track ->
+                    if (i != idx && track.isOnlineTrack) {
+                        try {
+                            getCachedOrResolveStreamUrl(track.id)
+                        } catch (e: Exception) {
+                            android.util.Log.e("PlayerController", "Background resolve failed for ${track.id}: ${e.message}")
+                        }
                     }
                 }
             }
 
-            // ── Step 8: Preload upcoming tracks (standard prefetch) ──
-            preloadUpcoming()
-
-            // ── Step 9: For single tracks, trigger immediate refill ──
-            if (tracks.size == 1) {
-                scope.launch {
-                    endlessEngine.checkAndRefillIfNeeded()
+            // ── Step 8: Pre-fetch lyrics ──
+            scope.launch(Dispatchers.IO) {
+                if (resolvedStartTrack.isOnlineTrack && LyricsParser.getCachedLyrics(resolvedStartTrack.id) == null) {
+                    try {
+                        LyricsParser.fetchOnlineLyrics(resolvedStartTrack.id, resolvedStartTrack.title, resolvedStartTrack.artist)
+                    } catch (_: Exception) {}
                 }
             }
 
-            // ── Step 10: Pre-fetch lyrics ──
-            scope.launch(Dispatchers.IO) {
-                val track = playableTracks[idx]
-                if (track.isOnlineTrack && LyricsParser.getCachedLyrics(track.id) == null) {
-                    try {
-                        LyricsParser.fetchOnlineLyrics(track.id, track.title, track.artist)
-                    } catch (_: Exception) {}
-                }
+            // ── Step 9: Refill check after safe delay (3s) ──
+            scope.launch {
+                delay(3000L)
+                android.util.Log.d("PlayerController", "Triggering refill check after 3s delay")
+                endlessEngine.checkAndRefillIfNeeded()
             }
 
             AudioService.companionService?.notifyManualNavigation()
@@ -888,8 +855,8 @@ object PlayerController {
             setQueue(listOf(track), 0)
             playTrack(context, 0)
             scope.launch {
+                delay(3000L)
                 endlessEngine.checkAndRefillIfNeeded()
-                preloadUpcoming()
             }
             return
         }
