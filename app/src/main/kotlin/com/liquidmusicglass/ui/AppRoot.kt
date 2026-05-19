@@ -308,9 +308,12 @@ fun AppRoot() {
             }
         }
 
-        val barsVisible = true
+    val barsVisible = detailAlbumId == null && detailArtistId == null && 
+                        !equalizerOpen && !playlistsOpen && playlistDetailId == null &&
+                        !settingsOpen && !authOpen && !profileOpen &&
+                        expandProgress.value < 0.95f
 
-        if (barsVisible && expandProgress.value < 0.95f) {
+    if (barsVisible) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -443,7 +446,8 @@ fun AppRoot() {
                     authOpen = false
                     selectedIndex = 3
                     AppSettings.setLastScreen(3)
-                }
+                },
+                onBack = { authOpen = false }
             )
         }
 
