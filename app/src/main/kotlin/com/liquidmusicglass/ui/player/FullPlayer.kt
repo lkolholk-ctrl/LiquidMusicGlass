@@ -468,26 +468,35 @@ fun FullPlayer(
                             overflow = TextOverflow.Ellipsis
                         )
                         Spacer(Modifier.height(2.dp))
-                        Text(
-                            text = artistName,
-                            color = Color.White.copy(alpha = 0.60f),
-                            fontSize = 16.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null
-                            ) {
-                                when {
-                                    artists.size == 1 && artists[0].id != null -> {
-                                        artists[0].id?.let { onNavigateToArtist(it) }
-                                    }
-                                    artists.size > 1 -> {
-                                        showArtistSheet = true
+                        // Artist name — wrapped in Box for minimum 48.dp touch target
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null
+                                ) {
+                                    when {
+                                        artists.size == 1 && artists[0].id != null -> {
+                                            artists[0].id?.let { onNavigateToArtist(it) }
+                                        }
+                                        artists.size > 1 -> {
+                                            showArtistSheet = true
+                                        }
                                     }
                                 }
-                            }
-                        )
+                                .padding(vertical = 12.dp),
+                            contentAlignment = Alignment.CenterStart
+                        ) {
+                            Text(
+                                text = artistName,
+                                color = Color.White.copy(alpha = 0.60f),
+                                fontSize = 16.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                     Spacer(Modifier.width(12.dp))
                     Box(
