@@ -274,8 +274,8 @@ fun SearchScreen(
                                             modifier = Modifier.weight(1f),
                                             onClick = {
                                                 hideKeyboard()
-                                                viewModel.setQuery(category.name)
-                                                viewModel.searchNow()
+                                                // Navigate to artist screen instead of searching
+                                                onNavigateToArtist(category.id)
                                             }
                                         )
                                     }
