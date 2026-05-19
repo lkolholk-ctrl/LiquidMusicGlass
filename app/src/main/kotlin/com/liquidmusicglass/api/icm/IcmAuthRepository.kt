@@ -118,9 +118,10 @@ object IcmAuthRepository {
     suspend fun loginWithEmail(email: String, apiKey: String): Result<String> = withContext(Dispatchers.IO) {
         try {
             val userId = generateUserIdFromEmail(email)
-            val result = issueSessionToken(userId, apiKey)
+            val tokenResult = issueSessionToken(userId, apiKey)
 
-            result.onSuccess { tokenData ->
+            if (tokenResult.isSuccess) {
+                val tokenData = tokenResult.getOrThrow()
                 prefs?.edit()?.apply {
                     putString(KEY_EMAIL, email)
                     putString(KEY_USER_ID, userId)
@@ -133,9 +134,10 @@ object IcmAuthRepository {
                 _partnerUserId.value = userId
                 _isLoggedIn.value = true
                 syncToIcmApi()
+                Result.success(tokenData.token)
+            } else {
+                Result.failure(tokenResult.exceptionOrNull() ?: IOException("Unknown error"))
             }
-
-            result.map { it.token }
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -147,9 +149,10 @@ object IcmAuthRepository {
     suspend fun loginWithTelegram(telegramId: Long, apiKey: String): Result<String> = withContext(Dispatchers.IO) {
         try {
             val userId = generateUserIdFromTelegram(telegramId)
-            val result = issueSessionToken(userId, apiKey)
+            val tokenResult = issueSessionToken(userId, apiKey)
 
-            result.onSuccess { tokenData ->
+            if (tokenResult.isSuccess) {
+                val tokenData = tokenResult.getOrThrow()
                 prefs?.edit()?.apply {
                     putString(KEY_TELEGRAM_ID, telegramId.toString())
                     putString(KEY_USER_ID, userId)
@@ -162,9 +165,10 @@ object IcmAuthRepository {
                 _partnerUserId.value = userId
                 _isLoggedIn.value = true
                 syncToIcmApi()
+                Result.success(tokenData.token)
+            } else {
+                Result.failure(tokenResult.exceptionOrNull() ?: IOException("Unknown error"))
             }
-
-            result.map { it.token }
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -257,17 +261,19 @@ object IcmAuthRepository {
         }
 
         val userId = _partnerUserId.value ?: return@withContext Result.failure(IOException("Not logged in"))
-        val result = issueSessionToken(userId, apiKey)
+        val tokenResult = issueSessionToken(userId, apiKey)
 
-        result.onSuccess { tokenData ->
+        if (tokenResult.isSuccess) {
+            val tokenData = tokenResult.getOrThrow()
             prefs?.edit()?.apply {
                 putString(KEY_TOKEN, tokenData.token)
                 putLong(KEY_TOKEN_EXPIRES, tokenData.expiresAt)
                 apply()
             }
+            Result.success(tokenData.token)
+        } else {
+            Result.failure(tokenResult.exceptionOrNull() ?: IOException("Unknown error"))
         }
-
-        result.map { it.token }
     }
 
     /**
@@ -336,18 +342,20 @@ object IcmAuthRepository {
      */
     suspend fun issueSessionAfterTelegramAuth(apiKey: String, hideExplicit: Boolean = false): Result<String> = withContext(Dispatchers.IO) {
         val userId = _partnerUserId.value ?: return@withContext Result.failure(IOException("No partner_user_id set"))
-        val result = issueSessionToken(userId, apiKey, hideExplicit)
+        val tokenResult = issueSessionToken(userId, apiKey, hideExplicit)
 
-        result.onSuccess { tokenData ->
+        if (tokenResult.isSuccess) {
+            val tokenData = tokenResult.getOrThrow()
             prefs?.edit()?.apply {
                 putString(KEY_TOKEN, tokenData.token)
                 putLong(KEY_TOKEN_EXPIRES, tokenData.expiresAt)
                 apply()
             }
             syncToIcmApi()
+            Result.success(tokenData.token)
+        } else {
+            Result.failure(tokenResult.exceptionOrNull() ?: IOException("Unknown error"))
         }
-
-        result.map { it.token }
     }
 
     /**

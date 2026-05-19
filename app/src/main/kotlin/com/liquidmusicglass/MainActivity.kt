@@ -7,6 +7,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import com.liquidmusicglass.api.icm.IcmAuthRepository
+import com.liquidmusicglass.engine.IcmKeyProvider
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.logging.CrashHandler
 import com.liquidmusicglass.ui.AppRoot
@@ -92,7 +94,7 @@ class MainActivity : ComponentActivity() {
             }
 
             // Store Telegram auth data — need to issue session token separately
-            com.liquidmusicglass.api.icm.IcmAuthRepository.setTelegramAuth(
+            IcmAuthRepository.setTelegramAuth(
                 icmUserId = icmUserId,
                 state = state
             )
@@ -101,14 +103,13 @@ class MainActivity : ComponentActivity() {
             // without S2S API key. Best-effort — wave already works via
             // X-Partner-Key + X-Partner-User-Id even if this fails.
             val apiKey = try {
-                com.liquidmusicglass.api.icm.IcmKeyProvider.getApiKey()
+                IcmKeyProvider.getApiKey()
             } catch (_: Throwable) { "" }
-                .ifBlank { com.liquidmusicglass.BuildConfig.ICM_API_KEY }
+                .ifBlank { BuildConfig.ICM_API_KEY }
             if (apiKey.isNotBlank() && apiKey.startsWith("pk_")) {
                 authScope.launch {
                     runCatching {
-                        com.liquidmusicglass.api.icm.IcmAuthRepository
-                            .issueSessionAfterTelegramAuth(apiKey)
+                        IcmAuthRepository.issueSessionAfterTelegramAuth(apiKey)
                     }
                 }
             }
@@ -121,4 +122,4 @@ class MainActivity : ComponentActivity() {
             return
         }
     }
- }
+}
