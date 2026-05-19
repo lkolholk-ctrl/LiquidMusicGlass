@@ -1,23 +1,16 @@
 package com.liquidmusicglass.ui.screens
 
+import android.content.Context
+import android.net.Uri
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.windowInsetsTopHeight
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -42,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -54,17 +48,22 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import com.liquidmusicglass.api.icm.IcmAuthRepository
 import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.api.icm.IcmSearchItem
 import com.liquidmusicglass.api.icm.IcmSearchSource
+import com.liquidmusicglass.api.icm.IcmWaveOnboardingArtist
 import com.liquidmusicglass.api.icm.toTrack
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.Track
 import com.liquidmusicglass.ui.glass.AlbumArtImage
 import com.liquidmusicglass.ui.theme.LiquidTheme
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
+import com.liquidmusicglass.ui.viewmodel.SearchViewModel
+import kotlinx.coroutines.launch
+
+private val AppleRed = Color(0xFFFC3C44)
 
 @Composable
 fun SearchScreen(
@@ -74,21 +73,27 @@ fun SearchScreen(
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
-    val prefs = remember { context.getSharedPreferences("search_history", android.content.Context.MODE_PRIVATE) }
+    val prefs = remember { context.getSharedPreferences("search_history", Context.MODE_PRIVATE) }
 
-    var query by remember { mutableStateOf("") }
-    var searchResults by remember { mutableStateOf<List<IcmSearchItem>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(false) }
-    var lastError by remember { mutableStateOf<String?>(null) }
-    var selectedSource by remember { mutableStateOf(IcmSearchSource.APPLE) }
-    val searchMutex = remember { Mutex() }
+    val viewModel = remember { SearchViewModel() }
+    val query by viewModel.query.collectAsState()
+    val searchResults by viewModel.searchResults.collectAsState()
+    val categories by viewModel.categories.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
+    val error by viewModel.error.collectAsState()
+    val selectedSource by viewModel.selectedSource.collectAsState()
+
+    // Load categories on first composition
+    LaunchedEffect(Unit) {
+        viewModel.loadCategories()
+    }
 
     fun hideKeyboard() {
         focusManager.clearFocus()
         keyboardController?.hide()
     }
 
-    // Load search history
+    // Search history
     var history by remember {
         mutableStateOf<List<String>>(
             prefs.getStringSet("queries", emptySet())?.toList()?.sortedDescending() ?: emptyList()
@@ -107,29 +112,10 @@ fun SearchScreen(
         history = emptyList()
     }
 
-    // Debounce search: 500ms after user stops typing + mutex serialization
-    LaunchedEffect(query, selectedSource) {
-        if (query.isBlank()) {
-            searchResults = emptyList()
-            return@LaunchedEffect
-        }
-        delay(500)
-        isLoading = true
-        lastError = null
-        searchMutex.withLock {
-            try {
-                val result = IcmRepository.searchAll(query, source = selectedSource)
-                searchResults = result?.items ?: emptyList()
-                if (result != null) {
-                    saveQuery(query)
-                } else {
-                    lastError = IcmRepository.lastError.value ?: "Search failed"
-                }
-            } catch (e: Exception) {
-                lastError = e.message
-            } finally {
-                isLoading = false
-            }
+    // Save query when search completes with results
+    LaunchedEffect(searchResults) {
+        if (searchResults.isNotEmpty() && query.isNotBlank()) {
+            saveQuery(query)
         }
     }
 
@@ -165,17 +151,17 @@ fun SearchScreen(
                 SourceChip(
                     text = "Apple Music",
                     selected = selectedSource == IcmSearchSource.APPLE,
-                    onClick = { selectedSource = IcmSearchSource.APPLE }
+                    onClick = { viewModel.setSource(IcmSearchSource.APPLE) }
                 )
                 SourceChip(
                     text = "VK",
                     selected = selectedSource == IcmSearchSource.VK,
-                    onClick = { selectedSource = IcmSearchSource.VK }
+                    onClick = { viewModel.setSource(IcmSearchSource.VK) }
                 )
                 SourceChip(
                     text = "All",
                     selected = selectedSource == IcmSearchSource.ALL,
-                    onClick = { selectedSource = IcmSearchSource.ALL }
+                    onClick = { viewModel.setSource(IcmSearchSource.ALL) }
                 )
             }
 
@@ -201,16 +187,20 @@ fun SearchScreen(
                 Spacer(modifier = Modifier.width(10.dp))
                 BasicTextField(
                     value = query,
-                    onValueChange = { query = it },
+                    onValueChange = { viewModel.setQuery(it) },
                     textStyle = TextStyle(
                         color = LiquidTheme.colors.textPrimary,
                         fontSize = 16.sp
                     ),
                     singleLine = true,
-                    cursorBrush = SolidColor(Color(0xFFFC3C44)),
+                    cursorBrush = SolidColor(AppleRed),
                     modifier = Modifier.weight(1f),
-                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
-                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { hideKeyboard() }),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        imeAction = androidx.compose.ui.text.input.ImeAction.Search
+                    ),
+                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                        onSearch = { hideKeyboard(); viewModel.searchNow() }
+                    ),
                     decorationBox = { innerTextField ->
                         Box {
                             if (query.isEmpty()) {
@@ -233,7 +223,7 @@ fun SearchScreen(
                             .clickable(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null,
-                                onClick = { query = "" }
+                                onClick = { viewModel.clearQuery(); hideKeyboard() }
                             ),
                         contentAlignment = Alignment.Center
                     ) {
@@ -249,221 +239,538 @@ fun SearchScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            if (query.isBlank()) {
-                // Show search history
-                if (history.isNotEmpty()) {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(2.dp)
-                    ) {
-                        item {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 20.dp, vertical = 8.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "Recent Searches",
-                                    color = LiquidTheme.colors.sectionLabel,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold
+            // ─── IDLE STATE: Categories + History ───
+            AnimatedVisibility(
+                visible = query.isBlank(),
+                enter = fadeIn(),
+                exit = fadeOut()
+            ) {
+                Column {
+                    // Categories grid (popular artists as genres)
+                    if (categories.isNotEmpty()) {
+                        Text(
+                            text = "Browse",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 22.sp,
+                            color = LiquidTheme.colors.textPrimary,
+                            modifier = Modifier.padding(horizontal = 20.dp)
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        // 2-column grid of category cards
+                        val chunkedCategories = categories.chunked(2)
+                        LazyColumn(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            contentPadding = PaddingValues(horizontal = 20.dp)
+                        ) {
+                            items(chunkedCategories, key = { "cat_${it.first().id}" }) { pair ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    pair.forEach { category ->
+                                        CategoryCard(
+                                            category = category,
+                                            modifier = Modifier.weight(1f),
+                                            onClick = {
+                                                hideKeyboard()
+                                                viewModel.setQuery(category.name)
+                                                viewModel.searchNow()
+                                            }
+                                        )
+                                    }
+                                    // Fill empty slot if odd number
+                                    if (pair.size == 1) {
+                                        Spacer(modifier = Modifier.weight(1f))
+                                    }
+                                }
+                            }
+                            item { Spacer(modifier = Modifier.height(16.dp)) }
+                        }
+                    }
+
+                    // Search history
+                    if (history.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Recent Searches",
+                                color = LiquidTheme.colors.sectionLabel,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "Clear",
+                                color = AppleRed,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null,
+                                    onClick = { clearHistory() }
                                 )
-                                Text(
-                                    text = "Clear",
-                                    color = Color(0xFFFC3C44),
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    modifier = Modifier.clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null,
-                                        onClick = { clearHistory() }
-                                    )
+                            )
+                        }
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            items(history, key = { "hist_$it" }) { item ->
+                                HistoryRow(
+                                    query = item,
+                                    onClick = {
+                                        hideKeyboard()
+                                        viewModel.setQuery(item)
+                                        viewModel.searchNow()
+                                    }
                                 )
                             }
+                            item { Spacer(modifier = Modifier.height(200.dp)) }
                         }
-                        items(history, key = { "hist_$it" }) { item ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp)
-                                    .height(52.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(Color(0xFF1A1A1A))
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null
-                                    ) { hideKeyboard(); query = item }
-                                    .padding(horizontal = 14.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.History,
-                                    contentDescription = null,
-                                    tint = LiquidTheme.colors.iconMuted,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Text(
-                                    text = item,
-                                    color = LiquidTheme.colors.textPrimary,
-                                    fontSize = 15.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f)
-                                )
+                    } else if (categories.isEmpty()) {
+                        // Empty state
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Icon(
                                     imageVector = Icons.Rounded.Search,
                                     contentDescription = null,
-                                    tint = LiquidTheme.colors.iconMuted,
-                                    modifier = Modifier.size(18.dp)
+                                    tint = LiquidTheme.colors.textTertiary,
+                                    modifier = Modifier.size(56.dp)
                                 )
-                            }
-                        }
-                        item { Spacer(modifier = Modifier.height(200.dp)) }
-                    }
-                } else {
-                    // Empty state
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(
-                                imageVector = Icons.Rounded.Search,
-                                contentDescription = null,
-                                tint = LiquidTheme.colors.textTertiary,
-                                modifier = Modifier.size(56.dp)
-                            )
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text(
-                                text = "Search ICM Music",
-                                color = LiquidTheme.colors.textTertiary,
-                                fontSize = 16.sp
-                            )
-                        }
-                    }
-                }
-            } else if (isLoading) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(
-                        color = Color(0xFFFC3C44),
-                        modifier = Modifier.size(32.dp)
-                    )
-                }
-            } else if (lastError != null) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = "Error",
-                            color = Color(0xFFFC3C44),
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = lastError ?: "Unknown error",
-                            color = LiquidTheme.colors.textTertiary,
-                            fontSize = 14.sp
-                        )
-                    }
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    // Artists
-                    if (artists.isNotEmpty()) {
-                        item(key = "artists_label") {
-                            SearchSectionLabel("Artists")
-                        }
-                        items(artists, key = { "artist_${it.id}" }) { item ->
-                            SearchResultRow(
-                                title = item.title.takeIf { it.isNotBlank() } ?: item.displayArtist,
-                                subtitle = "Artist",
-                                icon = Icons.Rounded.Person,
-                                coverUrl = item.cover,
-                                onClick = { hideKeyboard(); onNavigateToArtist(item.id) }
-                            )
-                        }
-                    }
-
-                    // Albums
-                    if (albums.isNotEmpty()) {
-                        item(key = "albums_label") {
-                            SearchSectionLabel("Albums")
-                        }
-                        items(albums, key = { "album_${it.id}" }) { item ->
-                            SearchResultRow(
-                                title = item.title,
-                                subtitle = item.displayArtist,
-                                icon = Icons.Rounded.Album,
-                                coverUrl = item.cover,
-                                onClick = { hideKeyboard(); onNavigateToAlbum(item.id) }
-                            )
-                        }
-                    }
-
-                    // Tracks
-                    if (tracks.isNotEmpty()) {
-                        item(key = "tracks_label") {
-                            SearchSectionLabel("Songs")
-                        }
-                        // Build the playable queue once: only real tracks
-                        // (drop artist/album rows the API mixes in) and
-                        // honour the order the user sees.
-                        val playableTracks = tracks.map { it.toTrack() }
-                        items(tracks, key = { "track_${it.id}" }) { item ->
-                            SearchResultRow(
-                                title = item.title,
-                                subtitle = item.displayArtist,
-                                icon = Icons.Rounded.MusicNote,
-                                coverUrl = item.cover,
-                                onClick = {
-                                    hideKeyboard()
-                                    val startIdx = playableTracks.indexOfFirst { it.id == item.id }
-                                        .coerceAtLeast(0)
-                                    PlayerController.playFromList(
-                                        context = context,
-                                        tracks = playableTracks,
-                                        startIndex = startIdx,
-                                        autoRefillType = "search",
-                                        autoRefillId = query,
-                                        autoRefillName = query
-                                    )
-                                }
-                            )
-                        }
-                    }
-
-                    if (tracks.isEmpty() && albums.isEmpty() && artists.isEmpty()) {
-                        item {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 60.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
+                                Spacer(modifier = Modifier.height(12.dp))
                                 Text(
-                                    text = "No results for \"$query\"",
+                                    text = "Search ICM Music",
                                     color = LiquidTheme.colors.textTertiary,
                                     fontSize = 16.sp
                                 )
                             }
                         }
                     }
-
-                    item { Spacer(modifier = Modifier.height(200.dp)) }
                 }
             }
+
+            // ─── ACTIVE SEARCH: Results ───
+            AnimatedVisibility(
+                visible = query.isNotBlank(),
+                enter = fadeIn(),
+                exit = fadeOut()
+            ) {
+                when {
+                    isLoading -> {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(
+                                color = AppleRed,
+                                modifier = Modifier.size(32.dp)
+                            )
+                        }
+                    }
+                    error != null -> {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    text = "Error",
+                                    color = AppleRed,
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = error ?: "Unknown error",
+                                    color = LiquidTheme.colors.textTertiary,
+                                    fontSize = 14.sp
+                                )
+                            }
+                        }
+                    }
+                    else -> {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            // Artists section
+                            if (artists.isNotEmpty()) {
+                                item(key = "artists_label") {
+                                    SearchSectionLabel("Artists")
+                                }
+                                // Artists as horizontal row of circular avatars
+                                item(key = "artists_row") {
+                                    LazyRow(
+                                        contentPadding = PaddingValues(horizontal = 20.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                    ) {
+                                        items(artists, key = { "artist_${it.id}" }) { artist ->
+                                            ArtistChip(
+                                                artist = artist,
+                                                onClick = {
+                                                    hideKeyboard()
+                                                    onNavigateToArtist(artist.id)
+                                                }
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                }
+                            }
+
+                            // Albums section
+                            if (albums.isNotEmpty()) {
+                                item(key = "albums_label") {
+                                    SearchSectionLabel("Albums")
+                                }
+                                // Albums as horizontal row of square cards
+                                item(key = "albums_row") {
+                                    LazyRow(
+                                        contentPadding = PaddingValues(horizontal = 20.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                                    ) {
+                                        items(albums, key = { "album_${it.id}" }) { album ->
+                                            AlbumCard(
+                                                album = album,
+                                                onClick = {
+                                                    hideKeyboard()
+                                                    onNavigateToAlbum(album.id)
+                                                }
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                }
+                            }
+
+                            // Tracks section
+                            if (tracks.isNotEmpty()) {
+                                item(key = "tracks_label") {
+                                    SearchSectionLabel("Songs")
+                                }
+                                val playableTracks = tracks.map { it.toTrack() }
+                                items(tracks, key = { "track_${it.id}" }) { item ->
+                                    SearchResultRow(
+                                        title = item.title,
+                                        subtitle = item.displayArtist,
+                                        icon = Icons.Rounded.MusicNote,
+                                        coverUrl = item.cover,
+                                        onClick = {
+                                            hideKeyboard()
+                                            val startIdx = playableTracks.indexOfFirst { it.id == item.id }
+                                                .coerceAtLeast(0)
+                                            PlayerController.playFromList(
+                                                context = context,
+                                                tracks = playableTracks,
+                                                startIndex = startIdx,
+                                                autoRefillType = "search",
+                                                autoRefillId = query,
+                                                autoRefillName = query
+                                            )
+                                        }
+                                    )
+                                }
+                            }
+
+                            // No results
+                            if (tracks.isEmpty() && albums.isEmpty() && artists.isEmpty()) {
+                                item {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 60.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = "No results for \"$query\"",
+                                            color = LiquidTheme.colors.textTertiary,
+                                            fontSize = 16.sp
+                                        )
+                                    }
+                                }
+                            }
+
+                            item { Spacer(modifier = Modifier.height(200.dp)) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  UI Components
+// ═══════════════════════════════════════════════════════════
+
+@Composable
+private fun CategoryCard(
+    category: IcmWaveOnboardingArtist,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    val gradientColors = remember(category.id) {
+        // Generate consistent gradient from category id hash
+        val hash = category.id.hashCode()
+        val hue1 = (hash % 360).let { if (it < 0) it + 360 else it }
+        val hue2 = ((hash * 31) % 360).let { if (it < 0) it + 360 else it }
+        listOf(
+            android.graphics.Color.HSVToColor(floatArrayOf(hue1.toFloat(), 0.7f, 0.4f)),
+            android.graphics.Color.HSVToColor(floatArrayOf(hue2.toFloat(), 0.8f, 0.25f))
+        ).map { Color(it) }
+    }
+
+    Box(
+        modifier = modifier
+            .height(100.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Brush.linearGradient(gradientColors))
+            .clickable(onClick = onClick)
+            .padding(16.dp)
+    ) {
+        // Artist image (small, bottom-right)
+        if (category.image != null) {
+            AsyncImage(
+                model = ImageRequest.Builder(LocalContext.current)
+                    .data(category.image)
+                    .crossfade(true)
+                    .build(),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(60.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .align(Alignment.BottomEnd)
+            )
+        }
+        // Category name
+        Text(
+            text = category.name,
+            color = Color.White,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.align(Alignment.TopStart)
+        )
+    }
+}
+
+@Composable
+private fun ArtistChip(
+    artist: IcmSearchItem,
+    onClick: () -> Unit
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .width(80.dp)
+            .clickable(onClick = onClick)
+    ) {
+        if (artist.cover != null) {
+            AsyncImage(
+                model = ImageRequest.Builder(LocalContext.current)
+                    .data(artist.cover)
+                    .crossfade(true)
+                    .build(),
+                contentDescription = artist.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(72.dp)
+                    .clip(CircleShape)
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(72.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF2A2A2A)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Person,
+                    contentDescription = null,
+                    tint = LiquidTheme.colors.iconMuted,
+                    modifier = Modifier.size(32.dp)
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = artist.title.takeIf { it.isNotBlank() } ?: artist.displayArtist,
+            color = LiquidTheme.colors.textPrimary,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth(),
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+        )
+    }
+}
+
+@Composable
+private fun AlbumCard(
+    album: IcmSearchItem,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .width(140.dp)
+            .clickable(onClick = onClick)
+    ) {
+        AsyncImage(
+            model = ImageRequest.Builder(LocalContext.current)
+                .data(album.cover)
+                .crossfade(true)
+                .build(),
+            contentDescription = album.title,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .size(140.dp)
+                .clip(RoundedCornerShape(8.dp))
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = album.title,
+            color = LiquidTheme.colors.textPrimary,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = album.displayArtist,
+            color = LiquidTheme.colors.textSecondary,
+            fontSize = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+private fun HistoryRow(
+    query: String,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .height(52.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF1A1A1A))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick
+            )
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.History,
+            contentDescription = null,
+            tint = LiquidTheme.colors.iconMuted,
+            modifier = Modifier.size(20.dp)
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Text(
+            text = query,
+            color = LiquidTheme.colors.textPrimary,
+            fontSize = 15.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
+        Icon(
+            imageVector = Icons.Rounded.Search,
+            contentDescription = null,
+            tint = LiquidTheme.colors.iconMuted,
+            modifier = Modifier.size(18.dp)
+        )
+    }
+}
+
+@Composable
+private fun SearchResultRow(
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    coverUrl: String?,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .height(64.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF1A1A1A))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick
+            )
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (coverUrl != null) {
+            AsyncImage(
+                model = ImageRequest.Builder(LocalContext.current)
+                    .data(coverUrl)
+                    .crossfade(true)
+                    .build(),
+                contentDescription = title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(6.dp))
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Color(0xFF2A2A2A)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = LiquidTheme.colors.iconMuted,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        }
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                color = LiquidTheme.colors.textPrimary,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = subtitle,
+                color = LiquidTheme.colors.textSecondary,
+                fontSize = 13.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }
@@ -478,7 +785,7 @@ private fun SourceChip(
         modifier = Modifier
             .clip(RoundedCornerShape(20.dp))
             .background(
-                if (selected) Color(0xFFFC3C44) else Color(0xFF1A1A1A)
+                if (selected) AppleRed else Color(0xFF1A1A1A)
             )
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
@@ -500,76 +807,9 @@ private fun SourceChip(
 private fun SearchSectionLabel(text: String) {
     Text(
         text = text,
-        color = LiquidTheme.colors.sectionLabel,
-        fontSize = 13.sp,
-        fontWeight = FontWeight.SemiBold,
-        modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
+        fontWeight = FontWeight.Bold,
+        fontSize = 20.sp,
+        color = LiquidTheme.colors.textPrimary,
+        modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
     )
-}
-
-@Composable
-private fun SearchResultRow(
-    title: String,
-    subtitle: String,
-    icon: ImageVector,
-    coverUrl: String? = null,
-    onClick: () -> Unit
-) {
-    val shape = RoundedCornerShape(16.dp)
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp)
-            .height(64.dp)
-            .clip(shape)
-            .background(Color(0xFF1A1A1A))
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onClick
-            )
-            .padding(horizontal = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .size(46.dp)
-                .clip(RoundedCornerShape(12.dp))
-        ) {
-            AlbumArtImage(
-                uri = null,
-                coverUrl = coverUrl,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
-            )
-        }
-
-        Spacer(modifier = Modifier.width(14.dp))
-
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = title,
-                color = LiquidTheme.colors.textPrimary,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = subtitle,
-                color = LiquidTheme.colors.textSecondary,
-                fontSize = 12.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = LiquidTheme.colors.iconMuted,
-            modifier = Modifier.size(18.dp)
-        )
-    }
 }
