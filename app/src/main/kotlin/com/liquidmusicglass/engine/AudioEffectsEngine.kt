@@ -75,6 +75,11 @@ object AudioEffectsEngine {
      * Инициализация эффектов с audioSessionId.
      * При смене сессии (AutoMix swap) пересоздаёт эффекты
      * и применяет текущие настройки.
+     * 
+     * CRITICAL: На OEM-устройствах (Huawei/Honor/MagicOS) инициализация
+     * Equalizer/Virtualizer может вызвать системный setParameters() для
+     * DTS-эффектов, что блокирует поток из-за отсутствия разрешения.
+     * При любой ошибке — полностью отключаем эффекты.
      */
     fun init(audioSessionId: Int) {
         if (audioSessionId == 0) return
@@ -91,6 +96,10 @@ object AudioEffectsEngine {
         release()
         currentSessionId = audioSessionId
 
+        // CRITICAL FIX: Обернуть ВСЮ инициализацию в try-catch.
+        // На Huawei/Honor создание Equalizer/Virtualizer вызывает
+        // AudioManager.setParameters("dts_effect_enable") который
+        // блокирует Main Thread из-за SecurityException.
         try {
             equalizer = Equalizer(0, audioSessionId).apply {
                 val nb = numberOfBands.toInt()
@@ -116,41 +125,68 @@ object AudioEffectsEngine {
 
                 enabled = savedEnabled
             }
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            android.util.Log.e("AudioEffectsEngine", "Equalizer init failed (OEM blocked?): ${e.message}")
+            equalizer = null
+        }
 
         try {
             bassBoost = BassBoost(0, audioSessionId).apply {
                 setStrength(savedBass.toShort())
                 enabled = savedEnabled && savedBass > 0
             }
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            android.util.Log.e("AudioEffectsEngine", "BassBoost init failed: ${e.message}")
+            bassBoost = null
+        }
 
         try {
             virtualizer = Virtualizer(0, audioSessionId).apply {
                 setStrength(savedVirt.toShort())
                 enabled = savedEnabled && savedVirt > 0
             }
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            android.util.Log.e("AudioEffectsEngine", "Virtualizer init failed (OEM blocked?): ${e.message}")
+            virtualizer = null
+        }
 
         try {
             loudnessEnhancer = LoudnessEnhancer(audioSessionId).apply {
                 setTargetGain(savedLoud)
                 enabled = savedEnabled && savedLoud > 0
             }
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            android.util.Log.e("AudioEffectsEngine", "LoudnessEnhancer init failed: ${e.message}")
+            loudnessEnhancer = null
+        }
 
-        _enabled.value = savedEnabled
+        // Если ни один эффект не инициализировался — сбрасываем флаг
+        if (equalizer == null && bassBoost == null && virtualizer == null && loudnessEnhancer == null) {
+            android.util.Log.w("AudioEffectsEngine", "All effects failed to init — disabling EQ on this device")
+            _enabled.value = false
+        } else {
+            _enabled.value = savedEnabled
+        }
     }
 
     /**
      * Включение/выключение всех эффектов.
+     * Безопасно для OEM-устройств — проверяет что эффекты инициализированы.
      */
     fun setEnabled(enable: Boolean) {
         _enabled.value = enable
-        equalizer?.enabled = enable
-        bassBoost?.enabled = enable && _bassBoostStrength.value > 0
-        virtualizer?.enabled = enable && _virtualizerStrength.value > 0
-        loudnessEnhancer?.enabled = enable && _loudnessGain.value > 0
+        try { equalizer?.enabled = enable } catch (e: Exception) {
+            android.util.Log.e("AudioEffectsEngine", "setEnabled EQ failed: ${e.message}")
+        }
+        try { bassBoost?.enabled = enable && _bassBoostStrength.value > 0 } catch (e: Exception) {
+            android.util.Log.e("AudioEffectsEngine", "setEnabled Bass failed: ${e.message}")
+        }
+        try { virtualizer?.enabled = enable && _virtualizerStrength.value > 0 } catch (e: Exception) {
+            android.util.Log.e("AudioEffectsEngine", "setEnabled Virt failed: ${e.message}")
+        }
+        try { loudnessEnhancer?.enabled = enable && _loudnessGain.value > 0 } catch (e: Exception) {
+            android.util.Log.e("AudioEffectsEngine", "setEnabled Loud failed: ${e.message}")
+        }
     }
 
     /**
