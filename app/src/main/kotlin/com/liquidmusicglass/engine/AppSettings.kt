@@ -91,92 +91,96 @@ object AppSettings {
         loadAll()
     }
 
+    private fun safePrefs(): SharedPreferences? {
+        return if (::prefs.isInitialized) prefs else null
+    }
+
     // ═══════════════════════════════════════════
     //  Setters (save immediately)
     // ═══════════════════════════════════════════
 
     fun setAutoMix(enabled: Boolean) {
         _autoMixEnabled.value = enabled
-        prefs.edit().putBoolean("automix", enabled).apply()
+        safePrefs()?.edit()?.putBoolean("automix", enabled)?.apply()
     }
 
     fun setGapless(enabled: Boolean) {
         _gaplessEnabled.value = enabled
-        prefs.edit().putBoolean("gapless", enabled).apply()
+        safePrefs()?.edit()?.putBoolean("gapless", enabled)?.apply()
     }
 
     fun setSleepTimer(minutes: Int) {
         _sleepTimerMinutes.value = minutes
-        prefs.edit().putInt("sleep_timer", minutes).apply()
+        safePrefs()?.edit()?.putInt("sleep_timer", minutes)?.apply()
         startSleepTimer(minutes)
     }
 
     fun setIgnoreShort(enabled: Boolean) {
         _ignoreShortEnabled.value = enabled
-        prefs.edit().putBoolean("ignore_short", enabled).apply()
+        safePrefs()?.edit()?.putBoolean("ignore_short", enabled)?.apply()
     }
 
     fun setIgnoreThreshold(sec: Float) {
         _ignoreThresholdSec.value = sec
-        prefs.edit().putFloat("ignore_threshold", sec).apply()
+        safePrefs()?.edit()?.putFloat("ignore_threshold", sec)?.apply()
     }
 
     fun setLastTrackIndex(index: Int) {
         _lastTrackIndex.value = index
-        prefs.edit().putInt("last_track", index).apply()
+        safePrefs()?.edit()?.putInt("last_track", index)?.apply()
     }
 
     fun setLastPosition(ms: Long) {
         _lastPositionMs.value = ms
-        prefs.edit().putLong("last_position", ms).apply()
+        safePrefs()?.edit()?.putLong("last_position", ms)?.apply()
     }
 
     fun setLastScreen(index: Int) {
         _lastScreenIndex.value = index
-        prefs.edit().putInt("last_screen", index).apply()
+        safePrefs()?.edit()?.putInt("last_screen", index)?.apply()
     }
 
     fun setEqEnabled(enabled: Boolean) {
         _eqEnabled.value = enabled
-        prefs.edit().putBoolean("eq_enabled", enabled).apply()
+        safePrefs()?.edit()?.putBoolean("eq_enabled", enabled)?.apply()
     }
 
     fun setEqPreset(name: String) {
         _eqPreset.value = name
-        prefs.edit().putString("eq_preset", name).apply()
+        safePrefs()?.edit()?.putString("eq_preset", name)?.apply()
     }
 
     fun setEqBands(bands: IntArray) {
         _eqBands.value = bands.copyOf()
         val sb = bands.joinToString(",")
-        prefs.edit().putString("eq_bands", sb).apply()
+        safePrefs()?.edit()?.putString("eq_bands", sb)?.apply()
     }
 
     fun setBassBoost(value: Int) {
         _bassBoost.value = value
-        prefs.edit().putInt("bass_boost", value).apply()
+        safePrefs()?.edit()?.putInt("bass_boost", value)?.apply()
     }
 
     fun setVirtualizer(value: Int) {
         _virtualizer.value = value
-        prefs.edit().putInt("virtualizer", value).apply()
+        safePrefs()?.edit()?.putInt("virtualizer", value)?.apply()
     }
 
     fun setLoudness(value: Int) {
         _loudness.value = value
-        prefs.edit().putInt("loudness", value).apply()
+        safePrefs()?.edit()?.putInt("loudness", value)?.apply()
     }
 
     fun setHideExplicit(enabled: Boolean) {
         _hideExplicit.value = enabled
-        prefs.edit().putBoolean("hide_explicit", enabled).apply()
+        safePrefs()?.edit()?.putBoolean("hide_explicit", enabled)?.apply()
     }
 
     // ── Scan Folders ──
 
     fun setScanFolders(folders: List<String>) {
         _scanFolders.value = folders
-        prefs.edit().putString("scan_folders", folders.joinToString("|")).apply()
+        safePrefs()?.edit()?.putString("scan_folders", folders.joinToString("|"))?.apply()
     }
 
     fun addScanFolder(path: String) {
@@ -262,7 +266,7 @@ object AppSettings {
         sleepTimerJob?.cancel()
         _sleepTimerMinutes.value = 0
         _sleepTimerRemainingMs.value = 0L
-        prefs.edit().putInt("sleep_timer", 0).apply()
+        safePrefs()?.edit()?.putInt("sleep_timer", 0)?.apply()
     }
 
     // ═══════════════════════════════════════════
@@ -270,25 +274,26 @@ object AppSettings {
     // ═══════════════════════════════════════════
 
     private fun loadAll() {
-        _autoMixEnabled.value = prefs.getBoolean("automix", false)
-        _gaplessEnabled.value = prefs.getBoolean("gapless", true)
-        _sleepTimerMinutes.value = prefs.getInt("sleep_timer", 0)
-        _ignoreShortEnabled.value = prefs.getBoolean("ignore_short", false)
-        _ignoreThresholdSec.value = prefs.getFloat("ignore_threshold", 30f)
+        val p = safePrefs() ?: return
+        _autoMixEnabled.value = p.getBoolean("automix", false)
+        _gaplessEnabled.value = p.getBoolean("gapless", true)
+        _sleepTimerMinutes.value = p.getInt("sleep_timer", 0)
+        _ignoreShortEnabled.value = p.getBoolean("ignore_short", false)
+        _ignoreThresholdSec.value = p.getFloat("ignore_threshold", 30f)
 
-        _lastTrackIndex.value = prefs.getInt("last_track", -1)
-        _lastPositionMs.value = prefs.getLong("last_position", 0L)
-        _lastScreenIndex.value = prefs.getInt("last_screen", 0)
+        _lastTrackIndex.value = p.getInt("last_track", -1)
+        _lastPositionMs.value = p.getLong("last_position", 0L)
+        _lastScreenIndex.value = p.getInt("last_screen", 0)
 
-        _eqEnabled.value = prefs.getBoolean("eq_enabled", false)
-        _hideExplicit.value = prefs.getBoolean("hide_explicit", false)
-        _eqPreset.value = prefs.getString("eq_preset", "Flat") ?: "Flat"
-        _bassBoost.value = prefs.getInt("bass_boost", 0)
-        _virtualizer.value = prefs.getInt("virtualizer", 0)
-        _loudness.value = prefs.getInt("loudness", 0)
+        _eqEnabled.value = p.getBoolean("eq_enabled", false)
+        _hideExplicit.value = p.getBoolean("hide_explicit", false)
+        _eqPreset.value = p.getString("eq_preset", "Flat") ?: "Flat"
+        _bassBoost.value = p.getInt("bass_boost", 0)
+        _virtualizer.value = p.getInt("virtualizer", 0)
+        _loudness.value = p.getInt("loudness", 0)
 
         try {
-            val bandsStr = prefs.getString("eq_bands", null)
+            val bandsStr = p.getString("eq_bands", null)
             if (bandsStr != null) {
                 _eqBands.value = bandsStr.split(",").map { it.toInt() }.toIntArray()
             }
@@ -296,7 +301,7 @@ object AppSettings {
 
         // Scan folders
         try {
-            val foldersStr = prefs.getString("scan_folders", null)
+            val foldersStr = p.getString("scan_folders", null)
             if (!foldersStr.isNullOrBlank()) {
                 _scanFolders.value = foldersStr.split("|").filter { it.isNotBlank() }
             }

@@ -4,6 +4,8 @@ import android.app.Application
 import com.kyant.fishnet.Fishnet
 import com.liquidmusicglass.api.icm.IcmAuthRepository
 import com.liquidmusicglass.api.icm.IcmRepository
+import com.liquidmusicglass.engine.AppSettings
+import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.logging.CrashHandler
 import java.io.File
 
@@ -14,6 +16,12 @@ class App : Application() {
         CrashHandler.install(this) // Java крэши
         val logDir = File(filesDir, "crash_logs").apply { mkdirs() }
         Fishnet.init(this, logDir.absolutePath) // Native/ANR крэши
+
+        // Initialize AppSettings (SharedPreferences) before any UI access
+        AppSettings.init(this)
+
+        // Initialize PlayerController
+        PlayerController.init(this)
 
         // Initialize auth repo first so partner_user_id is available before the
         // ICM API client is configured.
