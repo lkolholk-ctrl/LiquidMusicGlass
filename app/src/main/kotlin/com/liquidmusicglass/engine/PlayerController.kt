@@ -104,6 +104,14 @@ object PlayerController {
 
     private val _isMixing = MutableStateFlow(false)
     val isMixing: StateFlow<Boolean> = _isMixing
+    fun setMixing(mixing: Boolean) { _isMixing.value = mixing }
+
+    // ── AutoMix Engine reference (set by AudioService) ──
+    private var autoMixEngine: ServiceBackedAutoMixEngine? = null
+
+    fun setAutoMixEngine(engine: ServiceBackedAutoMixEngine?) {
+        autoMixEngine = engine
+    }
 
     // ── Init ──
     fun init(context: Context) {
@@ -254,6 +262,7 @@ object PlayerController {
 
     fun skipNext(context: Context) {
         logPlayback(completed = false, skipped = true)
+        autoMixEngine?.onManualNavigation()
         if (queue.isEmpty()) return
         val nextIndex = if (currentIndex + 1 < queue.size) currentIndex + 1 else 0
         playTrack(context, nextIndex)
@@ -268,6 +277,7 @@ object PlayerController {
                 return@launch
             }
             logPlayback(completed = false, skipped = true)
+            autoMixEngine?.onManualNavigation()
             if (queue.isEmpty()) return@launch
             val prevIndex = if (currentIndex > 0) currentIndex - 1 else queue.lastIndex
             playTrack(context, prevIndex)

@@ -68,11 +68,15 @@ class AudioService : MediaSessionService() {
     // ── Position polling job ──
     private var positionJob: Job? = null
 
+    // ── AutoMix Engine ──
+    private var autoMixEngine: ServiceBackedAutoMixEngine? = null
+
     override fun onCreate() {
         super.onCreate()
 
         val player = buildPlayer()
         _player = player
+        currentPlayer = player  // Exposed for AutoMix crossfade
 
         _session = MediaSession.Builder(this, player)
             .setId("liquid_music_session")
@@ -81,7 +85,15 @@ class AudioService : MediaSessionService() {
 
         player.addListener(PlayerEventForwarder())
 
-        // Start position polling
+        // Initialize AutoMix engine
+        autoMixEngine = ServiceBackedAutoMixEngine(
+            context = this,
+            scope = serviceScope,
+            isEnabled = { PlayerController.autoMixEnabled.value }
+        )
+        PlayerController.setAutoMixEngine(autoMixEngine)
+
+        // Start position polling (includes AutoMix checks)
         startPositionPolling(player)
     }
 
@@ -126,9 +138,13 @@ class AudioService : MediaSessionService() {
     override fun onDestroy() {
         positionJob?.cancel()
 
+        autoMixEngine?.release()
+        autoMixEngine = null
+
         _player?.removeListener(PlayerEventForwarder())
         _player?.release()
         _player = null
+        currentPlayer = null
 
         _session?.release()
         _session = null
@@ -170,6 +186,7 @@ class AudioService : MediaSessionService() {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             mediaItem?.let {
                 PlayerController.onTrackChanged(it.mediaId)
+                autoMixEngine?.onTrackChanged()
             }
         }
 
@@ -211,7 +228,22 @@ class AudioService : MediaSessionService() {
         positionJob = serviceScope.launch {
             while (true) {
                 if (player.isPlaying) {
-                    PlayerController.updatePosition(player.currentPosition)
+                    val position = player.currentPosition
+                    val duration = player.duration
+                    val currentIndex = player.currentMediaItemIndex
+                    val isPlaying = player.isPlaying
+                    val queueSize = player.mediaItemCount
+
+                    PlayerController.updatePosition(position)
+
+                    // AutoMix check
+                    autoMixEngine?.maybeStartAutoMix(
+                        currentPositionMs = position,
+                        durationMs = duration,
+                        currentIndex = currentIndex,
+                        isPlaying = isPlaying,
+                        queueSize = queueSize
+                    )
                 }
                 delay(200L)
             }
@@ -328,5 +360,14 @@ class AudioService : MediaSessionService() {
 
     companion object {
         private const val COMMAND_TOGGLE_FAVORITE = "com.liquidmusicglass.TOGGLE_FAVORITE"
+
+        /**
+         * Exposed for AutoMix crossfade volume control only.
+         * ServiceBackedAutoMixEngine needs temporary access to primary player
+         * during transitions to fade volume. Never used for playback control.
+         */
+        @Volatile
+        var currentPlayer: ExoPlayer? = null
+            private set
     }
 }
