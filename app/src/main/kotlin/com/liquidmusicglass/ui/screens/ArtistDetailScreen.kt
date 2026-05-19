@@ -98,7 +98,20 @@ fun ArtistDetailScreen(
     // Fetch batch track meta for durations
     LaunchedEffect(artist) {
         val songs = artist?.topSongs ?: emptyList()
-        val tracks = songs.map { it.toTrack() }
+        val topTracks = songs.map { it.toTrack() }
+        val singleTracks = artist?.singles?.map { single ->
+            com.liquidmusicglass.engine.Track(
+                id = single.id,
+                title = single.title,
+                artist = single.artist,
+                albumName = single.title,
+                uri = android.net.Uri.parse("https://byicloud.online/track/${single.id}"),
+                durationMs = 0L,
+                albumId = single.id.hashCode().toLong(),
+                coverUrl = single.cover.replace("1000x1000", "600x600")
+            )
+        } ?: emptyList()
+        val tracks = topTracks + singleTracks
         artistTracks = tracks
         if (tracks.isNotEmpty() && IcmRepository.isInitialized.value) {
             try {
@@ -106,7 +119,8 @@ fun ArtistDetailScreen(
                 val durMap = mutableMapOf<String, Long>()
                 batch?.items?.forEach { item ->
                     if (item.duration != null && item.duration > 0) {
-                        durMap[item.id] = item.duration
+                        // Use normalized durationMs (handles secondary_/vk_ seconds -> ms)
+                        durMap[item.id] = item.durationMs
                     }
                 }
                 trackDurations = durMap

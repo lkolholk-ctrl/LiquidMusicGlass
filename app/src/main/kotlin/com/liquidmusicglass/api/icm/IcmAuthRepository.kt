@@ -61,6 +61,14 @@ object IcmAuthRepository {
         .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
         .build()
 
+    /**
+     * Data class for token + expiry. Declared early for use in method signatures.
+     */
+    data class TokenData(
+        val token: String,
+        val expiresAt: Long
+    )
+
     fun init(context: Context) {
         prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         loadState()
@@ -283,7 +291,7 @@ object IcmAuthRepository {
      * IMPORTANT: this must NOT overwrite `partner_user_id` — the value that was
      * sent to ICM during the /partner/<id>/link request is the one ICM associates
      * with the linked account, and changing it here would break every subsequent
-     * call (wave, library, /me/*) because backend would return user_not_linked.
+     * call (wave, library, /me/ *) because backend would return user_not_linked.
      */
     fun setTelegramAuth(
         icmUserId: String,
@@ -387,8 +395,9 @@ object IcmAuthRepository {
         return generated
     }
 
-    data class TokenData(
-        val token: String,
-        val expiresAt: Long
-    )
+    /**
+     * Temporary stub for partner key retrieval.
+     * In production this is fetched dynamically from a native .so module.
+     */
+    fun getPartnerKey(): String = "YOUR_TEMPORARY_KEY_HERE"
 }

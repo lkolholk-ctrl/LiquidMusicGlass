@@ -362,6 +362,13 @@ data class IcmBatchTrackMetaItem(
 
     val isError: Boolean
         get() = error != null
+
+    /** VK/secondary tracks return duration in seconds, Apple in ms. Normalized to ms. */
+    val durationMs: Long
+        get() {
+            val d = duration ?: return 0L
+            return if (d < 1000) d * 1000L else d
+        }
 }
 
 // ─── Async Track ───

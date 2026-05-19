@@ -252,12 +252,11 @@ object PlayerController {
                 _durationMs.value = current.duration.coerceAtLeast(0L)
             }
             if (playbackState == Player.STATE_ENDED) {
+                // ExoPlayer auto-advances to the next MediaItem automatically.
+                // We only handle the case where the queue ran out and we need
+                // to auto-refill (e.g. wave radio mode).
                 val remainingTracks = queue.size - currentIndex - 1
-                if (remainingTracks >= 1 && controller?.hasNextMediaItem() == true) {
-                    // Next track already in ExoPlayer — seamless transition
-                    controller?.seekToNextMediaItem()
-                    controller?.play()
-                } else if (autoRefillContext != null) {
+                if (remainingTracks < 1 && autoRefillContext != null) {
                     scope.launch {
                         autoRefillQueue()
                         if (currentIndex + 1 < queue.size) {
@@ -296,17 +295,24 @@ object PlayerController {
                 waveTrackStartTimeMs = System.currentTimeMillis()
                 waveTrackPlayedMs = 0L
 
-                // Lazy resolve stream URL for this track if online
-                // Docs: "Когда URL истёк — позови /track заново. У нас сработает свой кеш, ответ придёт за миллисекунды."
+                // For online tracks: ensure the stream URL is resolved.
+                // If this is an auto-transition, the URL MUST be ready already
+                // (pre-fetched via preloadUpcoming). If not, resolve immediately
+                // and replace the MediaItem so ExoPlayer can buffer the real stream.
                 if (track.isOnlineTrack) {
                     scope.launch {
                         val resolvedUri = getCachedOrResolveStreamUrl(track.id)
-                        if (resolvedUri != null && resolvedUri != track.uri) {
-                            updateQueueTrackUri(track.id, resolvedUri)
-                            replaceMediaItemUri(index, resolvedUri, track)
+                        if (resolvedUri != null) {
+                            if (resolvedUri != track.uri) {
+                                updateQueueTrackUri(track.id, resolvedUri)
+                                replaceMediaItemUri(index, resolvedUri, track)
+                            }
+                            // Preload upcoming tracks after transition
+                            preloadUpcoming()
+                        } else {
+                            // Failed to resolve — skip to next if possible
+                            android.util.Log.e("PlayerController", "Failed to resolve URL on transition for ${track.id}")
                         }
-                        // Preload upcoming tracks after transition
-                        preloadUpcoming()
                     }
                 }
 
@@ -893,7 +899,7 @@ object PlayerController {
     /**
      * Get cached stream URL or resolve from API.
      * Docs: "file_id — cache for a day+ by (trackId + region + quality)"
-     * We cache resolved URLs for ~8 minutes (they expire at ~10 min).
+     * Uses the API's expires_at when available, otherwise falls back to ~8 min.
      */
     private suspend fun getCachedOrResolveStreamUrl(trackId: String): android.net.Uri? {
         val now = System.currentTimeMillis()
@@ -907,12 +913,20 @@ object PlayerController {
         return try {
             kotlinx.coroutines.withTimeout(15_000) {
                 android.util.Log.d("PlayerController", "Resolving stream URL for $trackId...")
-                val url = com.liquidmusicglass.api.icm.IcmRepository.getStreamUrl(trackId)
-                if (url != null) {
-                    val uri = android.net.Uri.parse(url)
+                // Use getTrackInfo to get both URL and expires_at
+                val trackInfo = com.liquidmusicglass.api.icm.IcmRepository.getTrackInfo(trackId)
+                if (trackInfo != null) {
+                    val uri = android.net.Uri.parse(trackInfo.url)
                     streamUrlCache[trackId] = uri
-                    streamUrlCacheExpiry[trackId] = now + STREAM_CACHE_TTL_MS
-                    android.util.Log.d("PlayerController", "Stream URL resolved for $trackId: ${url.take(60)}...")
+                    // Use API's expires_at minus 60s buffer, or fallback to 8 min
+                    val apiExpiry = trackInfo.expiresAt * 1000L // expires_at is in seconds
+                    val ttl = if (apiExpiry > now) {
+                        (apiExpiry - now - 60_000L).coerceAtLeast(60_000L)
+                    } else {
+                        STREAM_CACHE_TTL_MS
+                    }
+                    streamUrlCacheExpiry[trackId] = now + ttl
+                    android.util.Log.d("PlayerController", "Stream URL resolved for $trackId: ${trackInfo.url.take(60)}... (expires in ${ttl/1000}s)")
                     uri
                 } else {
                     android.util.Log.e("PlayerController", "Stream URL resolve returned null for $trackId")
@@ -1134,18 +1148,19 @@ object PlayerController {
      * Resolve `POST /track` URLs for the next [PREFETCH_AHEAD] queue items and
      * push them into ExoPlayer's MediaItems so the engine starts buffering
      * the streams in the background.
+     *
+     * Also adds missing MediaItems to ExoPlayer so seamless auto-advance works.
      */
     fun preloadUpcoming() {
         preloadJob?.cancel()
         if (queue.isEmpty() || currentIndex < 0) return
 
-        // Collect up to PREFETCH_AHEAD upcoming online tracks that still need
-        // a resolved URL.
+        // Collect up to PREFETCH_AHEAD upcoming online tracks.
         val upcoming = mutableListOf<Pair<Int, Track>>()
         var idx = currentIndex + 1
         while (idx < queue.size && upcoming.size < PREFETCH_AHEAD) {
             val t = queue[idx]
-            if (t.isOnlineTrack && getCachedStreamUrl(t.id) == null) {
+            if (t.isOnlineTrack) {
                 upcoming.add(idx to t)
             }
             idx++
@@ -1153,17 +1168,29 @@ object PlayerController {
         if (upcoming.isEmpty()) return
 
         preloadJob = scope.launch {
+            val pc = controller
+            val exo = AudioService.companionPlayer
+            val player = pc ?: exo
+
             for ((queueIndex, track) in upcoming) {
                 try {
+                    // Resolve stream URL (uses cache if available)
                     val uri = getCachedOrResolveStreamUrl(track.id) ?: continue
-                    // Persist the resolved URI in the kotlin queue and patch the
-                    // ExoPlayer MediaItem so it can buffer ahead.
                     updateQueueTrackUri(track.id, uri)
-                    // Re-find the index in case the queue shifted while we were
-                    // awaiting the network call.
+
                     val freshIndex = queue.indexOfFirst { it.id == track.id }
-                    if (freshIndex >= 0) {
-                        replaceMediaItemUri(freshIndex, uri, queue[freshIndex])
+                    if (freshIndex < 0) continue
+                    val updatedTrack = queue[freshIndex]
+
+                    if (player != null) {
+                        if (freshIndex < player.mediaItemCount) {
+                            // MediaItem exists — update its URI so ExoPlayer can buffer
+                            replaceMediaItemUri(freshIndex, uri, updatedTrack)
+                        } else {
+                            // MediaItem missing — add it to ExoPlayer's timeline
+                            val mediaItem = buildMediaItem(updatedTrack)
+                            player.addMediaItem(mediaItem)
+                        }
                     }
                 } catch (_: Exception) { /* best effort */ }
             }

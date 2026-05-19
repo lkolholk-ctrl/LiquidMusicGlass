@@ -90,8 +90,13 @@ class IcmApi private constructor() {
         // Auth: session token takes priority
         sessionToken?.let {
             builder.header("Authorization", "Bearer $it")
-        } ?: apiKey?.let {
-            builder.header("X-Partner-Key", it)
+        } ?: run {
+            val partnerKey = com.liquidmusicglass.api.icm.IcmAuthRepository.getPartnerKey()
+            if (partnerKey.isNotBlank() && partnerKey != "YOUR_TEMPORARY_KEY_HERE") {
+                builder.header("X-Partner-Key", partnerKey)
+            } else {
+                apiKey?.let { key -> builder.header("X-Partner-Key", key) }
+            }
         }
 
         partnerUserId?.let {
