@@ -70,6 +70,9 @@ internal class EndlessPlaybackEngine(
     /** Флаг: идёт ли сейчас refill-запрос. */
     private val isRefilling = AtomicBoolean(false)
 
+    /** Флаг: идёт ли сейчас добавление треков в очередь (блокирует рекурсию). */
+    private val isAddingToQueue = AtomicBoolean(false)
+
     /** Timestamp последнего refill-запроса. */
     private val lastRefillTime = AtomicLong(0L)
 
@@ -192,12 +195,14 @@ internal class EndlessPlaybackEngine(
 
     /**
      * Проверить, нужен ли refill, и выполнить его.
-     * Вызывается строго из:
-     *   - onMediaItemTransition (PlayerController)
-     *   - playFromList (PlayerController)
-     *   - onPlaybackStateChanged(STATE_ENDED) как fallback
+     * Безопасная проверка: если идёт добавление в очередь — пропускаем.
      */
     suspend fun checkAndRefillIfNeeded(): Boolean {
+        // БЛОКИРОВКА РЕКУРСИИ: если сейчас добавляем треки — не проверяем
+        if (isAddingToQueue.get()) {
+            android.util.Log.d("EndlessEngine", "Skipping refill check: queue addition in progress")
+            return false
+        }
         val remaining = getRemainingTracks()
         if (remaining < REFILL_THRESHOLD) {
             return performRefill()
@@ -547,9 +552,16 @@ internal class EndlessPlaybackEngine(
     /**
      * Атомарно добавить треки в конец очереди ExoPlayer.
      * Вызывается из Dispatchers.IO — переключаемся на Main для addMediaItems.
+     * Устанавливает isAddingToQueue чтобы блокировать рекурсивные вызовы refill.
      */
     private suspend fun addTracksToQueue(tracks: List<Track>) {
         if (tracks.isEmpty()) return
+
+        // БЛОКИРУЕМ рекурсию: пока добавляем — refill не проверяется
+        if (!isAddingToQueue.compareAndSet(false, true)) {
+            android.util.Log.w("EndlessEngine", "Queue addition already in progress, skipping")
+            return
+        }
 
         val mediaItems = tracks.map { track ->
             MediaItem.Builder()
@@ -566,16 +578,19 @@ internal class EndlessPlaybackEngine(
                 .build()
         }
 
-        // ExoPlayer API — переключаемся на Main
-        withContext(Dispatchers.Main) {
-            val player = getController() ?: getCompanionPlayer() ?: return@withContext
-            player.addMediaItems(mediaItems)
+        try {
+            // ExoPlayer API — переключаемся на Main
+            withContext(Dispatchers.Main) {
+                val player = getController() ?: getCompanionPlayer() ?: return@withContext
+                player.addMediaItems(mediaItems)
+                android.util.Log.d("EndlessEngine", "Added ${tracks.size} tracks to queue end")
+            }
+
+            // Регистрируем треки
+            tracks.forEach { registerTrack(it.id) }
+        } finally {
+            isAddingToQueue.set(false)
         }
-
-        // Регистрируем треки
-        tracks.forEach { registerTrack(it.id) }
-
-        android.util.Log.d("EndlessEngine", "Added ${tracks.size} tracks to queue end")
     }
 
     // ── Utility ──

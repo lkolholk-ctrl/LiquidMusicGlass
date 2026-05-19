@@ -323,7 +323,21 @@ object PlayerController {
                 )
 
                 // ── Event-driven refill: check queue on every track transition ──
+                // БЕЗОПАСНОСТЬ: задержка 1с + проверка STATE_READY чтобы не блокировать старт
                 scope.launch {
+                    delay(1000L)
+                    val player = controller ?: AudioService.companionPlayer ?: return@launch
+                    // Не проверяем refill если плеер ещё не готов или позиция = 0 (только стартовал)
+                    if (player.playbackState != Player.STATE_READY && 
+                        player.playbackState != Player.STATE_BUFFERING) {
+                        android.util.Log.d("PlayerDebug", "Skipping refill: playbackState=${player.playbackState}")
+                        return@launch
+                    }
+                    if (player.currentPosition <= 0) {
+                        android.util.Log.d("PlayerDebug", "Skipping refill: position=0, track just started")
+                        return@launch
+                    }
+                    android.util.Log.d("PlayerDebug", "Triggering refill check after 1s delay")
                     endlessEngine.checkAndRefillIfNeeded()
                 }
 
