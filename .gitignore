@@ -9,3 +9,4 @@
 .cxx
 app/build
 release-key.jks
+.github/workflows/smoke-test.yml
