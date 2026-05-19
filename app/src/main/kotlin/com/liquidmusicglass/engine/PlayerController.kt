@@ -42,6 +42,15 @@ object PlayerController {
 
     private const val POSITION_UPDATE_MS = 200L
 
+    // ── Endless Playback Engine ──
+    private val endlessEngine by lazy {
+        EndlessPlaybackEngine(
+            scope = scope,
+            getController = { controller },
+            getCompanionPlayer = { AudioService.companionPlayer }
+        )
+    }
+
     // ── Wave playback tracking ──
     private var waveTrackStartTimeMs: Long = 0L
     private var waveTrackPlayedMs: Long = 0L
@@ -212,51 +221,8 @@ object PlayerController {
         }
     }
 
-    // Auto-refill context
-    private var autoRefillContext: AutoRefillContext? = null
-
-    data class AutoRefillContext(
-        val type: String, // "wave", "artist", "album", "search", "genre"
-        val id: String?, // artistId, albumId, moodId, query
-        val name: String? = null,
-        /** For wave: an ICM trackId used as `seed_track_id` so the radio stays on-genre. */
-        val seedTrackId: String? = null
-    )
-
-    fun setAutoRefillContext(
-        type: String,
-        id: String? = null,
-        name: String? = null,
-        seedTrackId: String? = null
-    ) {
-        autoRefillContext = AutoRefillContext(type, id, name, seedTrackId)
-    }
-
-    fun clearAutoRefillContext() {
-        autoRefillContext = null
-    }
-
-    /**
-     * Automatically set auto-refill context based on track metadata.
-     * Used when playing a single track (no explicit playlist context).
-     */
-    private fun setAutoRefillContextForTrack(track: Track) {
-        val genre = detectGenre(track)
-        when {
-            genre != null -> {
-                // Genre-based refill
-                setAutoRefillContext("genre", genre, genre)
-            }
-            track.artist.isNotBlank() -> {
-                // Artist-based refill as fallback
-                setAutoRefillContext("artist", track.artist, track.artist)
-            }
-            else -> {
-                // Wave as ultimate fallback
-                setAutoRefillContext("wave", track.id, track.title, track.id)
-            }
-        }
-    }
+    // ── App Context accessor for EndlessPlaybackEngine ──
+    fun getAppContext(): Context? = appContext
 
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -306,21 +272,12 @@ object PlayerController {
             }
             if (playbackState == Player.STATE_ENDED) {
                 // ExoPlayer auto-advances to the next MediaItem automatically.
-                // We only handle the case where the queue ran out and we need
-                // to auto-refill (e.g. wave radio mode).
-                val remainingTracks = queue.size - currentIndex - 1
-                if (remainingTracks < 1 && autoRefillContext != null) {
+                // EndlessPlaybackEngine handles auto-refill via global queue monitor.
+                // Only handle edge case where queue truly ran out.
+                val remaining = endlessEngine.getRemainingTracks()
+                if (remaining < 1) {
                     scope.launch {
-                        autoRefillQueue()
-                        if (currentIndex + 1 < queue.size) {
-                            val pc = obtainController(appContext ?: return@launch)
-                            if (pc != null && pc.mediaItemCount > currentIndex + 1) {
-                                pc.seekTo(currentIndex + 1, 0L)
-                                pc.play()
-                            } else {
-                                playTrack(appContext ?: return@launch, currentIndex + 1)
-                            }
-                        }
+                        endlessEngine.checkAndRefillIfNeeded()
                     }
                 }
             }
@@ -349,9 +306,6 @@ object PlayerController {
                 waveTrackPlayedMs = 0L
 
                 // For online tracks: ensure the stream URL is resolved.
-                // If this is an auto-transition, the URL MUST be ready already
-                // (pre-fetched via preloadUpcoming). If not, resolve immediately
-                // and replace the MediaItem so ExoPlayer can buffer the real stream.
                 if (track.isOnlineTrack) {
                     scope.launch {
                         val resolvedUri = getCachedOrResolveStreamUrl(track.id)
@@ -363,19 +317,25 @@ object PlayerController {
                             // Preload upcoming tracks after transition
                             preloadUpcoming()
                         } else {
-                            // Failed to resolve — skip to next if possible
                             android.util.Log.e("PlayerController", "Failed to resolve URL on transition for ${track.id}")
                         }
                     }
                 }
 
-                // Auto-refill queue when running low
-                val remainingTracks = queue.size - index - 1
-                if (remainingTracks < 3 && autoRefillContext != null) {
-                    scope.launch {
-                        autoRefillQueue()
+                // ── GLOBAL: Start equator prefetch for ML AutoMix ──
+                endlessEngine.startEquatorPrefetch(
+                    track = track,
+                    onPrefetch = {
+                        // Aggressive prefetch at 50% — resolve URLs for upcoming tracks
+                        preloadUpcoming()
+                    },
+                    onRefillNeeded = {
+                        // If queue running low at equator, trigger refill
+                        scope.launch {
+                            endlessEngine.checkAndRefillIfNeeded()
+                        }
                     }
-                }
+                )
 
                 // Pre-fetch lyrics for current track in background
                 scope.launch(Dispatchers.IO) {
@@ -434,150 +394,42 @@ object PlayerController {
         } catch (_: Throwable) { /* best effort */ }
     }
 
+    // ── Backwards-compatible aliases (deprecated, use EndlessPlaybackEngine directly) ──
+
     /**
-     * Auto-refill queue based on current context when running low.
-     * Called from player listener when remaining tracks < 3.
-     * Falls back to wave recommendations if primary refill yields no results.
+     * Legacy alias for setting auto-refill context.
+     * Maps to EndlessPlaybackEngine.RefillContext internally.
      */
-    private suspend fun autoRefillQueue() {
-        val ctx = autoRefillContext ?: return
-        val exclude = queue.map { it.id }
-        val newTracks = mutableListOf<Track>()
-
-        when (ctx.type) {
-            "wave" -> {
-                // Personal wave — keep mood-specific seed if one was set.
-                val seed = ctx.seedTrackId
-                repeat(5) {
-                    val response = com.liquidmusicglass.api.icm.IcmRepository.getWaveNext(
-                        seedTrackId = seed,
-                        exclude = (exclude + newTracks.map { it.id }).takeIf { it.isNotEmpty() },
-                        recentSkips = 0
-                    )
-                    if (response == null || response.status != "ok") return@repeat
-                    val wt = response.track ?: return@repeat
-                    newTracks.add(Track(
-                        id = wt.id, title = wt.title, artist = wt.artist ?: "Unknown Artist",
-                        albumName = "", durationMs = wt.durationMs,
-                        uri = Uri.parse("https://byicloud.online/track/${wt.id}"),
-                        coverUrl = wt.cover, albumId = wt.collectionId?.hashCode()?.toLong() ?: -1L
-                    ))
-                }
-            }
-            "artist" -> {
-                // More tracks from same artist
-                val artistId = ctx.id ?: return
-                val response = com.liquidmusicglass.api.icm.IcmRepository.getArtist(artistId)
-                response?.topSongs?.shuffled()?.take(5)?.forEach { song ->
-                    if (song.id !in exclude && song.id !in newTracks.map { it.id }) {
-                        newTracks.add(Track(
-                            id = song.id, title = song.title, artist = song.artist ?: "Unknown Artist",
-                            albumName = "", durationMs = song.durationMs,
-                            uri = Uri.parse("https://byicloud.online/track/${song.id}"),
-                            coverUrl = song.cover, albumId = song.id.hashCode().toLong()
-                        ))
-                    }
-                }
-                // Fallback to wave if artist has no more tracks
-                if (newTracks.isEmpty()) {
-                    repeat(3) {
-                        val response = com.liquidmusicglass.api.icm.IcmRepository.getWaveNext(
-                            exclude = (exclude + newTracks.map { it.id }).takeIf { it.isNotEmpty() },
-                            recentSkips = 0
-                        )
-                        if (response == null || response.status != "ok") return@repeat
-                        val wt = response.track ?: return@repeat
-                        newTracks.add(Track(
-                            id = wt.id, title = wt.title, artist = wt.artist ?: "Unknown Artist",
-                            albumName = "", durationMs = wt.durationMs,
-                            uri = Uri.parse("https://byicloud.online/track/${wt.id}"),
-                            coverUrl = wt.cover, albumId = wt.collectionId?.hashCode()?.toLong() ?: -1L
-                        ))
-                    }
-                }
-            }
-            "album" -> {
-                // More tracks from same album (shouldn't happen often, but handle)
-                val albumId = ctx.id ?: return
-                val response = com.liquidmusicglass.api.icm.IcmRepository.getAlbum(albumId)
-                response?.tracks?.shuffled()?.take(5)?.forEach { track ->
-                    if (track.id !in exclude && track.id !in newTracks.map { it.id }) {
-                        newTracks.add(Track(
-                            id = track.id, title = track.title, artist = track.artist ?: "Unknown Artist",
-                            albumName = "", durationMs = track.durationMs,
-                            uri = Uri.parse("https://byicloud.online/track/${track.id}"),
-                            coverUrl = track.cover, albumId = track.collectionId?.hashCode()?.toLong() ?: -1L
-                        ))
-                    }
-                }
-                // Fallback to wave
-                if (newTracks.isEmpty()) {
-                    repeat(3) {
-                        val response = com.liquidmusicglass.api.icm.IcmRepository.getWaveNext(
-                            exclude = (exclude + newTracks.map { it.id }).takeIf { it.isNotEmpty() },
-                            recentSkips = 0
-                        )
-                        if (response == null || response.status != "ok") return@repeat
-                        val wt = response.track ?: return@repeat
-                        newTracks.add(Track(
-                            id = wt.id, title = wt.title, artist = wt.artist ?: "Unknown Artist",
-                            albumName = "", durationMs = wt.durationMs,
-                            uri = Uri.parse("https://byicloud.online/track/${wt.id}"),
-                            coverUrl = wt.cover, albumId = wt.collectionId?.hashCode()?.toLong() ?: -1L
-                        ))
-                    }
-                }
-            }
-            "search", "genre" -> {
-                // Similar tracks by search query
-                val query = ctx.name ?: ctx.id ?: return
-                val result = com.liquidmusicglass.api.icm.IcmRepository.searchAll(query)
-                result?.items?.filter { it.isTrack && it.id !in exclude }?.shuffled()?.take(5)?.forEach { item ->
-                    newTracks.add(Track(
-                        id = item.id, title = item.title, artist = item.displayArtist,
-                        albumName = item.album ?: "", durationMs = item.durationMs,
-                        uri = Uri.parse("https://byicloud.online/track/${item.id}"),
-                        coverUrl = item.cover, albumId = item.collectionId?.toLongOrNull() ?: 0L
-                    ))
-                }
-                // Fallback to wave if search yields no results
-                if (newTracks.isEmpty()) {
-                    repeat(3) {
-                        val response = com.liquidmusicglass.api.icm.IcmRepository.getWaveNext(
-                            exclude = (exclude + newTracks.map { it.id }).takeIf { it.isNotEmpty() },
-                            recentSkips = 0
-                        )
-                        if (response == null || response.status != "ok") return@repeat
-                        val wt = response.track ?: return@repeat
-                        newTracks.add(Track(
-                            id = wt.id, title = wt.title, artist = wt.artist ?: "Unknown Artist",
-                            albumName = "", durationMs = wt.durationMs,
-                            uri = Uri.parse("https://byicloud.online/track/${wt.id}"),
-                            coverUrl = wt.cover, albumId = wt.collectionId?.hashCode()?.toLong() ?: -1L
-                        ))
-                    }
-                }
-            }
-            "playlist" -> {
-                // For playlists — refill with wave tracks (personalized)
-                repeat(5) {
-                    val response = com.liquidmusicglass.api.icm.IcmRepository.getWaveNext(
-                        exclude = (exclude + newTracks.map { it.id }).takeIf { it.isNotEmpty() },
-                        recentSkips = 0
-                    )
-                    if (response == null || response.status != "ok") return@repeat
-                    val wt = response.track ?: return@repeat
-                    newTracks.add(Track(
-                        id = wt.id, title = wt.title, artist = wt.artist ?: "Unknown Artist",
-                        albumName = "", durationMs = wt.durationMs,
-                        uri = Uri.parse("https://byicloud.online/track/${wt.id}"),
-                        coverUrl = wt.cover, albumId = wt.collectionId?.hashCode()?.toLong() ?: -1L
-                    ))
-                }
-            }
+    @Deprecated("Use EndlessPlaybackEngine.RefillContext via playFromList parameters")
+    fun setAutoRefillContext(
+        type: String,
+        id: String? = null,
+        name: String? = null,
+        seedTrackId: String? = null
+    ) {
+        val ctxType = when (type) {
+            "wave" -> EndlessPlaybackEngine.RefillContext.Type.WAVE
+            "artist" -> EndlessPlaybackEngine.RefillContext.Type.ARTIST
+            "album" -> EndlessPlaybackEngine.RefillContext.Type.ALBUM
+            "search" -> EndlessPlaybackEngine.RefillContext.Type.SEARCH
+            "genre" -> EndlessPlaybackEngine.RefillContext.Type.GENRE
+            "playlist" -> EndlessPlaybackEngine.RefillContext.Type.PLAYLIST
+            "library" -> EndlessPlaybackEngine.RefillContext.Type.LIBRARY
+            else -> EndlessPlaybackEngine.RefillContext.Type.WAVE
         }
+        endlessEngine.setRefillContext(
+            EndlessPlaybackEngine.RefillContext(
+                type = ctxType,
+                id = id,
+                name = name,
+                seedTrackId = seedTrackId
+            )
+        )
+    }
 
-        newTracks.forEach { addToQueue(it) }
+    @Deprecated("Use EndlessPlaybackEngine.reset()")
+    fun clearAutoRefillContext() {
+        endlessEngine.reset()
     }
 
     fun init(context: Context) {
@@ -645,6 +497,9 @@ object PlayerController {
 
         // Load persisted AutoMix state
         loadAutoMixState(context)
+
+        // ── Start global endless playback engine ──
+        endlessEngine.startGlobalQueueMonitor()
 
         scope.launch {
             obtainController(context)
@@ -771,6 +626,9 @@ object PlayerController {
      * Используется на Поиске/Альбоме/Артисте — клик по треку из списка
      * формирует всю последующую очередь.
      *
+     * ── АТОМАРНАЯ ОЧИСТКА: при ручном переключении на другой контент ──
+     * старый бесконечный хвост очищается, мониторинг запускается заново.
+     *
      * Resolves the signed URL for [startIndex] up-front so ExoPlayer's first
      * MediaItem contains a real CDN url (avoids the placeholder bug). The
      * remaining items get their URLs pre-fetched via [preloadUpcoming].
@@ -787,18 +645,87 @@ object PlayerController {
         if (tracks.isEmpty()) return
         val idx = startIndex.coerceIn(0, tracks.lastIndex)
 
-        // Set auto-refill context BEFORE launching coroutine
-        if (autoRefillType != null) {
-            setAutoRefillContext(autoRefillType, autoRefillId, autoRefillName, autoRefillSeedTrackId)
-        } else if (tracks.size == 1) {
-            setAutoRefillContextForTrack(tracks[idx])
+        // ── ATOMIC RESET: clear old endless tail and restart monitoring ──
+        endlessEngine.reset()
+        endlessEngine.registerTracks(tracks.map { it.id })
+
+        // Set new refill context based on playback source
+        val refillContext = when (autoRefillType) {
+            "album" -> EndlessPlaybackEngine.RefillContext(
+                type = EndlessPlaybackEngine.RefillContext.Type.ALBUM,
+                id = autoRefillId,
+                name = autoRefillName,
+                seedTrackId = autoRefillSeedTrackId ?: tracks.getOrNull(idx)?.id
+            )
+            "artist" -> EndlessPlaybackEngine.RefillContext(
+                type = EndlessPlaybackEngine.RefillContext.Type.ARTIST,
+                id = autoRefillId,
+                name = autoRefillName,
+                seedTrackId = autoRefillSeedTrackId ?: tracks.getOrNull(idx)?.id
+            )
+            "search" -> EndlessPlaybackEngine.RefillContext(
+                type = EndlessPlaybackEngine.RefillContext.Type.SEARCH,
+                id = autoRefillId,
+                name = autoRefillName,
+                seedTrackId = autoRefillSeedTrackId ?: tracks.getOrNull(idx)?.id
+            )
+            "genre" -> EndlessPlaybackEngine.RefillContext(
+                type = EndlessPlaybackEngine.RefillContext.Type.GENRE,
+                id = autoRefillId,
+                name = autoRefillName,
+                genre = autoRefillName,
+                seedTrackId = autoRefillSeedTrackId ?: tracks.getOrNull(idx)?.id
+            )
+            "playlist" -> EndlessPlaybackEngine.RefillContext(
+                type = EndlessPlaybackEngine.RefillContext.Type.PLAYLIST,
+                id = autoRefillId,
+                name = autoRefillName,
+                seedTrackId = autoRefillSeedTrackId ?: tracks.getOrNull(idx)?.id
+            )
+            "library" -> EndlessPlaybackEngine.RefillContext(
+                type = EndlessPlaybackEngine.RefillContext.Type.LIBRARY,
+                id = autoRefillId,
+                name = autoRefillName,
+                seedTrackId = autoRefillSeedTrackId ?: tracks.getOrNull(idx)?.id
+            )
+            "wave" -> EndlessPlaybackEngine.RefillContext(
+                type = EndlessPlaybackEngine.RefillContext.Type.WAVE,
+                id = autoRefillId,
+                name = autoRefillName,
+                seedTrackId = autoRefillSeedTrackId ?: tracks.getOrNull(idx)?.id
+            )
+            else -> {
+                // Auto-detect context from track metadata
+                val track = tracks.getOrNull(idx)
+                if (track != null) {
+                    val genre = detectGenre(track)
+                    when {
+                        genre != null -> EndlessPlaybackEngine.RefillContext(
+                            type = EndlessPlaybackEngine.RefillContext.Type.GENRE,
+                            name = genre,
+                            genre = genre,
+                            seedTrackId = track.id
+                        )
+                        track.artist.isNotBlank() -> EndlessPlaybackEngine.RefillContext(
+                            type = EndlessPlaybackEngine.RefillContext.Type.ARTIST,
+                            id = track.artist,
+                            name = track.artist,
+                            seedTrackId = track.id
+                        )
+                        else -> EndlessPlaybackEngine.RefillContext(
+                            type = EndlessPlaybackEngine.RefillContext.Type.WAVE,
+                            seedTrackId = track.id
+                        )
+                    }
+                } else null
+            }
         }
+        refillContext?.let { endlessEngine.setRefillContext(it) }
 
         scope.launch {
-            android.util.Log.d("PlayerController", "playFromList: ${tracks.size} tracks, startIndex=$idx")
+            android.util.Log.d("PlayerController", "playFromList: ${tracks.size} tracks, startIndex=$idx, context=${refillContext?.type?.name}")
 
             // ── Step 1: Resolve stream URLs for ALL tracks upfront ──
-            // This is critical — ExoPlayer needs valid URLs, not placeholders
             val resolvedTracks = tracks.mapIndexed { i, track ->
                 if (track.isOnlineTrack) {
                     val resolvedUri = try {
@@ -822,7 +749,6 @@ object PlayerController {
             // Filter out tracks that failed to resolve (keep at least the start track)
             val playableTracks = if (resolvedTracks[idx].isOnlineTrack &&
                 !resolvedTracks[idx].uri.toString().startsWith("http")) {
-                // Start track failed to resolve — can't play
                 android.util.Log.e("PlayerController", "CRITICAL: Start track ${tracks[idx].id} failed to resolve!")
                 _isPlaying.value = false
                 return@launch
@@ -902,10 +828,11 @@ object PlayerController {
             // ── Step 8: Preload upcoming tracks (standard prefetch) ──
             preloadUpcoming()
 
-            // ── Step 9: For single tracks, populate similar tracks ──
+            // ── Step 9: For single tracks, trigger immediate refill ──
             if (tracks.size == 1) {
-                populateSimilarTracks(playableTracks[idx], context)
-                autoRefillQueue()
+                scope.launch {
+                    endlessEngine.checkAndRefillIfNeeded()
+                }
             }
 
             // ── Step 10: Pre-fetch lyrics ──
@@ -925,19 +852,36 @@ object PlayerController {
     /**
      * Добавить трек в очередь и сразу воспроизвести.
      * Сохраняет существующую очередь, вставляет трек после текущего.
-     * Автоматически подбирает похожие треки по жанру.
      */
     fun playNext(track: Track, context: Context) {
         if (queue.isEmpty()) {
-            // Single track — set up auto-refill based on artist/genre
-            setAutoRefillContextForTrack(track)
+            // Single track — set up wave context
+            endlessEngine.reset()
+            endlessEngine.registerTrack(track.id)
+            val genre = detectGenre(track)
+            val refillCtx = when {
+                genre != null -> EndlessPlaybackEngine.RefillContext(
+                    type = EndlessPlaybackEngine.RefillContext.Type.GENRE,
+                    name = genre,
+                    genre = genre,
+                    seedTrackId = track.id
+                )
+                track.artist.isNotBlank() -> EndlessPlaybackEngine.RefillContext(
+                    type = EndlessPlaybackEngine.RefillContext.Type.ARTIST,
+                    id = track.artist,
+                    name = track.artist,
+                    seedTrackId = track.id
+                )
+                else -> EndlessPlaybackEngine.RefillContext(
+                    type = EndlessPlaybackEngine.RefillContext.Type.WAVE,
+                    seedTrackId = track.id
+                )
+            }
+            endlessEngine.setRefillContext(refillCtx)
             setQueue(listOf(track), 0)
             playTrack(context, 0)
-            // Immediately populate with similar tracks
             scope.launch {
-                populateSimilarTracks(track, context)
-                // Also trigger auto-refill to ensure queue never runs dry
-                autoRefillQueue()
+                endlessEngine.checkAndRefillIfNeeded()
                 preloadUpcoming()
             }
             return
@@ -947,6 +891,7 @@ object PlayerController {
         newQueue.add(insertIndex, track)
         queue = newQueue
         _queue.value = queue
+        endlessEngine.registerTrack(track.id)
 
         // Sync insert with ExoPlayer for seamless transitions
         val mediaItem = buildMediaItem(track)
@@ -954,10 +899,6 @@ object PlayerController {
         AudioService.companionPlayer?.addMediaItem(insertIndex, mediaItem)
 
         playTrack(context, insertIndex)
-        // Auto-populate with similar genre tracks
-        scope.launch {
-            populateSimilarTracks(track, context)
-        }
     }
 
     private fun buildMediaItem(track: Track): MediaItem {
@@ -985,7 +926,6 @@ object PlayerController {
      * Воспроизвести трек из очереди по индексу.
      * Docs: "URL из поля url ответа /track подставляй прямо в плеер."
      * Если очередь уже загружена в ExoPlayer — просто seek, не перезагружаем.
-     * Текущий трек резолвим сразу, остальные — с placeholder URI (резолвим lazy).
      */
     fun playTrack(context: Context, index: Int) {
         if (index !in queue.indices) return
@@ -1032,7 +972,6 @@ object PlayerController {
             waveTrackPlayedMs = 0L
 
             // Resolve current track URL immediately (fast start)
-            // Docs: "URL из поля url ответа /track подставляй прямо в плеер."
             android.util.Log.d("PlayerController", "playTrack: ${track.id} | online=${track.isOnlineTrack} | uri=${track.uri}")
             val currentUri = if (track.isOnlineTrack) {
                 val resolved = getCachedOrResolveStreamUrl(track.id)
@@ -1049,12 +988,10 @@ object PlayerController {
             }
 
             // Build MediaItem list for the entire queue
-            // Current track gets resolved URL, others get placeholder (will be resolved on transition)
             val mediaItems = queue.mapIndexed { i, t ->
                 val uri = if (i == index) {
                     currentUri
                 } else {
-                    // For upcoming tracks: use cached URL if available, else placeholder
                     if (t.isOnlineTrack) {
                         val cached = getCachedStreamUrl(t.id)
                         cached ?: t.uri
@@ -1126,15 +1063,7 @@ object PlayerController {
     }
 
     /**
-     * Get cached stream URL or resolve from API.
-     * Docs: "file_id — cache for a day+ by (trackId + region + quality)"
-     * Uses the API's expires_at when available, otherwise falls back to ~8 min.
-     */
-    /**
      * Determine the effective stream quality based on user subscription status.
-     * - If user has premium (ALAC or 320K in allowedQualities), use configured quality.
-     * - Otherwise, cap at maxQuality from /me/preferences (e.g., 128K or 256K).
-     * - For secondary_ tracks, ALAC and MP3 320K are only allowed with premium.
      */
     private fun getEffectiveQuality(requestedQuality: String? = null, trackId: String): String? {
         val isSecondary = trackId.startsWith("secondary_")
@@ -1146,9 +1075,7 @@ object PlayerController {
             ?: com.liquidmusicglass.api.icm.IcmApi.getInstance().streamQuality
             ?: com.liquidmusicglass.api.icm.IcmStreamQuality.K256
 
-        // If no premium, cap at maxQuality from preferences
         if (!hasPremium && maxQuality != null) {
-            // Quality hierarchy: 128K < 256K < 320K < ALAC
             val qualityRank = mapOf(
                 "128K" to 1, "256K" to 2, "320K" to 3, "ALAC" to 4,
                 "MP3 128K" to 1, "MP3 256K" to 2, "MP3 320K" to 3
@@ -1160,9 +1087,7 @@ object PlayerController {
             }
         }
 
-        // For secondary tracks, premium-only qualities
         if (isSecondary && !hasPremium) {
-            // ALAC and MP3 320K require premium for secondary
             if (desired == "ALAC" || desired == "MP3 320K" || desired == "320K") {
                 return "MP3 256K"
             }
@@ -1184,13 +1109,11 @@ object PlayerController {
             kotlinx.coroutines.withTimeout(15_000) {
                 android.util.Log.d("PlayerController", "Resolving stream URL for $trackId...")
                 val effectiveQuality = getEffectiveQuality(requestedQuality, trackId)
-                // Use getTrackInfo to get both URL and expires_at with quality restriction
                 val trackInfo = com.liquidmusicglass.api.icm.IcmRepository.getTrackInfo(trackId, quality = effectiveQuality)
                 if (trackInfo != null) {
                     val uri = android.net.Uri.parse(trackInfo.url)
                     streamUrlCache[trackId] = uri
-                    // Use API's expires_at minus 60s buffer, or fallback to 8 min
-                    val apiExpiry = trackInfo.expiresAt * 1000L // expires_at is in seconds
+                    val apiExpiry = trackInfo.expiresAt * 1000L
                     val ttl = if (apiExpiry > now) {
                         (apiExpiry - now - 60_000L).coerceAtLeast(60_000L)
                     } else {
@@ -1211,13 +1134,6 @@ object PlayerController {
             android.util.Log.e("PlayerController", "Stream URL resolve error for $trackId: ${e.message}")
             null
         }
-    }
-
-    /**
-     * Resolve stream URL for upcoming track (preload).
-     */
-    private suspend fun preloadStreamUrl(trackId: String, requestedQuality: String? = null): android.net.Uri? {
-        return getCachedOrResolveStreamUrl(trackId, requestedQuality)
     }
 
     fun togglePlayPause(context: Context) {
@@ -1488,7 +1404,6 @@ object PlayerController {
      */
     private fun getPremiumQualityForPreload(): String? {
         return if (com.liquidmusicglass.api.icm.IcmAuthRepository.isPremium.value) {
-            // Use highest available quality for premium users
             val allowed = com.liquidmusicglass.api.icm.IcmAuthRepository.allowedQualities.value
             when {
                 "ALAC" in allowed -> "ALAC"
@@ -1500,32 +1415,11 @@ object PlayerController {
 
     /**
      * Start aggressive prefetch when track passes 50% (equator).
-     * This ensures the next track is fully buffered well before transition.
+     * DEPRECATED: Use EndlessPlaybackEngine.startEquatorPrefetch() instead.
+     * Kept for backwards compatibility.
      */
     fun startAggressivePrefetch() {
-        aggressivePrefetchJob?.cancel()
-        aggressivePrefetchJob = scope.launch {
-            val track = _currentTrack.value ?: return@launch
-            val duration = track.durationMs
-            if (duration <= 0) return@launch
-
-            val equatorMs = duration / 2
-            // Wait until we reach equator
-            while (_currentPositionMs.value < equatorMs && _currentTrack.value?.id == track.id) {
-                delay(1000) // Check every second
-            }
-
-            // Only prefetch if we're still on the same track
-            if (_currentTrack.value?.id == track.id) {
-                android.util.Log.d("PlayerController", "Aggressive prefetch triggered at equator for ${track.id}")
-                preloadUpcoming()
-                // Also trigger auto-refill if running low
-                val remaining = queue.size - currentIndex - 1
-                if (remaining < 3 && autoRefillContext != null) {
-                    autoRefillQueue()
-                }
-            }
-        }
+        // Now handled by EndlessPlaybackEngine in onMediaItemTransition
     }
 
     // ── Current queue access ──
@@ -1561,40 +1455,12 @@ object PlayerController {
     /**
      * Detect genre from track title and artist name.
      */
-    private fun detectGenre(track: Track): String? {
+    fun detectGenre(track: Track): String? {
         val text = "${track.title} ${track.artist}".lowercase()
         for ((keyword, genre) in genreKeywords) {
             if (keyword in text) return genre
         }
         return null
-    }
-
-    /**
-     * Auto-populate queue with similar genre tracks.
-     * Runs aggressively for single-track playback to ensure queue never runs dry.
-     */
-    private suspend fun populateSimilarTracks(track: Track, context: Context) {
-        val genre = detectGenre(track) ?: track.artist.takeIf { it.isNotBlank() } ?: return
-        try {
-            val result = com.liquidmusicglass.api.icm.IcmRepository.searchAll(genre)
-            result?.items
-                ?.filter { it.id != track.id && it.isTrack }
-                ?.shuffled()
-                ?.take(10)
-                ?.forEach { item ->
-                    val similarTrack = Track(
-                        id = item.id,
-                        title = item.title,
-                        artist = item.displayArtist,
-                        albumName = item.album ?: "",
-                        uri = android.net.Uri.parse("https://byicloud.online/track/${item.id}"),
-                        durationMs = item.durationMs,
-                        albumId = item.collectionId?.toLongOrNull() ?: 0L,
-                        coverUrl = item.cover
-                    )
-                    addToQueue(similarTrack)
-                }
-        } catch (_: Exception) {}
     }
 
     private fun startPositionUpdates() {
@@ -1610,16 +1476,8 @@ object PlayerController {
                         _durationMs.value = duration
                     }
 
-                    // Aggressive prefetch: trigger at equator (50%) AND 2 min before end
-                    val remaining = duration - playerController.currentPosition
-                    val progress = if (duration > 0) playerController.currentPosition.toFloat() / duration else 0f
-
-                    // Start aggressive prefetch at equator
-                    if (progress >= 0.5f && aggressivePrefetchJob?.isActive != true) {
-                        startAggressivePrefetch()
-                    }
-
                     // Also prefetch when 2 minutes remaining
+                    val remaining = duration - playerController.currentPosition
                     if (remaining in 1..PREFETCH_THRESHOLD_MS && prefetchJob?.isActive != true) {
                         preloadNextTrack()
                     }
@@ -1643,11 +1501,6 @@ object PlayerController {
      * Log playback when switching away from a wave track.
      * Called automatically on skipNext / skipPrevious / playTrack and
      * on seamless ExoPlayer transitions.
-     *
-     * @param autoCompleted true when the previous track ended on its own
-     *                      (ExoPlayer auto-advanced). In that case we force
-     *                      `completed=true` per docs 8.4 so the backend
-     *                      learns the user listened to the end.
      */
     private fun logWavePlaybackOnSwitch(autoCompleted: Boolean = false) {
         val trackId = waveTrackId ?: return
