@@ -64,6 +64,7 @@ object IcmAuthRepository {
     fun init(context: Context) {
         prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         loadState()
+        syncToIcmApi()
     }
 
     private fun loadState() {
@@ -73,7 +74,23 @@ object IcmAuthRepository {
         _partnerUserId.value = p.getString(KEY_USER_ID, null)
         _isPremium.value = p.getBoolean(KEY_IS_PREMIUM, false)
         _premiumExpiresAt.value = p.getLong(KEY_PREMIUM_EXPIRES, 0)
-        _isLoggedIn.value = _partnerUserId.value != null
+        val hasUser = _partnerUserId.value != null
+        val isTelegram = p.getString(KEY_AUTH_METHOD, null) == "telegram"
+        // Telegram link does not always issue a partner_session_token; presence
+        // of a partner_user_id is enough to consider the user logged in.
+        _isLoggedIn.value = hasUser && (isTelegram || p.getString(KEY_TOKEN, null) != null)
+    }
+
+    /**
+     * Push the current partner_user_id and session token into the shared
+     * [IcmApi] instance so subsequent API calls are authenticated correctly.
+     */
+    private fun syncToIcmApi() {
+        val api = IcmApi.getInstance()
+        api.partnerUserId = _partnerUserId.value
+        api.sessionToken = getSessionToken()
+        IcmRepository.setPartnerUserId(_partnerUserId.value)
+        IcmRepository.setSessionToken(getSessionToken())
     }
 
     /**
@@ -115,6 +132,7 @@ object IcmAuthRepository {
                 _userEmail.value = email
                 _partnerUserId.value = userId
                 _isLoggedIn.value = true
+                syncToIcmApi()
             }
 
             result.map { it.token }
@@ -143,6 +161,7 @@ object IcmAuthRepository {
                 _telegramId.value = telegramId.toString()
                 _partnerUserId.value = userId
                 _isLoggedIn.value = true
+                syncToIcmApi()
             }
 
             result.map { it.token }
@@ -254,25 +273,38 @@ object IcmAuthRepository {
     /**
      * Set Telegram auth data from ICM redirect (no token yet).
      * After successful Telegram link, we get icm_user_id and need to issue session token.
+     *
+     * IMPORTANT: this must NOT overwrite `partner_user_id` — the value that was
+     * sent to ICM during the /partner/<id>/link request is the one ICM associates
+     * with the linked account, and changing it here would break every subsequent
+     * call (wave, library, /me/*) because backend would return user_not_linked.
      */
     fun setTelegramAuth(
         icmUserId: String,
         state: String?
     ) {
-        prefs?.edit()?.apply {
+        val p = prefs
+        val existingUserId = p?.getString(KEY_USER_ID, null)
+        p?.edit()?.apply {
             putString(KEY_TELEGRAM_ID, icmUserId)
-            putString(KEY_USER_ID, "tg_${icmUserId}")
             putString(KEY_AUTH_METHOD, "telegram")
+            // Preserve partner_user_id that was actually used during /link.
+            // Only set it if we have never had one (extreme edge case).
+            if (existingUserId.isNullOrBlank()) {
+                putString(KEY_USER_ID, "tg_${icmUserId}")
+            }
             apply()
         }
         _telegramId.value = icmUserId
-        _partnerUserId.value = "tg_${icmUserId}"
+        _partnerUserId.value = existingUserId?.takeIf { it.isNotBlank() } ?: "tg_${icmUserId}"
         _isLoggedIn.value = true
+        syncToIcmApi()
     }
 
     /**
      * Set Telegram auth with session token from server redirect.
      * Server issues token and redirects to app with token in URL.
+     * Preserves the partner_user_id that was used during /link.
      */
     fun setTelegramAuthWithToken(
         icmUserId: String,
@@ -280,17 +312,22 @@ object IcmAuthRepository {
         expiresIn: Int
     ) {
         val expiresAt = System.currentTimeMillis() + expiresIn * 1000
-        prefs?.edit()?.apply {
+        val p = prefs
+        val existingUserId = p?.getString(KEY_USER_ID, null)
+        p?.edit()?.apply {
             putString(KEY_TELEGRAM_ID, icmUserId)
-            putString(KEY_USER_ID, "tg_${icmUserId}")
+            if (existingUserId.isNullOrBlank()) {
+                putString(KEY_USER_ID, "tg_${icmUserId}")
+            }
             putString(KEY_TOKEN, token)
             putLong(KEY_TOKEN_EXPIRES, expiresAt)
             putString(KEY_AUTH_METHOD, "telegram")
             apply()
         }
         _telegramId.value = icmUserId
-        _partnerUserId.value = "tg_${icmUserId}"
+        _partnerUserId.value = existingUserId?.takeIf { it.isNotBlank() } ?: "tg_${icmUserId}"
         _isLoggedIn.value = true
+        syncToIcmApi()
     }
 
     /**
@@ -307,6 +344,7 @@ object IcmAuthRepository {
                 putLong(KEY_TOKEN_EXPIRES, tokenData.expiresAt)
                 apply()
             }
+            syncToIcmApi()
         }
 
         result.map { it.token }
@@ -323,6 +361,22 @@ object IcmAuthRepository {
         _telegramId.value = null
         _partnerUserId.value = null
         _premiumExpiresAt.value = 0
+        syncToIcmApi()
+    }
+
+    /**
+     * Read the partner_user_id that AuthScreen pre-allocated for the /link
+     * request (or anything previously stored). Creates one on first call so the
+     * value is stable across the lifetime of the install.
+     */
+    fun ensurePartnerUserId(): String {
+        val p = prefs ?: return "lg_${java.util.UUID.randomUUID().toString().replace("-", "").take(16)}"
+        p.getString(KEY_USER_ID, null)?.takeIf { it.isNotBlank() }?.let { return it }
+        val generated = "lg_${java.util.UUID.randomUUID().toString().replace("-", "").take(16)}"
+        p.edit().putString(KEY_USER_ID, generated).apply()
+        _partnerUserId.value = generated
+        syncToIcmApi()
+        return generated
     }
 
     data class TokenData(

@@ -55,6 +55,23 @@ object IcmRepository {
     }
 
     /**
+     * Update only the partner_user_id (e.g. after authentication completes).
+     * Keeps the existing apiKey/sessionToken intact.
+     */
+    fun setPartnerUserId(partnerUserId: String?) {
+        api.partnerUserId = partnerUserId
+    }
+
+    /** Update the session token (used after /session/issue or Telegram OAuth). */
+    fun setSessionToken(sessionToken: String?) {
+        api.sessionToken = sessionToken
+    }
+
+    /** Current partner user id used as X-Partner-User-Id. */
+    val partnerUserId: String?
+        get() = api.partnerUserId
+
+    /**
      * Reset initialization.
      */
     fun reset() {
@@ -319,17 +336,17 @@ object IcmRepository {
     /**
      * Build a wave queue by calling API multiple times.
      * Recommended: preload 3-5 tracks for seamless playback.
+     * Stops early when the API reports `status == "empty"` (no more candidates).
      */
     suspend fun buildWaveQueue(count: Int = 5, seedTrackId: String? = null): List<com.liquidmusicglass.engine.Track> {
         val tracks = mutableListOf<com.liquidmusicglass.engine.Track>()
         val exclude = mutableListOf<String>()
         repeat(count) {
-            val response = getWaveNext(seedTrackId, exclude.takeIf { it.isNotEmpty() })
-            val track = response?.track
-            if (track != null) {
-                tracks.add(track.toTrack())
-                exclude.add(track.id)
-            }
+            val response = getWaveNext(seedTrackId, exclude.takeIf { it.isNotEmpty() }) ?: return@repeat
+            if (response.status == "empty") return@repeat
+            val track = response.track ?: return@repeat
+            tracks.add(track.toTrack())
+            exclude.add(track.id)
         }
         return tracks
     }
@@ -437,6 +454,44 @@ object IcmRepository {
      */
     suspend fun setUserQuality(quality: String): IcmUserQualityResponse? {
         val result = api.setUserQuality(quality)
+        result.exceptionOrNull()?.let {
+            _lastException = it as? Exception
+            _lastError.value = it.message
+        }
+        return result.getOrNull()
+    }
+
+    /**
+     * Get current user preferences (quality, region, hide_explicit, source).
+     * Docs 8.5.
+     */
+    suspend fun getUserPreferences(): IcmUserPreferences? {
+        val result = api.getUserPreferences()
+        result.exceptionOrNull()?.let {
+            _lastException = it as? Exception
+            _lastError.value = it.message
+        }
+        return result.getOrNull()
+    }
+
+    /**
+     * Update user preferences. Only non-null fields in [prefs] are sent to the
+     * server. Docs 8.5.
+     */
+    suspend fun updateUserPreferences(prefs: IcmUserPreferences): IcmUserPreferences? {
+        val result = api.updateUserPreferences(prefs)
+        result.exceptionOrNull()?.let {
+            _lastException = it as? Exception
+            _lastError.value = it.message
+        }
+        return result.getOrNull()
+    }
+
+    /**
+     * Get user profile (icm_user_id, email, subscription).
+     */
+    suspend fun getUserProfile(): IcmUserProfile? {
+        val result = api.getUserProfile()
         result.exceptionOrNull()?.let {
             _lastException = it as? Exception
             _lastError.value = it.message

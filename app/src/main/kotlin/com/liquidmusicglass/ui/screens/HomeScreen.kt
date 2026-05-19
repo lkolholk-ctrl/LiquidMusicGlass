@@ -62,19 +62,77 @@ private data class MoodCategory(
     val id: String,
     val title: String,
     val gradientColors: List<Color>,
-    val icon: String // Simple unicode/icon identifier
+    val icon: String,
+    /** Seed queries used to pick a representative track for the wave station. */
+    val seedQueries: List<String>
 )
 
 private val moodCategories = listOf(
-    MoodCategory("melancholy", "Меланхолия", listOf(Color(0xFF1E3A5F), Color(0xFF2D5A87)), "🌊"),
-    MoodCategory("good_mood", "Хорошее настроение", listOf(Color(0xFFD4730E), Color(0xFFF5A623)), "✦"),
-    MoodCategory("broken_heart", "Для разбитых сердец", listOf(Color(0xFF8B1538), Color(0xFFC41E3A)), "💔"),
-    MoodCategory("focus", "Концентрация", listOf(Color(0xFF2D5016), Color(0xFF4A7C23)), "◎"),
-    MoodCategory("energy", "Энергия", listOf(Color(0xFF8B4513), Color(0xFFD2691E)), "⚡"),
-    MoodCategory("night", "Ночная волна", listOf(Color(0xFF1A1A2E), Color(0xFF16213E)), "🌙"),
-    MoodCategory("workout", "Тренировка", listOf(Color(0xFF4A0000), Color(0xFF8B0000)), "💪"),
-    MoodCategory("chill", "Чилл", listOf(Color(0xFF483D8B), Color(0xFF6A5ACD)), "☁"),
+    MoodCategory(
+        "melancholy", "Меланхолия",
+        listOf(Color(0xFF1E3A5F), Color(0xFF2D5A87)), "🌊",
+        listOf("melancholy", "sad indie", "lo-fi sad")
+    ),
+    MoodCategory(
+        "good_mood", "Хорошее настроение",
+        listOf(Color(0xFFD4730E), Color(0xFFF5A623)), "✦",
+        listOf("happy pop hits", "feel good", "summer hits")
+    ),
+    MoodCategory(
+        "broken_heart", "Для разбитых сердец",
+        listOf(Color(0xFF8B1538), Color(0xFFC41E3A)), "💔",
+        listOf("breakup songs", "heartbreak", "sad love songs")
+    ),
+    MoodCategory(
+        "focus", "Концентрация",
+        listOf(Color(0xFF2D5016), Color(0xFF4A7C23)), "◎",
+        listOf("focus instrumental", "deep focus", "study beats")
+    ),
+    MoodCategory(
+        "energy", "Энергия",
+        listOf(Color(0xFF8B4513), Color(0xFFD2691E)), "⚡",
+        listOf("high energy", "power hits", "edm energy")
+    ),
+    MoodCategory(
+        "night", "Ночная волна",
+        listOf(Color(0xFF1A1A2E), Color(0xFF16213E)), "🌙",
+        listOf("late night", "night drive", "synthwave night")
+    ),
+    MoodCategory(
+        "workout", "Тренировка",
+        listOf(Color(0xFF4A0000), Color(0xFF8B0000)), "💪",
+        listOf("workout", "gym motivation", "running mix")
+    ),
+    MoodCategory(
+        "chill", "Чилл",
+        listOf(Color(0xFF483D8B), Color(0xFF6A5ACD)), "☁",
+        listOf("chillhop", "chill lofi", "ambient chill")
+    ),
 )
+
+/** Picks a seed track id for a mood, or null if the search returned nothing. */
+private suspend fun resolveMoodSeedTrackId(mood: MoodCategory): String? {
+    for (query in mood.seedQueries) {
+        val tracks = IcmRepository.searchTracks(query, limit = 5)
+        if (tracks.isNotEmpty()) return tracks.first().id
+    }
+    return null
+}
+
+/** Returns a list of tracks for a mood when the personal wave is unavailable. */
+private suspend fun loadMoodFallbackTracks(mood: MoodCategory, count: Int): List<Track> {
+    val collected = mutableListOf<Track>()
+    val seen = mutableSetOf<String>()
+    for (query in mood.seedQueries) {
+        if (collected.size >= count) break
+        val tracks = IcmRepository.searchTracks(query, limit = count * 2)
+        for (track in tracks) {
+            if (collected.size >= count) break
+            if (seen.add(track.id)) collected.add(track)
+        }
+    }
+    return collected
+}
 
 @Composable
 fun HomeScreen(
@@ -113,14 +171,19 @@ fun HomeScreen(
         )
     }
 
+    // Cached seed_track_id per mood so wave refills stay on-genre.
+    val moodSeeds = remember { mutableStateMapOf<String, String?>() }
+
     fun loadMoreMoodTracks(moodId: String, existing: List<IcmWaveTrack>) {
         if (moodId in moodLoading) return
         moodLoading = moodLoading + moodId
         scope.launch {
             val waveTracks = existing.toMutableList()
+            val seed = moodSeeds[moodId]
             repeat(5) {
                 val exclude = waveTracks.map { it.id }
                 val response = IcmRepository.getWaveNext(
+                    seedTrackId = seed,
                     exclude = exclude.takeIf { it.isNotEmpty() },
                     recentSkips = 0
                 )
@@ -137,7 +200,13 @@ fun HomeScreen(
     }
 
     fun playMoodStation(moodId: String) {
-        PlayerController.setAutoRefillContext("wave", moodId, moodCategories.find { it.id == moodId }?.title)
+        val mood = moodCategories.find { it.id == moodId } ?: return
+        PlayerController.setAutoRefillContext(
+            type = "wave",
+            id = moodId,
+            name = mood.title,
+            seedTrackId = moodSeeds[moodId]
+        )
         val existing = moodTracks[moodId]
         if (!existing.isNullOrEmpty()) {
             // Already loaded — start playing immediately
@@ -164,10 +233,21 @@ fun HomeScreen(
         isPlayingMood = true
         moodLoading = moodLoading + moodId
         scope.launch {
+            // Each mood needs its own seed so the wave really differs.
+            val seed = moodSeeds.getOrPut(moodId) { resolveMoodSeedTrackId(mood) }
+            // Refresh refill context with the resolved seed so auto-refill stays on-genre.
+            PlayerController.setAutoRefillContext(
+                type = "wave",
+                id = moodId,
+                name = mood.title,
+                seedTrackId = seed
+            )
+
             val waveTracks = mutableListOf<IcmWaveTrack>()
             repeat(5) {
                 val exclude = waveTracks.map { it.id }
                 val response = IcmRepository.getWaveNext(
+                    seedTrackId = seed,
                     exclude = exclude.takeIf { it.isNotEmpty() },
                     recentSkips = 0
                 )
@@ -190,6 +270,22 @@ fun HomeScreen(
                 }
                 // Preload next batch
                 loadMoreMoodTracks(moodId, waveTracks)
+            } else {
+                // Wave is empty or user is not linked — fall back to a plain
+                // search-driven mood playlist so the card still works.
+                val fallback = loadMoodFallbackTracks(mood, count = 12)
+                if (fallback.isNotEmpty()) {
+                    val firstResolved = resolveWaveTrackUrl(fallback.firstOrNull())
+                    val resolvedTracks = fallback.toMutableList()
+                    if (firstResolved != null) resolvedTracks[0] = firstResolved
+                    PlayerController.clearAutoRefillContext()
+                    PlayerController.setQueue(resolvedTracks)
+                    PlayerController.playTrack(context, 0)
+                } else {
+                    activeMoodId = null
+                    isPlayingMood = false
+                    PlayerController.clearAutoRefillContext()
+                }
             }
         }
     }

@@ -138,12 +138,14 @@ class IcmApi private constructor() {
                         } catch (_: Exception) {
                             null
                         }
+                        // Prefer the canonical HTTP Retry-After header, fall back to body field.
+                        val retryAfterHeader = response.header("Retry-After")?.toIntOrNull()
                         Result.failure(IcmApiException(
                             response.code,
                             errorText,
                             error?.error,
                             error?.requiredRegion,
-                            error?.retryAfter,
+                            retryAfterHeader ?: error?.retryAfter,
                             error?.source
                         ))
                     }
@@ -179,17 +181,28 @@ class IcmApi private constructor() {
     }
 
     /**
-     * Check session status and refresh token if needed.
+     * Issue a fresh session token if no live one is cached, otherwise just
+     * return a stub success with the existing token information. Per docs
+     * 12.1, `partner_session_token` is cached locally up to `expires_in`,
+     * so we only mint a new one when we don't already have one.
      */
     suspend fun refreshSessionIfNeeded(
         partnerUserId: String,
         hideExplicit: Boolean = false
     ): Result<IcmSessionResponse> {
-        val currentToken = sessionToken
-        if (currentToken != null) {
-            return Result.failure(IcmApiException(401, "Token refresh needed"))
+        if (sessionToken != null) {
+            return Result.success(
+                IcmSessionResponse(
+                    partnerSessionToken = sessionToken!!,
+                    expiresIn = 0,
+                    partnerUserId = partnerUserId,
+                    scopes = emptyList()
+                )
+            )
         }
-        return issueSession(partnerUserId, hideExplicit)
+        return issueSession(partnerUserId, hideExplicit).also { result ->
+            result.getOrNull()?.let { sessionToken = it.partnerSessionToken }
+        }
     }
 
     /**
@@ -497,11 +510,21 @@ class IcmApi private constructor() {
         recentSkips: Int? = null,
         region: String? = null
     ): Result<IcmWaveResponse> {
+        if (partnerUserId.isNullOrBlank()) {
+            return Result.failure(
+                IcmApiException(401, "partner_user_id is required for /library/wave/next")
+            )
+        }
         val params = buildString {
             append("/library/wave/next")
             val query = mutableListOf<String>()
-            if (!seedTrackId.isNullOrBlank()) query.add("seed_track_id=$seedTrackId")
-            if (!exclude.isNullOrEmpty()) query.add("exclude=${exclude.joinToString(",")}")
+            if (!seedTrackId.isNullOrBlank()) {
+                query.add("seed_track_id=${java.net.URLEncoder.encode(seedTrackId, "UTF-8")}")
+            }
+            if (!exclude.isNullOrEmpty()) {
+                val joined = exclude.joinToString(",")
+                query.add("exclude=${java.net.URLEncoder.encode(joined, "UTF-8")}")
+            }
             if (recentSkips != null) query.add("recent_skips=$recentSkips")
             if (region != null) query.add("region=$region")
             if (query.isNotEmpty()) append("?${query.joinToString("&")}")
@@ -585,20 +608,43 @@ class IcmApi private constructor() {
     // ═══════════════════════════════════════════════════════════
 
     /**
-     * Get user's preferred stream quality.
-     * Requires linked user with active subscription.
+     * Get user's preferred stream quality (legacy endpoint).
+     * Prefer [getUserPreferences] going forward.
      */
     suspend fun getUserQuality(): Result<IcmUserQualityResponse> {
         return execute("/me/quality")
     }
 
     /**
-     * Set user's preferred stream quality.
-     * Requires linked user with active subscription.
+     * Set user's preferred stream quality (legacy endpoint).
+     * Prefer [updateUserPreferences].
      */
     suspend fun setUserQuality(quality: String): Result<IcmUserQualityResponse> {
         val body = json.encodeToString(IcmUserQualityRequest(quality = quality))
         return execute("/me/quality", method = "POST", body = body)
+    }
+
+    /**
+     * Get current user preferences (quality, region, hide_explicit, source).
+     * Requires linked user with active subscription.
+     */
+    suspend fun getUserPreferences(): Result<IcmUserPreferences> {
+        return execute("/me/preferences")
+    }
+
+    /**
+     * Update user preferences. Only non-null fields in [prefs] are sent.
+     */
+    suspend fun updateUserPreferences(prefs: IcmUserPreferences): Result<IcmUserPreferences> {
+        val body = json.encodeToString(prefs)
+        return execute("/me/preferences", method = "PUT", body = body)
+    }
+
+    /**
+     * Get user profile (icm_user_id, email, subscription).
+     */
+    suspend fun getUserProfile(): Result<IcmUserProfile> {
+        return execute("/me/profile")
     }
 }
 
