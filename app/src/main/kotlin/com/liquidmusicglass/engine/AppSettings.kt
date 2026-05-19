@@ -83,7 +83,10 @@ object AppSettings {
     // ── Sleep Timer ──
     private var sleepTimerJob: Job? = null
 
+    private var appContext: Context? = null
+
     fun init(context: Context) {
+        appContext = context.applicationContext
         prefs = context.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
         loadAll()
     }
@@ -244,20 +247,10 @@ object AppSettings {
                 _sleepTimerRemainingMs.value = remaining.coerceAtLeast(0)
             }
 
-            // Timer expired — fade out and pause
-            val player = AudioService.companionPlayer
-            if (player != null && player.isPlaying) {
-                // Fade out over 30 seconds
-                val fadeSteps = 60
-                val stepMs = 500L
-                val startVolume = player.volume
-                for (i in 1..fadeSteps) {
-                    val vol = startVolume * (1f - i.toFloat() / fadeSteps)
-                    player.volume = vol.coerceAtLeast(0f)
-                    delay(stepMs)
-                }
-                player.pause()
-                player.volume = startVolume // restore for next play
+            // Timer expired — pause playback via PlayerController
+            val ctx = appContext
+            if (ctx != null) {
+                PlayerController.togglePlayPause(ctx)
             }
 
             _sleepTimerMinutes.value = 0

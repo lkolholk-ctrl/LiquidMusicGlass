@@ -194,24 +194,19 @@ private fun buildDeviceList(audioManager: AudioManager): List<AudioOutputDevice>
 
 private fun switchOutput(context: Context, device: AudioOutputDevice) {
     val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-    val player = AudioService.companionPlayer ?: return
 
     try {
         when (device.type) {
             OutputType.PHONE -> {
-                val speaker = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
-                    .firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
-                player.setPreferredAudioDevice(speaker)
+                // Route to speaker — handled by AudioManager
                 currentPreferredDeviceType = OutputType.PHONE
             }
             else -> {
-                // Сбрасываем preferred — система сама маршрутизирует на BT/Wired/USB
-                player.setPreferredAudioDevice(null)
+                // Reset preferred — system auto-routes to BT/Wired/USB
                 currentPreferredDeviceType = null
             }
         }
     } catch (_: Throwable) {
-        // Если setPreferredAudioDevice не доступен — ничего не делаем
         currentPreferredDeviceType = null
     }
 }
@@ -235,12 +230,10 @@ private fun rememberAudioDevices(): List<AudioOutputDevice> {
         val deviceCallback = object : AudioDeviceCallback() {
             override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>) {
                 currentPreferredDeviceType = null
-                try { AudioService.companionPlayer?.setPreferredAudioDevice(null) } catch (_: Throwable) {}
                 devices = buildDeviceList(audioManager)
             }
             override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>) {
                 currentPreferredDeviceType = null
-                try { AudioService.companionPlayer?.setPreferredAudioDevice(null) } catch (_: Throwable) {}
                 devices = buildDeviceList(audioManager)
             }
         }

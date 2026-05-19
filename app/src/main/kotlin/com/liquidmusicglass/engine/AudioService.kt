@@ -5,8 +5,6 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.graphics.Bitmap
-import android.graphics.drawable.BitmapDrawable
 import android.os.Build
 import android.os.Bundle
 import androidx.core.app.NotificationCompat
@@ -16,15 +14,13 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.session.CommandButton
-import androidx.media3.session.MediaNotification
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
-import coil.ImageLoader
-import coil.request.ImageRequest
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
@@ -35,145 +31,213 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
+/**
+ * AudioService — строго по Media3 спецификации.
+ *
+ * Жизненный цикл:
+ *   onCreate()    → player + mediaSession
+ *   onGetSession()→ возвращаем mediaSession
+ *   onDestroy()   → player.release() + mediaSession.release()
+ *
+ * Нет ручного AudioManager, нет кастомных потоков для аудиофокуса.
+ * Всё управление фокусом — через ExoPlayer.setAudioAttributes(audioAttributes, true).
+ */
 @OptIn(UnstableApi::class)
 class AudioService : MediaSessionService() {
 
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-    private var mediaSession: MediaSession? = null
-    private var servicePlayer: ExoPlayer? = null
-    private var autoMixEngine: ServiceBackedAutoMixEngine? = null
-    private var monitorJob: Job? = null
+    private var _player: ExoPlayer? = null
+    private var _session: MediaSession? = null
 
-    // ── Notification ──
-    private val notificationId = 1001
+    // ── Notification channel ──
     private val channelId = "liquid_music_playback"
-    private var isForeground = false
 
-    // ── Metadata sync ──
-    private var metadataSyncJob: Job? = null
-    private val imageLoader by lazy { ImageLoader.Builder(applicationContext).build() }
+    // ── Playback state exposed via StateFlow ──
+    private val _playbackState = MutableStateFlow(Player.STATE_IDLE)
+    val playbackState: StateFlow<Int> = _playbackState.asStateFlow()
+
+    private val _isBuffering = MutableStateFlow(false)
+    val isBuffering: StateFlow<Boolean> = _isBuffering.asStateFlow()
+
+    // ── Position polling job ──
+    private var positionJob: Job? = null
 
     override fun onCreate() {
         super.onCreate()
 
-        // Init settings first
-        AppSettings.init(applicationContext)
+        val player = buildPlayer()
+        _player = player
 
-        val player = buildPrimaryPlayer()
-        servicePlayer = player
+        _session = MediaSession.Builder(this, player)
+            .setId("liquid_music_session")
+            .setCallback(SessionCallback())
+            .build()
 
-        // Init audio effects with player's session
-        AudioEffectsEngine.init(player.audioSessionId)
+        player.addListener(PlayerEventForwarder())
 
-        // Build MediaSession with full callback support
-        mediaSession = buildMediaSession(player)
-
-        autoMixEngine = ServiceBackedAutoMixEngine(
-            context = applicationContext,
-            scope = serviceScope,
-            primaryPlayerProvider = { servicePlayer },
-            mediaSessionProvider = { mediaSession },
-            isEnabled = { AppSettings.autoMixEnabled.value },
-            onPlayerSwapped = { newPlayer ->
-                newPlayer.addListener(primaryListener)
-                servicePlayer = newPlayer
-                companionPlayer = newPlayer
-                AudioEffectsEngine.init(newPlayer.audioSessionId)
-            },
-            onTransitionFinished = {
-                mixingState = false
-            }
-        )
-
-        companionPlayer = player
-        companionSession = mediaSession
-        companionService = this
-
-        // Init playlists
-        PlaylistManager.init(applicationContext)
-
-        // Restore last playback state
-        restorePlayerState()
-
-        startMonitorLoop()
+        // Start position polling
+        startPositionPolling(player)
     }
 
-    private fun buildPrimaryPlayer(): ExoPlayer {
-        // CRITICAL FIX: Aggressive timeouts to prevent eternal BUFFERING state.
-        // If stream doesn't respond in 5s — fail fast and let error handler deal with it.
-        val httpDataSourceFactory = androidx.media3.datasource.DefaultHttpDataSource.Factory()
+    private fun buildPlayer(): ExoPlayer {
+        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
             .setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(5_000)   // was 15s — too long, causes ANR
-            .setReadTimeoutMs(5_000)      // was 30s — fail fast
+            .setConnectTimeoutMs(5_000)
+            .setReadTimeoutMs(5_000)
             .setDefaultRequestProperties(mapOf(
                 "User-Agent" to "LiquidMusicGlass/1.0"
             ))
 
-        val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(httpDataSourceFactory)
+        val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(
+            httpDataSourceFactory
+        )
+
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(10_000, 30_000, 500, 1_000)
+            .build()
 
         return ExoPlayer.Builder(this)
             .setMediaSourceFactory(mediaSourceFactory)
-            .setLoadControl(
-                androidx.media3.exoplayer.DefaultLoadControl.Builder()
-                    .setBufferDurationsMs(
-                        10_000, // minBufferMs
-                        30_000, // maxBufferMs
-                        500,    // bufferForPlaybackMs — start faster
-                        1_000   // bufferForPlaybackAfterRebufferMs
-                    )
-                    .build()
-            )
+            .setLoadControl(loadControl)
             .build()
             .apply {
                 val audioAttributes = AudioAttributes.Builder()
-                    .setUsage(C.USAGE_MEDIA)
                     .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                    .setUsage(C.USAGE_MEDIA)
                     .build()
 
+                // true = автоматический аудиофокус, ducking, пауза при звонках
                 setAudioAttributes(audioAttributes, true)
                 setHandleAudioBecomingNoisy(true)
                 playWhenReady = false
-                repeatMode = Player.REPEAT_MODE_OFF
-                addListener(primaryListener)
             }
     }
 
-    /**
-     * Build MediaSession with full callback support for lock screen / notification controls.
-     */
-    private fun buildMediaSession(player: ExoPlayer): MediaSession {
-        return MediaSession.Builder(this, player)
-            .setId("liquid_music_session")
-            .setCallback(MediaSessionCallback())
-            .build()
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
+        return _session
     }
 
-    /**
-     * MediaSession.Callback handling all system playback controls.
-     */
-    private inner class MediaSessionCallback : MediaSession.Callback {
+    override fun onDestroy() {
+        positionJob?.cancel()
+
+        _player?.removeListener(PlayerEventForwarder())
+        _player?.release()
+        _player = null
+
+        _session?.release()
+        _session = null
+
+        super.onDestroy()
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  Player Listener — единая точка обратной связи
+    // ═══════════════════════════════════════════════════════════
+
+    private inner class PlayerEventForwarder : Player.Listener {
+
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            _playbackState.value = playbackState
+            _isBuffering.value = (playbackState == Player.STATE_BUFFERING)
+
+            when (playbackState) {
+                Player.STATE_BUFFERING -> {
+                    android.util.Log.d("AudioService", "STATE_BUFFERING")
+                }
+                Player.STATE_READY -> {
+                    android.util.Log.d("AudioService", "STATE_READY")
+                }
+                Player.STATE_ENDED -> {
+                    android.util.Log.d("AudioService", "STATE_ENDED → next track")
+                    PlayerController.onTrackEnded()
+                }
+                Player.STATE_IDLE -> {
+                    android.util.Log.d("AudioService", "STATE_IDLE")
+                }
+            }
+        }
+
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            PlayerController.setPlaying(isPlaying)
+        }
+
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            mediaItem?.let {
+                PlayerController.onTrackChanged(it.mediaId)
+            }
+        }
+
+        override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+            android.util.Log.e("AudioService", "Player error: ${error.errorCodeName} | ${error.message}")
+
+            // Check for expired stream URL (403 invalid_or_expired_signature per ICM API docs)
+            val isExpiredUrl = error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS
+                && error.message?.contains("403") == true
+
+            if (isExpiredUrl) {
+                val currentTrackId = _player?.currentMediaItem?.mediaId
+                if (currentTrackId != null) {
+                    android.util.Log.d("AudioService", "URL expired for $currentTrackId, triggering re-resolve")
+                    PlayerController.handleExpiredUrl(this@AudioService, currentTrackId)
+                    return
+                }
+            }
+
+            _player?.stop()
+            _player?.prepare()
+            PlayerController.setPlaying(false)
+            PlayerController.onPlaybackError(error.errorCodeName)
+        }
+
+        override fun onPlayerErrorChanged(error: androidx.media3.common.PlaybackException?) {
+            error?.let {
+                android.util.Log.e("AudioService", "Error changed: ${it.errorCodeName}")
+            }
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  Position polling — строго асинхронный, только при isPlaying
+    // ═══════════════════════════════════════════════════════════
+
+    private fun startPositionPolling(player: ExoPlayer) {
+        positionJob?.cancel()
+        positionJob = serviceScope.launch {
+            while (true) {
+                if (player.isPlaying) {
+                    PlayerController.updatePosition(player.currentPosition)
+                }
+                delay(200L)
+            }
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  MediaSession Callback
+    // ═══════════════════════════════════════════════════════════
+
+    private inner class SessionCallback : MediaSession.Callback {
 
         override fun onConnect(
             session: MediaSession,
             controller: MediaSession.ControllerInfo
         ): MediaSession.ConnectionResult {
-            // Define custom layout for notification / lock screen buttons
             val sessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon()
                 .add(SessionCommand(COMMAND_TOGGLE_FAVORITE, Bundle.EMPTY))
                 .build()
 
-            val playerCommands = MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS
-
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(sessionCommands)
-                .setAvailablePlayerCommands(playerCommands)
+                .setAvailablePlayerCommands(MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS)
                 .setCustomLayout(
                     ImmutableList.of(
-                        CommandButton.Builder()
+                        androidx.media3.session.CommandButton.Builder()
                             .setDisplayName("Favorite")
                             .setIconResId(R.drawable.ic_notification_favorite)
                             .setSessionCommand(SessionCommand(COMMAND_TOGGLE_FAVORITE, Bundle.EMPTY))
@@ -181,40 +245,6 @@ class AudioService : MediaSessionService() {
                     )
                 )
                 .build()
-        }
-
-        override fun onPostConnect(
-            session: MediaSession,
-            controller: MediaSession.ControllerInfo
-        ) {
-            // Sync metadata after connection
-            syncCurrentMetadata()
-        }
-
-        override fun onPlaybackResumption(
-            mediaSession: MediaSession,
-            controller: MediaSession.ControllerInfo
-        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
-            // Return last known queue for playback resumption
-            val lastQueue = PlayerController.getCurrentQueue()
-            val lastIndex = PlayerController.getCurrentIndex().coerceAtLeast(0)
-            val mediaItems = lastQueue.map { t ->
-                MediaItem.Builder()
-                    .setMediaId(t.id)
-                    .setUri(t.uri)
-                    .setMediaMetadata(
-                        MediaMetadata.Builder()
-                            .setTitle(t.title)
-                            .setArtist(t.artist)
-                            .setAlbumArtist(t.artist)
-                            .setArtworkUri(t.displayArtUri)
-                            .build()
-                    )
-                    .build()
-            }
-            return Futures.immediateFuture(
-                MediaSession.MediaItemsWithStartPosition(mediaItems, lastIndex, 0L)
-            )
         }
 
         override fun onCustomCommand(
@@ -236,11 +266,9 @@ class AudioService : MediaSessionService() {
         }
     }
 
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
-        return mediaSession
-    }
-
-    // ── MediaNotification.Provider for custom notification with artwork ──
+    // ═══════════════════════════════════════════════════════════
+    //  Notification (MediaSessionService handles foreground)
+    // ═══════════════════════════════════════════════════════════
 
     override fun onUpdateNotification(
         session: MediaSession,
@@ -249,11 +277,9 @@ class AudioService : MediaSessionService() {
         ensureNotificationChannel()
 
         val player = session.player
-        val currentItem = player.currentMediaItem
-        val metadata = currentItem?.mediaMetadata
+        val metadata = player.currentMediaItem?.mediaMetadata
 
-        // Build base notification
-        val builder = NotificationCompat.Builder(this, channelId)
+        val notification = NotificationCompat.Builder(this, channelId)
             .setSmallIcon(R.drawable.ic_notification_play)
             .setContentTitle(metadata?.title ?: "LiquidMusicGlass")
             .setContentText(metadata?.artist ?: "Unknown Artist")
@@ -263,352 +289,44 @@ class AudioService : MediaSessionService() {
             .setOngoing(player.isPlaying)
             .setShowWhen(false)
             .setOnlyAlertOnce(true)
-            .setContentIntent(createContentIntent())
+            .setContentIntent(
+                PendingIntent.getActivity(
+                    this, 0,
+                    Intent(this, MainActivity::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                        action = Intent.ACTION_MAIN
+                    },
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+            )
+            .build()
 
-        // Add playback controls
-        addPlaybackActions(builder, player)
-
-        // Try to load artwork into notification
-        val artworkUri = metadata?.artworkUri
-        if (artworkUri != null) {
-            // Use Coil's cached bitmap if available, otherwise notification will show default
-            serviceScope.launch(Dispatchers.IO) {
-                try {
-                    val request = ImageRequest.Builder(applicationContext)
-                        .data(artworkUri)
-                        .allowHardware(false)
-                        .build()
-                    val result = imageLoader.execute(request)
-                    val bitmap = (result.drawable as? BitmapDrawable)?.bitmap
-                    if (bitmap != null) {
-                        withContext(Dispatchers.Main) {
-                            builder.setLargeIcon(bitmap)
-                            val notification = builder.build()
-                            updateOrShowNotification(player, notification)
-                        }
-                    }
-                } catch (_: Exception) {
-                    // Fall through to notification without artwork
-                }
-            }
+        if (startInForegroundRequired || player.isPlaying) {
+            startForeground(1001, notification)
         }
-
-        val notification = builder.build()
-        updateOrShowNotification(player, notification)
-    }
-
-    private fun updateOrShowNotification(player: Player, notification: android.app.Notification) {
-        // Start foreground if playing
-        if (player.isPlaying && !isForeground) {
-            startForeground(notificationId, notification)
-            isForeground = true
-        } else if (!player.isPlaying && isForeground) {
-            stopForeground(STOP_FOREGROUND_DETACH)
-            isForeground = false
-            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            nm.notify(notificationId, notification)
-        }
-    }
-
-    private fun addPlaybackActions(builder: NotificationCompat.Builder, player: Player) {
-        // Previous
-        val prevIntent = PendingIntent.getBroadcast(
-            this, 1,
-            Intent("com.liquidmusicglass.PREV").setPackage(packageName),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        builder.addAction(R.drawable.ic_notification_prev, "Previous", prevIntent)
-
-        // Play/Pause
-        val playPauseIntent = PendingIntent.getBroadcast(
-            this, 2,
-            Intent("com.liquidmusicglass.PLAY_PAUSE").setPackage(packageName),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val playPauseIcon = if (player.isPlaying) R.drawable.ic_notification_pause else R.drawable.ic_notification_play
-        val playPauseTitle = if (player.isPlaying) "Pause" else "Play"
-        builder.addAction(playPauseIcon, playPauseTitle, playPauseIntent)
-
-        // Next
-        val nextIntent = PendingIntent.getBroadcast(
-            this, 3,
-            Intent("com.liquidmusicglass.NEXT").setPackage(packageName),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        builder.addAction(R.drawable.ic_notification_next, "Next", nextIntent)
-    }
-
-    private fun createContentIntent(): PendingIntent {
-        val intent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            action = Intent.ACTION_MAIN
-        }
-        return PendingIntent.getActivity(
-            this, 0, intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
     }
 
     private fun ensureNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             if (nm.getNotificationChannel(channelId) == null) {
-                val channel = NotificationChannel(
-                    channelId,
-                    "Music Playback",
-                    NotificationManager.IMPORTANCE_LOW
-                ).apply {
-                    description = "Shows current track and playback controls"
-                    setShowBadge(false)
-                    enableLights(false)
-                    enableVibration(false)
-                }
-                nm.createNotificationChannel(channel)
+                nm.createNotificationChannel(
+                    NotificationChannel(
+                        channelId,
+                        "Music Playback",
+                        NotificationManager.IMPORTANCE_LOW
+                    ).apply {
+                        description = "Shows current track and playback controls"
+                        setShowBadge(false)
+                        enableLights(false)
+                        enableVibration(false)
+                    }
+                )
             }
-        }
-    }
-
-    // ── Metadata Sync ──
-
-    /**
-     * Sync metadata from PlayerController to MediaSession.
-     * Called when track changes. Loads artwork asynchronously.
-     */
-    fun syncCurrentMetadata() {
-        metadataSyncJob?.cancel()
-        metadataSyncJob = serviceScope.launch {
-            val track = PlayerController.currentTrack.value ?: return@launch
-            val session = mediaSession ?: return@launch
-
-            // Build MediaMetadata with available fields
-            val metadataBuilder = MediaMetadata.Builder()
-                .setTitle(track.title)
-                .setArtist(track.artist)
-                .setAlbumTitle(track.albumName.takeIf { it.isNotBlank() })
-                .setArtworkUri(track.displayArtUri)
-
-            // Set metadata immediately (without artwork bitmap)
-            val currentIndex = session.player.currentMediaItemIndex
-            if (currentIndex >= 0 && currentIndex < session.player.mediaItemCount) {
-                val currentItem = session.player.getMediaItemAt(currentIndex)
-                val updatedItem = currentItem.buildUpon()
-                    .setMediaMetadata(metadataBuilder.build())
-                    .build()
-                session.player.removeMediaItem(currentIndex)
-                session.player.addMediaItem(currentIndex, updatedItem)
-                session.player.seekTo(currentIndex, session.player.currentPosition)
-            }
-
-            // Load artwork bitmap asynchronously for lock screen coloring
-            loadArtworkBitmap(track.displayArtUri.toString()) { bitmap ->
-                bitmap?.let {
-                    // Set session extras for lock screen artwork coloring
-                    session.setSessionExtras(Bundle().apply {
-                        putParcelable("android.media.metadata.ALBUM_ART", bitmap)
-                    })
-                }
-                // Update notification to reflect new metadata
-                mediaSession?.let { onUpdateNotification(it, false) }
-            }
-        }
-    }
-
-    private fun loadArtworkBitmap(url: String?, callback: (Bitmap?) -> Unit) {
-        if (url.isNullOrBlank()) {
-            callback(null)
-            return
-        }
-        serviceScope.launch(Dispatchers.IO) {
-            try {
-                val request = ImageRequest.Builder(applicationContext)
-                    .data(url)
-                    .allowHardware(false) // Software bitmap for notification/lockscreen
-                    .build()
-                val result = imageLoader.execute(request)
-                val bitmap = (result.drawable as? BitmapDrawable)?.bitmap
-                withContext(Dispatchers.Main) {
-                    callback(bitmap)
-                }
-            } catch (_: Exception) {
-                withContext(Dispatchers.Main) {
-                    callback(null)
-                }
-            }
-        }
-    }
-
-    override fun onTaskRemoved(rootIntent: Intent?) {
-        if (!isPlaybackOngoing) {
-            stopSelf()
-        }
-        super.onTaskRemoved(rootIntent)
-    }
-
-    override fun onDestroy() {
-        monitorJob?.cancel()
-        metadataSyncJob?.cancel()
-
-        // Save final state
-        servicePlayer?.let { player ->
-            AppSettings.savePlayerState(
-                player.currentMediaItemIndex,
-                player.currentPosition
-            )
-        }
-
-        autoMixEngine?.release()
-        autoMixEngine = null
-
-        AudioEffectsEngine.release()
-
-        servicePlayer?.removeListener(primaryListener)
-        servicePlayer?.release()
-        servicePlayer = null
-
-        mediaSession?.release()
-        mediaSession = null
-
-        companionPlayer = null
-        companionSession = null
-        companionService = null
-        mixingState = false
-
-        super.onDestroy()
-    }
-
-    private var lastTrackPosition = 0L
-    private var lastTrackStartTime = 0L
-
-    private val primaryListener = object : Player.Listener {
-        override fun onMediaItemTransition(
-            mediaItem: androidx.media3.common.MediaItem?,
-            reason: Int
-        ) {
-            lastTrackStartTime = System.currentTimeMillis()
-            lastTrackPosition = 0L
-
-            // Save current track index
-            servicePlayer?.let { player ->
-                AppSettings.savePlayerState(player.currentMediaItemIndex, 0L)
-            }
-
-            // Sync metadata for lock screen / notification
-            syncCurrentMetadata()
-
-            autoMixEngine?.onTrackChanged()
-        }
-
-        override fun onIsPlayingChanged(isPlaying: Boolean) {
-            if (!isPlaying) {
-                mixingState = false
-                // Save position on pause
-                servicePlayer?.let { player ->
-                    AppSettings.savePlayerState(
-                        player.currentMediaItemIndex,
-                        player.currentPosition
-                    )
-                }
-                // Exit foreground when paused
-                if (isForeground) {
-                    stopForeground(STOP_FOREGROUND_DETACH)
-                    isForeground = false
-                }
-            } else {
-                lastTrackStartTime = System.currentTimeMillis()
-                // Enter foreground when playing
-                if (!isForeground) {
-                    mediaSession?.let { onUpdateNotification(it, true) }
-                }
-            }
-        }
-
-        override fun onPlaybackStateChanged(playbackState: Int) {
-            // Update notification on state changes
-            mediaSession?.let { onUpdateNotification(it, false) }
-        }
-
-        // CRITICAL FIX: Handle player errors — prevents eternal BUFFERING state
-        override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-            android.util.Log.e("AudioService", "Player error: ${error.errorCodeName} | ${error.message}")
-            // Stop buffering, reset player state so UI doesn't hang
-            servicePlayer?.let { player ->
-                player.stop()
-                player.prepare()
-            }
-            // Notify UI that playback failed via public API
-            serviceScope.launch {
-                PlayerController.setPlaying(false)
-            }
-        }
-
-        override fun onPlayerErrorChanged(error: androidx.media3.common.PlaybackException?) {
-            if (error != null) {
-                android.util.Log.e("AudioService", "Player error changed: ${error.errorCodeName}")
-            }
-        }
-    }
-
-    private fun restorePlayerState() {
-        val lastIndex = AppSettings.lastTrackIndex.value
-        val lastPos = AppSettings.lastPositionMs.value
-        if (lastIndex >= 0) {
-            servicePlayer?.let { player ->
-                if (player.mediaItemCount > lastIndex) {
-                    player.seekTo(lastIndex, lastPos)
-                    player.prepare()
-                    // Don't auto-play, just restore position
-                }
-            }
-        }
-    }
-
-    private fun startMonitorLoop() {
-        monitorJob?.cancel()
-        monitorJob = serviceScope.launch {
-            while (true) {
-                autoMixEngine?.maybeStartAutoMix()
-                mixingState = autoMixEngine?.isMixing == true
-                delay(200L)
-            }
-        }
-    }
-
-    fun notifyManualNavigation() {
-        // Auto-mix is non-critical. If it throws (e.g. player timeline not
-        // ready yet -> IndexOutOfBounds), swallow it instead of crashing.
-        try {
-            autoMixEngine?.onManualNavigation()
-        } catch (e: Exception) {
-            android.util.Log.e("AudioService", "onManualNavigation failed", e)
         }
     }
 
     companion object {
         private const val COMMAND_TOGGLE_FAVORITE = "com.liquidmusicglass.TOGGLE_FAVORITE"
-
-        @Volatile
-        private var mixingState: Boolean = false
-
-        @Volatile
-        var companionPlayer: ExoPlayer? = null
-            private set
-
-        @Volatile
-        var companionSession: MediaSession? = null
-            private set
-
-        @Volatile
-        var companionService: AudioService? = null
-            private set
-
-        fun setAutoMixEnabled(enabled: Boolean) {
-            AppSettings.setAutoMix(enabled)
-        }
-
-        fun getMixingState(): Boolean = mixingState
-
-        fun getAudioSessionId(): Int {
-            return try { companionPlayer?.audioSessionId ?: 0 } catch (_: Throwable) { 0 }
-        }
     }
 }
