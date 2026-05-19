@@ -140,7 +140,12 @@ object PlayerController {
 
     /**
      * Play track by index in current queue.
-     * All network work on IO, ExoPlayer calls on Main.
+     *
+     * Gapless playback architecture:
+     * 1. Устанавливаем текущий трек через setMediaItem (очищает очередь)
+     * 2. Сразу после prepare() асинхронно добавляем следующий трек через addMediaItem()
+     * 3. ExoPlayer через CacheDataSource начинает буферить следующий трек в фоне
+     * 4. При переходе к следующему треку — seamless, без затыков
      */
     fun playTrack(context: Context, index: Int) {
         if (index !in queue.indices) return
@@ -166,16 +171,18 @@ object PlayerController {
 
             when (streamResult) {
                 is StreamResult.Success -> {
-                    // Build MediaItems for entire queue
-                    val mediaItems = buildMediaItems(queue, index, streamResult.uri)
-
                     withContext(Dispatchers.Main) {
                         val player = getPlayer(context)
                         if (player != null) {
-                            player.setMediaItems(mediaItems, index, 0L)
+                            // Set current track (clears queue)
+                            val currentMediaItem = buildMediaItem(track, streamResult.uri)
+                            player.setMediaItem(currentMediaItem)
                             player.prepare()
                             player.play()
                             resetPlaybackLogging(track.durationMs)
+
+                            // Pre-fetch 3-5 tracks ahead per ICM API spec
+                            prefetchAhead(context, index, depth = 3)
                         } else {
                             android.util.Log.e("PlayerController", "No player available")
                             _isBuffering.value = false
@@ -188,6 +195,64 @@ object PlayerController {
                     withContext(Dispatchers.Main) {
                         _isBuffering.value = false
                     }
+                }
+            }
+        }
+    }
+
+    /**
+     * ICM API: Предзагружай 3-5 треков вперёд для бесшовного воспроизведения.
+     *
+     * Архитектура предзагрузки (строго по ICM API спецификации):
+     * 1. file_id кешируется 24ч+ — повторный POST /track с тем же trackId
+     *    возвращает мгновенный ответ (кеш сработает).
+     * 2. signed URL действует ~600 сек — предзагруженные треки должны
+     *    начать играть в пределах этого окна.
+     * 3. Холодные треки (первый запрос): 3-10 сек подготовки.
+     *    Используем ?async=1 для вторичного каталога.
+     * 4. Предзагружаем 3-5 треков вперёд от currentIndex.
+     *
+     * @param context Context
+     * @param currentIndex индекс текущего играющего трека
+     * @param depth количество треков для предзагрузки (default: 3)
+     */
+    private fun prefetchAhead(context: Context, currentIndex: Int, depth: Int = 3) {
+        if (queue.isEmpty()) return
+
+        val endIndex = (currentIndex + 1 + depth).coerceAtMost(queue.size)
+        val indicesToPrefetch = (currentIndex + 1 until endIndex)
+
+        ioScope.launch {
+            // Сначала резолвим все URL параллельно (file_id кеш 24ч+)
+            val resolved = indicesToPrefetch.map { idx ->
+                val track = queue[idx]
+                val result = if (track.isOnlineTrack) {
+                    resolveStreamUrl(track.id)
+                } else {
+                    StreamResult.Success(track.uri)
+                }
+                idx to result
+            }
+
+            // Затем добавляем в плеер на Main dispatcher
+            withContext(Dispatchers.Main) {
+                val player = getPlayer(context) ?: return@withContext
+                var addedCount = 0
+
+                for ((idx, result) in resolved) {
+                    if (result is StreamResult.Success) {
+                        val track = queue[idx]
+                        val mediaItem = buildMediaItem(track, result.uri)
+                        player.addMediaItem(mediaItem)
+                        addedCount++
+                    }
+                }
+
+                if (addedCount > 0) {
+                    android.util.Log.d(
+                        "PlayerController",
+                        "Pre-fetched $addedCount tracks ahead (indices ${currentIndex + 1}..${endIndex - 1})"
+                    )
                 }
             }
         }
@@ -236,7 +301,9 @@ object PlayerController {
 
                         val player = getPlayer(context)
                         player?.let {
-                            it.setMediaItems(mediaItems, startIndex, 0L)
+                            // Текущий трек + предзагружаем 3-5 следующих
+                            val currentItem = buildMediaItem(startTrack, streamResult.uri)
+                            it.setMediaItem(currentItem)
                             it.prepare()
                             it.play()
                             resetPlaybackLogging(startTrack.durationMs)
@@ -244,14 +311,8 @@ object PlayerController {
                     }
                     addToRecent(startTrack)
 
-                    // Pre-resolve remaining tracks in background
-                    ioScope.launch {
-                        tracks.forEachIndexed { i, track ->
-                            if (i != startIndex && track.isOnlineTrack) {
-                                try { resolveStreamUrl(track.id) } catch (_: Exception) {}
-                            }
-                        }
-                    }
+                    // ICM API: Предзагружай 3-5 треков вперёд для бесшовного воспроизведения
+                    prefetchAhead(context, startIndex, depth = 3)
                 }
                 is StreamResult.Error -> {
                     android.util.Log.e("PlayerController", "Stream error for ${startTrack.id}: ${streamResult.code}")
@@ -345,7 +406,13 @@ object PlayerController {
         logPlayback(completed = true, skipped = false)
         val nextIndex = currentIndex + 1
         if (nextIndex < queue.size) {
-            appContext?.let { playTrack(it, nextIndex) }
+            // ExoPlayer уже автоматически перешёл на следующий трек (addMediaItem)
+            // Обновляем индекс и предзагружаем следующие 3 трека
+            currentIndex = nextIndex
+            _currentTrack.value = queue[nextIndex]
+            _durationMs.value = queue[nextIndex].durationMs
+            _currentPositionMs.value = 0L
+            appContext?.let { prefetchAhead(it, nextIndex, depth = 3) }
         }
     }
 

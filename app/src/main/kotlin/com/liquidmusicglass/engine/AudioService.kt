@@ -17,6 +17,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import androidx.media3.session.SessionCommand
@@ -39,13 +40,17 @@ import kotlinx.coroutines.launch
 /**
  * AudioService — строго по Media3 спецификации.
  *
+ * Архитектура:
+ *   1. Асинхронная инициализация кэша (не блокирует onCreate)
+ *   2. CacheDataSource с fallback на чистый HTTP при ошибке
+ *   3. Агрессивный LoadControl: 30s min / 60s max буфер
+ *   4. MediaSessionService автоматически управляет foreground notification
+ *   5. Gapless playback через очередь (player.addMediaItem)
+ *
  * Жизненный цикл:
- *   onCreate()    → player + mediaSession
+ *   onCreate()    → player + mediaSession (кэш инициализируется async)
  *   onGetSession()→ возвращаем mediaSession
  *   onDestroy()   → player.release() + mediaSession.release()
- *
- * Нет ручного AudioManager, нет кастомных потоков для аудиофокуса.
- * Всё управление фокусом — через ExoPlayer.setAudioAttributes(audioAttributes, true).
  */
 @OptIn(UnstableApi::class)
 class AudioService : MediaSessionService() {
@@ -74,9 +79,17 @@ class AudioService : MediaSessionService() {
     override fun onCreate() {
         super.onCreate()
 
+        // Initialize cache asynchronously — NEVER blocks onCreate
+        serviceScope.launch {
+            MediaCacheManager.init(this@AudioService)
+            // Rebuild player with cache once it's ready
+            rebuildPlayerWithCache()
+        }
+
+        // Build initial player without cache (will be rebuilt when cache is ready)
         val player = buildPlayer()
         _player = player
-        currentPlayer = player  // Exposed for AutoMix crossfade
+        currentPlayer = player
 
         _session = MediaSession.Builder(this, player)
             .setId("liquid_music_session")
@@ -93,12 +106,68 @@ class AudioService : MediaSessionService() {
         )
         PlayerController.setAutoMixEngine(autoMixEngine)
 
-        // Start position polling (includes AutoMix checks)
+        // Start position polling
         startPositionPolling(player)
     }
 
-    private fun buildPlayer(): ExoPlayer {
-        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+    /**
+     * Пересобирает плеер с кэширующим DataSource когда кэш готов.
+     * Сохраняет текущее состояние воспроизведения.
+     */
+    private fun rebuildPlayerWithCache() {
+        val oldPlayer = _player ?: return
+        val cacheFactory = MediaCacheManager.getCacheDataSourceFactory()
+        if (cacheFactory == null) {
+            android.util.Log.d("AudioService", "Cache not available, using HTTP-only player")
+            return
+        }
+
+        // Save state
+        val wasPlaying = oldPlayer.isPlaying
+        val currentPosition = oldPlayer.currentPosition
+        val currentMediaItem = oldPlayer.currentMediaItem
+        val mediaItems = (0 until oldPlayer.mediaItemCount).map { oldPlayer.getMediaItemAt(it) }
+        val currentIndex = oldPlayer.currentMediaItemIndex
+
+        // Build new player with cache
+        val newPlayer = buildPlayer(cacheFactory)
+        _player = newPlayer
+        currentPlayer = newPlayer
+
+        // Restore state
+        if (mediaItems.isNotEmpty()) {
+            newPlayer.setMediaItems(mediaItems, currentIndex, currentPosition)
+            newPlayer.prepare()
+            if (wasPlaying) newPlayer.play()
+        } else if (currentMediaItem != null) {
+            newPlayer.setMediaItem(currentMediaItem)
+            newPlayer.prepare()
+            if (wasPlaying) newPlayer.play()
+        }
+
+        // Update session
+        oldPlayer.removeListener(PlayerEventForwarder())
+        newPlayer.addListener(PlayerEventForwarder())
+
+        _session?.let { session ->
+            val newSession = MediaSession.Builder(this, newPlayer)
+                .setId("liquid_music_session")
+                .setCallback(SessionCallback())
+                .build()
+            session.release()
+            _session = newSession
+        }
+
+        // Restart polling
+        startPositionPolling(newPlayer)
+
+        android.util.Log.d("AudioService", "Player rebuilt with cache support")
+    }
+
+    private fun buildPlayer(
+        cacheFactory: androidx.media3.datasource.cache.CacheDataSource.Factory? = null
+    ): ExoPlayer {
+        val dataSourceFactory = cacheFactory ?: DefaultHttpDataSource.Factory()
             .setAllowCrossProtocolRedirects(true)
             .setConnectTimeoutMs(5_000)
             .setReadTimeoutMs(5_000)
@@ -106,12 +175,16 @@ class AudioService : MediaSessionService() {
                 "User-Agent" to "LiquidMusicGlass/1.0"
             ))
 
-        val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(
-            httpDataSourceFactory
-        )
+        val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
 
+        // Агрессивный LoadControl для глубокой буферизации
         val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(10_000, 30_000, 500, 1_000)
+            .setBufferDurationsMs(
+                30_000, // minBufferMs — минимум 30 сек в буфере
+                60_000, // maxBufferMs — максимум 60 сек
+                2_500,  // bufferForPlaybackMs — начать играть когда 2.5сек буфер
+                5_000   // bufferForPlaybackAfterRebufferMs — после ребуфера 5сек
+            )
             .build()
 
         return ExoPlayer.Builder(this)
@@ -148,6 +221,8 @@ class AudioService : MediaSessionService() {
 
         _session?.release()
         _session = null
+
+        MediaCacheManager.release()
 
         super.onDestroy()
     }
