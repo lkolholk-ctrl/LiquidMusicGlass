@@ -103,11 +103,15 @@ class AudioService : MediaSessionService() {
     }
 
     private fun buildPrimaryPlayer(): ExoPlayer {
-        // Explicit HTTP data source for signed stream URLs
+        // CRITICAL FIX: Aggressive timeouts to prevent eternal BUFFERING state.
+        // If stream doesn't respond in 5s — fail fast and let error handler deal with it.
         val httpDataSourceFactory = androidx.media3.datasource.DefaultHttpDataSource.Factory()
             .setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(15_000)
-            .setReadTimeoutMs(30_000)
+            .setConnectTimeoutMs(5_000)   // was 15s — too long, causes ANR
+            .setReadTimeoutMs(5_000)      // was 30s — fail fast
+            .setDefaultRequestProperties(mapOf(
+                "User-Agent" to "LiquidMusicGlass/1.0"
+            ))
 
         val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(httpDataSourceFactory)
 
@@ -116,10 +120,10 @@ class AudioService : MediaSessionService() {
             .setLoadControl(
                 androidx.media3.exoplayer.DefaultLoadControl.Builder()
                     .setBufferDurationsMs(
-                        15_000, // minBufferMs
-                        50_000, // maxBufferMs
-                        1_000,  // bufferForPlaybackMs — faster start
-                        2_000   // bufferForPlaybackAfterRebufferMs
+                        10_000, // minBufferMs
+                        30_000, // maxBufferMs
+                        500,    // bufferForPlaybackMs — start faster
+                        1_000   // bufferForPlaybackAfterRebufferMs
                     )
                     .build()
             )
@@ -521,6 +525,26 @@ class AudioService : MediaSessionService() {
         override fun onPlaybackStateChanged(playbackState: Int) {
             // Update notification on state changes
             mediaSession?.let { onUpdateNotification(it, false) }
+        }
+
+        // CRITICAL FIX: Handle player errors — prevents eternal BUFFERING state
+        override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+            android.util.Log.e("AudioService", "Player error: ${error.errorCodeName} | ${error.message}")
+            // Stop buffering, reset player state so UI doesn't hang
+            servicePlayer?.let { player ->
+                player.stop()
+                player.prepare()
+            }
+            // Notify UI that playback failed via public API
+            serviceScope.launch {
+                PlayerController.setPlaying(false)
+            }
+        }
+
+        override fun onPlayerErrorChanged(error: androidx.media3.common.PlaybackException?) {
+            if (error != null) {
+                android.util.Log.e("AudioService", "Player error changed: ${error.errorCodeName}")
+            }
         }
     }
 

@@ -74,6 +74,12 @@ object PlayerController {
     private val _isPlaying = MutableStateFlow(false)
     val isPlaying: StateFlow<Boolean> = _isPlaying
 
+    /** Called from AudioService on fatal player error to reset UI state. */
+    fun setPlaying(playing: Boolean) {
+        _isPlaying.value = playing
+        if (!playing) stopPositionUpdates()
+    }
+
     private val _currentPositionMs = MutableStateFlow(0L)
     val currentPositionMs: StateFlow<Long> = _currentPositionMs
 

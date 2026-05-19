@@ -94,14 +94,51 @@ class LyricsTimeProcessor(
 
         if (!lyrics.isSynced || parsedLines.isEmpty()) return
 
-        // Находим текущую строку
+        // CRITICAL FIX: Binary search instead of linear scan — O(log n) vs O(n)
+        // Prevents UI jank when called frequently from Compose.
         var lineIdx = -1
-        for (i in parsedLines.indices) {
-            if (parsedLines[i].timeMs <= safePosition) {
-                lineIdx = i
+        var low = 0
+        var high = parsedLines.size - 1
+        while (low <= high) {
+            val mid = (low + high) ushr 1
+            if (parsedLines[mid].timeMs <= safePosition) {
+                lineIdx = mid
+                low = mid + 1
             } else {
-                break
+                high = mid - 1
             }
+        }
+
+        // Skip update if same line — reduces unnecessary recompositions
+        if (_currentLineIndex.value == lineIdx && lineIdx >= 0) {
+            // Still need to update word progress within the line
+            val line = parsedLines[lineIdx]
+            val past = mutableListOf<WordToken>()
+            val current = mutableListOf<WordToken>()
+            val upcoming = mutableListOf<WordToken>()
+
+            for (word in line.words) {
+                when {
+                    safePosition >= word.endMs -> past.add(word)
+                    safePosition in word.startMs..word.endMs -> current.add(
+                        word.copy(
+                            progress = LYRIC_PROGRESS_INTERPOLATOR.getInterpolation(
+                                ((safePosition - word.startMs).toFloat() /
+                                        (word.endMs - word.startMs).toFloat()).coerceIn(0f, 1f)
+                            )
+                        )
+                    )
+                    else -> upcoming.add(word)
+                }
+            }
+
+            // Only emit if word states actually changed
+            if (_pastWords.value != past || _currentWords.value != current || _upcomingWords.value != upcoming) {
+                _pastWords.value = past
+                _currentWords.value = current
+                _upcomingWords.value = upcoming
+            }
+            return
         }
 
         _currentLineIndex.value = lineIdx
