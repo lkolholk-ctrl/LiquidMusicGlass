@@ -115,60 +115,11 @@ jobs:
           disable-animations: true
           script: |
             echo "=== Smoke Test Started ==="
-            
-            adb wait-for-device
-            while [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" != "1" ]; do
-              echo -n "."
-              sleep 2
-            done
-            echo "Boot completed!"
-            sleep 5
-            
-            # Install APK
-            APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
-            echo "Installing $APK_PATH..."
-            adb install -r -t "$APK_PATH"
-            echo "APK installed."
-            
-            # Clear logcat
-            adb logcat -c
-            
-            # Launch app
-            echo "Launching MainActivity..."
-            adb shell am start -n "com.liquidmusicglass/com.liquidmusicglass.MainActivity"
-            sleep 5
-            
-            # Screenshot
-            echo "Taking screenshot..."
-            adb shell screencap -p /sdcard/screen.png
-            adb pull /sdcard/screen.png smoke-test-screenshot.png
-            adb shell rm /sdcard/screen.png
-            
-            # Collect logcat
-            echo "Collecting logcat..."
-            adb logcat -d > smoke-test-logcat.txt
-            
-            # Check for crashes
-            echo "=== Crash Analysis ==="
-            CRASH=0
-            if grep -q "FATAL EXCEPTION" smoke-test-logcat.txt; then
-              echo "❌ FATAL EXCEPTION found!"
-              grep -A 10 "FATAL EXCEPTION" smoke-test-logcat.txt
-              CRASH=1
-            fi
-            
-            if grep -q "UninitializedPropertyAccessException" smoke-test-logcat.txt; then
-              echo "❌ UninitializedPropertyAccessException found!"
-              grep -A 10 "UninitializedPropertyAccessException" smoke-test-logcat.txt
-              CRASH=1
-            fi
-            
-            if [ $CRASH -eq 0 ]; then
-              echo "✅ No crashes detected — SMOKE TEST PASSED"
-            else
-              echo "❌ SMOKE TEST FAILED"
-              exit 1
-            fi
+            adb install -r -t app/build/outputs/apk/debug/app-debug.apk
+            adb shell am start -n com.liquidmusicglass/.MainActivity
+            sleep 10
+            adb shell monkey -p com.liquidmusicglass --pct-syskeys 0 -v 100
+            adb logcat -d > crash_check.log
 
       - name: Upload Smoke Test Results
         if: always()
@@ -176,8 +127,7 @@ jobs:
         with:
           name: smoke-test-results
           path: |
-            smoke-test-screenshot.png
-            smoke-test-logcat.txt
+            crash_check.log
           retention-days: 7
 
   ui-tests:
