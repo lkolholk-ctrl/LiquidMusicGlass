@@ -164,6 +164,165 @@ object IcmRepository {
         return searchAll(query, region, IcmSearchSource.ALL, limit)
     }
 
+    // ═══════════════════════════════════════════════════════════
+    //  Home Screen Content (Banners, New Releases, Charts)
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * Load home screen content blocks.
+     * Since the backend does not have a dedicated /home endpoint,
+     * we construct blocks from available APIs:
+     * - Banners: search tracks with popular queries
+     * - New Releases: search albums with "new" query
+     * - Charts: search tracks with trending queries
+     * - Recommendations: wave next tracks (if user is linked)
+     */
+    suspend fun loadHomeContent(): IcmHomeResponse {
+        val blocks = mutableListOf<IcmHomeBlock>()
+
+        // ─── Banners: popular tracks ───
+        val bannerQueries = listOf("top hits", "popular", "trending")
+        val bannerItems = mutableListOf<IcmHomeItem>()
+        for (query in bannerQueries) {
+            if (bannerItems.size >= 6) break
+            val result = searchAll(query, limit = 5)
+            result?.items
+                ?.filter { it.isTrack }
+                ?.take(6 - bannerItems.size)
+                ?.forEach { item ->
+                    bannerItems.add(
+                        IcmHomeItem(
+                            id = item.id,
+                            title = item.title,
+                            artist = item.displayArtist,
+                            artistId = item.artistId,
+                            cover = item.cover,
+                            duration = item.duration,
+                            source = item.source,
+                            genre = query
+                        )
+                    )
+                }
+        }
+        if (bannerItems.isNotEmpty()) {
+            blocks.add(
+                IcmHomeBlock(
+                    id = "banners",
+                    title = "Featured",
+                    type = "banner",
+                    items = bannerItems
+                )
+            )
+        }
+
+        // ─── New Releases: albums ───
+        val newReleaseQueries = listOf("new releases", "new music", "latest")
+        val newReleaseItems = mutableListOf<IcmHomeItem>()
+        for (query in newReleaseQueries) {
+            if (newReleaseItems.size >= 10) break
+            val result = searchAll(query, limit = 10)
+            result?.items
+                ?.filter { it.isAlbum || it.collectionId != null }
+                ?.take(10 - newReleaseItems.size)
+                ?.forEach { item ->
+                    newReleaseItems.add(
+                        IcmHomeItem(
+                            id = item.id,
+                            title = item.title,
+                            artist = item.displayArtist,
+                            artistId = item.artistId,
+                            cover = item.cover,
+                            collectionId = item.collectionId,
+                            album = item.album,
+                            source = item.source
+                        )
+                    )
+                }
+        }
+        if (newReleaseItems.isNotEmpty()) {
+            blocks.add(
+                IcmHomeBlock(
+                    id = "new_releases",
+                    title = "New Releases",
+                    type = "new_releases",
+                    items = newReleaseItems
+                )
+            )
+        }
+
+        // ─── Charts: trending tracks with rank ───
+        val chartQueries = listOf("top 100", "chart", "hot", "viral")
+        val chartItems = mutableListOf<IcmHomeItem>()
+        var rank = 1
+        for (query in chartQueries) {
+            if (chartItems.size >= 15) break
+            val result = searchAll(query, limit = 10)
+            result?.items
+                ?.filter { it.isTrack }
+                ?.take(15 - chartItems.size)
+                ?.forEach { item ->
+                    chartItems.add(
+                        IcmHomeItem(
+                            id = item.id,
+                            title = item.title,
+                            artist = item.displayArtist,
+                            artistId = item.artistId,
+                            cover = item.cover,
+                            duration = item.duration,
+                            source = item.source,
+                            rank = rank++
+                        )
+                    )
+                }
+        }
+        if (chartItems.isNotEmpty()) {
+            blocks.add(
+                IcmHomeBlock(
+                    id = "charts",
+                    title = "Top Charts",
+                    type = "charts",
+                    items = chartItems
+                )
+            )
+        }
+
+        // ─── Recommendations: wave tracks (if linked) ───
+        if (api.partnerUserId != null) {
+            val waveItems = mutableListOf<IcmHomeItem>()
+            repeat(5) {
+                val response = getWaveNext(
+                    seedTrackId = waveItems.firstOrNull()?.id,
+                    exclude = waveItems.map { it.id }.takeIf { it.isNotEmpty() },
+                    recentSkips = 0
+                )
+                if (response != null && response.status == "ok" && response.track != null) {
+                    waveItems.add(
+                        IcmHomeItem(
+                            id = response.track.id,
+                            title = response.track.title,
+                            artist = response.track.artist ?: "Unknown Artist",
+                            cover = response.track.cover,
+                            duration = response.track.durationMs,
+                            source = "wave"
+                        )
+                    )
+                }
+            }
+            if (waveItems.isNotEmpty()) {
+                blocks.add(
+                    IcmHomeBlock(
+                        id = "recommendations",
+                        title = "Made For You",
+                        type = "recommendations",
+                        items = waveItems
+                    )
+                )
+            }
+        }
+
+        return IcmHomeResponse(blocks = blocks)
+    }
+
     /**
      * Get signed stream URL.
      */

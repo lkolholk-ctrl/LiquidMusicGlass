@@ -747,3 +747,66 @@ data class IcmPasswordResetRequest(
 data class IcmPasswordResetResponse(
     val reset: Boolean = false
 )
+
+// ═══════════════════════════════════════════════════════════
+//  Home Screen Models (Banners, New Releases, Charts)
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * A generic content block returned by the backend for the home screen.
+ * Each block has a title, type, and a list of items.
+ */
+@Serializable
+data class IcmHomeBlock(
+    val id: String,
+    val title: String,
+    val type: String, // "banner", "new_releases", "charts", "recommendations"
+    val items: List<IcmHomeItem> = emptyList()
+)
+
+/**
+ * A single item inside a home block.
+ * Can represent a track, album, artist, or promotional card.
+ */
+@Serializable
+data class IcmHomeItem(
+    val id: String,
+    val title: String,
+    val artist: String? = null,
+    @SerialName("artistName") val artistName: String? = null,
+    @SerialName("artistId") val artistId: String? = null,
+    val cover: String? = null,
+    @SerialName("collectionId") val collectionId: String? = null,
+    val album: String? = null,
+    @SerialName("is_explicit") val isExplicit: Boolean = false,
+    val region: String? = null,
+    val duration: Long? = null,
+    val source: String? = null,
+    @SerialName("trackId") val trackId: String? = null,
+    @SerialName("rank") val rank: Int? = null,
+    @SerialName("subtitle") val subtitle: String? = null,
+    @SerialName("genre") val genre: String? = null
+) {
+    val displayArtist: String
+        get() = artist?.takeIf { it.isNotBlank() && it != "Исполнитель" }
+            ?: artistName?.takeIf { it.isNotBlank() && it != "Исполнитель" }
+            ?: "Unknown Artist"
+
+    /** VK returns duration in seconds, Apple in milliseconds. Normalized to ms. */
+    val durationMs: Long
+        get() {
+            val d = duration ?: return 0L
+            return if (d < 1000) d * 1000L else d
+        }
+}
+
+/**
+ * Full home screen response — a list of content blocks.
+ * This is what the backend returns for GET /api/partner/home (if available)
+ * or what we construct from multiple API calls.
+ */
+@Serializable
+data class IcmHomeResponse(
+    val blocks: List<IcmHomeBlock> = emptyList(),
+    @SerialName("updated_at") val updatedAt: Long? = null
+)

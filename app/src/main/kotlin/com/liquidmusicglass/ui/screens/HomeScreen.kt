@@ -14,8 +14,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.ThumbDown
-import androidx.compose.material.icons.rounded.ThumbUp
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -33,12 +31,17 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import com.liquidmusicglass.api.icm.IcmAuthRepository
+import com.liquidmusicglass.api.icm.IcmHomeBlock
+import com.liquidmusicglass.api.icm.IcmHomeItem
 import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.api.icm.IcmWaveTrack
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.Track
 import com.liquidmusicglass.ui.glass.AlbumArtImage
 import com.liquidmusicglass.ui.theme.LiquidTheme
+import com.liquidmusicglass.ui.viewmodel.HomeViewModel
 import kotlinx.coroutines.launch
 
 private val AppleRed = Color(0xFFFC3C44)
@@ -55,6 +58,19 @@ private suspend fun resolveWaveTrackUrl(track: Track?): Track? {
     } catch (_: Exception) {
         track
     }
+}
+
+private fun IcmHomeItem.toTrack(): Track {
+    return Track(
+        id = id,
+        title = title,
+        artist = displayArtist,
+        albumName = album ?: "",
+        uri = Uri.parse("https://byicloud.online/track/$id"),
+        durationMs = durationMs,
+        albumId = collectionId?.hashCode()?.toLong() ?: -1L,
+        coverUrl = cover
+    )
 }
 
 // Mood categories with gradient colors (like Apple Music screenshot)
@@ -140,9 +156,14 @@ fun HomeScreen(
     onNavigateToArtist: (String) -> Unit = {},
     onNavigateToPlaylist: (String) -> Unit = {}
 ) {
+    val viewModel = remember { HomeViewModel() }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val scroll = rememberScrollState()
+
+    val homeContent by viewModel.homeContent.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
+    val error by viewModel.error.collectAsState()
 
     val allTracks by PlayerController.queueFlow.collectAsState()
     val recentlyPlayed by PlayerController.recentlyPlayed.collectAsState()
@@ -151,6 +172,17 @@ fun HomeScreen(
     val favoriteTracks = remember(allTracks, favoriteIds) {
         allTracks.filter { it.id in favoriteIds }
     }
+
+    // Load home content on first composition
+    LaunchedEffect(Unit) {
+        viewModel.loadHomeContent()
+    }
+
+    // Extract blocks from home content
+    val bannerBlock = remember(homeContent) { homeContent?.blocks?.find { it.type == "banner" } }
+    val newReleasesBlock = remember(homeContent) { homeContent?.blocks?.find { it.type == "new_releases" } }
+    val chartsBlock = remember(homeContent) { homeContent?.blocks?.find { it.type == "charts" } }
+    val recommendationsBlock = remember(homeContent) { homeContent?.blocks?.find { it.type == "recommendations" } }
 
     // Wave state - active mood station
     var activeMoodId by remember { mutableStateOf<String?>(null) }
@@ -303,15 +335,171 @@ fun HomeScreen(
         ) {
             Spacer(modifier = Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
 
-            Text(
-                text = "Home",
-                fontWeight = FontWeight.Bold,
-                fontSize = 32.sp,
-                color = LiquidTheme.colors.textPrimary,
-                modifier = Modifier.padding(horizontal = 20.dp)
-            )
+            // Header with refresh
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Listen Now",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 32.sp,
+                    color = LiquidTheme.colors.textPrimary
+                )
+                IconButton(onClick = { viewModel.refresh() }) {
+                    Icon(
+                        imageVector = Icons.Rounded.Refresh,
+                        contentDescription = "Refresh",
+                        tint = LiquidTheme.colors.textSecondary
+                    )
+                }
+            }
 
             Spacer(modifier = Modifier.height(28.dp))
+
+            // Loading state
+            if (isLoading && homeContent == null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(400.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(color = AppleRed)
+                }
+            }
+
+            // Error state
+            error?.let { errorMsg ->
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFF1C1C1E))
+                        .padding(16.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = errorMsg,
+                        color = Color(0xFFFF453A),
+                        fontSize = 14.sp
+                    )
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+
+            // ─── Banners (Featured) ───
+            bannerBlock?.let { block ->
+                if (block.items.isNotEmpty()) {
+                    SectionHeader(title = block.title)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 20.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        items(block.items, key = { "banner_${it.id}" }) { item ->
+                            BannerCard(
+                                item = item,
+                                onClick = {
+                                    val track = item.toTrack()
+                                    scope.launch {
+                                        val resolved = resolveWaveTrackUrl(track)
+                                        PlayerController.playNext(resolved ?: track, context)
+                                    }
+                                }
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(32.dp))
+                }
+            }
+
+            // ─── New Releases ───
+            newReleasesBlock?.let { block ->
+                if (block.items.isNotEmpty()) {
+                    SectionHeader(title = block.title)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 20.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        items(block.items, key = { "new_${it.id}" }) { item ->
+                            AlbumCard(
+                                item = item,
+                                onClick = {
+                                    item.collectionId?.let { onNavigateToAlbum(it) }
+                                }
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(32.dp))
+                }
+            }
+
+            // ─── Charts (Top Tracks) ───
+            chartsBlock?.let { block ->
+                if (block.items.isNotEmpty()) {
+                    SectionHeader(title = block.title)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    // Charts displayed as a horizontal carousel with 3 tracks per column
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 20.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        val chunked = block.items.chunked(3)
+                        items(chunked, key = { "chart_col_${it.first().id}" }) { chunk ->
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.width(280.dp)
+                            ) {
+                                chunk.forEach { item ->
+                                    ChartTrackRow(
+                                        item = item,
+                                        onClick = {
+                                            val track = item.toTrack()
+                                            scope.launch {
+                                                val resolved = resolveWaveTrackUrl(track)
+                                                PlayerController.playNext(resolved ?: track, context)
+                                            }
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(32.dp))
+                }
+            }
+
+            // ─── Recommendations (Made For You) ───
+            recommendationsBlock?.let { block ->
+                if (block.items.isNotEmpty()) {
+                    SectionHeader(title = block.title)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 20.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        items(block.items, key = { "rec_${it.id}" }) { item ->
+                            RecommendationCard(
+                                item = item,
+                                onClick = {
+                                    val track = item.toTrack()
+                                    scope.launch {
+                                        val resolved = resolveWaveTrackUrl(track)
+                                        PlayerController.playNext(resolved ?: track, context)
+                                    }
+                                }
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(32.dp))
+                }
+            }
 
             // ─── My Wave - Mood Categories ───
             SectionHeader(title = "Под настроение")
@@ -392,58 +580,6 @@ fun HomeScreen(
                 Spacer(modifier = Modifier.height(32.dp))
             }
 
-            // ─── For You ───
-            if (allTracks.isNotEmpty()) {
-                SectionHeader(title = "For You")
-                Spacer(modifier = Modifier.height(12.dp))
-                val recs = remember(allTracks) { allTracks.distinctBy { it.id }.shuffled().take(15) }
-                Box(modifier = Modifier.height(190.dp)) {
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = 20.dp),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp)
-                    ) {
-                        items(recs, key = { "foryou_${it.id}" }) { track ->
-                            RecommendationCard(
-                                track = track,
-                                onClick = { PlayerController.playNext(track, context) }
-                            )
-                        }
-                    }
-                }
-                Spacer(modifier = Modifier.height(32.dp))
-            }
-
-            // ─── Mixes ───
-            if (allTracks.isNotEmpty()) {
-                SectionHeader(title = "Mixes")
-                Spacer(modifier = Modifier.height(12.dp))
-                val artistGroups = remember(allTracks) {
-                    allTracks.groupBy { it.artist }
-                        .filter { it.value.size >= 2 }
-                        .entries
-                        .sortedByDescending { it.value.size }
-                        .take(8)
-                }
-                Box(modifier = Modifier.height(220.dp)) {
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = 20.dp),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp)
-                    ) {
-                        items(artistGroups, key = { it.key }) { (artist, tracks) ->
-                            ArtistMixCard(
-                                artistName = artist,
-                                tracks = tracks,
-                                onClick = {
-                                    PlayerController.setQueue(tracks)
-                                    PlayerController.playTrack(context, 0)
-                                }
-                            )
-                        }
-                    }
-                }
-                Spacer(modifier = Modifier.height(32.dp))
-            }
-
             // ─── Favorites ───
             if (favoriteTracks.isNotEmpty()) {
                 SectionHeader(title = "Favorites")
@@ -464,27 +600,238 @@ fun HomeScreen(
                 Spacer(modifier = Modifier.height(32.dp))
             }
 
-            // ─── Quick Picks ───
-            if (allTracks.isNotEmpty()) {
-                SectionHeader(title = "Quick Picks")
-                Spacer(modifier = Modifier.height(12.dp))
-                val quickPicks = remember(allTracks) { allTracks.shuffled().take(6) }
-                Column(
-                    modifier = Modifier.padding(horizontal = 20.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    quickPicks.forEach { track ->
-                        QuickPickRow(
-                            track = track,
-                            onClick = { PlayerController.playNext(track, context) }
-                        )
-                    }
-                }
-            }
-
             Spacer(modifier = Modifier.height(200.dp))
         }
     }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  UI Components
+// ═══════════════════════════════════════════════════════════
+
+@Composable
+private fun BannerCard(
+    item: IcmHomeItem,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .width(320.dp)
+            .height(180.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+    ) {
+        // Background image
+        AsyncImage(
+            model = ImageRequest.Builder(LocalContext.current)
+                .data(item.cover)
+                .crossfade(true)
+                .build(),
+            contentDescription = item.title,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize()
+        )
+        // Dark gradient overlay
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.7f)),
+                        startY = 80f
+                    )
+                )
+        )
+        // Text content
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(16.dp)
+        ) {
+            Text(
+                text = item.title,
+                color = Color.White,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = item.genre ?: item.displayArtist,
+                color = Color.White.copy(alpha = 0.7f),
+                fontSize = 13.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        // Play button
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(12.dp)
+                .size(36.dp)
+                .clip(RoundedCornerShape(50))
+                .background(AppleRed)
+                .clickable(onClick = onClick),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.PlayArrow,
+                contentDescription = "Play",
+                tint = Color.White,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun AlbumCard(
+    item: IcmHomeItem,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .width(140.dp)
+            .clickable(onClick = onClick)
+    ) {
+        AsyncImage(
+            model = ImageRequest.Builder(LocalContext.current)
+                .data(item.cover)
+                .crossfade(true)
+                .build(),
+            contentDescription = item.title,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .size(140.dp)
+                .clip(RoundedCornerShape(8.dp))
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = item.title,
+            color = LiquidTheme.colors.textPrimary,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = item.displayArtist,
+            color = LiquidTheme.colors.textSecondary,
+            fontSize = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+private fun ChartTrackRow(
+    item: IcmHomeItem,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Rank number
+        Text(
+            text = "${item.rank ?: 0}",
+            color = LiquidTheme.colors.textSecondary,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.width(28.dp)
+        )
+        // Mini cover
+        AsyncImage(
+            model = ImageRequest.Builder(LocalContext.current)
+                .data(item.cover)
+                .crossfade(true)
+                .build(),
+            contentDescription = item.title,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .size(48.dp)
+                .clip(RoundedCornerShape(6.dp))
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        // Track info
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = item.title,
+                color = LiquidTheme.colors.textPrimary,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = item.displayArtist,
+                color = LiquidTheme.colors.textSecondary,
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+private fun RecommendationCard(
+    item: IcmHomeItem,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .width(160.dp)
+            .clickable(onClick = onClick)
+    ) {
+        AsyncImage(
+            model = ImageRequest.Builder(LocalContext.current)
+                .data(item.cover)
+                .crossfade(true)
+                .build(),
+            contentDescription = item.title,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .size(160.dp)
+                .clip(RoundedCornerShape(8.dp))
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = item.title,
+            color = LiquidTheme.colors.textPrimary,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = item.displayArtist,
+            color = LiquidTheme.colors.textSecondary,
+            fontSize = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+private fun SectionHeader(title: String) {
+    Text(
+        text = title,
+        fontWeight = FontWeight.Bold,
+        fontSize = 22.sp,
+        color = LiquidTheme.colors.textPrimary,
+        modifier = Modifier.padding(horizontal = 20.dp)
+    )
 }
 
 @Composable
@@ -498,70 +845,43 @@ private fun MoodCard(
         modifier = Modifier
             .width(160.dp)
             .height(100.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(
-                brush = Brush.linearGradient(
-                    colors = mood.gradientColors,
-                    start = androidx.compose.ui.geometry.Offset(0f, 0f),
-                    end = androidx.compose.ui.geometry.Offset(160f, 100f)
-                )
-            )
+            .clip(RoundedCornerShape(16.dp))
+            .background(Brush.linearGradient(mood.gradientColors))
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = onClick
             )
-            .padding(12.dp)
+            .padding(16.dp)
     ) {
-        // Decorative icon (top-right)
+        if (isLoading) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(20.dp).align(Alignment.BottomEnd),
+                color = Color.White,
+                strokeWidth = 2.dp
+            )
+        }
         Text(
             text = mood.icon,
             fontSize = 24.sp,
-            modifier = Modifier.align(Alignment.TopEnd),
-            color = Color.White.copy(alpha = 0.6f)
+            modifier = Modifier.align(Alignment.TopEnd)
         )
-
-        // Title (bottom-left)
         Text(
             text = mood.title,
             color = Color.White,
-            fontSize = 15.sp,
+            fontSize = 16.sp,
             fontWeight = FontWeight.SemiBold,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
             modifier = Modifier.align(Alignment.BottomStart)
         )
-
-        // Active / loading indicator
-        Box(
-            modifier = Modifier.align(Alignment.BottomEnd)
-        ) {
-            if (isLoading) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(16.dp),
-                    color = Color.White,
-                    strokeWidth = 2.dp
-                )
-            } else if (isActive) {
-                Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .background(AppleRed, RoundedCornerShape(50))
-                )
-            }
+        if (isActive) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .background(AppleRed, RoundedCornerShape(50))
+                    .align(Alignment.TopStart)
+            )
         }
     }
-}
-
-@Composable
-private fun SectionHeader(title: String) {
-    Text(
-        text = title,
-        color = LiquidTheme.colors.textPrimary,
-        fontSize = 20.sp,
-        fontWeight = FontWeight.SemiBold,
-        modifier = Modifier.padding(horizontal = 20.dp)
-    )
 }
 
 @Composable
@@ -571,199 +891,32 @@ private fun RecentTrackCard(
 ) {
     Column(
         modifier = Modifier
-            .width(130.dp)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onClick
-            )
+            .width(140.dp)
+            .clickable(onClick = onClick)
     ) {
-        Box(
+        AlbumArtImage(
+            uri = track.displayArtUri,
+            coverUrl = track.coverUrl,
             modifier = Modifier
-                .size(130.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(Color(0xFF1A1A1A))
-        ) {
-            AlbumArtImage(
-                uri = null,
-                coverUrl = track.coverUrl?.replace("1000x1000", "600x600"),
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
-            )
-        }
-        Spacer(modifier = Modifier.height(6.dp))
-        Text(
-            text = track.title,
-            color = LiquidTheme.colors.textPrimary,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Medium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-        Text(
-            text = track.artist,
-            color = LiquidTheme.colors.textSecondary,
-            fontSize = 11.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-    }
-}
-
-@Composable
-private fun RecommendationCard(
-    track: Track,
-    onClick: () -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .width(130.dp)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onClick
-            )
-    ) {
-        Box(
-            modifier = Modifier
-                .size(130.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(Color(0xFF1A1A1A))
-        ) {
-            AlbumArtImage(
-                uri = null,
-                coverUrl = track.coverUrl?.replace("1000x1000", "600x600"),
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
-            )
-        }
-        Spacer(modifier = Modifier.height(6.dp))
-        Text(
-            text = track.title,
-            color = LiquidTheme.colors.textPrimary,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Medium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-        Text(
-            text = track.artist,
-            color = LiquidTheme.colors.textSecondary,
-            fontSize = 11.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-    }
-}
-
-@Composable
-private fun ArtistMixCard(
-    artistName: String,
-    tracks: List<Track>,
-    onClick: () -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .width(180.dp)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onClick
-            )
-    ) {
-        Box(
-            modifier = Modifier
-                .size(180.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(Color(0xFF1A1A1A))
-        ) {
-            AlbumArtImage(
-                uri = null,
-                coverUrl = tracks.firstOrNull()?.coverUrl?.replace("1000x1000", "600x600"),
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
-            )
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.3f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = artistName,
-                        color = Color.White,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = "${tracks.size} tracks",
-                        color = Color.White.copy(alpha = 0.7f),
-                        fontSize = 12.sp
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun QuickPickRow(
-    track: Track,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(56.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(Color(0xFF1A1A1A))
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onClick
-            )
-            .padding(horizontal = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .size(44.dp)
+                .size(140.dp)
                 .clip(RoundedCornerShape(8.dp))
-                .background(Color(0xFF2A2A2A))
-        ) {
-            AlbumArtImage(
-                uri = null,
-                coverUrl = track.coverUrl?.replace("1000x1000", "600x600"),
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
-            )
-        }
-        Spacer(modifier = Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = track.title,
-                color = LiquidTheme.colors.textPrimary,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = track.artist,
-                color = LiquidTheme.colors.textSecondary,
-                fontSize = 12.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-        Icon(
-            imageVector = Icons.Rounded.PlayArrow,
-            contentDescription = null,
-            tint = AppleRed,
-            modifier = Modifier.size(20.dp)
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = track.title,
+            color = LiquidTheme.colors.textPrimary,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = track.artist,
+            color = LiquidTheme.colors.textSecondary,
+            fontSize = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }
