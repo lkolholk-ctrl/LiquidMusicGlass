@@ -40,19 +40,6 @@ import kotlinx.coroutines.launch
 
 /**
  * AudioService — строго по Media3 спецификации.
- *
- * Архитектура:
- *   1. Асинхронная инициализация кэша (не блокирует onCreate)
- *   2. CacheDataSource с fallback на чистый HTTP при ошибке
- *   3. Агрессивный LoadControl: 30s min / 60s max буфер
- *   4. DefaultMediaNotificationProvider — автоматическое медиа-уведомление
- *      с обложкой, кнопками Play/Pause/Next/Prev, прогресс-баром
- *   5. Gapless playback через очередь (player.addMediaItem)
- *
- * Жизненный цикл:
- *   onCreate()    → player + mediaSession + notificationProvider (кэш async)
- *   onGetSession()→ возвращаем mediaSession
- *   onDestroy()   → player.release() + mediaSession.release()
  */
 @OptIn(UnstableApi::class)
 class AudioService : MediaSessionService() {
@@ -63,33 +50,25 @@ class AudioService : MediaSessionService() {
     private var _session: MediaSession? = null
     private var _notificationProvider: DefaultMediaNotificationProvider? = null
 
-    // ── Notification channel ──
     private val channelId = "liquid_music_playback"
 
-    // ── Playback state exposed via StateFlow ──
     private val _playbackState = MutableStateFlow(Player.STATE_IDLE)
     val playbackState: StateFlow<Int> = _playbackState.asStateFlow()
 
     private val _isBuffering = MutableStateFlow(false)
     val isBuffering: StateFlow<Boolean> = _isBuffering.asStateFlow()
 
-    // ── Position polling job ──
     private var positionJob: Job? = null
-
-    // ── AutoMix Engine ──
     private var autoMixEngine: ServiceBackedAutoMixEngine? = null
 
     override fun onCreate() {
         super.onCreate()
 
-        // Initialize cache asynchronously — NEVER blocks onCreate
         serviceScope.launch {
             MediaCacheManager.init(this@AudioService)
-            // Rebuild player with cache once it's ready
             rebuildPlayerWithCache()
         }
 
-        // Build initial player without cache (will be rebuilt when cache is ready)
         val player = buildPlayer()
         _player = player
         currentPlayer = player
@@ -99,7 +78,6 @@ class AudioService : MediaSessionService() {
             .setCallback(SessionCallback())
             .build()
 
-        // Set up DefaultMediaNotificationProvider for rich media notification
         val notificationProvider = DefaultMediaNotificationProvider.Builder(this)
             .setChannelId(channelId)
             .setChannelName(R.string.notification_channel_name)
@@ -113,7 +91,6 @@ class AudioService : MediaSessionService() {
 
         player.addListener(PlayerEventForwarder())
 
-        // Initialize AutoMix engine
         autoMixEngine = ServiceBackedAutoMixEngine(
             context = this,
             scope = serviceScope,
@@ -121,17 +98,10 @@ class AudioService : MediaSessionService() {
         )
         PlayerController.setAutoMixEngine(autoMixEngine)
 
-        // Start position polling
         startPositionPolling(player)
-
-        // Ensure notification channel exists
         ensureNotificationChannel()
     }
 
-    /**
-     * Пересобирает плеер с кэширующим DataSource когда кэш готов.
-     * Сохраняет текущее состояние воспроизведения.
-     */
     private fun rebuildPlayerWithCache() {
         val oldPlayer = _player ?: return
         val cacheFactory = MediaCacheManager.getCacheDataSourceFactory()
@@ -140,19 +110,16 @@ class AudioService : MediaSessionService() {
             return
         }
 
-        // Save state
         val wasPlaying = oldPlayer.isPlaying
         val currentPosition = oldPlayer.currentPosition
         val currentMediaItem = oldPlayer.currentMediaItem
         val mediaItems = (0 until oldPlayer.mediaItemCount).map { oldPlayer.getMediaItemAt(it) }
         val currentIndex = oldPlayer.currentMediaItemIndex
 
-        // Build new player with cache
         val newPlayer = buildPlayer(cacheFactory)
         _player = newPlayer
         currentPlayer = newPlayer
 
-        // Restore state
         if (mediaItems.isNotEmpty()) {
             newPlayer.setMediaItems(mediaItems, currentIndex, currentPosition)
             newPlayer.prepare()
@@ -163,7 +130,6 @@ class AudioService : MediaSessionService() {
             if (wasPlaying) newPlayer.play()
         }
 
-        // Update session
         oldPlayer.removeListener(PlayerEventForwarder())
         newPlayer.addListener(PlayerEventForwarder())
 
@@ -177,9 +143,7 @@ class AudioService : MediaSessionService() {
             .setCallback(SessionCallback())
             .build()
 
-        // Restart polling
         startPositionPolling(newPlayer)
-
         android.util.Log.d("AudioService", "Player rebuilt with cache support")
     }
 
@@ -196,14 +160,8 @@ class AudioService : MediaSessionService() {
 
         val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
 
-        // Агрессивный LoadControl для глубокой буферизации
         val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(
-                30_000, // minBufferMs — минимум 30 сек в буфере
-                60_000, // maxBufferMs — максимум 60 сек
-                2_500,  // bufferForPlaybackMs — начать играть когда 2.5сек буфер
-                5_000   // bufferForPlaybackAfterRebufferMs — после ребуфера 5сек
-            )
+            .setBufferDurationsMs(30_000, 60_000, 2_500, 5_000)
             .build()
 
         return ExoPlayer.Builder(this)
@@ -216,7 +174,6 @@ class AudioService : MediaSessionService() {
                     .setUsage(C.USAGE_MEDIA)
                     .build()
 
-                // true = автоматический аудиофокус, ducking, пауза при звонках
                 setAudioAttributes(audioAttributes, true)
                 setHandleAudioBecomingNoisy(true)
                 playWhenReady = false
@@ -229,7 +186,6 @@ class AudioService : MediaSessionService() {
 
     override fun onDestroy() {
         positionJob?.cancel()
-
         autoMixEngine?.release()
         autoMixEngine = null
 
@@ -242,13 +198,8 @@ class AudioService : MediaSessionService() {
         _session = null
 
         MediaCacheManager.release()
-
         super.onDestroy()
     }
-
-    // ═══════════════════════════════════════════════════════════
-    //  Player Listener — единая точка обратной связи
-    // ═══════════════════════════════════════════════════════════
 
     private inner class PlayerEventForwarder : Player.Listener {
 
@@ -257,18 +208,9 @@ class AudioService : MediaSessionService() {
             _isBuffering.value = (playbackState == Player.STATE_BUFFERING)
 
             when (playbackState) {
-                Player.STATE_BUFFERING -> {
-                    android.util.Log.d("AudioService", "STATE_BUFFERING")
-                }
-                Player.STATE_READY -> {
-                    android.util.Log.d("AudioService", "STATE_READY")
-                }
                 Player.STATE_ENDED -> {
                     android.util.Log.d("AudioService", "STATE_ENDED → next track")
                     PlayerController.onTrackEnded()
-                }
-                Player.STATE_IDLE -> {
-                    android.util.Log.d("AudioService", "STATE_IDLE")
                 }
             }
         }
@@ -287,14 +229,12 @@ class AudioService : MediaSessionService() {
         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
             android.util.Log.e("AudioService", "Player error: ${error.errorCodeName} | ${error.message}")
 
-            // Check for expired stream URL (403 invalid_or_expired_signature per ICM API docs)
             val isExpiredUrl = error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS
                 && error.message?.contains("403") == true
 
             if (isExpiredUrl) {
                 val currentTrackId = _player?.currentMediaItem?.mediaId
                 if (currentTrackId != null) {
-                    android.util.Log.d("AudioService", "URL expired for $currentTrackId, triggering re-resolve")
                     PlayerController.handleExpiredUrl(this@AudioService, currentTrackId)
                     return
                 }
@@ -305,17 +245,7 @@ class AudioService : MediaSessionService() {
             PlayerController.setPlaying(false)
             PlayerController.onPlaybackError(error.errorCodeName)
         }
-
-        override fun onPlayerErrorChanged(error: androidx.media3.common.PlaybackException?) {
-            error?.let {
-                android.util.Log.e("AudioService", "Error changed: ${it.errorCodeName}")
-            }
-        }
     }
-
-    // ═══════════════════════════════════════════════════════════
-    //  Position polling — строго асинхронный, только при isPlaying
-    // ═══════════════════════════════════════════════════════════
 
     private fun startPositionPolling(player: ExoPlayer) {
         positionJob?.cancel()
@@ -330,7 +260,6 @@ class AudioService : MediaSessionService() {
 
                     PlayerController.updatePosition(position)
 
-                    // AutoMix check
                     autoMixEngine?.maybeStartAutoMix(
                         currentPositionMs = position,
                         durationMs = duration,
@@ -344,12 +273,7 @@ class AudioService : MediaSessionService() {
         }
     }
 
-    // ═══════════════════════════════════════════════════════════
-    //  MediaSession Callback
-    // ═══════════════════════════════════════════════════════════
-
     private inner class SessionCallback : MediaSession.Callback {
-
         override fun onConnect(
             session: MediaSession,
             controller: MediaSession.ControllerInfo
@@ -392,10 +316,6 @@ class AudioService : MediaSessionService() {
         }
     }
 
-    // ═══════════════════════════════════════════════════════════
-    //  Notification Channel
-    // ═══════════════════════════════════════════════════════════
-
     private fun ensureNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -405,12 +325,7 @@ class AudioService : MediaSessionService() {
                         channelId,
                         getString(R.string.notification_channel_name),
                         NotificationManager.IMPORTANCE_LOW
-                    ).apply {
-                        description = getString(R.string.notification_channel_description)
-                        setShowBadge(false)
-                        enableLights(false)
-                        enableVibration(false)
-                    }
+                    )
                 )
             }
         }
@@ -419,11 +334,6 @@ class AudioService : MediaSessionService() {
     companion object {
         private const val COMMAND_TOGGLE_FAVORITE = "com.liquidmusicglass.TOGGLE_FAVORITE"
 
-        /**
-         * Exposed for AutoMix crossfade volume control only.
-         * ServiceBackedAutoMixEngine needs temporary access to primary player
-         * during transitions to fade volume. Never used for playback control.
-         */
         @Volatile
         var currentPlayer: ExoPlayer? = null
             private set
