@@ -398,6 +398,12 @@ class AutoMixController(
         return output
     }
 
+    fun release() {
+        try { predictor?.close() } catch (_: Throwable) {}
+        predictor = null
+        energyCache.clear()
+    }
+
     companion object {
         private const val COMPATIBILITY_THRESHOLD = 0.45f
         private const val MIN_COMPATIBILITY = 0.25f
