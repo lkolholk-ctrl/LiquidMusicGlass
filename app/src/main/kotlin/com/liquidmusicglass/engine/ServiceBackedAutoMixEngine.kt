@@ -78,6 +78,10 @@ class ServiceBackedAutoMixEngine(
     fun onManualNavigation() {
         fadeJob?.cancel()
         crossfadeActive = false
+        
+        // Ensure primary player volume is restored if transition was interrupted
+        getPrimaryPlayer()?.volume = 1f
+        
         releaseSecondaryPlayer()
         transitionStarted = false
         mixing = false
@@ -218,8 +222,19 @@ class ServiceBackedAutoMixEngine(
                     simpleCrossfade(secondary, crossfadeDuration)
                 }
 
-                // Transition complete — primary player уже на следующем треке
-                // (ExoPlayer auto-advanced через addMediaItem)
+                // Transition complete — handoff back to primary player
+                if (primaryPlayer != null) {
+                    val currentPos = secondary.currentPosition
+                    
+                    // Force primary player to jump to the next track at the exact same position
+                    // where the secondary player finished the crossfade.
+                    primaryPlayer.seekTo(nextIndex, currentPos)
+                    primaryPlayer.play() // Ensure it's playing
+                    
+                    // Restore primary player's master volume
+                    primaryPlayer.volume = 1f
+                }
+
                 secondary.stop()
                 releaseSecondaryPlayer()
 

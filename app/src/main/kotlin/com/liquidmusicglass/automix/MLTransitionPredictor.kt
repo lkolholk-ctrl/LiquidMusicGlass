@@ -10,36 +10,32 @@ import java.nio.ByteOrder
  * AutoMix v3 — мульти-выходная модель (Pro).
  *
  * Входы:
- *   mel_a:  [1, 431, 128, 1]  — конец трека A
- *   mel_b:  [1, 431, 128, 1]  — начало трека B
- *   aux:    [1, 32]            — BPM, chroma, energy, spectral
+ *   mel_a:  [1, 1200, 128, 1] — конец трека A
+ *   mel_b:  [1, 1200, 128, 1] — начало трека B
+ *   aux:    [1, 2]            — BPM(1), energy(1)
  *
  * Выходы:
- *   compatibility:      [1, 1]    — совместимость 0..1
- *   crossfade_duration: [1, 1]    — длительность (normalized 0..1 → 2000..16000мс)
- *   entry_offset:       [1, 1]    — смещение входа (normalized 0..1 → 0..10000мс)
- *   transition_type:    [1, 6]    — softmax по 6 типам перехода
- *   transition_start:   [1, 1]    — точка начала (normalized 0..1 от длительности)
+ *   bpm_drift:       [1, 1]   — изменение темпа (Float)
+ *   low_pass_curve:  [1, 10]  — кривая среза частот (FloatArray)
+ *   energy_score:    [1, 1]   — оценка сочетаемости энергии (Float)
  */
 class MLTransitionPredictor(context: Context) {
 
     private val interpreter: Interpreter = ModelLoader.load(context)
 
     data class Prediction(
-        val compatibility: Float,
-        val crossfadeDurationMs: Long,
-        val entryOffsetMs: Long,
-        val transitionType: Int,
-        val transitionStartFraction: Float
+        val bpmDrift: Float,
+        val lowPassCurve: FloatArray,
+        val energyScore: Float
     )
 
     /**
-     * Конвертирует [1, 431, 128] в ByteBuffer формата [1, 431, 128, 1]
+     * Конвертирует [1, TARGET_FRAMES, 128] в ByteBuffer формата [1, TARGET_FRAMES, 128, 1]
      * который ожидает TFLite модель (Conv2D требует channel dimension).
      */
     private fun melToByteBuffer(mel: Array<Array<FloatArray>>): ByteBuffer {
         val frames = mel[0]
-        val numFrames = frames.size       // 431
+        val numFrames = frames.size       // 1200
         val numMels = frames[0].size      // 128
         val buffer = ByteBuffer.allocateDirect(numFrames * numMels * 4)
         buffer.order(ByteOrder.nativeOrder())
@@ -77,39 +73,23 @@ class MLTransitionPredictor(context: Context) {
         val bufferB = melToByteBuffer(features.melB)
         val bufferAux = auxToByteBuffer(features.aux)
 
-        val outCompat = Array(1) { FloatArray(1) }
-        val outDuration = Array(1) { FloatArray(1) }
-        val outOffset = Array(1) { FloatArray(1) }
-        val outTransition = Array(1) { FloatArray(6) }
-        val outStart = Array(1) { FloatArray(1) }
+        val outBpmDrift = Array(1) { FloatArray(1) }
+        val outLowPass = Array(1) { FloatArray(10) }
+        val outEnergy = Array(1) { FloatArray(1) }
 
         val inputs = arrayOf(bufferA, bufferB, bufferAux)
         val outputs = mapOf(
-            0 to outCompat,
-            1 to outDuration,
-            2 to outOffset,
-            3 to outTransition,
-            4 to outStart
+            0 to outBpmDrift,
+            1 to outLowPass,
+            2 to outEnergy
         )
 
         interpreter.runForMultipleInputsOutputs(inputs, outputs)
 
-        val transProbs = outTransition[0]
-        var bestType = 0
-        var bestProb = transProbs[0]
-        for (i in 1 until transProbs.size) {
-            if (transProbs[i] > bestProb) {
-                bestProb = transProbs[i]
-                bestType = i
-            }
-        }
-
         return Prediction(
-            compatibility = outCompat[0][0].coerceIn(0f, 1f),
-            crossfadeDurationMs = (outDuration[0][0] * 16000f).toLong().coerceIn(2000L, 16000L),
-            entryOffsetMs = (outOffset[0][0] * 10000f).toLong().coerceIn(0L, 10000L),
-            transitionType = bestType,
-            transitionStartFraction = outStart[0][0].coerceIn(0f, 1f)
+            bpmDrift = outBpmDrift[0][0],
+            lowPassCurve = outLowPass[0],
+            energyScore = outEnergy[0][0].coerceIn(0f, 1f)
         )
     }
 

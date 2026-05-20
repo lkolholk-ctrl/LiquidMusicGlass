@@ -32,6 +32,10 @@ data class TrackFeatures(
     /** Тональность следующего */
     val keyB: KeyDetector.KeyResult?,
 
+    val bpmDrift: Float = 0f,
+
+    val lowPassCurve: FloatArray? = null,
+
     /** Debug info */
     val debugInfo: String,
 

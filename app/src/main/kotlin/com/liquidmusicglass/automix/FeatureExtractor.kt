@@ -1,6 +1,8 @@
 package com.liquidmusicglass.automix
 
 import android.content.Context
+import android.media.AudioFormat
+import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.net.Uri
@@ -21,15 +23,15 @@ import kotlin.math.sqrt
 object FeatureExtractor {
 
     private const val N_CHROMA = 12
-    private const val AUX_PER_TRACK = 16  // BPM(1) + chroma(12) + energy(1) + centroid(1) + onset(1)
+    private const val AUX_PER_TRACK = 2   // BPM(1) + energy(1)
 
     /**
      * Результат извлечения фичей для пары треков.
      */
     data class PairFeatures(
-        val melA: Array<Array<FloatArray>>,    // [1, 431, 128]
-        val melB: Array<Array<FloatArray>>,    // [1, 431, 128]
-        val aux: Array<FloatArray>             // [1, 32]
+        val melA: Array<Array<FloatArray>>,    // [1, 1200, 128, 1]
+        val melB: Array<Array<FloatArray>>,    // [1, 1200, 128, 1]
+        val aux: Array<FloatArray>             // [1, 2]
     )
 
     /**
@@ -45,7 +47,6 @@ object FeatureExtractor {
         val samplesA = decodePcmSegment(context, trackAUri, fromEnd = true, trackDurationMs = trackADurationMs)
         val melA = MelSpectrogram.generate(samplesA)
         val normalizedA = normalizeFrames(melA)
-        val auxA = computeAuxFeatures(samplesA)
 
         // Начало трека B
         val samplesB = decodePcmSegment(context, trackBUri, fromEnd = false, trackDurationMs = 0L)
@@ -53,15 +54,10 @@ object FeatureExtractor {
         val normalizedB = normalizeFrames(melB)
         val auxB = computeAuxFeatures(samplesB)
 
-        // Объединяем aux: [auxA(16) + auxB(16)] = [32]
-        val combinedAux = FloatArray(AUX_PER_TRACK * 2)
-        auxA.copyInto(combinedAux, 0)
-        auxB.copyInto(combinedAux, AUX_PER_TRACK)
-
         return PairFeatures(
             melA = Array(1) { normalizedA },
             melB = Array(1) { normalizedB },
-            aux = Array(1) { combinedAux }
+            aux = Array(1) { auxB }
         )
     }
 
@@ -96,20 +92,8 @@ object FeatureExtractor {
         val bpm = estimateBpm(samples)
         features[idx++] = bpm / 200f
 
-        // 2. Chroma (12 нот, средние значения)
-        val chroma = computeChroma(samples)
-        for (c in chroma) {
-            features[idx++] = c
-        }
-
-        // 3. RMS энергия
+        // 2. RMS энергия
         features[idx++] = computeRms(samples)
-
-        // 4. Spectral centroid (нормализованный)
-        features[idx++] = computeSpectralCentroid(samples)
-
-        // 5. Onset strength (нормализованный)
-        features[idx++] = computeOnsetStrength(samples)
 
         return features
     }
@@ -313,81 +297,205 @@ object FeatureExtractor {
         fromEnd: Boolean,
         trackDurationMs: Long
     ): FloatArray {
+        val targetRate = MelSpectrogram.SAMPLE_RATE
+        val targetSamples = MelSpectrogram.SEGMENT_DURATION_SEC * targetRate
+        val fallback = FloatArray(targetSamples)
+
         val extractor = MediaExtractor()
-        extractor.setDataSource(context, uri, null)
-
-        var audioTrackIndex = -1
-        var sampleRate = MelSpectrogram.SAMPLE_RATE
-
-        for (i in 0 until extractor.trackCount) {
-            val format = extractor.getTrackFormat(i)
-            val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
-            if (mime.startsWith("audio/")) {
-                audioTrackIndex = i
-                if (format.containsKey(MediaFormat.KEY_SAMPLE_RATE)) {
-                    sampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
-                }
-                break
-            }
-        }
-
-        if (audioTrackIndex == -1) {
+        try {
+            extractor.setDataSource(context, uri, null)
+        } catch (_: Exception) {
             extractor.release()
-            return FloatArray(MelSpectrogram.SEGMENT_DURATION_SEC * MelSpectrogram.SAMPLE_RATE)
+            return fallback
         }
 
-        extractor.selectTrack(audioTrackIndex)
-
-        // Если fromEnd — seekTo к последним 10 сек
-        if (fromEnd && trackDurationMs > 0L) {
-            val seekToMs = (trackDurationMs - MelSpectrogram.SEGMENT_DURATION_SEC * 1000L)
-                .coerceAtLeast(0L)
-            extractor.seekTo(seekToMs * 1000L, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
-        }
-
-        val maxBytes = MelSpectrogram.SEGMENT_DURATION_SEC * sampleRate * 2 * 2
-        val buffer = ByteBuffer.allocate(maxBytes)
-        val output = ArrayList<Float>(MelSpectrogram.SEGMENT_DURATION_SEC * MelSpectrogram.SAMPLE_RATE)
-
-        while (true) {
-            buffer.clear()
-            val size = extractor.readSampleData(buffer, 0)
-            if (size < 0) break
-
-            buffer.limit(size)
-            val data = ByteArray(size)
-            buffer.get(data)
-
-            var i = 0
-            while (i + 1 < data.size) {
-                val sample = ((data[i + 1].toInt() shl 8) or (data[i].toInt() and 0xFF)).toShort()
-                output.add(sample / 32768f)
-                i += 2
-            }
-
-            extractor.advance()
-
-            if (output.size >= MelSpectrogram.SEGMENT_DURATION_SEC * sampleRate) {
+        var trackIndex = -1
+        var inputFormat: MediaFormat? = null
+        for (i in 0 until extractor.trackCount) {
+            val fmt = extractor.getTrackFormat(i)
+            val mime = fmt.getString(MediaFormat.KEY_MIME) ?: continue
+            if (mime.startsWith("audio/")) {
+                trackIndex = i
+                inputFormat = fmt
                 break
             }
         }
 
-        extractor.release()
-
-        val mono = if (sampleRate == MelSpectrogram.SAMPLE_RATE) {
-            output.toFloatArray()
-        } else {
-            resampleLinear(
-                input = output.toFloatArray(),
-                inputRate = sampleRate,
-                outputRate = MelSpectrogram.SAMPLE_RATE
-            )
+        val format = inputFormat
+        if (trackIndex == -1 || format == null) {
+            extractor.release()
+            return fallback
         }
 
-        return fitToExactSamples(
-            mono,
-            MelSpectrogram.SEGMENT_DURATION_SEC * MelSpectrogram.SAMPLE_RATE
-        )
+        extractor.selectTrack(trackIndex)
+
+        val mime = format.getString(MediaFormat.KEY_MIME)
+        if (mime == null) {
+            extractor.release()
+            return fallback
+        }
+
+        val sourceRate = if (format.containsKey(MediaFormat.KEY_SAMPLE_RATE)) {
+            format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+        } else {
+            targetRate
+        }
+
+        // Если fromEnd — seekTo к последним SEGMENT_DURATION_SEC секундам
+        if (fromEnd && trackDurationMs > 0L) {
+            val seekToMs = (trackDurationMs - MelSpectrogram.SEGMENT_DURATION_SEC * 1000L).coerceAtLeast(0L)
+            try {
+                extractor.seekTo(seekToMs * 1000L, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
+            } catch (_: Exception) {}
+        }
+
+        val codec = try {
+            MediaCodec.createDecoderByType(mime)
+        } catch (_: Exception) {
+            extractor.release()
+            return fallback
+        }
+
+        // Буфер под моно-сэмплы в исходном sample rate.
+        val maxMonoSamples = sourceRate * MelSpectrogram.SEGMENT_DURATION_SEC
+        val mono = FloatArray(maxMonoSamples)
+        var monoCount = 0
+
+        var channels = if (format.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) {
+            format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+        } else {
+            2
+        }
+        var pcmIsFloat = false
+
+        try {
+            codec.configure(format, null, null, 0)
+            codec.start()
+
+            val bufferInfo = MediaCodec.BufferInfo()
+            var inputDone = false
+            var outputDone = false
+            var idleIterations = 0
+            val TIMEOUT_US = 10000L
+            val MAX_IDLE_ITERATIONS = 200
+            val KEY_PCM_ENCODING = "pcm-encoding"
+
+            while (!outputDone && monoCount < maxMonoSamples) {
+                if (idleIterations > MAX_IDLE_ITERATIONS) break
+
+                if (!inputDone) {
+                    val inIndex = codec.dequeueInputBuffer(TIMEOUT_US)
+                    if (inIndex >= 0) {
+                        val inBuf = codec.getInputBuffer(inIndex)
+                        if (inBuf != null) {
+                            val sampleSize = extractor.readSampleData(inBuf, 0)
+                            if (sampleSize < 0) {
+                                codec.queueInputBuffer(
+                                    inIndex, 0, 0, 0,
+                                    MediaCodec.BUFFER_FLAG_END_OF_STREAM
+                                )
+                                inputDone = true
+                            } else {
+                                codec.queueInputBuffer(
+                                    inIndex, 0, sampleSize,
+                                    extractor.sampleTime, 0
+                                )
+                                extractor.advance()
+                            }
+                        }
+                    }
+                }
+
+                val outIndex = codec.dequeueOutputBuffer(bufferInfo, TIMEOUT_US)
+                when {
+                    outIndex >= 0 -> {
+                        idleIterations = 0
+                        if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
+                            outputDone = true
+                        }
+                        if (bufferInfo.size > 0) {
+                            val outBuf = codec.getOutputBuffer(outIndex)
+                            if (outBuf != null) {
+                                outBuf.position(bufferInfo.offset)
+                                outBuf.limit(bufferInfo.offset + bufferInfo.size)
+                                monoCount = appendPcm(
+                                    src = outBuf,
+                                    dst = mono,
+                                    dstIndex = monoCount,
+                                    channels = channels,
+                                    isFloat = pcmIsFloat
+                                )
+                            }
+                        }
+                        codec.releaseOutputBuffer(outIndex, false)
+                    }
+                    outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                        val outFormat = codec.outputFormat
+                        if (outFormat.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) {
+                            channels = outFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+                        }
+                        if (outFormat.containsKey(KEY_PCM_ENCODING)) {
+                            pcmIsFloat = outFormat.getInteger(KEY_PCM_ENCODING) ==
+                                    AudioFormat.ENCODING_PCM_FLOAT
+                        }
+                    }
+                    outIndex == MediaCodec.INFO_TRY_AGAIN_LATER -> {
+                        idleIterations++
+                    }
+                }
+            }
+        } catch (_: Exception) {
+        } finally {
+            try { codec.stop() } catch (_: Exception) {}
+            try { codec.release() } catch (_: Exception) {}
+            extractor.release()
+        }
+
+        if (monoCount == 0) return fallback
+
+        val decoded = mono.copyOf(monoCount)
+        val resampled = if (sourceRate == targetRate) {
+            decoded
+        } else {
+            resampleLinear(decoded, sourceRate, targetRate)
+        }
+
+        return fitToExactSamples(resampled, targetSamples)
+    }
+
+    private fun appendPcm(
+        src: ByteBuffer,
+        dst: FloatArray,
+        dstIndex: Int,
+        channels: Int,
+        isFloat: Boolean
+    ): Int {
+        var idx = dstIndex
+        val ch = channels.coerceAtLeast(1)
+        src.order(java.nio.ByteOrder.LITTLE_ENDIAN)
+
+        if (isFloat) {
+            val fb = src.asFloatBuffer()
+            val frames = fb.remaining() / ch
+            var f = 0
+            while (f < frames && idx < dst.size) {
+                var sum = 0f
+                for (c in 0 until ch) sum += fb.get()
+                dst[idx++] = (sum / ch).coerceIn(-1f, 1f)
+                f++
+            }
+        } else {
+            val sb = src.asShortBuffer()
+            val frames = sb.remaining() / ch
+            var f = 0
+            while (f < frames && idx < dst.size) {
+                var sum = 0f
+                for (c in 0 until ch) sum += sb.get() / 32768f
+                dst[idx++] = sum / ch
+                f++
+            }
+        }
+        return idx
     }
 
     private fun resampleLinear(

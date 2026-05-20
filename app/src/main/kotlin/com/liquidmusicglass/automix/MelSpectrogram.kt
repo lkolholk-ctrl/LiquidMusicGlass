@@ -12,8 +12,8 @@ object MelSpectrogram {
     const val N_MELS = 128
     const val HOP_LENGTH = 512
     const val N_FFT = 2048
-    const val SEGMENT_DURATION_SEC = 10   // было 6, теперь 10 для v2
-    const val TARGET_FRAMES = 431         // ceil(10 * 22050 / 512)
+    const val SEGMENT_DURATION_SEC = 28
+    const val TARGET_FRAMES = 1200
 
     private val hannWindow: FloatArray by lazy {
         FloatArray(N_FFT) { i ->

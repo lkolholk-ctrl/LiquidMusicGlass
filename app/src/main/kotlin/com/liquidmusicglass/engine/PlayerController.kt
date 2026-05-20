@@ -49,6 +49,13 @@ object PlayerController {
     private var queue = listOf<Track>()
     private var currentIndex = -1
 
+    // ── Endless Playback (AutoMix) ──
+    private val endlessEngine = EndlessPlaybackEngine(
+        scope = ioScope,
+        getController = { controller },
+        getCompanionPlayer = { null }
+    )
+
     // ── Stream URL cache (ICM API: file_id cacheable 24h) ──
     private val streamUrlCache = mutableMapOf<String, CachedStreamUrl>()
     private const val STREAM_CACHE_TTL_MS = 10 * 60 * 1000L  // ~600s per docs, use 10min safe
@@ -262,6 +269,28 @@ object PlayerController {
      * Play a list of tracks from specified start index.
      * Legacy parameters (autoRefill*, seedTrackId) kept for API compatibility — no-op.
      */
+    /**
+     * ICM API: Adds tracks to the end of the current queue and syncs with ExoPlayer.
+     * Used by EndlessPlaybackEngine (AutoMix).
+     */
+    fun addTracksToQueue(newTracks: List<Track>) {
+        if (newTracks.isEmpty()) return
+        mainScope.launch {
+            val oldSize = queue.size
+            queue = queue + newTracks
+            _queueFlow.value = queue
+            
+            // Sync with actual ExoPlayer (or MediaController)
+            val player = controller ?: appContext?.let { getPlayer(it) }
+            player?.let { p ->
+                val mediaItems = newTracks.map { track ->
+                    buildMediaItem(track, track.uri)
+                }
+                p.addMediaItems(mediaItems)
+            }
+        }
+    }
+
     fun playFromList(
         context: Context,
         tracks: List<Track>,
@@ -275,6 +304,25 @@ object PlayerController {
 
         ioScope.launch {
             val startTrack = tracks[startIndex]
+
+            // Endless Playback Setup
+            endlessEngine.reset()
+            if (autoRefillType != null) {
+                val type = try {
+                    EndlessPlaybackEngine.RefillContext.Type.valueOf(autoRefillType.uppercase())
+                } catch (e: Exception) {
+                    EndlessPlaybackEngine.RefillContext.Type.WAVE
+                }
+                endlessEngine.setRefillContext(
+                    EndlessPlaybackEngine.RefillContext(
+                        type = type,
+                        id = autoRefillId,
+                        name = autoRefillName,
+                        seedTrackId = seedTrackId
+                    )
+                )
+            }
+            endlessEngine.registerTracks(tracks.map { it.id })
 
             // Resolve start track URL
             val streamResult = if (startTrack.isOnlineTrack) {
@@ -301,15 +349,19 @@ object PlayerController {
 
                         val player = getPlayer(context)
                         player?.let {
-                            // Текущий трек + предзагружаем 3-5 следующих
-                            val currentItem = buildMediaItem(startTrack, streamResult.uri)
-                            it.setMediaItem(currentItem)
+                            it.setMediaItems(mediaItems, startIndex, 0L)
                             it.prepare()
                             it.play()
                             resetPlaybackLogging(startTrack.durationMs)
                         }
                     }
                     addToRecent(startTrack)
+
+                    // Initial refill check after start
+                    launch {
+                        kotlinx.coroutines.delay(3000)
+                        endlessEngine.checkAndRefillIfNeeded()
+                    }
 
                     // ICM API: Предзагружай 3-5 треков вперёд для бесшовного воспроизведения
                     prefetchAhead(context, startIndex, depth = 3)
@@ -415,6 +467,11 @@ object PlayerController {
             _currentTrack.value = track
             _durationMs.value = track.durationMs
             _currentPositionMs.value = 0L
+            
+            // Check if we need to refill the queue for endless playback
+            ioScope.launch {
+                endlessEngine.checkAndRefillIfNeeded()
+            }
         }
     }
 

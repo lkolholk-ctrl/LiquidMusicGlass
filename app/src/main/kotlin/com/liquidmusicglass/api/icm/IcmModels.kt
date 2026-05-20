@@ -100,7 +100,7 @@ data class IcmSearchItem(
     val durationMs: Long
         get() {
             val d = duration ?: return 0L
-            return if (isVk) d * 1000L else d
+            return if (d < 1000L) d * 1000L else d
         }
 
     val isTrack: Boolean
@@ -227,7 +227,7 @@ data class IcmArtistSong(
     val durationMs: Long
         get() {
             val d = duration ?: return 0L
-            return if (isVk) d * 1000L else d
+            return if (d < 1000L) d * 1000L else d
         }
 }
 
@@ -372,8 +372,7 @@ data class IcmBatchTrackMetaItem(
     val durationMs: Long
         get() {
             val d = duration ?: return 0L
-            val isVk = id.startsWith("vk_") || trackId?.startsWith("vk_") == true
-            return if (isVk) d * 1000L else d
+            return if (d < 1000L) d * 1000L else d
         }
 }
 

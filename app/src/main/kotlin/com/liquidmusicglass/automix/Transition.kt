@@ -7,6 +7,8 @@ data class Transition(
     val entryOffsetMs: Long,
     val transitionType: Int,
     val transitionStartMs: Long,
+    val bpmDrift: Float = 0f,
+    val lowPassCurve: FloatArray? = null,
     val debugInfo: String
 ) {
     companion object {
@@ -17,6 +19,8 @@ data class Transition(
             entryOffsetMs = 0L,
             transitionType = 0,
             transitionStartMs = 0L,
+            bpmDrift = 0f,
+            lowPassCurve = null,
             debugInfo = ""
         )
     }

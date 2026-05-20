@@ -203,25 +203,9 @@ internal class EndlessPlaybackEngine(
     private suspend fun addTracksToQueue(tracks: List<Track>) {
         if (tracks.isEmpty()) return
 
-        val mediaItems = tracks.map { track ->
-            MediaItem.Builder()
-                .setMediaId(track.id)
-                .setUri(track.uri)
-                .setMediaMetadata(
-                    MediaMetadata.Builder()
-                        .setTitle(track.title)
-                        .setArtist(track.artist)
-                        .setAlbumArtist(track.artist)
-                        .setArtworkUri(track.displayArtUri)
-                        .build()
-                )
-                .build()
-        }
-
         withContext(Dispatchers.Main) {
-            val player = getController() ?: getCompanionPlayer() ?: return@withContext
-            player.addMediaItems(mediaItems)
-            android.util.Log.d("EndlessEngine", "Added ${tracks.size} tracks")
+            PlayerController.addTracksToQueue(tracks)
+            android.util.Log.d("EndlessEngine", "Added ${tracks.size} tracks to PlayerController queue")
         }
 
         tracks.forEach { playedIds.add(it.id) }

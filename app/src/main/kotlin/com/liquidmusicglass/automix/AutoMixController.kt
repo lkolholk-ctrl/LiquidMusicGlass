@@ -78,8 +78,9 @@ class AutoMixController(
         )
 
         // 4. Комбинируем ML + алгоритмический анализ
-        if (mlPrediction != null && mlPrediction.compatibility > COMPATIBILITY_THRESHOLD) {
-            val finalCompat = (mlPrediction.compatibility * 0.6f + plan.compatibility * 0.4f)
+        if (mlPrediction != null && mlPrediction.energyScore > COMPATIBILITY_THRESHOLD) {
+            val finalCompat = (mlPrediction.energyScore * 0.6f + plan.compatibility * 0.4f)
+            
             return@withContext TrackFeatures(
                 trackUri = nextTrackUri,
                 compatibility = finalCompat,
@@ -91,7 +92,9 @@ class AutoMixController(
                 bpmB = plan.bpmB,
                 keyA = plan.keyA,
                 keyB = plan.keyB,
-                debugInfo = "ML+Algo: ${plan.debugInfo}",
+                bpmDrift = mlPrediction.bpmDrift,
+                lowPassCurve = mlPrediction.lowPassCurve,
+                debugInfo = "ML v3 applied (Energy score: ${mlPrediction.energyScore})",
                 readyForTransition = true
             )
         }
