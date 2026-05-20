@@ -1,7 +1,10 @@
 package com.liquidmusicglass.automix
 
+import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.pow
@@ -9,27 +12,9 @@ import kotlin.math.sin
 
 /**
  * DJ Effects Engine — эффекты при кроссфейде.
- *
- * Типы переходов:
- * 0 = SMOOTH_FADE    — плавный equal-power кроссфейд
- * 1 = ENERGY_FADE    — быстрый уход трека A
- * 2 = BEAT_MATCH     — beat-aligned, длинный, equal-power
- * 3 = HARD_CUT       — резкий переход с минимальным overlap
- * 4 = FILTER_SWEEP   — имитация закрытия/открытия фильтра
- * 5 = ECHO_OUT       — трек A уходит в эхо
- *
- * Главный принцип всех кривых: громкость ВЫХОДЯЩЕГО трека (fadeOut)
- * убывает МОНОТОННО — без плато на 1.0. Выходящий трек всегда
- * "уступает" входящему, чтобы не было каши из двух треков на максимуме.
- *
- * Дополнительно: outgoingBias в crossfadeWithEffects позволяет
- * сделать затухание выходящего трека ещё заметнее.
  */
 object DJEffectsEngine {
 
-    /**
-     * Кривые кроссфейда. Возвращает (fadeOutVolume, fadeInVolume) для progress [0..1].
-     */
     fun getCrossfadeCurve(
         progress: Float,
         transitionType: Int
@@ -47,21 +32,12 @@ object DJEffectsEngine {
         }
     }
 
-    /**
-     * SMOOTH_FADE — equal-power crossfade (косинус/синус).
-     * Выходящий трек плавно и монотонно убывает 1 → 0.
-     * Суммарная воспринимаемая мощность держится постоянной.
-     */
     private fun smoothFadeCurve(p: Float): Pair<Float, Float> {
         val fadeOut = cos(p * PI.toFloat() / 2f)
         val fadeIn = sin(p * PI.toFloat() / 2f)
         return fadeOut to fadeIn
     }
 
-    /**
-     * ENERGY_FADE — быстрый fade-out, отложенный fade-in.
-     * Трек A уходит резво, B нарастает плавно.
-     */
     private fun energyFadeCurve(p: Float): Pair<Float, Float> {
         val fadeOut = (1f - p * p).coerceIn(0f, 1f)
         val fadeIn = if (p < 0.3f) 0f
@@ -69,53 +45,27 @@ object DJEffectsEngine {
         return fadeOut to fadeIn
     }
 
-    /**
-     * BEAT_MATCH — длинный, выровненный по битам переход.
-     *
-     * РАНЬШЕ: оба трека держались на 1.0 в середине (p in 0.3..0.7) —
-     * это и давало кашу из двух треков на полной громкости.
-     *
-     * ТЕПЕРЬ: equal-power кривая. Оба трека слышны (на то и beat match),
-     * но выходящий трек МОНОТОННО убывает и никогда не "спорит" с входящим
-     * на полной громкости. Длина перехода (12с) и так даёт плавность.
-     */
     private fun beatMatchCurve(p: Float): Pair<Float, Float> {
-        // Equal-power, но с лёгким перекосом: выходящий трек убывает
-        // чуть раньше входящего — новый трек ведёт.
         val fadeOut = cos(p * PI.toFloat() / 2f).pow(1.15f)
         val fadeIn = sin(p * PI.toFloat() / 2f)
         return fadeOut.coerceIn(0f, 1f) to fadeIn.coerceIn(0f, 1f)
     }
 
-    /**
-     * HARD_CUT — короткий резкий переход.
-     * Небольшое перекрытие, но выходящий трек уже убывает с начала.
-     */
     private fun hardCutCurve(p: Float): Pair<Float, Float> {
-        // Выходящий: держится высоко, но не на плато 1.0 — слегка убывает,
-        // затем после 55% резко в ноль.
         val fadeOut = when {
-            p < 0.55f -> 1f - p * 0.35f          // 1.0 → ~0.81
-            else -> (1f - 0.81f.let { it } - (p - 0.55f) * 4f)
-                .let { (1f - (p - 0.55f) * 4f) }.coerceIn(0f, 1f)
+            p < 0.55f -> 1f - p * 0.35f
+            else -> (1f - (p - 0.55f) * 4f).coerceIn(0f, 1f)
         }
         val fadeIn = if (p < 0.4f) (p * 2.5f).coerceIn(0f, 1f) else 1f
         return fadeOut.coerceIn(0f, 1f) to fadeIn
     }
 
-    /**
-     * FILTER_SWEEP — имитация low-pass фильтра.
-     * A уходит экспоненциально, B нарастает экспоненциально.
-     */
     private fun filterSweepCurve(p: Float): Pair<Float, Float> {
         val fadeOut = (1f - p).let { it * it }
         val fadeIn = p * p
         return fadeOut to fadeIn
     }
 
-    /**
-     * ECHO_OUT — трек A затухает с пульсацией (имитация delay/echo).
-     */
     private fun echoOutCurve(p: Float): Pair<Float, Float> {
         val envelope = (1f - p)
         val pulse = 1f + 0.1f * sin(p * 8f * PI.toFloat()) * envelope
@@ -125,13 +75,7 @@ object DJEffectsEngine {
     }
 
     /**
-     * Прокачанный кроссфейд с DJ-кривыми.
-     *
-     * @param outgoingBias дополнительное затухание ВЫХОДЯЩЕГО трека.
-     *   1.0  — кривая как есть.
-     *   >1.0 — выходящий трек затухает заметнее/раньше (меньше каши).
-     *   Применяется как fadeOut^outgoingBias. При 1.5 громкость 0.7
-     *   превращается в ~0.57 — старый трек ощутимо уходит на задний план.
+     * ИСПРАВЛЕНО: Полная синхронизация на Main-треде Android + применение ИИ-параметра bpmDrift!
      */
     suspend fun crossfadeWithEffects(
         fromPlayer: Player,
@@ -140,8 +84,9 @@ object DJEffectsEngine {
         transitionType: Int,
         masterVolume: Float = 1f,
         outgoingBias: Float = 1.5f,
+        bpmDrift: Float = 0f, // Применяем ИИ-предсказание
         stepMs: Long = 40L
-    ) {
+    ) = withContext(Dispatchers.Main) { // Железный фикс потоков!
         val safeDuration = durationMs.coerceAtLeast(stepMs)
         val steps = (safeDuration / stepMs).toInt().coerceAtLeast(1)
         val bias = outgoingBias.coerceIn(1f, 3f)
@@ -149,13 +94,14 @@ object DJEffectsEngine {
         toPlayer.volume = 0f
         toPlayer.play()
 
+        // Если включен Бит-Мэтч, подгоняем скорость воспроизведения входящего трека
+        if (transitionType == 2 && bpmDrift != 0f) {
+            toPlayer.playbackParameters = PlaybackParameters(1f + bpmDrift)
+        }
+
         for (step in 0..steps) {
             val progress = (step.toFloat() / steps.toFloat()).coerceIn(0f, 1f)
-
             val (rawFadeOut, fadeIn) = getCrossfadeCurve(progress, transitionType)
-
-            // Выходящий трек дополнительно притушивается:
-            // pow с показателем >1 ускоряет затухание, не ломая монотонность.
             val fadeOut = rawFadeOut.coerceIn(0f, 1f).pow(bias)
 
             fromPlayer.volume = (fadeOut * masterVolume).coerceIn(0f, 1f)
@@ -166,11 +112,13 @@ object DJEffectsEngine {
 
         fromPlayer.volume = 0f
         toPlayer.volume = masterVolume
+
+        // Мягко возвращаем дефолтную скорость по окончании микса
+        if (transitionType == 2) {
+            toPlayer.playbackParameters = PlaybackParameters(1f)
+        }
     }
 
-    /**
-     * Выбирает лучший тип перехода на основе анализа двух треков.
-     */
     fun selectTransitionType(
         energyA: EnergyAnalyzer.TrackEnergy?,
         energyB: EnergyAnalyzer.TrackEnergy?,
@@ -191,9 +139,6 @@ object DJEffectsEngine {
         }
     }
 
-    /**
-     * Рассчитывает оптимальную длительность кроссфейда.
-     */
     fun calculateCrossfadeDuration(
         transitionType: Int,
         bpmA: Float?,
