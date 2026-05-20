@@ -127,11 +127,13 @@ internal class EndlessPlaybackEngine(
         }
     }
 
-    private fun getRemainingTracks(): Int {
-        val player = getController() ?: getCompanionPlayer() ?: return 0
-        val total = player.mediaItemCount
-        val current = player.currentMediaItemIndex
-        return if (total > 0 && current >= 0) (total - current) else 0
+    private suspend fun getRemainingTracks(): Int {
+        return withContext(Dispatchers.Main) {
+            val player = getController() ?: getCompanionPlayer() ?: return@withContext 0
+            val total = player.mediaItemCount
+            val current = player.currentMediaItemIndex
+            if (total > 0 && current >= 0) (total - current) else 0
+        }
     }
 
     /**
@@ -183,14 +185,16 @@ internal class EndlessPlaybackEngine(
         return tracks
     }
 
-    private fun buildExcludeSet(): MutableSet<String> {
+    private suspend fun buildExcludeSet(): MutableSet<String> {
         val exclude = mutableSetOf<String>()
         exclude.addAll(playedIds)
 
-        val player = getController() ?: getCompanionPlayer()
-        player?.let { p ->
-            for (i in 0 until p.mediaItemCount) {
-                p.getMediaItemAt(i).mediaId?.let { exclude.add(it) }
+        withContext(Dispatchers.Main) {
+            val player = getController() ?: getCompanionPlayer()
+            player?.let { p ->
+                for (i in 0 until p.mediaItemCount) {
+                    p.getMediaItemAt(i).mediaId?.let { exclude.add(it) }
+                }
             }
         }
 

@@ -280,13 +280,15 @@ object PlayerController {
             queue = queue + newTracks
             _queueFlow.value = queue
             
-            // Sync with actual ExoPlayer (or MediaController)
-            val player = controller ?: appContext?.let { getPlayer(it) }
-            player?.let { p ->
-                val mediaItems = newTracks.map { track ->
-                    buildMediaItem(track, track.uri)
+            // Sync with actual ExoPlayer (or MediaController) — ВСЕГДА на Main треде
+            withContext(Dispatchers.Main) {
+                val player = controller ?: appContext?.let { getPlayer(it) }
+                player?.let { p ->
+                    val mediaItems = newTracks.map { track ->
+                        buildMediaItem(track, track.uri)
+                    }
+                    p.addMediaItems(mediaItems)
                 }
-                p.addMediaItems(mediaItems)
             }
         }
     }
