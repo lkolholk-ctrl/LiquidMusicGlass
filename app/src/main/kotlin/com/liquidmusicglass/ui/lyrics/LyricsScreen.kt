@@ -22,6 +22,7 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
@@ -57,7 +58,7 @@ import kotlin.math.min
  * - Strict left alignment — все строки строго по левому краю, никаких staggered offsets
  * - Text containment — текст никогда не вылезает за края экрана
  * - Fluid gliding scroll — плавный spring-скролл без рывков
- * - Пословное караоке через Canvas + TextMeasurer + clipRect
+ * - Character-level fluid color bleed — посимвольное плавное закрашивание
  * - HSV-boosted фон с blur + scrim
  */
 @Composable
@@ -336,8 +337,9 @@ fun LyricsScreen(
                                 contentAlignment = Alignment.CenterStart
                             ) {
                                 if (isCurrentLine && lyrics.isSynced) {
-                                    // Пословное караоке-закрашивание
-                                    KaraokeLine(
+                                    // ПОСИМВОЛЬНОЕ караоке с fluid color bleed
+                                    KaraokeLineFluid(
+                                        text = cleanText,
                                         words = currentWords,
                                         activeColor = duetColor ?: Color.White,
                                         inactiveColor = (duetColor ?: Color.White).copy(
@@ -402,43 +404,48 @@ fun LyricsScreen(
 }
 
 /**
- * Строка с пословным караоке-закрашиванием.
+ * ПОСИМВОЛЬНОЕ караоке с fluid color bleed.
  *
- * Каждое слово рисуется отдельно через Canvas + TextMeasurer + clipRect.
- * Это даёт точное позиционирование без "лесенки" — граница цвета всегда
- * совпадает с границей слова.
+ * Каждый символ плавно переходит от inactive к active цвету.
+ * Использует Brush.horizontalGradient с colorStops на границах символов.
+ * Эффект "растекания" цвета — граница не резкая, а с небольшим fade zone.
  *
+ * @param text полный текст строки
  * @param words список слов с прогрессом (0f..1f)
  * @param activeColor цвет активной (закрашенной) части
  * @param inactiveColor цвет неактивной части
  * @param fontSize размер шрифта
- * @param maxWidthPx максимальная ширина в пикселях (чтобы не вылезать за экран)
+ * @param maxWidthPx максимальная ширина в пикселях
  */
 @Composable
-private fun KaraokeLine(
+private fun KaraokeLineFluid(
+    text: String,
     words: List<LyricsTimeProcessor.WordToken>,
     activeColor: Color,
     inactiveColor: Color,
     fontSize: androidx.compose.ui.unit.TextUnit,
     maxWidthPx: Int
 ) {
-    if (words.isEmpty()) return
+    if (text.isEmpty() || words.isEmpty()) {
+        // Fallback: просто текст inactive цветом
+        Text(
+            text = text,
+            color = inactiveColor,
+            style = TextStyle(
+                fontSize = fontSize,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Start,
+                lineHeight = 36.sp
+            ),
+            modifier = Modifier.fillMaxWidth(),
+            maxLines = 3,
+            softWrap = true
+        )
+        return
+    }
 
     val textMeasurer = rememberTextMeasurer()
     val density = LocalDensity.current
-
-    // Собираем полный текст с пробелами
-    val fullText = remember(words) { words.joinToString(" ") { it.text } }
-    val wordRanges = remember(words) {
-        val ranges = mutableListOf<IntRange>()
-        var pos = 0
-        for ((i, word) in words.withIndex()) {
-            ranges.add(pos until pos + word.text.length)
-            pos += word.text.length
-            if (i < words.lastIndex) pos += 1 // space
-        }
-        ranges
-    }
 
     val textStyle = TextStyle(
         fontSize = fontSize,
@@ -448,13 +455,92 @@ private fun KaraokeLine(
         platformStyle = PlatformTextStyle(includeFontPadding = false)
     )
 
-    // Измеряем текст с ограничением ширины экрана
-    val layoutResult = remember(fullText, textStyle, maxWidthPx) {
+    // Измеряем полный текст
+    val layoutResult = remember(text, textStyle, maxWidthPx) {
         textMeasurer.measure(
-            text = fullText,
+            text = text,
             style = textStyle,
             constraints = Constraints(maxWidth = maxWidthPx)
         )
+    }
+
+    // Создаём карту: индекс символа → прогресс (0f..1f)
+    // Распределяем progress слов по символам
+    val charProgressMap = remember(text, words) {
+        val map = MutableList(text.length) { 0f }
+        var charIdx = 0
+        for (word in words) {
+            // Пропускаем пробелы
+            while (charIdx < text.length && text[charIdx] == ' ') {
+                charIdx++
+            }
+            // Заполняем символы слова
+            for (i in word.text.indices) {
+                if (charIdx < text.length) {
+                    map[charIdx] = word.progress.coerceIn(0f, 1f)
+                    charIdx++
+                }
+            }
+        }
+        map
+    }
+
+    // Вычисляем colorStops для градиента
+    // Каждый символ имеет свою границу с fade zone
+    val colorStops = remember(layoutResult, charProgressMap, activeColor, inactiveColor) {
+        val stops = mutableListOf<Pair<Float, Color>>()
+        val totalWidth = layoutResult.size.width.toFloat().coerceAtLeast(1f)
+
+        var accumulatedWidth = 0f
+        val fadePx = 3f // 3px fade zone для fluid bleed
+
+        for (i in text.indices) {
+            val bounds = layoutResult.getBoundingBox(i)
+            val charLeft = bounds.left / totalWidth
+            val charRight = bounds.right / totalWidth
+            val charWidth = bounds.width
+            val progress = charProgressMap[i]
+
+            if (charWidth <= 0) continue
+
+            // Граница внутри символа с fade zone
+            val boundary = charLeft + (charRight - charLeft) * progress
+            val fade = (fadePx / totalWidth).coerceAtMost((charRight - charLeft) * 0.3f)
+
+            when {
+                progress <= 0f -> {
+                    // Полностью inactive
+                    stops.add(charLeft to inactiveColor)
+                    stops.add(charRight to inactiveColor)
+                }
+                progress >= 1f -> {
+                    // Полностью active
+                    stops.add(charLeft to activeColor)
+                    stops.add(charRight to activeColor)
+                }
+                else -> {
+                    // Частично active — fluid bleed с fade zone
+                    stops.add(charLeft to activeColor)
+                    stops.add((boundary - fade).coerceAtLeast(charLeft) to activeColor)
+                    stops.add((boundary + fade).coerceAtMost(charRight) to inactiveColor)
+                    stops.add(charRight to inactiveColor)
+                }
+            }
+
+            accumulatedWidth = bounds.right
+        }
+
+        // Удаляем дубликаты и сортируем
+        stops.sortBy { it.first }
+        stops.distinctBy { it.first }.toTypedArray()
+    }
+
+    val brush = remember(colorStops, activeColor, inactiveColor) {
+        if (colorStops.size >= 2) {
+            Brush.horizontalGradient(colorStops = colorStops)
+        } else {
+            SolidColor(inactiveColor)
+        }
     }
 
     val canvasWidth = with(density) { layoutResult.size.width.toDp() }
@@ -465,46 +551,10 @@ private fun KaraokeLine(
             .width(canvasWidth)
             .height(canvasHeight)
     ) {
-        // Background: вся строка inactive цветом
         drawText(
             textLayoutResult = layoutResult,
-            color = inactiveColor,
+            brush = brush,
             topLeft = Offset.Zero
         )
-
-        // Foreground: каждое слово активным цветом, обрезанное по progress
-        for ((i, word) in words.withIndex()) {
-            val range = wordRanges[i]
-            if (range.isEmpty()) continue
-
-            // Получаем bounding box первого и последнего символа слова
-            val startBounds = layoutResult.getBoundingBox(range.first)
-            val endBounds = layoutResult.getBoundingBox(range.last)
-
-            val wordLeft = startBounds.left
-            val wordRight = endBounds.right
-            val wordTop = min(startBounds.top, endBounds.top)
-            val wordBottom = max(startBounds.bottom, endBounds.bottom)
-            val wordWidth = wordRight - wordLeft
-
-            val progress = word.progress.coerceIn(0f, 1f)
-            val activeWidth = wordWidth * progress
-
-            if (activeWidth <= 0.5f) continue // Пропускаем полностью неактивные
-
-            // Рисуем активную часть слова через clipRect
-            clipRect(
-                left = wordLeft,
-                top = wordTop,
-                right = wordLeft + activeWidth,
-                bottom = wordBottom
-            ) {
-                drawText(
-                    textLayoutResult = layoutResult,
-                    color = activeColor,
-                    topLeft = Offset.Zero
-                )
-            }
-        }
     }
 }
