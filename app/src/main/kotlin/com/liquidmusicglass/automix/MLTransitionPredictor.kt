@@ -8,16 +8,6 @@ import java.nio.ByteOrder
 
 /**
  * AutoMix v3 — мульти-выходная модель (Pro).
- *
- * Входы:
- *   mel_a:  [1, 1200, 128, 1] — конец трека A
- *   mel_b:  [1, 1200, 128, 1] — начало трека B
- *   aux:    [1, 2]            — BPM(1), energy(1)
- *
- * Выходы:
- *   bpm_drift:       [1, 1]   — изменение темпа (Float)
- *   low_pass_curve:  [1, 10]  — кривая среза частот (FloatArray)
- *   energy_score:    [1, 1]   — оценка сочетаемости энергии (Float)
  */
 class MLTransitionPredictor(context: Context) {
 
@@ -29,14 +19,10 @@ class MLTransitionPredictor(context: Context) {
         val energyScore: Float
     )
 
-    /**
-     * Конвертирует [1, TARGET_FRAMES, 128] в ByteBuffer формата [1, TARGET_FRAMES, 128, 1]
-     * который ожидает TFLite модель (Conv2D требует channel dimension).
-     */
     private fun melToByteBuffer(mel: Array<Array<FloatArray>>): ByteBuffer {
         val frames = mel[0]
-        val numFrames = frames.size       // 1200
-        val numMels = frames[0].size      // 128
+        val numFrames = frames.size
+        val numMels = frames[0].size
         val buffer = ByteBuffer.allocateDirect(numFrames * numMels * 4)
         buffer.order(ByteOrder.nativeOrder())
         for (frame in frames) {
