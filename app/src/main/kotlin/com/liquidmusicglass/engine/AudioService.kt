@@ -285,9 +285,9 @@ class AudioService : MediaSessionService() {
                 PlayerController.updatePosition(position, safeDuration)
 
                 if (player.isPlaying) {
-                    val currentIndex = player.currentMediaItemIndex
+                    val currentIndex = PlayerController.getCurrentIndex()
                     val isPlaying = player.isPlaying
-                    val queueSize = player.mediaItemCount
+                    val queueSize = PlayerController.getCurrentQueue().size
 
                     autoMixEngine?.maybeStartAutoMix(
                         currentPositionMs = position,

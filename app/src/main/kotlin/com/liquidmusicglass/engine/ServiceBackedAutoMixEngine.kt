@@ -231,10 +231,10 @@ class ServiceBackedAutoMixEngine(
                 mixing = false
                 PlayerController.setMixing(false)
                 transitionStarted = false
-                nextTrackFeatures = null
-                analyzedNextIndex = -1
+
+                // Принудительно очищаем кэш ИИ и запускаем предзагрузку/анализ для СЛЕДУЮЩЕЙ пары
+                onTrackChanged()
                 onTransitionFinished()
-                scheduleNextTrackAnalysis()
             } catch (e: Exception) {
                 android.util.Log.e("AutoMixEngine", "Crossfade execution crash: ${e.message}")
                 crossfadeActive = false
