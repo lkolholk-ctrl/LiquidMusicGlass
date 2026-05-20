@@ -201,6 +201,31 @@ class AudioService : MediaSessionService() {
         super.onDestroy()
     }
 
+    /**
+     * Deck Swapping: динамически меняет активный плеер в MediaSession.
+     * Используется AutoMix для бесшовного перехода между треками.
+     */
+    fun switchActivePlayer(newPrimary: ExoPlayer) {
+        _session?.let { session ->
+            if (session.player != newPrimary) {
+                // Переносим листенер со старого плеера
+                val oldPlayer = _player
+                oldPlayer?.removeListener(PlayerEventForwarder())
+                newPrimary.addListener(PlayerEventForwarder())
+
+                // Меняем плеер в сессии — система увидит новый активный плеер
+                session.player = newPrimary
+                _player = newPrimary
+                currentPlayer = newPrimary
+
+                // Перезапускаем полинг на новом плеере
+                startPositionPolling(newPrimary)
+
+                android.util.Log.d("AudioService", "MediaSession successfully swapped to new primary deck.")
+            }
+        }
+    }
+
     private inner class PlayerEventForwarder : Player.Listener {
 
         override fun onPlaybackStateChanged(playbackState: Int) {

@@ -205,37 +205,26 @@ class ServiceBackedAutoMixEngine(
                     simpleCrossfade(secondary, crossfadeDuration)
                 }
 
-                // Переход завершен — возвращаем управление главному плееру
-                if (primaryPlayer != null) {
-                    val currentPos = secondary.currentPosition
-                    val freshNextUri = PlayerController.getValidStreamUri(nextTrack.id) ?: nextTrack.uri
-                    
-                    withContext(Dispatchers.Main) {
-                        // КРИТИЧЕСКИЙ ФИКС: Перед прыжком выпрямляем фейковый Uri в главном плеере!
-                        val synchronizedMediaItem = MediaItem.Builder()
-                            .setMediaId(nextTrack.id)
-                            .setUri(freshNextUri)
-                            .setMediaMetadata(
-                                MediaMetadata.Builder()
-                                    .setTitle(nextTrack.title)
-                                    .setArtist(nextTrack.artist)
-                                    .build()
-                            )
-                            .build()
-                        
-                        if (nextIndex < primaryPlayer.mediaItemCount) {
-                            primaryPlayer.replaceMediaItem(nextIndex, synchronizedMediaItem)
-                        }
-                        
-                        primaryPlayer.seekTo(nextIndex, currentPos)
-                        primaryPlayer.play()
-                        primaryPlayer.volume = 1f
-                    }
-                }
-
+                // ═══════════════════════════════════════════════════════════
+                //  DECK SWAPPING: Бесшовная смена активного плеера
+                //  Вместо seekTo на primary — меняем MediaSession на secondary
+                // ═══════════════════════════════════════════════════════════
                 withContext(Dispatchers.Main) {
-                    secondary.stop()
-                    releaseSecondaryPlayer()
+                    val oldPrimary = getPrimaryPlayer()
+                    val newPrimary = secondaryPlayer ?: return@withContext
+
+                    // 1. Переключаем MediaSession на новый плеер — без seekTo!
+                    val service = appContext as? AudioService
+                    service?.switchActivePlayer(newPrimary)
+
+                    // 2. Синхронизируем очередь в PlayerController
+                    PlayerController.setQueue(queue, nextIndex)
+
+                    // 3. Старый плеер становится новой secondary декой
+                    oldPrimary?.stop()
+                    oldPrimary?.clearMediaItems()
+                    oldPrimary?.volume = 0f
+                    secondaryPlayer = oldPrimary
                 }
 
                 crossfadeActive = false
