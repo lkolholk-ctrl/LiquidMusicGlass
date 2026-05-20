@@ -23,7 +23,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -346,7 +346,8 @@ fun LyricsScreen(
                                             alpha = 0.3f
                                         ),
                                         fontSize = 26.sp,
-                                        maxWidthPx = with(density) { (configuration.screenWidthDp - 48).dp.roundToPx() }
+                                        maxWidthPx = with(density) { (configuration.screenWidthDp - 48).dp.roundToPx() },
+                                        isActiveLine = true
                                     )
                                 } else {
                                     // Static line — строгое левое выравнивание
@@ -404,18 +405,21 @@ fun LyricsScreen(
 }
 
 /**
- * ПОСИМВОЛЬНОЕ караоке с fluid color bleed.
+ * ПОСИМВОЛЬНОЕ караоке с fluid color bleed — Apple Music style.
  *
- * Каждый символ плавно переходит от inactive к active цвету.
- * Использует Brush.horizontalGradient с colorStops на границах символов.
- * Эффект "растекания" цвета — граница не резкая, а с небольшим fade zone.
+ * Каждый символ плавно переходит от inactive к active через точный
+ * horizontalGradient с colorStops на физических границах символов.
+ *
+ * Масштабирование активной строки: transformOrigin = (0f, 0.5f) —
+ * строго от левого края, никакого horizontal jitter.
  *
  * @param text полный текст строки
  * @param words список слов с прогрессом (0f..1f)
- * @param activeColor цвет активной (закрашенной) части
+ * @param activeColor цвет активной части
  * @param inactiveColor цвет неактивной части
  * @param fontSize размер шрифта
  * @param maxWidthPx максимальная ширина в пикселях
+ * @param isActiveLine true для текущей строки (включает scale + bold)
  */
 @Composable
 private fun KaraokeLineFluid(
@@ -424,16 +428,16 @@ private fun KaraokeLineFluid(
     activeColor: Color,
     inactiveColor: Color,
     fontSize: androidx.compose.ui.unit.TextUnit,
-    maxWidthPx: Int
+    maxWidthPx: Int,
+    isActiveLine: Boolean = true
 ) {
-    if (text.isEmpty() || words.isEmpty()) {
-        // Fallback: просто текст inactive цветом
+    if (text.isEmpty()) {
         Text(
             text = text,
             color = inactiveColor,
             style = TextStyle(
                 fontSize = fontSize,
-                fontWeight = FontWeight.Bold,
+                fontWeight = FontWeight.Normal,
                 textAlign = TextAlign.Start,
                 lineHeight = 36.sp
             ),
@@ -447,9 +451,13 @@ private fun KaraokeLineFluid(
     val textMeasurer = rememberTextMeasurer()
     val density = LocalDensity.current
 
+    // Активная строка: bold + чуть крупнее; неактивная: normal
+    val fontWeight = if (isActiveLine) FontWeight.Bold else FontWeight.Normal
+    val effectiveFontSize = if (isActiveLine) fontSize * 1.04f else fontSize
+
     val textStyle = TextStyle(
-        fontSize = fontSize,
-        fontWeight = FontWeight.Bold,
+        fontSize = effectiveFontSize,
+        fontWeight = fontWeight,
         textAlign = TextAlign.Start,
         lineHeight = 36.sp,
         platformStyle = PlatformTextStyle(includeFontPadding = false)
@@ -464,17 +472,14 @@ private fun KaraokeLineFluid(
         )
     }
 
-    // Создаём карту: индекс символа → прогресс (0f..1f)
-    // Распределяем progress слов по символам
+    // Карта: индекс символа → прогресс (0f..1f)
     val charProgressMap = remember(text, words) {
         val map = MutableList(text.length) { 0f }
         var charIdx = 0
         for (word in words) {
-            // Пропускаем пробелы
             while (charIdx < text.length && text[charIdx] == ' ') {
                 charIdx++
             }
-            // Заполняем символы слова
             for (i in word.text.indices) {
                 if (charIdx < text.length) {
                     map[charIdx] = word.progress.coerceIn(0f, 1f)
@@ -485,57 +490,62 @@ private fun KaraokeLineFluid(
         map
     }
 
-    // Вычисляем colorStops для градиента
-    // Каждый символ имеет свою границу с fade zone
+    // Вычисляем colorStops на основе ТОЧНЫХ физических координат символов
     val colorStops = remember(layoutResult, charProgressMap, activeColor, inactiveColor) {
         val stops = mutableListOf<Pair<Float, Color>>()
         val totalWidth = layoutResult.size.width.toFloat().coerceAtLeast(1f)
-
-        var accumulatedWidth = 0f
-        val fadePx = 3f // 3px fade zone для fluid bleed
+        val fadePx = 2.5f // 2.5px fade zone для плавного bleed
 
         for (i in text.indices) {
-            val bounds = layoutResult.getBoundingBox(i)
-            val charLeft = bounds.left / totalWidth
-            val charRight = bounds.right / totalWidth
-            val charWidth = bounds.width
-            val progress = charProgressMap[i]
+            val bounds = try {
+                layoutResult.getBoundingBox(i)
+            } catch (_: Exception) {
+                continue
+            }
 
-            if (charWidth <= 0) continue
+            val charLeft = (bounds.left / totalWidth).coerceIn(0f, 1f)
+            val charRight = (bounds.right / totalWidth).coerceIn(0f, 1f)
+            val progress = charProgressMap.getOrElse(i) { 0f }
+
+            if (charRight <= charLeft) continue
 
             // Граница внутри символа с fade zone
             val boundary = charLeft + (charRight - charLeft) * progress
-            val fade = (fadePx / totalWidth).coerceAtMost((charRight - charLeft) * 0.3f)
+            val fade = (fadePx / totalWidth).coerceAtMost((charRight - charLeft) * 0.25f)
 
             when {
                 progress <= 0f -> {
-                    // Полностью inactive
                     stops.add(charLeft to inactiveColor)
                     stops.add(charRight to inactiveColor)
                 }
                 progress >= 1f -> {
-                    // Полностью active
                     stops.add(charLeft to activeColor)
                     stops.add(charRight to activeColor)
                 }
                 else -> {
-                    // Частично active — fluid bleed с fade zone
+                    // Fluid bleed: active → fade → inactive
                     stops.add(charLeft to activeColor)
                     stops.add((boundary - fade).coerceAtLeast(charLeft) to activeColor)
                     stops.add((boundary + fade).coerceAtMost(charRight) to inactiveColor)
                     stops.add(charRight to inactiveColor)
                 }
             }
-
-            accumulatedWidth = bounds.right
         }
 
-        // Удаляем дубликаты и сортируем
+        // Сортируем, удаляем дубликаты по позиции
         stops.sortBy { it.first }
-        stops.distinctBy { it.first }.toTypedArray()
+        val deduped = mutableListOf<Pair<Float, Color>>()
+        var lastPos = -1f
+        for (stop in stops) {
+            if (kotlin.math.abs(stop.first - lastPos) > 0.0001f) {
+                deduped.add(stop)
+                lastPos = stop.first
+            }
+        }
+        deduped.toTypedArray()
     }
 
-    val brush = remember(colorStops, activeColor, inactiveColor) {
+    val brush = remember(colorStops) {
         if (colorStops.size >= 2) {
             Brush.horizontalGradient(colorStops = colorStops)
         } else {
@@ -546,10 +556,26 @@ private fun KaraokeLineFluid(
     val canvasWidth = with(density) { layoutResult.size.width.toDp() }
     val canvasHeight = with(density) { layoutResult.size.height.toDp() }
 
+    // Scale для активной строки: ТОЛЬКО от левого края
+    val scale by animateFloatAsState(
+        targetValue = if (isActiveLine) 1.04f else 1.0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessLow
+        ),
+        label = "karaokeScale"
+    )
+
     Canvas(
         modifier = Modifier
-            .width(canvasWidth)
-            .height(canvasHeight)
+            .width(canvasWidth * scale)
+            .height(canvasHeight * scale)
+            .graphicsLayer {
+                this.scaleX = scale
+                this.scaleY = scale
+                // КРИТИЧЕСКИ ВАЖНО: масштабирование от левого края
+                transformOrigin = TransformOrigin(0f, 0.5f)
+            }
     ) {
         drawText(
             textLayoutResult = layoutResult,
