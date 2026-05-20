@@ -393,10 +393,21 @@ object PlayerController {
         if (!playing) _isBuffering.value = false
     }
 
-    fun updatePosition(positionMs: Long) {
+    // Фикс: Принимаем живой durationMs и обновляем StateFlow для Seekbar и обратного отсчета
+    fun updatePosition(positionMs: Long, durationMs: Long) {
         _currentPositionMs.value = positionMs
         lastPlayerPositionMs = positionMs
         lastSyncTimeMs = SystemClock.elapsedRealtime()
+
+        if (durationMs > 0L && _durationMs.value != durationMs) {
+            _durationMs.value = durationMs
+            _currentTrack.value?.let { track ->
+                if (track.durationMs != durationMs) {
+                    _currentTrack.value = track.copy(durationMs = durationMs)
+                }
+            }
+        }
+
         if (_isPlaying.value) {
             val delta = positionMs - lastPositionMs
             if (delta > 0) totalPlayedMs += delta

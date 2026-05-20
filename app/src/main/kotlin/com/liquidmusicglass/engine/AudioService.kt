@@ -247,22 +247,26 @@ class AudioService : MediaSessionService() {
         }
     }
 
+    // Фикс: Полинг непрерывно шлет позицию и безопасный duration в PlayerController
     private fun startPositionPolling(player: ExoPlayer) {
         positionJob?.cancel()
         positionJob = serviceScope.launch {
             while (true) {
+                val position = player.currentPosition
+                val duration = player.duration
+                
+                val safeDuration = if (duration > 0 && duration != C.TIME_UNSET) duration else 0L
+
+                PlayerController.updatePosition(position, safeDuration)
+
                 if (player.isPlaying) {
-                    val position = player.currentPosition
-                    val duration = player.duration
                     val currentIndex = player.currentMediaItemIndex
                     val isPlaying = player.isPlaying
                     val queueSize = player.mediaItemCount
 
-                    PlayerController.updatePosition(position)
-
                     autoMixEngine?.maybeStartAutoMix(
                         currentPositionMs = position,
-                        durationMs = duration,
+                        durationMs = safeDuration,
                         currentIndex = currentIndex,
                         isPlaying = isPlaying,
                         queueSize = queueSize
