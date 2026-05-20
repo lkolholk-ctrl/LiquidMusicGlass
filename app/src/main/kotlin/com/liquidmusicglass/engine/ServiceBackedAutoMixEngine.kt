@@ -14,21 +14,17 @@ import com.liquidmusicglass.automix.DJEffectsEngine
 import com.liquidmusicglass.automix.TrackFeatures
 import com.liquidmusicglass.automix.Transition
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.resume
 
 /**
  * ServiceBackedAutoMixEngine — ML-powered DJ transitions.
- *
- * Адаптирован под новую архитектуру PlayerController + AudioService:
- *   - Не имеет прямого доступа к primary ExoPlayer / MediaSession
- *   - Получает состояние через PlayerController StateFlow
- *   - Создаёт secondary ExoPlayer только на время перехода
- *   - По окончании — обновляет queue в PlayerController, primary player подхватывает
  */
 @OptIn(UnstableApi::class)
 class ServiceBackedAutoMixEngine(
@@ -78,10 +74,7 @@ class ServiceBackedAutoMixEngine(
     fun onManualNavigation() {
         fadeJob?.cancel()
         crossfadeActive = false
-        
-        // Ensure primary player volume is restored if transition was interrupted
         getPrimaryPlayer()?.volume = 1f
-        
         releaseSecondaryPlayer()
         transitionStarted = false
         mixing = false
@@ -90,10 +83,6 @@ class ServiceBackedAutoMixEngine(
         scheduleNextTrackAnalysis()
     }
 
-    /**
-     * Вызывается из AudioService position polling каждые ~200ms.
-     * Проверяет, пора ли начинать переход.
-     */
     fun maybeStartAutoMix(
         currentPositionMs: Long,
         durationMs: Long,
@@ -124,9 +113,6 @@ class ServiceBackedAutoMixEngine(
         startDualPlayerTransition(transition, currentIndex, nextIndex)
     }
 
-    /**
-     * Парный анализ: модель видит конец текущего + начало следующего.
-     */
     private fun scheduleNextTrackAnalysis() {
         if (!isEnabled()) return
 
@@ -154,13 +140,6 @@ class ServiceBackedAutoMixEngine(
         }
     }
 
-    /**
-     * Dual-player кроссфейд с параметрами от ML модели.
-     *
-     * В отличие от старой версии — НЕ меняет MediaSession.player.
-     * Вместо этого: secondary играет переход, затем primary
-     * переключается на следующий трек через PlayerController.
-     */
     private fun startDualPlayerTransition(
         transition: Transition,
         currentIndex: Int,
@@ -175,37 +154,42 @@ class ServiceBackedAutoMixEngine(
         val currentTrack = queue[currentIndex]
         val nextTrack = queue[nextIndex]
 
-        // Entry offset: модель может сказать "начни трек B с 1500мс"
         val entryOffsetMs = transition.entryOffsetMs.coerceAtLeast(0L)
         val crossfadeDuration = transition.crossfadeDurationMs
-
-        // Build secondary player with just the next track
-        val secondary = try {
-            buildSecondaryPlayer().apply {
-                val mediaItem = buildMediaItem(nextTrack)
-                setMediaItem(mediaItem)
-                seekTo(entryOffsetMs)
-                prepare()
-                volume = 0f
-            }
-        } catch (_: Throwable) {
-            transitionStarted = false
-            return
-        }
-        secondaryPlayer = secondary
 
         fadeJob?.cancel()
         fadeJob = scope.launch {
             try {
+                // ИСПРАВЛЕНО: Извлекаем горячий рабочий URL из кэша для дочернего плеера кроссфейда
+                val realNextUri = PlayerController.getValidStreamUri(nextTrack.id) ?: nextTrack.uri
+
+                val secondary = withContext(Dispatchers.Main) {
+                    buildSecondaryPlayer().apply {
+                        val mediaItem = MediaItem.Builder()
+                            .setMediaId(nextTrack.id)
+                            .setUri(realNextUri)
+                            .setMediaMetadata(
+                                MediaMetadata.Builder()
+                                    .setTitle(nextTrack.title)
+                                    .setArtist(nextTrack.artist)
+                                    .build()
+                            )
+                            .build()
+                        setMediaItem(mediaItem)
+                        seekTo(entryOffsetMs)
+                        prepare()
+                        volume = 0f
+                    }
+                }
+                secondaryPlayer = secondary
+
                 mixing = true
                 PlayerController.setMixing(true)
                 crossfadeActive = true
 
-                awaitPlayerReady(secondary, timeoutMs = 3000L)
-                secondary.play()
+                awaitPlayerReady(secondary, timeoutMs = 4000L)
+                withContext(Dispatchers.Main) { secondary.play() }
 
-                // Get reference to primary player via AudioService for volume control
-                // We need to temporarily access the service player for crossfade
                 val primaryPlayer = getPrimaryPlayer()
 
                 if (primaryPlayer != null) {
@@ -218,28 +202,42 @@ class ServiceBackedAutoMixEngine(
                         stepMs = STEP_MS
                     )
                 } else {
-                    // Fallback: simple volume fade on secondary
                     simpleCrossfade(secondary, crossfadeDuration)
                 }
 
-                // Transition complete — handoff back to primary player
+                // Переход завершен — возвращаем управление главному плееру
                 if (primaryPlayer != null) {
                     val currentPos = secondary.currentPosition
+                    val freshNextUri = PlayerController.getValidStreamUri(nextTrack.id) ?: nextTrack.uri
                     
-                    // Force primary player to jump to the next track at the exact same position
-                    // where the secondary player finished the crossfade.
-                    primaryPlayer.seekTo(nextIndex, currentPos)
-                    primaryPlayer.play() // Ensure it's playing
-                    
-                    // Restore primary player's master volume
-                    primaryPlayer.volume = 1f
+                    withContext(Dispatchers.Main) {
+                        // КРИТИЧЕСКИЙ ФИКС: Перед прыжком выпрямляем фейковый Uri в главном плеере!
+                        val synchronizedMediaItem = MediaItem.Builder()
+                            .setMediaId(nextTrack.id)
+                            .setUri(freshNextUri)
+                            .setMediaMetadata(
+                                MediaMetadata.Builder()
+                                    .setTitle(nextTrack.title)
+                                    .setArtist(nextTrack.artist)
+                                    .build()
+                            )
+                            .build()
+                        
+                        if (nextIndex < primaryPlayer.mediaItemCount) {
+                            primaryPlayer.replaceMediaItem(nextIndex, synchronizedMediaItem)
+                        }
+                        
+                        primaryPlayer.seekTo(nextIndex, currentPos)
+                        primaryPlayer.play()
+                        primaryPlayer.volume = 1f
+                    }
                 }
 
-                secondary.stop()
-                releaseSecondaryPlayer()
+                withContext(Dispatchers.Main) {
+                    secondary.stop()
+                    releaseSecondaryPlayer()
+                }
 
-                // Не вызываем skipNext() — это сбросит очередь!
-                // Просто сбрасываем флаги и планируем анализ следующего трека
                 crossfadeActive = false
                 mixing = false
                 PlayerController.setMixing(false)
@@ -248,9 +246,10 @@ class ServiceBackedAutoMixEngine(
                 analyzedNextIndex = -1
                 onTransitionFinished()
                 scheduleNextTrackAnalysis()
-            } catch (_: Throwable) {
+            } catch (e: Exception) {
+                android.util.Log.e("AutoMixEngine", "Crossfade execution crash: ${e.message}")
                 crossfadeActive = false
-                releaseSecondaryPlayer()
+                withContext(Dispatchers.Main) { releaseSecondaryPlayer() }
                 mixing = false
                 PlayerController.setMixing(false)
                 transitionStarted = false
@@ -266,19 +265,6 @@ class ServiceBackedAutoMixEngine(
                 .build()
             setAudioAttributes(attrs, false)
         }
-    }
-
-    private fun buildMediaItem(track: Track): MediaItem {
-        return MediaItem.Builder()
-            .setMediaId(track.id)
-            .setUri(track.uri)
-            .setMediaMetadata(
-                MediaMetadata.Builder()
-                    .setTitle(track.title)
-                    .setArtist(track.artist)
-                    .build()
-            )
-            .build()
     }
 
     private suspend fun awaitPlayerReady(player: ExoPlayer, timeoutMs: Long) {
@@ -323,17 +309,17 @@ class ServiceBackedAutoMixEngine(
     }
 
     private fun simpleCrossfade(secondary: ExoPlayer, durationMs: Long) {
-        // Fallback when primary player is not accessible
-        // Just fade in the secondary player
         fadeJob?.cancel()
         fadeJob = scope.launch {
             val steps = (durationMs / STEP_MS).toInt().coerceAtLeast(1)
             for (step in 0..steps) {
                 val progress = step.toFloat() / steps
-                secondary.volume = progress.coerceIn(0f, 1f)
+                withContext(Dispatchers.Main) {
+                    secondary.volume = progress.coerceIn(0f, 1f)
+                }
                 delay(STEP_MS)
             }
-            secondary.volume = 1f
+            withContext(Dispatchers.Main) { secondary.volume = 1f }
         }
     }
 
