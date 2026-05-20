@@ -17,8 +17,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -27,13 +25,6 @@ import kotlin.coroutines.resume
 
 /**
  * PlayerController — единая точка управления воспроизведением.
- *
- * Архитектура (строго по ICM API docs + Media3):
- *   1. Все сетевые операции — в ioScope (Dispatchers.IO)
- *   2. Все UI StateFlow обновления — с Main dispatcher
- *   3. ExoPlayer API (prepare, play, pause) — только с Main dispatcher
- *   4. Stream URL lifecycle: POST /track → cache → play → expired → re-POST
- *   5. Playback logging: POST /library/wave/playback on skip/end
  */
 object PlayerController {
 
@@ -56,9 +47,9 @@ object PlayerController {
         getCompanionPlayer = { null }
     )
 
-    // ── Stream URL cache (ICM API: file_id cacheable 24h) ──
+    // ── Stream URL cache ──
     private val streamUrlCache = mutableMapOf<String, CachedStreamUrl>()
-    private const val STREAM_CACHE_TTL_MS = 10 * 60 * 1000L  // ~600s per docs, use 10min safe
+    private const val STREAM_CACHE_TTL_MS = 10 * 60 * 1000L
 
     // ── Playback logging state ──
     private var playbackStartTimeMs: Long = 0L
@@ -78,15 +69,10 @@ object PlayerController {
     private val _currentPositionMs = MutableStateFlow(0L)
     val currentPositionMs: StateFlow<Long> = _currentPositionMs
 
-    // ── Smooth time interpolation for 60/120 FPS lyrics ──
     private var lastPlayerPositionMs: Long = 0L
     private var lastSyncTimeMs: Long = 0L
     private var lastIsPlaying: Boolean = false
 
-    /**
-     * Returns smoothly interpolated position for butter-smooth lyrics animation.
-     * Call this from UI frame callbacks (withFrameMillis) at display refresh rate.
-     */
     fun getSmoothPositionMs(): Long {
         if (!lastIsPlaying) return lastPlayerPositionMs
         val elapsed = SystemClock.elapsedRealtime() - lastSyncTimeMs
@@ -111,12 +97,10 @@ object PlayerController {
     private val _recentlyPlayed = MutableStateFlow<List<Track>>(emptyList())
     val recentlyPlayed: StateFlow<List<Track>> = _recentlyPlayed
 
-    // Legacy theme mode stub (moved to AppSettings)
     private val _themeMode = MutableStateFlow(0)
     val themeMode: StateFlow<Int> = _themeMode
     fun setThemeMode(mode: Int) { _themeMode.value = mode }
 
-    // Legacy stubs (AudioEffectsEngine / AutoMix removed)
     private val _volume = MutableStateFlow(1f)
     val volume: StateFlow<Float> = _volume
     fun setVolume(value: Float) { _volume.value = value.coerceIn(0f, 1f) }
@@ -129,14 +113,12 @@ object PlayerController {
     val isMixing: StateFlow<Boolean> = _isMixing
     fun setMixing(mixing: Boolean) { _isMixing.value = mixing }
 
-    // ── AutoMix Engine reference (set by AudioService) ──
     private var autoMixEngine: ServiceBackedAutoMixEngine? = null
 
     fun setAutoMixEngine(engine: ServiceBackedAutoMixEngine?) {
         autoMixEngine = engine
     }
 
-    // ── Init ──
     fun init(context: Context) {
         appContext = context.applicationContext
     }
@@ -145,22 +127,12 @@ object PlayerController {
     //  Playback Control
     // ═══════════════════════════════════════════════════════════
 
-    /**
-     * Play track by index in current queue.
-     *
-     * Gapless playback architecture:
-     * 1. Устанавливаем текущий трек через setMediaItem (очищает очередь)
-     * 2. Сразу после prepare() асинхронно добавляем следующий трек через addMediaItem()
-     * 3. ExoPlayer через CacheDataSource начинает буферить следующий трек в фоне
-     * 4. При переходе к следующему треку — seamless, без затыков
-     */
     fun playTrack(context: Context, index: Int) {
         if (index !in queue.indices) return
 
         ioScope.launch {
             val track = queue[index]
 
-            // Update UI state immediately
             withContext(Dispatchers.Main) {
                 currentIndex = index
                 _currentTrack.value = track
@@ -169,7 +141,6 @@ object PlayerController {
                 _isBuffering.value = true
             }
 
-            // Resolve stream URL on IO
             val streamResult = if (track.isOnlineTrack) {
                 resolveStreamUrl(track.id)
             } else {
@@ -181,14 +152,13 @@ object PlayerController {
                     withContext(Dispatchers.Main) {
                         val player = getPlayer(context)
                         if (player != null) {
-                            // Set current track (clears queue)
                             val currentMediaItem = buildMediaItem(track, streamResult.uri)
                             player.setMediaItem(currentMediaItem)
                             player.prepare()
                             player.play()
                             resetPlaybackLogging(track.durationMs)
 
-                            // Pre-fetch 3-5 tracks ahead per ICM API spec
+                            // Запускаем предзагрузку оконных треков
                             prefetchAhead(context, index, depth = 3)
                         } else {
                             android.util.Log.e("PlayerController", "No player available")
@@ -208,20 +178,7 @@ object PlayerController {
     }
 
     /**
-     * ICM API: Предзагружай 3-5 треков вперёд для бесшовного воспроизведения.
-     *
-     * Архитектура предзагрузки (строго по ICM API спецификации):
-     * 1. file_id кешируется 24ч+ — повторный POST /track с тем же trackId
-     *    возвращает мгновенный ответ (кеш сработает).
-     * 2. signed URL действует ~600 сек — предзагруженные треки должны
-     *    начать играть в пределах этого окна.
-     * 3. Холодные треки (первый запрос): 3-10 сек подготовки.
-     *    Используем ?async=1 для вторичного каталога.
-     * 4. Предзагружаем 3-5 треков вперёд от currentIndex.
-     *
-     * @param context Context
-     * @param currentIndex индекс текущего играющего трека
-     * @param depth количество треков для предзагрузки (default: 3)
+     * ИСПРАВЛЕНО: Теперь заменяет невалидные Uri-плейсхолдеры в очереди на реальные ссылки.
      */
     private fun prefetchAhead(context: Context, currentIndex: Int, depth: Int = 3) {
         if (queue.isEmpty()) return
@@ -230,7 +187,6 @@ object PlayerController {
         val indicesToPrefetch = (currentIndex + 1 until endIndex)
 
         ioScope.launch {
-            // Сначала резолвим все URL параллельно (file_id кеш 24ч+)
             val resolved = indicesToPrefetch.map { idx ->
                 val track = queue[idx]
                 val result = if (track.isOnlineTrack) {
@@ -241,38 +197,35 @@ object PlayerController {
                 idx to result
             }
 
-            // Затем добавляем в плеер на Main dispatcher
             withContext(Dispatchers.Main) {
                 val player = getPlayer(context) ?: return@withContext
-                var addedCount = 0
+                var updatedCount = 0
 
                 for ((idx, result) in resolved) {
                     if (result is StreamResult.Success) {
                         val track = queue[idx]
                         val mediaItem = buildMediaItem(track, result.uri)
-                        player.addMediaItem(mediaItem)
-                        addedCount++
+                        
+                        // КРИТИЧЕСКИЙ ФИКС: Если индекс существует в ExoPlayer — заменяем его, а не аппендим в хвост!
+                        if (idx < player.mediaItemCount) {
+                            player.replaceMediaItem(idx, mediaItem)
+                        } else {
+                            player.addMediaItem(mediaItem)
+                        }
+                        updatedCount++
                     }
                 }
 
-                if (addedCount > 0) {
+                if (updatedCount > 0) {
                     android.util.Log.d(
                         "PlayerController",
-                        "Pre-fetched $addedCount tracks ahead (indices ${currentIndex + 1}..${endIndex - 1})"
+                        "Pre-fetched and synchronized $updatedCount tracks in ExoPlayer queue."
                     )
                 }
             }
         }
     }
 
-    /**
-     * Play a list of tracks from specified start index.
-     * Legacy parameters (autoRefill*, seedTrackId) kept for API compatibility — no-op.
-     */
-    /**
-     * ICM API: Adds tracks to the end of the current queue and syncs with ExoPlayer.
-     * Used by EndlessPlaybackEngine (AutoMix).
-     */
     fun addTracksToQueue(newTracks: List<Track>) {
         if (newTracks.isEmpty()) return
         mainScope.launch {
@@ -280,7 +233,6 @@ object PlayerController {
             queue = queue + newTracks
             _queueFlow.value = queue
             
-            // Sync with actual ExoPlayer (or MediaController) — ВСЕГДА на Main треде
             withContext(Dispatchers.Main) {
                 val player = controller ?: appContext?.let { getPlayer(it) }
                 player?.let { p ->
@@ -288,6 +240,9 @@ object PlayerController {
                         buildMediaItem(track, track.uri)
                     }
                     p.addMediaItems(mediaItems)
+                    
+                    // Сразу обновляем плейсхолдеры для свежих элементов
+                    appContext?.let { prefetchAhead(it, currentIndex, depth = 3) }
                 }
             }
         }
@@ -307,7 +262,6 @@ object PlayerController {
         ioScope.launch {
             val startTrack = tracks[startIndex]
 
-            // Endless Playback Setup
             endlessEngine.reset()
             if (autoRefillType != null) {
                 val type = try {
@@ -326,7 +280,6 @@ object PlayerController {
             }
             endlessEngine.registerTracks(tracks.map { it.id })
 
-            // Resolve start track URL
             val streamResult = if (startTrack.isOnlineTrack) {
                 resolveStreamUrl(startTrack.id)
             } else {
@@ -359,13 +312,11 @@ object PlayerController {
                     }
                     addToRecent(startTrack)
 
-                    // Initial refill check after start
                     launch {
                         kotlinx.coroutines.delay(3000)
                         endlessEngine.checkAndRefillIfNeeded()
                     }
 
-                    // ICM API: Предзагружай 3-5 треков вперёд для бесшовного воспроизведения
                     prefetchAhead(context, startIndex, depth = 3)
                 }
                 is StreamResult.Error -> {
@@ -396,15 +347,11 @@ object PlayerController {
         autoMixEngine?.onManualNavigation()
         if (queue.isEmpty()) return
         val nextIndex = if (currentIndex + 1 < queue.size) currentIndex + 1 else 0
-        // Gapless: используем seekToNextMediaItem вместо playTrack()
-        // Это сохраняет очередь и не сбрасывает предзагруженные треки
         mainScope.launch {
             val player = getPlayer(context)
             if (player != null && nextIndex > currentIndex && player.mediaItemCount > nextIndex) {
-                // ExoPlayer уже имеет трек в очереди — просто переходим
                 player.seekToNextMediaItem()
             } else {
-                // Очередь пуста или трек не предзагружен — запускаем с нуля
                 playTrack(context, nextIndex)
             }
         }
@@ -422,7 +369,6 @@ object PlayerController {
             autoMixEngine?.onManualNavigation()
             if (queue.isEmpty()) return@launch
             val prevIndex = if (currentIndex > 0) currentIndex - 1 else queue.lastIndex
-            // Gapless: используем seekToPreviousMediaItem если возможно
             if (player != null && prevIndex < currentIndex && prevIndex >= 0) {
                 player.seekToPreviousMediaItem()
             } else {
@@ -439,10 +385,6 @@ object PlayerController {
         }
     }
 
-    // ═══════════════════════════════════════════════════════════
-    //  State updates from AudioService
-    // ═══════════════════════════════════════════════════════════
-
     fun setPlaying(playing: Boolean) {
         _isPlaying.value = playing
         lastIsPlaying = playing
@@ -453,7 +395,6 @@ object PlayerController {
         _currentPositionMs.value = positionMs
         lastPlayerPositionMs = positionMs
         lastSyncTimeMs = SystemClock.elapsedRealtime()
-        // Accumulate played time
         if (_isPlaying.value) {
             val delta = positionMs - lastPositionMs
             if (delta > 0) totalPlayedMs += delta
@@ -470,7 +411,9 @@ object PlayerController {
             _durationMs.value = track.durationMs
             _currentPositionMs.value = 0L
             
-            // Check if we need to refill the queue for endless playback
+            // ИСПРАВЛЕНО: Сдвигаем окно предзагрузки вперед, выпрямляя ссылки
+            appContext?.let { prefetchAhead(it, index, depth = 3) }
+
             ioScope.launch {
                 endlessEngine.checkAndRefillIfNeeded()
             }
@@ -481,17 +424,13 @@ object PlayerController {
         logPlayback(completed = true, skipped = false)
         val nextIndex = currentIndex + 1
         if (nextIndex < queue.size) {
-            // ExoPlayer остановился (STATE_ENDED). Нужно вручную перейти на следующий трек.
-            // Используем skipNext для gapless-перехода с ре-резолвом URL если нужно.
             appContext?.let { ctx ->
                 mainScope.launch {
                     val player = getPlayer(ctx)
                     if (player != null && nextIndex > currentIndex && player.mediaItemCount > nextIndex) {
-                        // Трек уже в очереди плеера — просто переходим
                         player.seekToNextMediaItem()
                         player.play()
                     } else {
-                        // Очередь пуста или трек не предзагружен — запускаем с нуля
                         playTrack(ctx, nextIndex)
                     }
                 }
@@ -504,10 +443,6 @@ object PlayerController {
         _isBuffering.value = false
         _isPlaying.value = false
     }
-
-    // ═══════════════════════════════════════════════════════════
-    //  Queue Management
-    // ═══════════════════════════════════════════════════════════
 
     fun setQueue(tracks: List<Track>, startIndex: Int = 0) {
         queue = tracks
@@ -523,25 +458,23 @@ object PlayerController {
         _queueFlow.value = queue
     }
 
+    fun setAutoRefillContext(type: String, id: String, name: String, seedTrackId: String? = null) {}
+    fun clearAutoRefillContext() {}
+    fun playNext(track: Track, context: Context) { addToQueue(track) }
+
     // ═══════════════════════════════════════════════════════════
-    //  Legacy AutoMix stubs (removed — kept for API compatibility)
+    //  Stream URL Resolution & External Bridge Fixes
     // ═══════════════════════════════════════════════════════════
 
-    fun setAutoRefillContext(type: String, id: String, name: String, seedTrackId: String? = null) {
-        // AutoMixEngine removed — no-op
+    /**
+     * ДОБАВЛЕНО: Публичный мост для AutoMixEngine, чтобы вторичный плеер не падал на заглушках.
+     */
+    suspend fun getValidStreamUri(trackId: String): Uri? {
+        return when (val result = resolveStreamUrl(trackId)) {
+            is StreamResult.Success -> result.uri
+            else -> null
+        }
     }
-
-    fun clearAutoRefillContext() {
-        // AutoMixEngine removed — no-op
-    }
-
-    fun playNext(track: Track, context: Context) {
-        addToQueue(track)
-    }
-
-    // ═══════════════════════════════════════════════════════════
-    //  Stream URL Resolution (ICM API compliant)
-    // ═══════════════════════════════════════════════════════════
 
     private sealed class StreamResult {
         data class Success(val uri: Uri) : StreamResult()
@@ -558,9 +491,7 @@ object PlayerController {
         val now = System.currentTimeMillis()
         val cached = streamUrlCache[trackId]
 
-        // Check cache first
         if (cached != null && now < cached.expiresAtMs) {
-            android.util.Log.d("PlayerController", "Cache hit for $trackId")
             return StreamResult.Success(cached.uri)
         }
 
@@ -572,33 +503,28 @@ object PlayerController {
                 if (trackInfo != null) {
                     cacheAndReturn(trackId, trackInfo)
                 } else {
-                    // Check if error is region-related (451)
                     val error = IcmRepository.lastError.value
                     when {
                         error?.contains("region_unavailable") == true ||
                         error?.contains("451") == true -> {
-                            // Retry with required_region if available
                             val apiException = IcmRepository.lastApiException.value
                             val requiredRegion = apiException?.requiredRegion
                             
                             if (requiredRegion != null) {
-                                android.util.Log.w("PlayerController", "Track $trackId region locked, retrying with $requiredRegion")
                                 val retryTrackInfo = IcmRepository.getTrackInfo(trackId, quality = quality, region = requiredRegion)
                                 if (retryTrackInfo != null) {
                                     cacheAndReturn(trackId, retryTrackInfo)
                                 } else {
-                                    StreamResult.Error("region_unavailable", "Failed even after region switch to $requiredRegion")
+                                    StreamResult.Error("region_unavailable", "Failed after region switch")
                                 }
                             } else {
                                 StreamResult.Error("region_unavailable", error)
                             }
                         }
-                        error?.contains("source_not_allowed") == true ||
-                        error?.contains("403") == true -> {
+                        error?.contains("source_not_allowed") == true || error?.contains("403") == true -> {
                             StreamResult.Error("source_not_allowed", error)
                         }
-                        error?.contains("track_not_found") == true ||
-                        error?.contains("404") == true -> {
+                        error?.contains("track_not_found") == true || error?.contains("404") == true -> {
                             StreamResult.Error("track_not_found", error)
                         }
                         error?.contains("early_access") == true -> {
@@ -618,7 +544,6 @@ object PlayerController {
         val uri = Uri.parse(trackInfo.url)
         val now = System.currentTimeMillis()
 
-        // Calculate TTL from expires_at (seconds → ms)
         val ttl = if (trackInfo.expiresAt > 0) {
             (trackInfo.expiresAt * 1000L - now - 60_000L).coerceAtLeast(60_000L)
         } else {
@@ -630,38 +555,23 @@ object PlayerController {
             expiresAtMs = now + ttl,
             fileId = trackInfo.fileId
         )
-
-        android.util.Log.d("PlayerController", "Cached URL for $trackId, expires in ${ttl / 1000}s")
         return StreamResult.Success(uri)
     }
 
-    /**
-     * Handle expired URL during playback — re-resolve and retry.
-     * Called when player gets 403 invalid_or_expired_signature.
-     */
     fun handleExpiredUrl(context: Context, trackId: String) {
         ioScope.launch {
-            // Clear cache for this track
             streamUrlCache.remove(trackId)
-            android.util.Log.d("PlayerController", "Cleared expired cache for $trackId, re-resolving...")
-
             val result = resolveStreamUrl(trackId)
-            when (result) {
-                is StreamResult.Success -> {
-                    withContext(Dispatchers.Main) {
-                        val player = getPlayer(context) ?: return@withContext
-                        val currentMediaItem = player.currentMediaItem
-                        if (currentMediaItem?.mediaId == trackId) {
-                            // Replace current item with fresh URL
-                            val newItem = buildMediaItem(queue[currentIndex], result.uri)
-                            player.replaceMediaItem(currentIndex, newItem)
-                            player.prepare()
-                            player.play()
-                        }
+            if (result is StreamResult.Success) {
+                withContext(Dispatchers.Main) {
+                    val player = getPlayer(context) ?: return@withContext
+                    val currentMediaItem = player.currentMediaItem
+                    if (currentMediaItem?.mediaId == trackId) {
+                        val newItem = buildMediaItem(queue[currentIndex], result.uri)
+                        player.replaceMediaItem(currentIndex, newItem)
+                        player.prepare()
+                        player.play()
                     }
-                }
-                is StreamResult.Error -> {
-                    android.util.Log.e("PlayerController", "Re-resolve failed: ${result.code}")
                 }
             }
         }
@@ -671,13 +581,10 @@ object PlayerController {
         val allowed = com.liquidmusicglass.api.icm.IcmAuthRepository.allowedQualities.value
         val desired = com.liquidmusicglass.api.icm.IcmApi.getInstance().streamQuality ?: "256K"
 
-        // If specific quality is not in allowed list, fallback to safest (256K or first allowed)
         if (allowed.isNotEmpty() && !allowed.contains(desired)) {
-            android.util.Log.w("PlayerController", "Quality $desired not allowed, falling back.")
             return if (allowed.contains("256K")) "256K" else allowed.firstOrNull() ?: "128K"
         }
 
-        // Legacy: secondary catalog limited to 256K without premium (even if not explicitly in allowed)
         val hasPremium = com.liquidmusicglass.api.icm.IcmAuthRepository.isPremium.value
         if (!hasPremium && trackId.startsWith("secondary_")) {
             if (desired == "ALAC" || desired == "320K") return "256K"
@@ -686,7 +593,7 @@ object PlayerController {
     }
 
     // ═══════════════════════════════════════════════════════════
-    //  Playback Logging (POST /library/wave/playback)
+    //  Playback Logging
     // ═══════════════════════════════════════════════════════════
 
     private fun resetPlaybackLogging(durationMs: Long) {
@@ -700,23 +607,15 @@ object PlayerController {
         val durationSec = track.durationMs / 1000f
         val playedSec = totalPlayedMs / 1000f
 
-        // Auto-calculate completed/skipped per ICM API docs:
-        // completed: played >= 0.85 * total
-        // skipped: played < 0.15 * total
         val isCompleted = completed || (playedSec >= 0.85f * durationSec)
         val isSkipped = !isCompleted && (skipped || (playedSec < 0.15f * durationSec))
 
-        // POST /library/wave/playback — только для треков из Wave (радио)
-        // Обычные треки (альбомы, поиск, плейлисты) — не логируем
         val isWaveTrack = track.id.startsWith("wave_") ||
                 (queue.isNotEmpty() && currentIndex >= 0 &&
                         queue.getOrNull(currentIndex)?.let { it.id == track.id } != null &&
                         autoMixEnabled.value)
 
-        if (!isWaveTrack) {
-            android.util.Log.d("PlayerController", "Skip wave playback log for non-wave track: ${track.id}")
-            return
-        }
+        if (!isWaveTrack) return
 
         ioScope.launch {
             try {
@@ -727,16 +626,9 @@ object PlayerController {
                     completed = isCompleted,
                     skipped = isSkipped
                 )
-                android.util.Log.d("PlayerController", "Logged wave playback: ${track.id}, played=${playedSec}s, completed=$isCompleted")
-            } catch (e: Exception) {
-                android.util.Log.e("PlayerController", "Wave playback log failed: ${e.message}")
-            }
+            } catch (_: Exception) {}
         }
     }
-
-    // ═══════════════════════════════════════════════════════════
-    //  MediaItem Builders
-    // ═══════════════════════════════════════════════════════════
 
     private fun buildMediaItem(track: Track, uri: Uri = track.uri): MediaItem {
         return MediaItem.Builder()
@@ -752,17 +644,6 @@ object PlayerController {
             )
             .build()
     }
-
-    private fun buildMediaItems(tracks: List<Track>, startIndex: Int, startUri: Uri): List<MediaItem> {
-        return tracks.mapIndexed { i, track ->
-            val uri = if (i == startIndex) startUri else track.uri
-            buildMediaItem(track, uri)
-        }
-    }
-
-    // ═══════════════════════════════════════════════════════════
-    //  MediaController / Player Access
-    // ═══════════════════════════════════════════════════════════
 
     private suspend fun getPlayer(context: Context): MediaController? {
         controller?.let { return it }
@@ -815,10 +696,6 @@ object PlayerController {
         }
     }
 
-    // ═══════════════════════════════════════════════════════════
-    //  Favorites & Playlists
-    // ═══════════════════════════════════════════════════════════
-
     fun toggleFavorite(trackId: String) {
         ioScope.launch {
             val repo = appContext?.let {
@@ -833,15 +710,8 @@ object PlayerController {
         }
     }
 
-    fun setFavoriteIds(ids: Set<String>) {
-        _favoriteIds.value = ids
-    }
-
+    fun setFavoriteIds(ids: Set<String>) { _favoriteIds.value = ids }
     fun isFavorite(trackId: String): Boolean = _favoriteIds.value.contains(trackId)
-
-    // ═══════════════════════════════════════════════════════════
-    //  Recently Played
-    // ═══════════════════════════════════════════════════════════
 
     private fun addToRecent(track: Track) {
         val current = _recentlyPlayed.value.toMutableList()
@@ -849,10 +719,6 @@ object PlayerController {
         current.add(0, track)
         _recentlyPlayed.value = current.take(50)
     }
-
-    // ═══════════════════════════════════════════════════════════
-    //  Shuffle / Repeat
-    // ═══════════════════════════════════════════════════════════
 
     fun toggleShuffle() {
         _shuffleEnabled.value = !_shuffleEnabled.value
