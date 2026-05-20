@@ -336,39 +336,28 @@ fun LyricsScreen(
                                     },
                                 contentAlignment = Alignment.CenterStart
                             ) {
-                                if (isCurrentLine && lyrics.isSynced) {
-                                    // ПОСИМВОЛЬНОЕ караоке с fluid color bleed
-                                    KaraokeLineFluid(
-                                        text = cleanText,
-                                        words = currentWords,
-                                        activeColor = duetColor ?: Color.White,
-                                        inactiveColor = (duetColor ?: Color.White).copy(
-                                            alpha = 0.3f
-                                        ),
-                                        fontSize = 26.sp,
-                                        maxWidthPx = with(density) { (configuration.screenWidthDp - 48).dp.roundToPx() },
-                                        isActiveLine = true
-                                    )
-                                } else {
-                                    // Static line — строгое левое выравнивание
-                                    Text(
-                                        text = cleanText,
-                                        color = (duetColor ?: Color.White).copy(
-                                            alpha = if (isPastLine) 0.5f else 0.25f
-                                        ),
-                                        style = TextStyle(
-                                            fontSize = 26.sp,
-                                            fontWeight = FontWeight.Normal,
-                                            textAlign = TextAlign.Start,
-                                            lineHeight = 36.sp,
-                                            platformStyle = PlatformTextStyle(includeFontPadding = false)
-                                        ),
-                                        modifier = Modifier.fillMaxWidth(),
-                                        maxLines = 3,
-                                        softWrap = true,
-                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                                    )
+                                // Строка целиком: белая если текущая, полупрозрачная если нет
+                                val textColor = when {
+                                    isCurrentLine -> duetColor ?: Color.White
+                                    isPastLine -> (duetColor ?: Color.White).copy(alpha = 0.5f)
+                                    else -> (duetColor ?: Color.White).copy(alpha = 0.25f)
                                 }
+
+                                Text(
+                                    text = cleanText,
+                                    color = textColor,
+                                    style = TextStyle(
+                                        fontSize = if (isCurrentLine) 28.sp else 26.sp,
+                                        fontWeight = if (isCurrentLine) FontWeight.Bold else FontWeight.SemiBold,
+                                        textAlign = TextAlign.Start,
+                                        lineHeight = 38.sp,
+                                        platformStyle = PlatformTextStyle(includeFontPadding = false)
+                                    ),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    maxLines = 3,
+                                    softWrap = true,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                )
                             }
                         }
 
