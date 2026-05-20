@@ -1,8 +1,9 @@
 package com.liquidmusicglass.ui.lyrics
 
 import android.net.Uri
-import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -22,6 +23,7 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
@@ -177,8 +179,8 @@ fun LyricsScreen(
     
     LaunchedEffect(currentLineIndex) {
         if (currentLineIndex >= 0) {
-            // Центрируем строку: смещение = половина экрана минус примерная высота строки (40dp)
-            val offset = (screenHeightPx / 2 - with(density) { 40.dp.toPx() }).toInt()
+            // Центрируем строку: смещение = половина экрана минус высота строки
+            val offset = (screenHeightPx / 2 - with(density) { 36.dp.toPx() }).toInt()
             listState.animateScrollToItem(
                 index = currentLineIndex.coerceAtMost((lyrics.lines.size - 1).coerceAtLeast(0)),
                 scrollOffset = -offset
@@ -259,7 +261,7 @@ fun LyricsScreen(
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                        horizontalAlignment = Alignment.Start
                     ) {
                         // Header spacer
                         item { Spacer(Modifier.height(100.dp)) }
@@ -301,13 +303,31 @@ fun LyricsScreen(
 
                             val distance = remember(currentLineIndex) { abs(index - currentLineIndex) }
 
+                            // Динамическая скорость: если строки меняются быстро (rap), ускоряем анимацию
+                            val lineDuration = remember(index, lyrics) {
+                                val current = lyrics.lines.getOrNull(index)?.timeMs ?: 0L
+                                val next = lyrics.lines.getOrNull(index + 1)?.timeMs ?: (current + 1000L)
+                                (next - current).coerceAtLeast(100L)
+                            }
+                            
+                            val springStiffness = when {
+                                lineDuration < 400 -> Spring.StiffnessHigh
+                                lineDuration < 800 -> Spring.StiffnessMedium
+                                else -> Spring.StiffnessMediumLow
+                            }
+
+                            val springSpec = spring<Float>(
+                                dampingRatio = Spring.DampingRatioNoBouncy,
+                                stiffness = springStiffness
+                            )
+
                             val lineAlpha by animateFloatAsState(
                                 targetValue = when (distance) {
                                     0 -> 1.0f
-                                    1 -> 0.6f
-                                    else -> 0.3f
+                                    1 -> 0.5f
+                                    else -> 0.15f
                                 },
-                                animationSpec = tween(600, easing = FastOutSlowInEasing),
+                                animationSpec = springSpec,
                                 label = "lineAlpha"
                             )
 
@@ -317,20 +337,22 @@ fun LyricsScreen(
                                     1 -> 0.95f
                                     else -> 0.85f
                                 },
-                                animationSpec = tween(600, easing = FastOutSlowInEasing),
+                                animationSpec = springSpec,
                                 label = "lineScale"
                             )
 
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 32.dp, vertical = 12.dp)
+                                    .heightIn(min = 52.dp) // Стабильная высота контейнера для исключения "эффекта желе"
+                                    .padding(horizontal = 20.dp, vertical = 8.dp)
                                     .graphicsLayer {
                                         scaleX = scale
                                         scaleY = scale
                                         alpha = lineAlpha
+                                        transformOrigin = TransformOrigin(0f, 0.5f)
                                     },
-                                contentAlignment = Alignment.Center
+                                contentAlignment = Alignment.CenterStart
                             ) {
                                 if (isCurrentLine && lyrics.isSynced) {
                                     // Пословное караоке-закрашивание через Canvas + clipRect
@@ -350,11 +372,13 @@ fun LyricsScreen(
                                         style = TextStyle(
                                             fontSize = 28.sp,
                                             fontWeight = if (isCurrentLine) FontWeight.Bold else FontWeight.Normal,
-                                            textAlign = TextAlign.Center,
+                                            textAlign = TextAlign.Start,
                                             lineHeight = 38.sp,
                                             platformStyle = PlatformTextStyle(includeFontPadding = false)
                                         ),
-                                        modifier = Modifier.fillMaxWidth()
+                                        modifier = Modifier.fillMaxWidth(),
+                                        maxLines = 2,
+                                        softWrap = true
                                     )
                                 }
                             }
@@ -421,6 +445,7 @@ private fun KaraokeLine(
 
     val textMeasurer = rememberTextMeasurer()
     val density = LocalDensity.current
+    val configuration = LocalConfiguration.current
 
     // Собираем полный текст с пробелами
     val fullText = remember(words) { words.joinToString(" ") { it.text } }
@@ -438,17 +463,17 @@ private fun KaraokeLine(
     val textStyle = TextStyle(
         fontSize = fontSize,
         fontWeight = FontWeight.Bold,
-        textAlign = TextAlign.Center,
+        textAlign = TextAlign.Start,
         lineHeight = 38.sp,
         platformStyle = PlatformTextStyle(includeFontPadding = false)
     )
 
-    // Измеряем текст для получения точных размеров
+    // Измеряем текст для получения точных размеров, ограничивая шириной экрана минус отступы
     val layoutResult = remember(fullText, textStyle) {
         textMeasurer.measure(
             text = fullText,
             style = textStyle,
-            constraints = Constraints(maxWidth = Int.MAX_VALUE)
+            constraints = Constraints(maxWidth = with(density) { (configuration.screenWidthDp - 40).dp.roundToPx() })
         )
     }
 

@@ -37,6 +37,12 @@ class MainActivity : ComponentActivity() {
         // Handle Telegram auth redirect
         handleTelegramAuth(intent)
 
+        // Security checks: Root & Emulator detection
+        if (com.liquidmusicglass.engine.SecurityUtils.isDeviceRooted() || com.liquidmusicglass.engine.SecurityUtils.isEmulator()) {
+            android.util.Log.e("Security", "Security risk detected: Root or Emulator")
+            // In production, you might want to show a warning dialog or finish the activity
+        }
+
         setContent {
             val themeMode by PlayerController.themeMode.collectAsState()
             LiquidMusicGlassTheme(themeMode = themeMode) {
@@ -103,7 +109,7 @@ class MainActivity : ComponentActivity() {
             // without S2S API key. Best-effort — wave already works via
             // X-Partner-Key + X-Partner-User-Id even if this fails.
             val apiKey = try {
-                IcmKeyProvider.getApiKey()
+                IcmKeyProvider.getApiKey(this)
             } catch (_: Throwable) { "" }
                 .ifBlank { BuildConfig.ICM_API_KEY }
             if (apiKey.isNotBlank() && apiKey.startsWith("pk_")) {

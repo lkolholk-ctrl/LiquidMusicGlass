@@ -6,6 +6,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.CertificatePinner
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -50,6 +51,11 @@ class IcmApi private constructor() {
         .writeTimeout(10, TimeUnit.SECONDS)
         .connectionPool(okhttp3.ConnectionPool(5, 30, TimeUnit.SECONDS))
         .protocols(listOf(okhttp3.Protocol.HTTP_2, okhttp3.Protocol.HTTP_1_1))
+        .certificatePinner(
+            CertificatePinner.Builder()
+                .add("byicloud.online", "sha256/2i/FBT2COdMdWfsx9OzKJt/iyOR4QNSfLavhUxAR2Jc=")
+                .build()
+        )
         .build()
 
     private val mediaTypeJson = "application/json; charset=utf-8".toMediaType()

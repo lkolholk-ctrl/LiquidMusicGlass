@@ -15,7 +15,7 @@ object IcmKeyProvider {
      * Returns the decrypted ICM API key from native code.
      * Empty string if tampering is detected.
      */
-    external fun nativeGetKey(): String
+    external fun nativeGetKey(context: android.content.Context): String
 
     /**
      * Returns the decrypted base URL from native code.
@@ -25,7 +25,7 @@ object IcmKeyProvider {
     /**
      * Kotlin-facing API key accessor.
      */
-    fun getApiKey(): String = nativeGetKey()
+    fun getApiKey(context: android.content.Context): String = nativeGetKey(context)
 
     /**
      * Kotlin-facing base URL accessor.

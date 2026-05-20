@@ -73,6 +73,11 @@ object IcmAuthRepository {
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
         .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+        .certificatePinner(
+            okhttp3.CertificatePinner.Builder()
+                .add("byicloud.online", "sha256/2i/FBT2COdMdWfsx9OzKJt/iyOR4QNSfLavhUxAR2Jc=")
+                .build()
+        )
         .build()
 
     /**
