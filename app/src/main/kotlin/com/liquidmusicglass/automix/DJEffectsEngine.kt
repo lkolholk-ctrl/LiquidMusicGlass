@@ -93,6 +93,8 @@ object DJEffectsEngine {
         val steps = (safeDuration / stepMs).toInt().coerceAtLeast(1)
         val bias = outgoingBias.coerceIn(1f, 3f)
 
+        val targetMediaId = toPlayer.currentMediaItem?.mediaId
+
         toPlayer.volume = 0f
         toPlayer.play()
 
@@ -102,6 +104,19 @@ object DJEffectsEngine {
         }
 
         for (step in 0..steps) {
+            // Проверяем, не нажал ли пользователь паузу во время кроссфейда
+            if (!toPlayer.playWhenReady) {
+                fromPlayer.pause()
+                fromPlayer.volume = 0f
+                break
+            }
+            // Проверяем, не переключили ли трек вручную
+            if (toPlayer.currentMediaItem?.mediaId != targetMediaId) {
+                fromPlayer.volume = 0f
+                fromPlayer.stop()
+                break
+            }
+
             val progress = (step.toFloat() / steps.toFloat()).coerceIn(0f, 1f)
             val (rawFadeOut, fadeIn) = getCrossfadeCurve(progress, transitionType)
             val fadeOut = rawFadeOut.coerceIn(0f, 1f).pow(bias)
@@ -112,7 +127,10 @@ object DJEffectsEngine {
             delay(stepMs)
         }
 
+        // Принудительно останавливаем старый плеер
         fromPlayer.volume = 0f
+        fromPlayer.stop()
+
         toPlayer.volume = masterVolume
 
         // Мягко возвращаем дефолтную скорость по окончании микса
