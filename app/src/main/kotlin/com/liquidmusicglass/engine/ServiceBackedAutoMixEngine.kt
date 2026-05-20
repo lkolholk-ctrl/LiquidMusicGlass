@@ -173,18 +173,31 @@ class ServiceBackedAutoMixEngine(
 
                 val secondary = withContext(Dispatchers.Main) {
                     buildSecondaryPlayer().apply {
-                        val mediaItem = MediaItem.Builder()
-                            .setMediaId(nextTrack.id)
-                            .setUri(realNextUri)
-                            .setMediaMetadata(
-                                MediaMetadata.Builder()
-                                    .setTitle(nextTrack.title)
-                                    .setArtist(nextTrack.artist)
-                                    .build()
-                            )
-                            .build()
-                        setMediaItem(mediaItem)
-                        seekTo(entryOffsetMs)
+                        val primary = getPrimaryPlayer()
+                        val syncMediaItems = mutableListOf<MediaItem>()
+                        if (primary != null) {
+                            for (i in 0 until primary.mediaItemCount) {
+                                syncMediaItems.add(primary.getMediaItemAt(i))
+                            }
+                        }
+                        // Загружаем в деку ПОЛНУЮ копию плейлиста для сохранения таймлайна Media3
+                        if (syncMediaItems.isNotEmpty()) {
+                            setMediaItems(syncMediaItems, nextIndex, entryOffsetMs)
+                        } else {
+                            // Fallback: один трек если primary пуст
+                            val mediaItem = MediaItem.Builder()
+                                .setMediaId(nextTrack.id)
+                                .setUri(realNextUri)
+                                .setMediaMetadata(
+                                    MediaMetadata.Builder()
+                                        .setTitle(nextTrack.title)
+                                        .setArtist(nextTrack.artist)
+                                        .build()
+                                )
+                                .build()
+                            setMediaItem(mediaItem)
+                            seekTo(entryOffsetMs)
+                        }
                         prepare()
                         volume = 0f
                     }
