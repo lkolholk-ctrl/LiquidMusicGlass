@@ -96,6 +96,14 @@ class ServiceBackedAutoMixEngine(
         if (currentIndex + 1 >= queueSize) return
         if (durationMs <= 0L) return
 
+        // Защита от фальстарта: автомикс физически не может начаться,
+        // если трек не проиграл хотя бы 65% от своей общей длительности.
+        val safePlaybackThreshold = (durationMs * 0.65f).toLong()
+        if (currentPositionMs < safePlaybackThreshold) return
+
+        // Дополнительная защита: игнорируем триггер в первые 60 секунд трека в любом случае
+        if (currentPositionMs < 60_000L) return
+
         val remaining = durationMs - currentPositionMs
         val nextIndex = currentIndex + 1
         if (analyzedNextIndex != nextIndex) return
