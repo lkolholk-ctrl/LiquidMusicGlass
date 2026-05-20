@@ -1,0 +1,35 @@
+{
+  "allFiles": [
+    {
+      "file": "/storage/emulated/0/AndroidIDEProjects/backed_up_projects/project_clean_backup_20260318_151152/app/build.gradle.kts",
+      "selection": {
+        "end": {
+          "column": 19,
+          "index": 162,
+          "line": 8
+        },
+        "start": {
+          "column": 19,
+          "index": 162,
+          "line": 8
+        }
+      }
+    },
+    {
+      "file": "/storage/emulated/0/AndroidIDEProjects/backed_up_projects/project_clean_backup_20260318_151152/app/src/main/kotlin/com/liquidmusicglass/automix/DJEffectsEngine.kt",
+      "selection": {
+        "end": {
+          "column": 0,
+          "index": 7988,
+          "line": 232
+        },
+        "start": {
+          "column": 0,
+          "index": 7988,
+          "line": 232
+        }
+      }
+    }
+  ],
+  "selectedFile": "/storage/emulated/0/AndroidIDEProjects/backed_up_projects/project_clean_backup_20260318_151152/app/build.gradle.kts"
+}

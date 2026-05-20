@@ -1,0 +1,20 @@
+{
+  "allFiles": [
+    {
+      "file": "/storage/emulated/0/Download/project_clean/app/src/main/kotlin/com/liquidmusicglass/ui/player/FullPlayer.kt",
+      "selection": {
+        "end": {
+          "column": 1,
+          "index": 24016,
+          "line": 636
+        },
+        "start": {
+          "column": 1,
+          "index": 24016,
+          "line": 636
+        }
+      }
+    }
+  ],
+  "selectedFile": "/storage/emulated/0/Download/project_clean/app/src/main/kotlin/com/liquidmusicglass/ui/player/FullPlayer.kt"
+}

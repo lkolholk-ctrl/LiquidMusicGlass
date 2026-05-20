@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">LiquidMusic</string>
+    <string name="notification_channel_name">Music Playback</string>
+    <string name="notification_channel_description">Shows current track and playback controls</string>
+</resources>
