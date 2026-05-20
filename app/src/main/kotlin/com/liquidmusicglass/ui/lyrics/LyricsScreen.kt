@@ -176,12 +176,12 @@ fun LyricsScreen(
 
     LaunchedEffect(currentLineIndex) {
         if (currentLineIndex >= 0) {
-            // Центрируем активную строку на экране
+            // Поднимаем активную строку ВЫШЕ центра экрана (~35% от высоты)
             val targetIndex = currentLineIndex.coerceAtMost((lyrics.lines.size - 1).coerceAtLeast(0))
-            val centerOffset = (screenHeightPx / 2 - with(density) { 40.dp.toPx() }).toInt()
+            val aboveCenterOffset = (screenHeightPx * 0.35f - with(density) { 40.dp.toPx() }).toInt()
             listState.animateScrollToItem(
                 index = targetIndex,
-                scrollOffset = -centerOffset
+                scrollOffset = -aboveCenterOffset
             )
         }
     }
