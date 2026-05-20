@@ -4,7 +4,6 @@ import android.net.Uri
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -23,7 +22,6 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
@@ -56,13 +54,11 @@ import kotlin.math.min
  * Полноэкранный караоке-экран лирики (Apple Music style).
  *
  * Фичи:
- * - Плавное градиентное закрашивание строки через Brush.horizontalGradient
- * - Субпиксельное сглаживание Skia/Impeller — никаких лесенок
- * - 60/120 FPS smooth interpolation через withFrameMillis
+ * - Strict left alignment — все строки строго по левому краю, никаких staggered offsets
+ * - Text containment — текст никогда не вылезает за края экрана
+ * - Fluid gliding scroll — плавный spring-скролл без рывков
+ * - Пословное караоке через Canvas + TextMeasurer + clipRect
  * - HSV-boosted фон с blur + scrim
- * - Duet layout: мужской/женский вокал разными цветами
- * - WaitingDots до начала первой строки
- * - Auto-scroll к активной строке
  */
 @Composable
 fun LyricsScreen(
@@ -171,19 +167,20 @@ fun LyricsScreen(
         timeProcessor?.getCurrentLineWords() ?: emptyList()
     }
 
-    // ── Auto-scroll ──
+    // ── Auto-scroll с fluid gliding ──
     val listState = rememberLazyListState()
-    val configuration = LocalConfiguration.current
     val density = LocalDensity.current
+    val configuration = LocalConfiguration.current
     val screenHeightPx = with(density) { configuration.screenHeightDp.dp.toPx() }
-    
+
     LaunchedEffect(currentLineIndex) {
         if (currentLineIndex >= 0) {
-            // Центрируем строку: смещение = половина экрана минус высота строки
-            val offset = (screenHeightPx / 2 - with(density) { 36.dp.toPx() }).toInt()
+            // Центрируем активную строку на экране
+            val targetIndex = currentLineIndex.coerceAtMost((lyrics.lines.size - 1).coerceAtLeast(0))
+            val centerOffset = (screenHeightPx / 2 - with(density) { 40.dp.toPx() }).toInt()
             listState.animateScrollToItem(
-                index = currentLineIndex.coerceAtMost((lyrics.lines.size - 1).coerceAtLeast(0)),
-                scrollOffset = -offset
+                index = targetIndex,
+                scrollOffset = -centerOffset
             )
         }
     }
@@ -303,82 +300,70 @@ fun LyricsScreen(
 
                             val distance = remember(currentLineIndex) { abs(index - currentLineIndex) }
 
-                            // Динамическая скорость: если строки меняются быстро (rap), ускоряем анимацию
-                            val lineDuration = remember(index, lyrics) {
-                                val current = lyrics.lines.getOrNull(index)?.timeMs ?: 0L
-                                val next = lyrics.lines.getOrNull(index + 1)?.timeMs ?: (current + 1000L)
-                                (next - current).coerceAtLeast(100L)
-                            }
-                            
-                            val springStiffness = when {
-                                lineDuration < 400 -> Spring.StiffnessHigh
-                                lineDuration < 800 -> Spring.StiffnessMedium
-                                else -> Spring.StiffnessMediumLow
-                            }
-
-                            val springSpec = spring<Float>(
-                                dampingRatio = Spring.DampingRatioNoBouncy,
-                                stiffness = springStiffness
-                            )
-
+                            // Единая spring-анимация для всех строк — никакого staggered offset
                             val lineAlpha by animateFloatAsState(
-                                targetValue = when (distance) {
-                                    0 -> 1.0f
-                                    1 -> 0.5f
-                                    else -> 0.15f
+                                targetValue = when {
+                                    isCurrentLine -> 1.0f
+                                    isPastLine -> 0.5f
+                                    else -> 0.25f
                                 },
-                                animationSpec = springSpec,
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                    stiffness = Spring.StiffnessLow
+                                ),
                                 label = "lineAlpha"
                             )
 
+                            // Убрано масштабирование активной строки — предотвращает вылет за экран
                             val scale by animateFloatAsState(
-                                targetValue = when (distance) {
-                                    0 -> 1.05f
-                                    1 -> 0.95f
-                                    else -> 0.85f
-                                },
-                                animationSpec = springSpec,
+                                targetValue = 1.0f, // ВСЕГДА 1.0 — никакого scale
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                    stiffness = Spring.StiffnessLow
+                                ),
                                 label = "lineScale"
                             )
 
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .heightIn(min = 52.dp) // Стабильная высота контейнера для исключения "эффекта желе"
-                                    .padding(horizontal = 20.dp, vertical = 8.dp)
+                                    .padding(horizontal = 24.dp, vertical = 10.dp)
                                     .graphicsLayer {
                                         scaleX = scale
                                         scaleY = scale
                                         alpha = lineAlpha
-                                        transformOrigin = TransformOrigin(0f, 0.5f)
                                     },
                                 contentAlignment = Alignment.CenterStart
                             ) {
                                 if (isCurrentLine && lyrics.isSynced) {
-                                    // Пословное караоке-закрашивание через Canvas + clipRect
+                                    // Пословное караоке-закрашивание
                                     KaraokeLine(
                                         words = currentWords,
                                         activeColor = duetColor ?: Color.White,
                                         inactiveColor = (duetColor ?: Color.White).copy(
                                             alpha = 0.3f
                                         ),
-                                        fontSize = 28.sp
+                                        fontSize = 26.sp,
+                                        maxWidthPx = with(density) { (configuration.screenWidthDp - 48).dp.roundToPx() }
                                     )
                                 } else {
-                                    // Static line
+                                    // Static line — строгое левое выравнивание
                                     Text(
                                         text = cleanText,
-                                        color = duetColor ?: Color.White,
+                                        color = (duetColor ?: Color.White).copy(
+                                            alpha = if (isPastLine) 0.5f else 0.25f
+                                        ),
                                         style = TextStyle(
-                                            fontSize = 28.sp,
-                                            fontWeight = if (isCurrentLine) FontWeight.Bold else FontWeight.Normal,
+                                            fontSize = 26.sp,
+                                            fontWeight = FontWeight.Normal,
                                             textAlign = TextAlign.Start,
-                                            lineHeight = 38.sp,
+                                            lineHeight = 36.sp,
                                             platformStyle = PlatformTextStyle(includeFontPadding = false)
                                         ),
                                         modifier = Modifier.fillMaxWidth(),
-                                        maxLines = 2,
-                                        softWrap = true
+                                        maxLines = 3,
+                                        softWrap = true,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                     )
                                 }
                             }
@@ -423,29 +408,24 @@ fun LyricsScreen(
  * Это даёт точное позиционирование без "лесенки" — граница цвета всегда
  * совпадает с границей слова.
  *
- * Архитектура:
- * 1. Измеряем полную строку через TextMeasurer
- * 2. Получаем bounding box каждого слова через getBoundingBox()
- * 3. Рисуем background (inactive) — всю строку
- * 4. Для каждого слова рисуем foreground (active) через clipRect
- *
  * @param words список слов с прогрессом (0f..1f)
  * @param activeColor цвет активной (закрашенной) части
  * @param inactiveColor цвет неактивной части
  * @param fontSize размер шрифта
+ * @param maxWidthPx максимальная ширина в пикселях (чтобы не вылезать за экран)
  */
 @Composable
 private fun KaraokeLine(
     words: List<LyricsTimeProcessor.WordToken>,
     activeColor: Color,
     inactiveColor: Color,
-    fontSize: androidx.compose.ui.unit.TextUnit
+    fontSize: androidx.compose.ui.unit.TextUnit,
+    maxWidthPx: Int
 ) {
     if (words.isEmpty()) return
 
     val textMeasurer = rememberTextMeasurer()
     val density = LocalDensity.current
-    val configuration = LocalConfiguration.current
 
     // Собираем полный текст с пробелами
     val fullText = remember(words) { words.joinToString(" ") { it.text } }
@@ -464,16 +444,16 @@ private fun KaraokeLine(
         fontSize = fontSize,
         fontWeight = FontWeight.Bold,
         textAlign = TextAlign.Start,
-        lineHeight = 38.sp,
+        lineHeight = 36.sp,
         platformStyle = PlatformTextStyle(includeFontPadding = false)
     )
 
-    // Измеряем текст для получения точных размеров, ограничивая шириной экрана минус отступы
-    val layoutResult = remember(fullText, textStyle) {
+    // Измеряем текст с ограничением ширины экрана
+    val layoutResult = remember(fullText, textStyle, maxWidthPx) {
         textMeasurer.measure(
             text = fullText,
             style = textStyle,
-            constraints = Constraints(maxWidth = with(density) { (configuration.screenWidthDp - 40).dp.roundToPx() })
+            constraints = Constraints(maxWidth = maxWidthPx)
         )
     }
 
@@ -513,7 +493,6 @@ private fun KaraokeLine(
             if (activeWidth <= 0.5f) continue // Пропускаем полностью неактивные
 
             // Рисуем активную часть слова через clipRect
-            // clipRect обрезает всё что выходит за границы activeWidth
             clipRect(
                 left = wordLeft,
                 top = wordTop,
