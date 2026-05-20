@@ -14,6 +14,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.ChevronRight
@@ -178,30 +179,49 @@ fun SettingsScreen(
 
             PlainCard {
                 Column(modifier = Modifier.padding(vertical = 14.dp)) {
+                    val isPremium = com.liquidmusicglass.api.icm.IcmAuthRepository.isPremium.collectAsState().value
                     qualityOptions.forEach { (quality, description) ->
                         val isSelected = selectedQuality == quality
+                        val isAvailable = isPremium || (quality != "320K" && quality != "ALAC")
+                        
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable(
                                     interactionSource = remember { MutableInteractionSource() },
-                                    indication = null
+                                    indication = null,
+                                    enabled = isAvailable
                                 ) {
                                     selectedQuality = quality
                                     context.getSharedPreferences("icm", Context.MODE_PRIVATE)
                                         .edit().putString("stream_quality", quality).apply()
                                     com.liquidmusicglass.api.icm.IcmRepository.streamQuality = quality
                                 }
-                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                                .padding(horizontal = 16.dp, vertical = 12.dp)
+                                .graphicsLayer { alpha = if (isAvailable) 1f else 0.4f },
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = quality,
-                                    color = if (isSelected) AppleRed else lc.textPrimary,
-                                    fontSize = 16.sp,
-                                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = quality,
+                                        color = if (isSelected) AppleRed else lc.textPrimary,
+                                        fontSize = 16.sp,
+                                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+                                    )
+                                    if (!isAvailable) {
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            "Premium",
+                                            color = Color(0xFF8B5CF6),
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier
+                                                .background(Color(0xFF8B5CF6).copy(alpha = 0.15f), RoundedCornerShape(4.dp))
+                                                .padding(horizontal = 4.dp, vertical = 1.dp)
+                                        )
+                                    }
+                                }
                                 Text(
                                     text = description,
                                     color = lc.textSecondary,

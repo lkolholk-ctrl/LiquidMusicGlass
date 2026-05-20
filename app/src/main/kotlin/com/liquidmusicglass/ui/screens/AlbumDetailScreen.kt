@@ -46,6 +46,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.liquidmusicglass.ui.glass.GlassKit
 import com.liquidmusicglass.api.icm.IcmAlbumResponse
 import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.api.icm.toTrack
@@ -364,10 +365,29 @@ fun AlbumDetailScreen(
                                 modifier = Modifier.width(28.dp)
                             )
                             Column(modifier = Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = track.title,
+                                        color = Color.White,
+                                        fontSize = 15.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f, fill = false)
+                                    )
+                                    if (track.isExplicit) {
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        GlassKit.ExplicitBadge()
+                                    }
+                                    if (track.isCustom) {
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        GlassKit.VerifiedBadge()
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(2.dp))
                                 Text(
-                                    text = track.title,
-                                    color = Color.White,
-                                    fontSize = 15.sp,
+                                    text = track.artist,
+                                    color = Color.White.copy(alpha = 0.45f),
+                                    fontSize = 12.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )

@@ -11,6 +11,17 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
@@ -353,5 +364,38 @@ object GlassKit {
         ) {
             content()
         }
+    }
+
+    // ═══════════════════════════════════════════
+    //  Badges — Explicit, Verified
+    // ═══════════════════════════════════════════
+
+    @Composable
+    fun ExplicitBadge(modifier: Modifier = Modifier) {
+        Box(
+            modifier = modifier
+                .size(14.dp)
+                .clip(RoundedCornerShape(3.dp))
+                .background(Color.White.copy(alpha = 0.25f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "E",
+                color = Color.White.copy(alpha = 0.8f),
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                lineHeight = 9.sp
+            )
+        }
+    }
+
+    @Composable
+    fun VerifiedBadge(modifier: Modifier = Modifier) {
+        Icon(
+            imageVector = Icons.Rounded.CheckCircle,
+            contentDescription = null,
+            tint = Color(0xFF00BFFF),
+            modifier = modifier.size(14.dp)
+        )
     }
 }

@@ -19,6 +19,9 @@ object IcmRepository {
     private val _lastError = MutableStateFlow<String?>(null)
     val lastError: StateFlow<String?> = _lastError
 
+    private val _lastApiException = MutableStateFlow<IcmApiException?>(null)
+    val lastApiException: StateFlow<IcmApiException?> = _lastApiException
+
     private var _lastException: Exception? = null
 
     /** Default region */
@@ -41,6 +44,7 @@ object IcmRepository {
         api.partnerUserId = partnerUserId
         _isInitialized.value = true
         _lastError.value = null
+        _lastApiException.value = null
     }
 
     /**
@@ -52,6 +56,7 @@ object IcmRepository {
         api.partnerUserId = partnerUserId
         _isInitialized.value = true
         _lastError.value = null
+        _lastApiException.value = null
     }
 
     /**
@@ -185,7 +190,7 @@ object IcmRepository {
         val bannerItems = mutableListOf<IcmHomeItem>()
         for (query in bannerQueries) {
             if (bannerItems.size >= 6) break
-            val result = searchAll(query, limit = 5)
+            val result = searchAll(query, limit = 5, source = IcmSearchSource.ALL)
             result?.items
                 ?.filter { it.isTrack }
                 ?.take(6 - bannerItems.size)
@@ -220,7 +225,7 @@ object IcmRepository {
         val newReleaseItems = mutableListOf<IcmHomeItem>()
         for (query in newReleaseQueries) {
             if (newReleaseItems.size >= 10) break
-            val result = searchAll(query, limit = 10)
+            val result = searchAll(query, limit = 10, source = IcmSearchSource.ALL)
             result?.items
                 ?.filter { it.isAlbum || it.collectionId != null }
                 ?.take(10 - newReleaseItems.size)
@@ -256,7 +261,7 @@ object IcmRepository {
         var rank = 1
         for (query in chartQueries) {
             if (chartItems.size >= 15) break
-            val result = searchAll(query, limit = 10)
+            val result = searchAll(query, limit = 10, source = IcmSearchSource.ALL)
             result?.items
                 ?.filter { it.isTrack }
                 ?.take(15 - chartItems.size)
@@ -343,6 +348,9 @@ object IcmRepository {
         result.exceptionOrNull()?.let {
             _lastException = it as? Exception
             _lastError.value = it.message
+            if (it is IcmApiException) {
+                _lastApiException.value = it
+            }
         }
         return result.getOrNull()
     }

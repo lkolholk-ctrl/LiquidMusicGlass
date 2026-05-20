@@ -30,6 +30,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.liquidmusicglass.ui.glass.GlassKit
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.PlaylistManager
 import com.liquidmusicglass.engine.Track
@@ -234,14 +235,25 @@ fun PlaylistDetailScreen(
                 Spacer(Modifier.width(12.dp))
 
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        track.title,
-                        color = lc.textPrimary,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            track.title,
+                            color = lc.textPrimary,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        if (track.isExplicit) {
+                            Spacer(Modifier.width(6.dp))
+                            GlassKit.ExplicitBadge()
+                        }
+                        if (track.isCustom) {
+                            Spacer(Modifier.width(6.dp))
+                            GlassKit.VerifiedBadge()
+                        }
+                    }
                     Text(
                         track.artist,
                         color = lc.textSecondary,

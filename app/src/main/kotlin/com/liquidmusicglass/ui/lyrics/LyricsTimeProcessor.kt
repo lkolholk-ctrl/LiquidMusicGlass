@@ -118,14 +118,14 @@ class LyricsTimeProcessor(
     fun updatePosition(positionMs: Long) {
         if (!lyrics.isSynced || allWords.isEmpty()) return
 
-        // Monotonic Time Guard: позиция никогда не идёт назад
-        val safePosition = if (lastProcessedPositionMs >= 0) {
-            kotlin.math.max(lastProcessedPositionMs, positionMs)
-        } else positionMs
-
         // Детекция ручной перемотки: если скачок > 500мс — сбрасываем курсор
         val isSeek = lastProcessedPositionMs >= 0 &&
-                kotlin.math.abs(safePosition - lastProcessedPositionMs) > SEEK_JUMP_THRESHOLD_MS
+                kotlin.math.abs(positionMs - lastProcessedPositionMs) > SEEK_JUMP_THRESHOLD_MS
+
+        // Monotonic Time Guard: позиция никогда не идёт назад (только если не было seek)
+        val safePosition = if (!isSeek && lastProcessedPositionMs >= 0) {
+            kotlin.math.max(lastProcessedPositionMs, positionMs)
+        } else positionMs
 
         lastProcessedPositionMs = safePosition
 
@@ -213,6 +213,27 @@ class LyricsTimeProcessor(
             }
         }
         return result.coerceIn(0, allWords.size - 1)
+    }
+
+    /**
+     * Возвращает список слов текущей строки с их прогрессом.
+     * Используется для пословного караоке-рендеринга.
+     */
+    fun getCurrentLineWords(): List<WordToken> {
+        val currentLine = _currentLineIndex.value
+        if (currentLine < 0 || currentLine >= lineWordRanges.size) return emptyList()
+
+        val range = lineWordRanges[currentLine]
+        return range.map { idx ->
+            val word = allWords[idx]
+            val safePosition = lastProcessedPositionMs
+            val progress = when {
+                safePosition >= word.endMs -> 1f
+                safePosition <= word.startMs -> 0f
+                else -> (safePosition - word.startMs).toFloat() / (word.endMs - word.startMs).toFloat()
+            }
+            word.toToken(progress = progress.coerceIn(0f, 1f))
+        }
     }
 
     /**

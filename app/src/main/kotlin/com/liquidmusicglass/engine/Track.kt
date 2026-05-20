@@ -18,7 +18,9 @@ data class Track(
     /** URL обложки из ICM API (Apple Music covers). Приоритет над albumArtUri. */
     val coverUrl: String? = null,
     /** Список артистов трека (для фитов/коллабораций). Первый — основной. */
-    val artists: List<com.liquidmusicglass.api.icm.IcmMiniArtist> = emptyList()
+    val artists: List<com.liquidmusicglass.api.icm.IcmMiniArtist> = emptyList(),
+    val isExplicit: Boolean = false,
+    val isCustom: Boolean = false
 ) {
     /** Uri обложки альбома из MediaStore (для локальных треков). */
     val albumArtUri: Uri

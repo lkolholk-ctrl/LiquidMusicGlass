@@ -108,8 +108,12 @@ class MainActivity : ComponentActivity() {
                 .ifBlank { BuildConfig.ICM_API_KEY }
             if (apiKey.isNotBlank() && apiKey.startsWith("pk_")) {
                 authScope.launch {
-                    runCatching {
+                    val loginResult = runCatching {
                         IcmAuthRepository.issueSessionAfterTelegramAuth(apiKey)
+                    }
+                    if (loginResult.isSuccess) {
+                        // After token is issued, fetch profile & preferences (subscription)
+                        IcmAuthRepository.fetchUserData()
                     }
                 }
             }

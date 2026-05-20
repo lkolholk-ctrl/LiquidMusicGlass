@@ -515,8 +515,20 @@ object PlayerController {
                         error?.contains("region_unavailable") == true ||
                         error?.contains("451") == true -> {
                             // Retry with required_region if available
-                            // For now, return error
-                            StreamResult.Error("region_unavailable", error)
+                            val apiException = IcmRepository.lastApiException.value
+                            val requiredRegion = apiException?.requiredRegion
+                            
+                            if (requiredRegion != null) {
+                                android.util.Log.w("PlayerController", "Track $trackId region locked, retrying with $requiredRegion")
+                                val retryTrackInfo = IcmRepository.getTrackInfo(trackId, quality = quality, region = requiredRegion)
+                                if (retryTrackInfo != null) {
+                                    cacheAndReturn(trackId, retryTrackInfo)
+                                } else {
+                                    StreamResult.Error("region_unavailable", "Failed even after region switch to $requiredRegion")
+                                }
+                            } else {
+                                StreamResult.Error("region_unavailable", error)
+                            }
                         }
                         error?.contains("source_not_allowed") == true ||
                         error?.contains("403") == true -> {
@@ -593,10 +605,17 @@ object PlayerController {
     }
 
     private fun getEffectiveQuality(trackId: String): String? {
-        val hasPremium = com.liquidmusicglass.api.icm.IcmAuthRepository.isPremium.value
+        val allowed = com.liquidmusicglass.api.icm.IcmAuthRepository.allowedQualities.value
         val desired = com.liquidmusicglass.api.icm.IcmApi.getInstance().streamQuality ?: "256K"
 
-        // ICM API docs: secondary catalog limited to 256K without premium
+        // If specific quality is not in allowed list, fallback to safest (256K or first allowed)
+        if (allowed.isNotEmpty() && !allowed.contains(desired)) {
+            android.util.Log.w("PlayerController", "Quality $desired not allowed, falling back.")
+            return if (allowed.contains("256K")) "256K" else allowed.firstOrNull() ?: "128K"
+        }
+
+        // Legacy: secondary catalog limited to 256K without premium (even if not explicitly in allowed)
+        val hasPremium = com.liquidmusicglass.api.icm.IcmAuthRepository.isPremium.value
         if (!hasPremium && trackId.startsWith("secondary_")) {
             if (desired == "ALAC" || desired == "320K") return "256K"
         }
@@ -622,7 +641,7 @@ object PlayerController {
         // completed: played >= 0.85 * total
         // skipped: played < 0.15 * total
         val isCompleted = completed || (playedSec >= 0.85f * durationSec)
-        val isSkipped = skipped || (playedSec < 0.15f * durationSec)
+        val isSkipped = !isCompleted && (skipped || (playedSec < 0.15f * durationSec))
 
         // POST /library/wave/playback — только для треков из Wave (радио)
         // Обычные треки (альбомы, поиск, плейлисты) — не логируем

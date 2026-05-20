@@ -100,7 +100,7 @@ data class IcmSearchItem(
     val durationMs: Long
         get() {
             val d = duration ?: return 0L
-            return if (d < 1000) d * 1000L else d
+            return if (isVk) d * 1000L else d
         }
 
     val isTrack: Boolean
@@ -162,6 +162,7 @@ data class IcmAlbumTrack(
     val cover: String,
     @SerialName("collectionId") val collectionId: String? = null,
     @SerialName("is_explicit") val isExplicit: Boolean = false,
+    @SerialName("isCustom") val isCustom: Boolean = false,
     val region: String? = null,
     @SerialName("trackNumber") val trackNumber: Int? = null,
     val duration: Long? = null,
@@ -171,7 +172,8 @@ data class IcmAlbumTrack(
     val durationMs: Long
         get() {
             val d = duration ?: return 0L
-            return if (d < 1000) d * 1000L else d
+            val isVk = id.startsWith("vk_") || source == "secondary" || source == "vk"
+            return if (isVk) d * 1000L else d
         }
 }
 
@@ -213,6 +215,7 @@ data class IcmArtistSong(
     @SerialName("albumName") val albumName: String? = null,
     @SerialName("isAlbum") val isAlbum: Boolean = false,
     @SerialName("is_explicit") val isExplicit: Boolean = false,
+    @SerialName("isCustom") val isCustom: Boolean = false,
     val region: String? = null,
     val source: String? = null,
     val duration: Long? = null
@@ -224,7 +227,7 @@ data class IcmArtistSong(
     val durationMs: Long
         get() {
             val d = duration ?: return 0L
-            return if (d < 1000) d * 1000L else d
+            return if (isVk) d * 1000L else d
         }
 }
 
@@ -301,7 +304,8 @@ data class IcmPlaylistTrack(
     val cover: String,
     @SerialName("collectionId") val collectionId: String,
     val duration: Long,
-    @SerialName("is_explicit") val isExplicit: Boolean = false
+    @SerialName("is_explicit") val isExplicit: Boolean = false,
+    @SerialName("isCustom") val isCustom: Boolean = false
 )
 
 // ─── Cover Sign ───
@@ -368,7 +372,8 @@ data class IcmBatchTrackMetaItem(
     val durationMs: Long
         get() {
             val d = duration ?: return 0L
-            return if (d < 1000) d * 1000L else d
+            val isVk = id.startsWith("vk_") || trackId?.startsWith("vk_") == true
+            return if (isVk) d * 1000L else d
         }
 }
 
@@ -425,7 +430,9 @@ fun IcmSearchItem.toTrack(uri: String? = null): com.liquidmusicglass.engine.Trac
         durationMs = durationMs,
         albumId = collectionId?.hashCode()?.toLong() ?: id.hashCode().toLong(),
         coverUrl = cover?.replace("1000x1000", "600x600") ?: cover,
-        artists = artists
+        artists = artists,
+        isExplicit = isExplicit,
+        isCustom = isCustom
     )
 }
 
@@ -439,7 +446,9 @@ fun IcmAlbumTrack.toTrack(): com.liquidmusicglass.engine.Track {
         durationMs = durationMs,
         albumId = collectionId?.hashCode()?.toLong() ?: id.hashCode().toLong(),
         coverUrl = cover.replace("1000x1000", "600x600"),
-        artists = emptyList()
+        artists = emptyList(),
+        isExplicit = isExplicit,
+        isCustom = isCustom
     )
 }
 
@@ -453,7 +462,9 @@ fun IcmArtistSong.toTrack(): com.liquidmusicglass.engine.Track {
         durationMs = durationMs,
         albumId = 0L,
         coverUrl = cover.replace("300x300", "600x600"),
-        artists = artists
+        artists = artists,
+        isExplicit = isExplicit,
+        isCustom = isCustom
     )
 }
 
@@ -465,10 +476,12 @@ fun IcmPlaylistTrack.toTrack(): com.liquidmusicglass.engine.Track {
         albumName = "",
         uri = android.net.Uri.parse("https://byicloud.online/track/$id"),
         // VK/secondary return seconds, Apple ms — normalize uniformly.
-        durationMs = if (duration in 1..999) duration * 1000L else duration,
+        durationMs = if (id.startsWith("vk_")) duration * 1000L else duration,
         albumId = collectionId.hashCode().toLong(),
         coverUrl = cover.replace("1000x1000", "600x600"),
-        artists = emptyList()
+        artists = emptyList(),
+        isExplicit = isExplicit,
+        isCustom = isCustom
     )
 }
 
@@ -564,13 +577,15 @@ data class IcmWaveTrack(
     val duration: Long? = null,
     @SerialName("collectionId") val collectionId: String? = null,
     @SerialName("is_explicit") val isExplicit: Boolean = false,
+    @SerialName("isCustom") val isCustom: Boolean = false,
     val source: String? = null
 ) {
     /** VK returns duration in seconds, Apple in milliseconds. Normalized to ms. */
     val durationMs: Long
         get() {
             val d = duration ?: return 0L
-            return if (d < 1000) d * 1000L else d
+            val isVk = id.startsWith("vk_") || source == "secondary" || source == "vk"
+            return if (isVk) d * 1000L else d
         }
 
     fun toTrack(): com.liquidmusicglass.engine.Track {
@@ -582,7 +597,9 @@ data class IcmWaveTrack(
             uri = android.net.Uri.parse("https://byicloud.online/track/$id"),
             durationMs = durationMs,
             albumId = collectionId?.hashCode()?.toLong() ?: id.hashCode().toLong(),
-            coverUrl = cover?.replace("1000x1000", "600x600")
+            coverUrl = cover?.replace("1000x1000", "600x600"),
+            isExplicit = isExplicit,
+            isCustom = isCustom
         )
     }
 }
@@ -617,13 +634,15 @@ data class IcmLibraryTrack(
     val duration: Long? = null,
     @SerialName("collectionId") val collectionId: String? = null,
     @SerialName("is_explicit") val isExplicit: Boolean = false,
+    @SerialName("isCustom") val isCustom: Boolean = false,
     val source: String? = null
 ) {
     /** VK returns duration in seconds, Apple in milliseconds. Normalized to ms. */
     val durationMs: Long
         get() {
             val d = duration ?: return 0L
-            return if (d < 1000) d * 1000L else d
+            val isVk = id.startsWith("vk_") || source == "secondary" || source == "vk"
+            return if (isVk) d * 1000L else d
         }
 }
 

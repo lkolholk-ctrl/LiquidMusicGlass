@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -18,16 +19,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.liquidmusicglass.engine.LyricsParser
@@ -42,6 +47,8 @@ import kotlinx.coroutines.withContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import kotlin.math.max
+import kotlin.math.min
 
 /**
  * Полноэкранный караоке-экран лирики (Apple Music style).
@@ -156,6 +163,11 @@ fun LyricsScreen(
 
     val currentLineIndex by timeProcessor?.currentLineIndex?.collectAsState() ?: remember { mutableIntStateOf(-1) }
     val currentLineProgress by timeProcessor?.currentLineProgress?.collectAsState() ?: remember { mutableFloatStateOf(0f) }
+
+    // Получаем слова текущей строки для пословного караоке
+    val currentWords = remember(currentLineIndex, smoothPositionMs) {
+        timeProcessor?.getCurrentLineWords() ?: emptyList()
+    }
 
     // ── Auto-scroll ──
     val listState = rememberLazyListState()
@@ -309,10 +321,9 @@ fun LyricsScreen(
                                 contentAlignment = Alignment.Center
                             ) {
                                 if (isCurrentLine && lyrics.isSynced) {
-                                    // Плавное градиентное закрашивание строки
+                                    // Пословное караоке-закрашивание через Canvas + clipRect
                                     KaraokeLine(
-                                        text = cleanText,
-                                        progress = currentLineProgress,
+                                        words = currentWords,
                                         activeColor = duetColor ?: Color.White,
                                         inactiveColor = (duetColor ?: Color.White).copy(
                                             alpha = LyricsTimeProcessor.UPCOMING_ALPHA
@@ -367,50 +378,113 @@ fun LyricsScreen(
 }
 
 /**
- * Строка с плавным градиентным закрашиванием (караоке-эффект).
+ * Строка с пословным караоке-закрашиванием.
  *
- * Использует Brush.horizontalGradient в TextStyle — Skia/Impeller автоматически
- * применяет субпиксельное сглаживание (anti-aliasing) на стыке цветов.
- * Никаких clipRect, никакой посимвольной отрисовки.
+ * Каждое слово рисуется отдельно через Canvas + TextMeasurer + clipRect.
+ * Это даёт точное позиционирование без "лесенки" — граница цвета всегда
+ * совпадает с границей слова.
  *
- * @param text текст строки
- * @param progress прогресс закрашивания (0f..1f), плавный Float от плеера
+ * Архитектура:
+ * 1. Измеряем полную строку через TextMeasurer
+ * 2. Получаем bounding box каждого слова через getBoundingBox()
+ * 3. Рисуем background (inactive) — всю строку
+ * 4. Для каждого слова рисуем foreground (active) через clipRect
+ *
+ * @param words список слов с прогрессом (0f..1f)
  * @param activeColor цвет активной (закрашенной) части
  * @param inactiveColor цвет неактивной части
  * @param fontSize размер шрифта
  */
 @Composable
 private fun KaraokeLine(
-    text: String,
-    progress: Float,
+    words: List<LyricsTimeProcessor.WordToken>,
     activeColor: Color,
     inactiveColor: Color,
     fontSize: androidx.compose.ui.unit.TextUnit
 ) {
-    val clampedProgress = progress.coerceIn(0f, 1f)
+    if (words.isEmpty()) return
 
-    // Ультра-короткий переход 1.5% — полностью убирает пиксельные стыки
-    val transitionStart = clampedProgress
-    val transitionEnd = (clampedProgress + 0.015f).coerceAtMost(1.0f)
+    val textMeasurer = rememberTextMeasurer()
+    val density = LocalDensity.current
 
-    val karaokeBrush = Brush.horizontalGradient(
-        colorStops = arrayOf(
-            0.0f to activeColor,
-            transitionStart to activeColor,
-            transitionEnd to inactiveColor,
-            1.0f to inactiveColor
+    // Собираем полный текст с пробелами
+    val fullText = remember(words) { words.joinToString(" ") { it.text } }
+    val wordRanges = remember(words) {
+        val ranges = mutableListOf<IntRange>()
+        var pos = 0
+        for ((i, word) in words.withIndex()) {
+            ranges.add(pos until pos + word.text.length)
+            pos += word.text.length
+            if (i < words.lastIndex) pos += 1 // space
+        }
+        ranges
+    }
+
+    val textStyle = TextStyle(
+        fontSize = fontSize,
+        fontWeight = FontWeight.Bold,
+        textAlign = TextAlign.Center,
+        lineHeight = 38.sp
+    )
+
+    // Измеряем текст для получения точных размеров
+    val layoutResult = remember(fullText, textStyle) {
+        textMeasurer.measure(
+            text = fullText,
+            style = textStyle,
+            constraints = Constraints(maxWidth = Int.MAX_VALUE)
         )
-    )
+    }
 
-    Text(
-        text = text,
-        style = TextStyle(
-            brush = karaokeBrush,
-            fontSize = fontSize,
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center,
-            lineHeight = 38.sp
-        ),
-        modifier = Modifier.fillMaxWidth()
-    )
+    val canvasWidth = with(density) { layoutResult.size.width.toDp() }
+    val canvasHeight = with(density) { layoutResult.size.height.toDp() }
+
+    Canvas(
+        modifier = Modifier
+            .width(canvasWidth)
+            .height(canvasHeight)
+    ) {
+        // Background: вся строка inactive цветом
+        drawText(
+            textLayoutResult = layoutResult,
+            color = inactiveColor,
+            topLeft = Offset.Zero
+        )
+
+        // Foreground: каждое слово активным цветом, обрезанное по progress
+        for ((i, word) in words.withIndex()) {
+            val range = wordRanges[i]
+            if (range.isEmpty()) continue
+
+            // Получаем bounding box первого и последнего символа слова
+            val startBounds = layoutResult.getBoundingBox(range.first)
+            val endBounds = layoutResult.getBoundingBox(range.last)
+
+            val wordLeft = startBounds.left
+            val wordRight = endBounds.right
+            val wordTop = min(startBounds.top, endBounds.top)
+            val wordBottom = max(startBounds.bottom, endBounds.bottom)
+            val wordWidth = wordRight - wordLeft
+
+            val progress = word.progress.coerceIn(0f, 1f)
+            val activeWidth = wordWidth * progress
+
+            if (activeWidth <= 0.5f) continue // Пропускаем полностью неактивные
+
+            // Рисуем активную часть слова через clipRect
+            // clipRect обрезает всё что выходит за границы activeWidth
+            clipRect(
+                left = wordLeft,
+                top = wordTop,
+                right = wordLeft + activeWidth,
+                bottom = wordBottom
+            ) {
+                drawText(
+                    textLayoutResult = layoutResult,
+                    color = activeColor,
+                    topLeft = Offset.Zero
+                )
+            }
+        }
+    }
 }

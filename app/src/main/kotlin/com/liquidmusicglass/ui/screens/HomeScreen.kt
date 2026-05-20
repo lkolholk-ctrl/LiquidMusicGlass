@@ -173,8 +173,10 @@ fun HomeScreen(
         allTracks.filter { it.id in favoriteIds }
     }
 
-    // Load home content on first composition
-    LaunchedEffect(Unit) {
+    val isLoggedIn by IcmAuthRepository.isLoggedIn.collectAsState()
+
+    // Load home content on first composition or when login state changes
+    LaunchedEffect(isLoggedIn) {
         viewModel.loadHomeContent()
     }
 
@@ -191,16 +193,7 @@ fun HomeScreen(
     var isPlayingMood by remember { mutableStateOf(false) }
 
     fun waveTrackToTrack(waveTrack: IcmWaveTrack): Track {
-        return Track(
-            id = waveTrack.id,
-            title = waveTrack.title,
-            artist = waveTrack.artist ?: "Unknown Artist",
-            albumName = "",
-            durationMs = waveTrack.durationMs,
-            uri = Uri.parse("https://byicloud.online/track/${waveTrack.id}"),
-            coverUrl = waveTrack.cover,
-            albumId = waveTrack.collectionId?.hashCode()?.toLong() ?: -1L
-        )
+        return waveTrack.toTrack()
     }
 
     // Cached seed_track_id per mood so wave refills stay on-genre.

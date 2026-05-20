@@ -48,6 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.liquidmusicglass.ui.glass.GlassKit
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.liquidmusicglass.api.icm.IcmAuthRepository
@@ -463,6 +464,8 @@ fun SearchScreen(
                                         subtitle = item.displayArtist,
                                         icon = Icons.Rounded.MusicNote,
                                         coverUrl = item.cover,
+                                        isExplicit = item.isExplicit,
+                                        isCustom = item.isCustom,
                                         onClick = {
                                             hideKeyboard()
                                             val startIdx = playableTracks.indexOfFirst { it.id == item.id }
@@ -708,6 +711,8 @@ private fun SearchResultRow(
     subtitle: String,
     icon: ImageVector,
     coverUrl: String?,
+    isExplicit: Boolean = false,
+    isCustom: Boolean = false,
     onClick: () -> Unit
 ) {
     Row(
@@ -755,14 +760,25 @@ private fun SearchResultRow(
         }
         Spacer(modifier = Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = title,
-                color = LiquidTheme.colors.textPrimary,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = title,
+                    color = LiquidTheme.colors.textPrimary,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                if (isExplicit) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    GlassKit.ExplicitBadge()
+                }
+                if (isCustom) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    GlassKit.VerifiedBadge()
+                }
+            }
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = subtitle,
