@@ -481,17 +481,21 @@ object PlayerController {
         logPlayback(completed = true, skipped = false)
         val nextIndex = currentIndex + 1
         if (nextIndex < queue.size) {
-            // ExoPlayer автоматически перешёл на следующий трек из очереди (addMediaItem)
-            // Но URL мог истечь (>600s). Проверяем и ре-резолвим если нужно.
-            currentIndex = nextIndex
-            val nextTrack = queue[nextIndex]
-            _currentTrack.value = nextTrack
-            _durationMs.value = nextTrack.durationMs
-            _currentPositionMs.value = 0L
-            resetPlaybackLogging(nextTrack.durationMs)
-
-            // Предзагружаем следующие 3 трека
-            appContext?.let { prefetchAhead(it, nextIndex, depth = 3) }
+            // ExoPlayer остановился (STATE_ENDED). Нужно вручную перейти на следующий трек.
+            // Используем skipNext для gapless-перехода с ре-резолвом URL если нужно.
+            appContext?.let { ctx ->
+                mainScope.launch {
+                    val player = getPlayer(ctx)
+                    if (player != null && nextIndex > currentIndex && player.mediaItemCount > nextIndex) {
+                        // Трек уже в очереди плеера — просто переходим
+                        player.seekToNextMediaItem()
+                        player.play()
+                    } else {
+                        // Очередь пуста или трек не предзагружен — запускаем с нуля
+                        playTrack(ctx, nextIndex)
+                    }
+                }
+            }
         }
     }
 
