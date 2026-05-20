@@ -44,9 +44,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.text.PlatformTextStyle
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
@@ -171,11 +171,17 @@ fun LyricsScreen(
 
     // ── Auto-scroll ──
     val listState = rememberLazyListState()
+    val configuration = LocalConfiguration.current
+    val density = LocalDensity.current
+    val screenHeightPx = with(density) { configuration.screenHeightDp.dp.toPx() }
+    
     LaunchedEffect(currentLineIndex) {
         if (currentLineIndex >= 0) {
+            // Центрируем строку: смещение = половина экрана минус примерная высота строки (40dp)
+            val offset = (screenHeightPx / 2 - with(density) { 40.dp.toPx() }).toInt()
             listState.animateScrollToItem(
                 index = currentLineIndex.coerceAtMost((lyrics.lines.size - 1).coerceAtLeast(0)),
-                scrollOffset = -300
+                scrollOffset = -offset
             )
         }
     }
@@ -293,19 +299,25 @@ fun LyricsScreen(
 
                             val cleanText = line.text.replace(Regex("""\[(M|F|D|Male|Female|Duet):?\s*""", RegexOption.IGNORE_CASE), "")
 
+                            val distance = remember(currentLineIndex) { abs(index - currentLineIndex) }
+
                             val lineAlpha by animateFloatAsState(
-                                targetValue = when {
-                                    isCurrentLine -> 1f
-                                    isPastLine -> LyricsTimeProcessor.PAST_ALPHA
-                                    else -> LyricsTimeProcessor.UPCOMING_ALPHA
+                                targetValue = when (distance) {
+                                    0 -> 1.0f
+                                    1 -> 0.6f
+                                    else -> 0.3f
                                 },
-                                animationSpec = tween(400),
+                                animationSpec = tween(600, easing = FastOutSlowInEasing),
                                 label = "lineAlpha"
                             )
 
                             val scale by animateFloatAsState(
-                                targetValue = if (isCurrentLine) 1.05f else 1f,
-                                animationSpec = tween(400),
+                                targetValue = when (distance) {
+                                    0 -> 1.05f
+                                    1 -> 0.95f
+                                    else -> 0.85f
+                                },
+                                animationSpec = tween(600, easing = FastOutSlowInEasing),
                                 label = "lineScale"
                             )
 
@@ -326,7 +338,7 @@ fun LyricsScreen(
                                         words = currentWords,
                                         activeColor = duetColor ?: Color.White,
                                         inactiveColor = (duetColor ?: Color.White).copy(
-                                            alpha = LyricsTimeProcessor.UPCOMING_ALPHA
+                                            alpha = 0.3f
                                         ),
                                         fontSize = 28.sp
                                     )
@@ -335,10 +347,13 @@ fun LyricsScreen(
                                     Text(
                                         text = cleanText,
                                         color = duetColor ?: Color.White,
-                                        fontSize = if (isCurrentLine) 28.sp else 26.sp,
-                                        fontWeight = if (isCurrentLine) FontWeight.Bold else FontWeight.SemiBold,
-                                        textAlign = TextAlign.Center,
-                                        lineHeight = 38.sp,
+                                        style = TextStyle(
+                                            fontSize = 28.sp,
+                                            fontWeight = if (isCurrentLine) FontWeight.Bold else FontWeight.Normal,
+                                            textAlign = TextAlign.Center,
+                                            lineHeight = 38.sp,
+                                            platformStyle = PlatformTextStyle(includeFontPadding = false)
+                                        ),
                                         modifier = Modifier.fillMaxWidth()
                                     )
                                 }
@@ -424,7 +439,8 @@ private fun KaraokeLine(
         fontSize = fontSize,
         fontWeight = FontWeight.Bold,
         textAlign = TextAlign.Center,
-        lineHeight = 38.sp
+        lineHeight = 38.sp,
+        platformStyle = PlatformTextStyle(includeFontPadding = false)
     )
 
     // Измеряем текст для получения точных размеров

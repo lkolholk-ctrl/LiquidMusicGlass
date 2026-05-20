@@ -179,7 +179,18 @@ fun SettingsScreen(
 
             PlainCard {
                 Column(modifier = Modifier.padding(vertical = 14.dp)) {
-                    val isPremium = com.liquidmusicglass.api.icm.IcmAuthRepository.isPremium.collectAsState().value
+                    val isPremium by com.liquidmusicglass.api.icm.IcmAuthRepository.isPremium.collectAsState()
+                    
+                    // Auto-fallback to 256K if premium is lost but high quality was selected
+                    androidx.compose.runtime.LaunchedEffect(isPremium) {
+                        if (!isPremium && (selectedQuality == "320K" || selectedQuality == "ALAC")) {
+                            selectedQuality = "256K"
+                            context.getSharedPreferences("icm", Context.MODE_PRIVATE)
+                                .edit().putString("stream_quality", "256K").apply()
+                            com.liquidmusicglass.api.icm.IcmRepository.streamQuality = "256K"
+                        }
+                    }
+
                     qualityOptions.forEach { (quality, description) ->
                         val isSelected = selectedQuality == quality
                         val isAvailable = isPremium || (quality != "320K" && quality != "ALAC")
