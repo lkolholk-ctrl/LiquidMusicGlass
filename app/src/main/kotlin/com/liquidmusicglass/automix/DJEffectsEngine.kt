@@ -33,45 +33,47 @@ object DJEffectsEngine {
     }
 
     private fun smoothFadeCurve(p: Float): Pair<Float, Float> {
-        val fadeOut = cos(p * PI.toFloat() / 2f)
+        // Constant Power Crossfade:
+        // Входящий — синус (мягкий старт), исходящий — кубический нырок (быстрое освобождение частот)
         val fadeIn = sin(p * PI.toFloat() / 2f)
-        return fadeOut to fadeIn
-    }
-
-    private fun energyFadeCurve(p: Float): Pair<Float, Float> {
-        val fadeOut = (1f - p * p).coerceIn(0f, 1f)
-        val fadeIn = if (p < 0.3f) 0f
-        else ((p - 0.3f) / 0.7f).let { t -> t * t * (3f - 2f * t) }
-        return fadeOut to fadeIn
-    }
-
-    private fun beatMatchCurve(p: Float): Pair<Float, Float> {
-        val fadeOut = cos(p * PI.toFloat() / 2f).pow(1.15f)
-        val fadeIn = sin(p * PI.toFloat() / 2f)
+        val fadeOut = 1f - p * p * p
         return fadeOut.coerceIn(0f, 1f) to fadeIn.coerceIn(0f, 1f)
     }
 
+    private fun energyFadeCurve(p: Float): Pair<Float, Float> {
+        // Исходящий уходит быстро (куб), входящий нарастает синусом после небольшой задержки
+        val fadeOut = (1f - p * p * p).coerceIn(0f, 1f)
+        val fadeIn = if (p < 0.2f) 0f
+        else sin(((p - 0.2f) / 0.8f) * PI.toFloat() / 2f)
+        return fadeOut to fadeIn.coerceIn(0f, 1f)
+    }
+
+    private fun beatMatchCurve(p: Float): Pair<Float, Float> {
+        // Быстрый нырок исходящего, синус входящего — минимум конфликта басов при бит-матче
+        val fadeOut = (1f - p * p * p).coerceIn(0f, 1f)
+        val fadeIn = sin(p * PI.toFloat() / 2f)
+        return fadeOut to fadeIn.coerceIn(0f, 1f)
+    }
+
     private fun hardCutCurve(p: Float): Pair<Float, Float> {
-        val fadeOut = when {
-            p < 0.55f -> 1f - p * 0.35f
-            else -> (1f - (p - 0.55f) * 4f).coerceIn(0f, 1f)
-        }
-        val fadeIn = if (p < 0.4f) (p * 2.5f).coerceIn(0f, 1f) else 1f
-        return fadeOut.coerceIn(0f, 1f) to fadeIn
+        // Быстрый резкий срез: исходящий уходит кубически, входящий — синус
+        val fadeOut = (1f - p * p * p).coerceIn(0f, 1f)
+        val fadeIn = sin(p * PI.toFloat() / 2f)
+        return fadeOut to fadeIn.coerceIn(0f, 1f)
     }
 
     private fun filterSweepCurve(p: Float): Pair<Float, Float> {
-        val fadeOut = (1f - p).let { it * it }
-        val fadeIn = p * p
-        return fadeOut to fadeIn
+        val fadeOut = (1f - p * p * p).coerceIn(0f, 1f)
+        val fadeIn = sin(p * PI.toFloat() / 2f)
+        return fadeOut to fadeIn.coerceIn(0f, 1f)
     }
 
     private fun echoOutCurve(p: Float): Pair<Float, Float> {
-        val envelope = (1f - p)
+        val envelope = (1f - p * p * p).coerceIn(0f, 1f)
         val pulse = 1f + 0.1f * sin(p * 8f * PI.toFloat()) * envelope
         val fadeOut = (envelope * pulse).coerceIn(0f, 1f)
         val fadeIn = sin(p * PI.toFloat() / 2f)
-        return fadeOut to fadeIn
+        return fadeOut to fadeIn.coerceIn(0f, 1f)
     }
 
     /**
