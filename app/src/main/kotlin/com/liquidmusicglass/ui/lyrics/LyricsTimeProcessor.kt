@@ -55,8 +55,8 @@ class LyricsTimeProcessor(
     private val _currentWords = MutableStateFlow<List<WordToken>>(emptyList())
     val currentWords: StateFlow<List<WordToken>> = _currentWords.asStateFlow()
 
-    private val _upcomingWords = MutableStateFlow<List<WordToken>>(emptyList())
-    val upcomingWords: StateFlow<List<WordToken>> = _upcomingWords.asStateFlow()
+    private val _currentLineProgress = MutableStateFlow(0f)
+    val currentLineProgress: StateFlow<Float> = _currentLineProgress.asStateFlow()
 
     private val _currentLineIndex = MutableStateFlow(-1)
     val currentLineIndex: StateFlow<Int> = _currentLineIndex.asStateFlow()
@@ -153,7 +153,7 @@ class LyricsTimeProcessor(
         if (currentLine < 0 || currentLine >= lineWordRanges.size) {
             _pastWords.value = emptyList()
             _currentWords.value = emptyList()
-            _upcomingWords.value = emptyList()
+            _currentLineProgress.value = 0f
             return
         }
 
@@ -184,7 +184,15 @@ class LyricsTimeProcessor(
 
         _pastWords.value = past
         _currentWords.value = current
-        _upcomingWords.value = upcoming
+
+        // Вычисляем прогресс для всей строки целиком (0f..1f)
+        val lineStartMs = allWords[range.first].startMs
+        val lineEndMs = allWords[range.last].endMs
+        val lineDuration = (lineEndMs - lineStartMs).coerceAtLeast(1L)
+        val rawLineProgress = (safePosition - lineStartMs).toFloat() / lineDuration.toFloat()
+        _currentLineProgress.value = LYRIC_PROGRESS_INTERPOLATOR.getInterpolation(
+            rawLineProgress.coerceIn(0f, 1f)
+        )
     }
 
     /**
@@ -222,9 +230,9 @@ class LyricsTimeProcessor(
         currentWordIndex = 0
         lastProcessedPositionMs = -1L
         _currentLineIndex.value = -1
+        _currentLineProgress.value = 0f
         _pastWords.value = emptyList()
         _currentWords.value = emptyList()
-        _upcomingWords.value = emptyList()
     }
 
     data class WordToken(

@@ -47,9 +47,9 @@ import androidx.lifecycle.LifecycleEventObserver
  * Полноэкранный караоке-экран лирики (Apple Music style).
  *
  * Фичи:
- * - Word-level synchronization с градиентным наплывом
+ * - Плавное градиентное закрашивание строки через Brush.horizontalGradient
+ * - Субпиксельное сглаживание Skia/Impeller — никаких лесенок
  * - 60/120 FPS smooth interpolation через withFrameMillis
- * - Monotonic Cursor Index — O(1) обновление, никакого хаоса на высокой скорости
  * - HSV-boosted фон с blur + scrim
  * - Duet layout: мужской/женский вокал разными цветами
  * - WaitingDots до начала первой строки
@@ -122,7 +122,7 @@ fun LyricsScreen(
         isLoading = false
     }
 
-    // ── Time processor for word-level sync ──
+    // ── Time processor for line-level sync ──
     val timeProcessor = remember(lyrics) {
         if (lyrics.lines.isNotEmpty()) LyricsTimeProcessor(lyrics) else null
     }
@@ -155,9 +155,7 @@ fun LyricsScreen(
     }
 
     val currentLineIndex by timeProcessor?.currentLineIndex?.collectAsState() ?: remember { mutableIntStateOf(-1) }
-    val pastWords by timeProcessor?.pastWords?.collectAsState() ?: remember { mutableStateOf(emptyList<LyricsTimeProcessor.WordToken>()) }
-    val currentWords by timeProcessor?.currentWords?.collectAsState() ?: remember { mutableStateOf(emptyList<LyricsTimeProcessor.WordToken>()) }
-    val upcomingWords by timeProcessor?.upcomingWords?.collectAsState() ?: remember { mutableStateOf(emptyList<LyricsTimeProcessor.WordToken>()) }
+    val currentLineProgress by timeProcessor?.currentLineProgress?.collectAsState() ?: remember { mutableFloatStateOf(0f) }
 
     // ── Auto-scroll ──
     val listState = rememberLazyListState()
@@ -311,14 +309,14 @@ fun LyricsScreen(
                                 contentAlignment = Alignment.Center
                             ) {
                                 if (isCurrentLine && lyrics.isSynced) {
-                                    // Word-level karaoke rendering
+                                    // Плавное градиентное закрашивание строки
                                     KaraokeLine(
-                                        line = cleanText,
-                                        pastWords = pastWords,
-                                        currentWords = currentWords,
-                                        upcomingWords = upcomingWords,
-                                        baseColor = duetColor ?: Color.White.copy(alpha = LyricsTimeProcessor.UPCOMING_ALPHA),
+                                        text = cleanText,
+                                        progress = currentLineProgress,
                                         activeColor = duetColor ?: Color.White,
+                                        inactiveColor = (duetColor ?: Color.White).copy(
+                                            alpha = LyricsTimeProcessor.UPCOMING_ALPHA
+                                        ),
                                         fontSize = 28.sp
                                     )
                                 } else {
@@ -369,129 +367,50 @@ fun LyricsScreen(
 }
 
 /**
- * Строка с word-level караоке-эффектом.
- * Каждое слово рендерится отдельно с градиентным наплывом.
+ * Строка с плавным градиентным закрашиванием (караоке-эффект).
+ *
+ * Использует Brush.horizontalGradient в TextStyle — Skia/Impeller автоматически
+ * применяет субпиксельное сглаживание (anti-aliasing) на стыке цветов.
+ * Никаких clipRect, никакой посимвольной отрисовки.
+ *
+ * @param text текст строки
+ * @param progress прогресс закрашивания (0f..1f), плавный Float от плеера
+ * @param activeColor цвет активной (закрашенной) части
+ * @param inactiveColor цвет неактивной части
+ * @param fontSize размер шрифта
  */
 @Composable
 private fun KaraokeLine(
-    line: String,
-    pastWords: List<LyricsTimeProcessor.WordToken>,
-    currentWords: List<LyricsTimeProcessor.WordToken>,
-    upcomingWords: List<LyricsTimeProcessor.WordToken>,
-    baseColor: Color,
+    text: String,
+    progress: Float,
     activeColor: Color,
+    inactiveColor: Color,
     fontSize: androidx.compose.ui.unit.TextUnit
 ) {
-    val words = line.split(" ").filter { it.isNotBlank() }
+    val clampedProgress = progress.coerceIn(0f, 1f)
 
-    // Build word states
-    val wordStates = words.map { wordText ->
-        val past = pastWords.find { it.text == wordText }
-        val current = currentWords.find { it.text == wordText }
-        val upcoming = upcomingWords.find { it.text == wordText }
+    // Ультра-короткий переход 1.5% — полностью убирает пиксельные стыки
+    val transitionStart = clampedProgress
+    val transitionEnd = (clampedProgress + 0.015f).coerceAtMost(1.0f)
 
-        when {
-            past != null -> WordState.Past
-            current != null -> WordState.Current(current.progress)
-            upcoming != null -> WordState.Upcoming
-            else -> WordState.Upcoming
-        }
-    }
-
-    // Render as flow layout (simplified row wrapping)
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        var currentRow = mutableListOf<Pair<String, WordState>>()
-        var rowWidth = 0f
-        val maxRowWidth = 320f // approximate dp width
-
-        val textMeasurer = rememberTextMeasurer()
-        val textStyle = TextStyle(
-            fontSize = fontSize,
-            fontWeight = FontWeight.Bold
+    val karaokeBrush = Brush.horizontalGradient(
+        colorStops = arrayOf(
+            0.0f to activeColor,
+            transitionStart to activeColor,
+            transitionEnd to inactiveColor,
+            1.0f to inactiveColor
         )
+    )
 
-        for ((i, word) in words.withIndex()) {
-            val measured = textMeasurer.measure(word, textStyle)
-            val wordWidth = measured.size.width.toFloat() / LocalDensity.current.density + 8f // + spacing
-
-            if (rowWidth + wordWidth > maxRowWidth && currentRow.isNotEmpty()) {
-                // Render current row
-                KaraokeRow(
-                    words = currentRow.toList(),
-                    baseColor = baseColor,
-                    activeColor = activeColor,
-                    fontSize = fontSize
-                )
-                currentRow = mutableListOf()
-                rowWidth = 0f
-            }
-
-            currentRow.add(word to wordStates[i])
-            rowWidth += wordWidth
-        }
-
-        // Render last row
-        if (currentRow.isNotEmpty()) {
-            KaraokeRow(
-                words = currentRow.toList(),
-                baseColor = baseColor,
-                activeColor = activeColor,
-                fontSize = fontSize
-            )
-        }
-    }
-}
-
-private sealed class WordState {
-    data object Past : WordState()
-    data class Current(val progress: Float) : WordState()
-    data object Upcoming : WordState()
-}
-
-@Composable
-private fun KaraokeRow(
-    words: List<Pair<String, WordState>>,
-    baseColor: Color,
-    activeColor: Color,
-    fontSize: androidx.compose.ui.unit.TextUnit
-) {
-    Row(
-        modifier = Modifier.wrapContentWidth(),
-        horizontalArrangement = Arrangement.Center
-    ) {
-        for ((text, state) in words) {
-            when (state) {
-                is WordState.Past -> {
-                    LyricsWord(
-                        text = text,
-                        progress = 1f,
-                        color = baseColor.copy(alpha = LyricsTimeProcessor.PAST_ALPHA),
-                        activeColor = activeColor,
-                        fontSize = fontSize
-                    )
-                }
-                is WordState.Current -> {
-                    LyricsWord(
-                        text = text,
-                        progress = state.progress,
-                        color = baseColor.copy(alpha = LyricsTimeProcessor.UPCOMING_ALPHA),
-                        activeColor = activeColor,
-                        fontSize = fontSize
-                    )
-                }
-                is WordState.Upcoming -> {
-                    LyricsWord(
-                        text = text,
-                        progress = 0f,
-                        color = baseColor.copy(alpha = LyricsTimeProcessor.UPCOMING_ALPHA),
-                        activeColor = activeColor,
-                        fontSize = fontSize
-                    )
-                }
-            }
-        }
-    }
+    Text(
+        text = text,
+        style = TextStyle(
+            brush = karaokeBrush,
+            fontSize = fontSize,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
+            lineHeight = 38.sp
+        ),
+        modifier = Modifier.fillMaxWidth()
+    )
 }

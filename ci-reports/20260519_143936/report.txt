@@ -1,0 +1,30 @@
+========================================
+  APK Smoke Test Report (Firebase)
+  Timestamp: 20260519_143936
+========================================
+
+APK Path:    /root/LiquidMusicGlass/app/build/outputs/apk/debug/app-debug.apk
+Device:      MediumPhone.arm
+OS Version:  34
+Account:     linux-cli@gemini-teat-493814.iam.gserviceaccount.com
+
+--- Test Outcome ---
+Outcome:     
+Have questions, feedback, or issues? Get support by visiting:
+  https://firebase.google.com/support/
+
+Creating results bucket [gs://test-lab-gemini-teat-493814] in project [gemini-teat-493814].
+ERROR: (gcloud.firebase.test.android.run) Permission denied while creating bucket [test-lab-gemini-teat-493814]. Is billing enabled for project: [gemini-teat-493814]?
+Details:     N/A
+
+--- Raw Output ---
+
+Have questions, feedback, or issues? Get support by visiting:
+  https://firebase.google.com/support/
+
+Creating results bucket [gs://test-lab-gemini-teat-493814] in project [gemini-teat-493814].
+ERROR: (gcloud.firebase.test.android.run) Permission denied while creating bucket [test-lab-gemini-teat-493814]. Is billing enabled for project: [gemini-teat-493814]?
+
+--- Full Results ---
+Console: https://console.firebase.google.com/project/gemini-teat-493814/testlab/histories
+

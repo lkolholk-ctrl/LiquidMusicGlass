@@ -168,13 +168,14 @@ class AudioService : MediaSessionService() {
         newPlayer.addListener(PlayerEventForwarder())
 
         _session?.let { session ->
-            val newSession = MediaSession.Builder(this, newPlayer)
-                .setId("liquid_music_session")
-                .setCallback(SessionCallback())
-                .build()
             session.release()
-            _session = newSession
+            _session = null
         }
+
+        _session = MediaSession.Builder(this, newPlayer)
+            .setId("liquid_music_session")
+            .setCallback(SessionCallback())
+            .build()
 
         // Restart polling
         startPositionPolling(newPlayer)
