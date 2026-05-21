@@ -140,7 +140,7 @@ object PlayerController {
         if (index !in queue.indices) return
 
         ioScope.launch {
-            val track = queue[index]
+            val track = queue.getOrNull(index) ?: return@launch
 
             withContext(Dispatchers.Main) {
                 currentIndex = index
@@ -197,7 +197,7 @@ object PlayerController {
 
         ioScope.launch {
             indicesToPrefetch.forEach { idx ->
-                val track = queue[idx]
+                val track = queue.getOrNull(idx) ?: return@forEach
                 if (track.isOnlineTrack) {
                     resolveStreamUrl(track.id)
                 }
@@ -240,7 +240,10 @@ object PlayerController {
         if (tracks.isEmpty() || startIndex !in tracks.indices) return
 
         ioScope.launch {
-            val startTrack = tracks[startIndex]
+            val startTrack = tracks.getOrNull(startIndex) ?: run {
+                withContext(Dispatchers.Main) { _isBuffering.value = false }
+                return@launch
+            }
 
             endlessEngine.reset()
             if (autoRefillType != null) {
@@ -304,7 +307,7 @@ object PlayerController {
                     launch {
                         val prefetchIndices = (startIndex + 1 until minOf(startIndex + 6, tracks.size))
                         prefetchIndices.forEach { idx ->
-                            val t = tracks[idx]
+                            val t = tracks.getOrNull(idx) ?: return@forEach
                             if (t.isOnlineTrack) {
                                 resolveStreamUrl(t.id)
                             }
@@ -406,20 +409,18 @@ object PlayerController {
 
     fun onTrackChanged(mediaId: String) {
         val index = queue.indexOfFirst { it.id == mediaId }
-        if (index in queue.indices) {
-            currentIndex = index
-            val track = queue[index]
-            _currentTrack.value = track
-            android.util.Log.d("PlayerController", "[TRACK_CHANGED] id=$mediaId track.durationMs=${track.durationMs}")
-            _durationMs.value = track.durationMs
-            _currentPositionMs.value = 0L
-            
-            // Предзагружаем следующие треки
-            appContext?.let { prefetchAhead(it, index, depth = 5) }
+        val track = queue.getOrNull(index) ?: return
+        currentIndex = index
+        _currentTrack.value = track
+        android.util.Log.d("PlayerController", "[TRACK_CHANGED] id=$mediaId track.durationMs=${track.durationMs}")
+        _durationMs.value = track.durationMs
+        _currentPositionMs.value = 0L
+        
+        // Предзагружаем следующие треки
+        appContext?.let { prefetchAhead(it, index, depth = 5) }
 
-            ioScope.launch {
-                endlessEngine.checkAndRefillIfNeeded()
-            }
+        ioScope.launch {
+            endlessEngine.checkAndRefillIfNeeded()
         }
     }
 
@@ -644,9 +645,9 @@ object PlayerController {
                     val currentMediaItem = player.currentMediaItem
                     if (currentMediaItem?.mediaId == trackId) {
                         // Защита: проверяем что currentIndex валиден
-                        if (currentIndex !in queue.indices) return@withContext
+                        val track = queue.getOrNull(currentIndex) ?: return@withContext
                         val currentPosition = player.currentPosition
-                        val newItem = buildMediaItem(queue[currentIndex], result.uri)
+                        val newItem = buildMediaItem(track, result.uri)
                         // Защита: заменяем только если индекс существует в плеере
                         if (currentIndex < player.mediaItemCount) {
                             player.replaceMediaItem(currentIndex, newItem)
