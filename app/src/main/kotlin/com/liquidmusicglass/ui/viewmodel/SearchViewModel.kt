@@ -55,7 +55,7 @@ class SearchViewModel : ViewModel() {
         // Setup debounced search: 300ms after user stops typing
         _query
             .debounce(300)
-            .filter { it.isNotBlank() }
+            .filter { it.trim().length >= 2 }
             .distinctUntilChanged()
             .onEach { performSearch(it) }
             .launchIn(viewModelScope)
@@ -111,8 +111,8 @@ class SearchViewModel : ViewModel() {
      * Perform search immediately (bypass debounce).
      */
     fun searchNow() {
-        val q = _query.value
-        if (q.isNotBlank()) {
+        val q = _query.value.trim()
+        if (q.length >= 2) {
             performSearch(q)
         }
     }

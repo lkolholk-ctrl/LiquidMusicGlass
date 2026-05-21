@@ -113,8 +113,9 @@ object IcmRepository {
         source: String? = null,
         limit: Int? = null
     ): List<Track> {
-        if (query.isBlank()) return emptyList()
-        val result = api.search(query, region, source, limit)
+        val trimmed = query.trim()
+        if (trimmed.length < 2) return emptyList()
+        val result = api.search(trimmed, region, source, limit)
         result.exceptionOrNull()?.let {
             _lastException = it as? Exception
             _lastError.value = it.message
@@ -139,7 +140,9 @@ object IcmRepository {
         source: String? = null,
         limit: Int? = null
     ): IcmSearchResponse? {
-        val result = api.search(query, region, source, limit)
+        val trimmed = query.trim()
+        if (trimmed.length < 2) return null
+        val result = api.search(trimmed, region, source, limit)
         result.exceptionOrNull()?.let {
             _lastException = it as? Exception
             _lastError.value = it.message

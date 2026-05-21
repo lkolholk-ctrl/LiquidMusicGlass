@@ -129,4 +129,18 @@ class IcmRepositoryTest {
         assertTrue(lyricsPath.contains(trackId), "Lyrics path should contain track ID")
         assertTrue(lyricsPath.endsWith("/lyrics"), "Lyrics path should end with /lyrics")
     }
+
+    @Test
+    fun `searchTracks with short query returns empty list`() = runBlocking {
+        val shortQuery = "a"
+        val results = IcmRepository.searchTracks(shortQuery)
+        assertTrue(results.isEmpty(), "Short query should return empty list")
+    }
+
+    @Test
+    fun `searchAll with short query returns null`() = runBlocking {
+        val shortQuery = "a"
+        val result = IcmRepository.searchAll(shortQuery)
+        assertNull(result, "Short query should return null")
+    }
 }
