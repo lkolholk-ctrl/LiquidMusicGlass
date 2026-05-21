@@ -12,6 +12,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.CircularProgressIndicator
@@ -85,43 +86,48 @@ private data class MoodCategory(
 
 private val moodCategories = listOf(
     MoodCategory(
+        "my_wave", "Моя волна",
+        listOf(Color(0xFFFC3C44), Color(0xFFFF6B6B)), "",
+        listOf("") // Personal wave — no seed queries, uses getWaveNext directly
+    ),
+    MoodCategory(
         "melancholy", "Меланхолия",
-        listOf(Color(0xFF1E3A5F), Color(0xFF2D5A87)), "🌊",
+        listOf(Color(0xFF1E3A5F), Color(0xFF2D5A87)), "",
         listOf("melancholy", "sad indie", "lo-fi sad")
     ),
     MoodCategory(
         "good_mood", "Хорошее настроение",
-        listOf(Color(0xFFD4730E), Color(0xFFF5A623)), "✦",
+        listOf(Color(0xFFD4730E), Color(0xFFF5A623)), "",
         listOf("happy pop hits", "feel good", "summer hits")
     ),
     MoodCategory(
         "broken_heart", "Для разбитых сердец",
-        listOf(Color(0xFF8B1538), Color(0xFFC41E3A)), "💔",
+        listOf(Color(0xFF8B1538), Color(0xFFC41E3A)), "",
         listOf("breakup songs", "heartbreak", "sad love songs")
     ),
     MoodCategory(
         "focus", "Концентрация",
-        listOf(Color(0xFF2D5016), Color(0xFF4A7C23)), "◎",
+        listOf(Color(0xFF2D5016), Color(0xFF4A7C23)), "",
         listOf("focus instrumental", "deep focus", "study beats")
     ),
     MoodCategory(
         "energy", "Энергия",
-        listOf(Color(0xFF8B4513), Color(0xFFD2691E)), "⚡",
+        listOf(Color(0xFF8B4513), Color(0xFFD2691E)), "",
         listOf("high energy", "power hits", "edm energy")
     ),
     MoodCategory(
         "night", "Ночная волна",
-        listOf(Color(0xFF1A1A2E), Color(0xFF16213E)), "🌙",
+        listOf(Color(0xFF1A1A2E), Color(0xFF16213E)), "",
         listOf("late night", "night drive", "synthwave night")
     ),
     MoodCategory(
         "workout", "Тренировка",
-        listOf(Color(0xFF4A0000), Color(0xFF8B0000)), "💪",
+        listOf(Color(0xFF4A0000), Color(0xFF8B0000)), "",
         listOf("workout", "gym motivation", "running mix")
     ),
     MoodCategory(
         "chill", "Чилл",
-        listOf(Color(0xFF483D8B), Color(0xFF6A5ACD)), "☁",
+        listOf(Color(0xFF483D8B), Color(0xFF6A5ACD)), "",
         listOf("chillhop", "chill lofi", "ambient chill")
     ),
 )
@@ -181,6 +187,7 @@ fun HomeScreen(
     }
 
     // Extract blocks from home content
+    val popularBlock = remember(homeContent) { homeContent?.blocks?.find { it.type == "popular" } }
     val bannerBlock = remember(homeContent) { homeContent?.blocks?.find { it.type == "banner" } }
     val newReleasesBlock = remember(homeContent) { homeContent?.blocks?.find { it.type == "new_releases" } }
     val chartsBlock = remember(homeContent) { homeContent?.blocks?.find { it.type == "charts" } }
@@ -260,8 +267,8 @@ fun HomeScreen(
         isPlayingMood = true
         moodLoading = moodLoading + moodId
         scope.launch {
-            // Each mood needs its own seed so the wave really differs.
-            val seed = moodSeeds.getOrPut(moodId) { resolveMoodSeedTrackId(mood) }
+            // For "my_wave" use personal wave without seed — pure recommendation
+            val seed = if (moodId == "my_wave") null else moodSeeds.getOrPut(moodId) { resolveMoodSeedTrackId(mood) }
             // Refresh refill context with the resolved seed so auto-refill stays on-genre.
             PlayerController.setAutoRefillContext(
                 type = "wave",
@@ -301,8 +308,8 @@ fun HomeScreen(
                 }
                 // Preload next batch
                 loadMoreMoodTracks(moodId, waveTracks)
-            } else if (waveStatus == "empty") {
-                // Wave is empty — show onboarding to let user pick artists
+            } else if (waveStatus == "empty" && moodId == "my_wave") {
+                // Personal wave is empty — show onboarding to let user pick artists
                 pendingMoodId = moodId
                 activeMoodId = null
                 isPlayingMood = false
@@ -396,6 +403,32 @@ fun HomeScreen(
                     )
                 }
                 Spacer(modifier = Modifier.height(16.dp))
+            }
+
+            // ─── Popular Tracks ───
+            popularBlock?.let { block ->
+                if (block.items.isNotEmpty()) {
+                    SectionHeader(title = block.title)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 20.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        items(block.items, key = { "popular_${it.id}" }) { item ->
+                            RecommendationCard(
+                                item = item,
+                                onClick = {
+                                    val track = item.toTrack()
+                                    scope.launch {
+                                        val resolved = resolveWaveTrackUrl(track)
+                                        PlayerController.playNext(resolved ?: track, context)
+                                    }
+                                }
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(32.dp))
+                }
             }
 
             // ─── Banners (Featured) ───
@@ -885,11 +918,15 @@ private fun MoodCard(
                 strokeWidth = 2.dp
             )
         }
-        Text(
-            text = mood.icon,
-            fontSize = 24.sp,
-            modifier = Modifier.align(Alignment.TopEnd)
-        )
+        // Show heart icon for "My Wave", nothing for others (clean look)
+        if (mood.id == "my_wave") {
+            Icon(
+                imageVector = Icons.Filled.Favorite,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.8f),
+                modifier = Modifier.align(Alignment.TopEnd).size(22.dp)
+            )
+        }
         Text(
             text = mood.title,
             color = Color.White,

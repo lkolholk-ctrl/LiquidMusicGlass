@@ -189,18 +189,58 @@ object IcmRepository {
 
     /**
      * Load home screen content blocks.
-     * Since the backend does not have a dedicated /home endpoint,
-     * we construct blocks from available APIs:
-     * - Banners: search tracks with popular queries
-     * - New Releases: search albums with "new" query
-     * - Charts: search tracks with trending queries
-     * - Recommendations: wave next tracks (if user is linked)
+     * Rotates search queries on each call so content stays fresh.
      */
     suspend fun loadHomeContent(): IcmHomeResponse {
         val blocks = mutableListOf<IcmHomeBlock>()
 
-        // ─── Banners: popular tracks ───
-        val bannerQueries = listOf("top hits", "popular", "trending")
+        // ─── Popular Tracks (always first, always fresh) ───
+        val popularQueries = listOf(
+            listOf("top hits 2025", "viral hits", "trending now"),
+            listOf("popular songs", "hot tracks", "chart toppers"),
+            listOf("best songs", "top tracks", "hit parade"),
+            listOf("viral songs", "trending hits", "top music")
+        )
+        val popularQuerySet = popularQueries.random()
+        val popularItems = mutableListOf<IcmHomeItem>()
+        for (query in popularQuerySet) {
+            if (popularItems.size >= 10) break
+            val result = searchAll(query, limit = 5, source = IcmSearchSource.ALL)
+            result?.items
+                ?.filter { it.isTrack }
+                ?.take(10 - popularItems.size)
+                ?.forEach { item ->
+                    popularItems.add(
+                        IcmHomeItem(
+                            id = item.id,
+                            title = item.title,
+                            artist = item.displayArtist,
+                            artistId = item.artistId,
+                            cover = item.cover,
+                            duration = item.duration,
+                            source = item.source
+                        )
+                    )
+                }
+        }
+        if (popularItems.isNotEmpty()) {
+            blocks.add(
+                IcmHomeBlock(
+                    id = "popular",
+                    title = "Popular",
+                    type = "popular",
+                    items = popularItems
+                )
+            )
+        }
+
+        // ─── Banners: featured tracks (rotated queries) ───
+        val bannerQuerySets = listOf(
+            listOf("top hits", "popular", "trending"),
+            listOf("viral", "hot", "featured"),
+            listOf("best new", "rising", "buzzing")
+        )
+        val bannerQueries = bannerQuerySets.random()
         val bannerItems = mutableListOf<IcmHomeItem>()
         for (query in bannerQueries) {
             if (bannerItems.size >= 6) break
@@ -234,8 +274,13 @@ object IcmRepository {
             )
         }
 
-        // ─── New Releases: albums ───
-        val newReleaseQueries = listOf("new releases", "new music", "latest")
+        // ─── New Releases: albums (rotated queries) ───
+        val newReleaseQuerySets = listOf(
+            listOf("new releases", "new music", "latest"),
+            listOf("fresh drops", "new albums", "just released"),
+            listOf("this week", "new singles", "debut")
+        )
+        val newReleaseQueries = newReleaseQuerySets.random()
         val newReleaseItems = mutableListOf<IcmHomeItem>()
         for (query in newReleaseQueries) {
             if (newReleaseItems.size >= 10) break
@@ -269,8 +314,13 @@ object IcmRepository {
             )
         }
 
-        // ─── Charts: trending tracks with rank ───
-        val chartQueries = listOf("top 100", "chart", "hot", "viral")
+        // ─── Charts: trending tracks with rank (rotated queries) ───
+        val chartQuerySets = listOf(
+            listOf("top 100", "chart", "hot", "viral"),
+            listOf("billboard", "ranking", "top 50", "trending"),
+            listOf("most played", "global hits", "top chart", "ranked")
+        )
+        val chartQueries = chartQuerySets.random()
         val chartItems = mutableListOf<IcmHomeItem>()
         var rank = 1
         for (query in chartQueries) {
