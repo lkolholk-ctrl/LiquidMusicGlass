@@ -425,13 +425,20 @@ object IcmRepository {
      * Get full TrackResponse (including expires_at).
      */
     suspend fun getTrackInfo(trackId: String, region: String? = null, quality: String? = null): IcmTrackResponse? {
+        android.util.Log.d("IcmRepository", "[VK_DEBUG] getTrackInfo called: trackId=$trackId, region=$region, quality=$quality")
         val result = api.getTrack(trackId, region, quality)
         result.exceptionOrNull()?.let {
             _lastException = it as? Exception
             _lastError.value = it.message
             if (it is IcmApiException) {
                 _lastApiException.value = it
+                android.util.Log.e("IcmRepository", "[VK_DEBUG] API error: code=${it.code}, errorCode=${it.errorCode}, message=${it.message}, requiredRegion=${it.requiredRegion}")
+            } else {
+                android.util.Log.e("IcmRepository", "[VK_DEBUG] Generic error: ${it.javaClass.simpleName}: ${it.message}")
             }
+        }
+        result.getOrNull()?.let {
+            android.util.Log.d("IcmRepository", "[VK_DEBUG] API success: source=${it.source}, quality=${it.quality}, url=${it.url.take(60)}...")
         }
         return result.getOrNull()
     }

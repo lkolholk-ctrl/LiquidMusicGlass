@@ -2,6 +2,8 @@ package com.liquidmusicglass.api.icm
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.EncodeDefault
 
 // ─── Health ───
 
@@ -120,10 +122,12 @@ data class IcmSearchItem(
 
 // ─── Track (Playback URL) ───
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 data class IcmTrackRequest(
     @SerialName("trackId") val trackId: String,
     val region: String = "us",
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
     val quality: String? = null
 )
 

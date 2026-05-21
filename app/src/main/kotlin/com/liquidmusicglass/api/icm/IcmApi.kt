@@ -93,18 +93,18 @@ class IcmApi private constructor() {
             .header("User-Agent", "LiquidMusicGlass/1.0")
             .header("Accept", "application/json")
 
-        // Auth: session token takes priority
+        // Auth: session token for user-scoped endpoints (/me/*, wave, likes)
         sessionToken?.let {
             builder.header("Authorization", "Bearer $it")
-        } ?: run {
-            // Dynamic partner key — NEVER hardcoded
-            val partnerKey = com.liquidmusicglass.api.icm.IcmAuthRepository.getPartnerKey()
-            if (partnerKey.isNotBlank()) {
-                builder.header("X-Partner-Key", partnerKey)
-            } else {
-                // Fallback to apiKey field (legacy compat)
-                apiKey?.let { key -> builder.header("X-Partner-Key", key) }
-            }
+        }
+
+        // X-Partner-Key is always required for source validation (VK, etc.)
+        // even when Bearer token is present.
+        val partnerKey = com.liquidmusicglass.api.icm.IcmAuthRepository.getPartnerKey()
+            .takeIf { it.isNotBlank() }
+            ?: apiKey
+        if (!partnerKey.isNullOrBlank()) {
+            builder.header("X-Partner-Key", partnerKey)
         }
 
         partnerUserId?.let {
@@ -306,15 +306,11 @@ suspend fun search(
         region: String? = null,
         quality: String? = streamQuality
     ): Result<IcmTrackResponse> {
-        // VK tracks: let API choose quality (docs show no quality in request)
-        val isVk = trackId.startsWith("vk_") || trackId.startsWith("secondary_")
-        val effectiveQuality = if (isVk) null else quality
-        
         val body = json.encodeToString(
             IcmTrackRequest(
                 trackId = trackId,
                 region = region ?: defaultRegion,
-                quality = effectiveQuality
+                quality = quality
             )
         )
         return execute("/track", method = "POST", body = body)
@@ -325,15 +321,11 @@ suspend fun search(
         region: String? = null,
         quality: String? = streamQuality
     ): Result<IcmTrackResponse> {
-        // VK tracks: let API choose quality (docs show no quality in request)
-        val isVk = trackId.startsWith("vk_") || trackId.startsWith("secondary_")
-        val effectiveQuality = if (isVk) null else quality
-        
         val body = json.encodeToString(
             IcmTrackRequest(
                 trackId = trackId,
                 region = region ?: defaultRegion,
-                quality = effectiveQuality
+                quality = quality
             )
         )
         return executeSync("/track", method = "POST", body = body)

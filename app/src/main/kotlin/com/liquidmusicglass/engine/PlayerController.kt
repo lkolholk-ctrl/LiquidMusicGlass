@@ -182,6 +182,15 @@ object PlayerController {
                     android.util.Log.e("PlayerController", "Stream error for ${track.id}: ${streamResult.code}")
                     withContext(Dispatchers.Main) {
                         _isBuffering.value = false
+                        val msg = when (streamResult.code) {
+                            "source_not_allowed" -> "VK Music is not enabled for this API key"
+                            "track_not_found" -> "Track not found"
+                            "region_unavailable" -> "Track not available in your region"
+                            "early_access" -> "This feature requires early access"
+                            "network_error" -> "Network error. Please check your connection"
+                            else -> "Failed to load track (${streamResult.code})"
+                        }
+                        android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
                     }
                 }
             }
@@ -320,7 +329,18 @@ object PlayerController {
                 }
                 is StreamResult.Error -> {
                     android.util.Log.e("PlayerController", "Stream error for ${startTrack.id}: ${streamResult.code}")
-                    withContext(Dispatchers.Main) { _isBuffering.value = false }
+                    withContext(Dispatchers.Main) {
+                        _isBuffering.value = false
+                        val msg = when (streamResult.code) {
+                            "source_not_allowed" -> "VK Music is not enabled for this API key"
+                            "track_not_found" -> "Track not found"
+                            "region_unavailable" -> "Track not available in your region"
+                            "early_access" -> "This feature requires early access"
+                            "network_error" -> "Network error. Please check your connection"
+                            else -> "Failed to load track (${streamResult.code})"
+                        }
+                        android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
+                    }
                 }
             }
         }
@@ -574,26 +594,33 @@ object PlayerController {
     }
 
     private suspend fun resolveStreamUrl(trackId: String): StreamResult {
+        android.util.Log.d("PlayerController", "[VK_DEBUG] resolveStreamUrl called for trackId=$trackId")
         val now = System.currentTimeMillis()
         val cached = streamUrlCache[trackId]
 
         if (cached != null && now < cached.expiresAtMs) {
+            android.util.Log.d("PlayerController", "[VK_DEBUG] Using cached URL for $trackId")
             return StreamResult.Success(cached.uri)
         }
 
         return try {
             withTimeout(15_000) {
                 val quality = getEffectiveQuality(trackId)
+                android.util.Log.d("PlayerController", "[VK_DEBUG] quality=$quality for trackId=$trackId")
+                
                 val trackInfo = IcmRepository.getTrackInfo(trackId, quality = quality)
+                android.util.Log.d("PlayerController", "[VK_DEBUG] getTrackInfo returned: ${if (trackInfo != null) "SUCCESS url=${trackInfo.url.take(60)}..." else "NULL"}")
 
                 if (trackInfo != null) {
                     cacheAndReturn(trackId, trackInfo)
                 } else {
                     val error = IcmRepository.lastError.value
+                    val apiException = IcmRepository.lastApiException.value
+                    android.util.Log.e("PlayerController", "[VK_DEBUG] getTrackInfo failed. error=$error, apiException=$apiException, code=${apiException?.code}, requiredRegion=${apiException?.requiredRegion}")
+                    
                     when {
                         error?.contains("region_unavailable") == true ||
                         error?.contains("451") == true -> {
-                            val apiException = IcmRepository.lastApiException.value
                             val requiredRegion = apiException?.requiredRegion
                             
                             if (requiredRegion != null) {
@@ -621,7 +648,7 @@ object PlayerController {
                 }
             }
         } catch (e: Exception) {
-            android.util.Log.e("PlayerController", "URL resolve failed: ${e.message}")
+            android.util.Log.e("PlayerController", "[VK_DEBUG] URL resolve exception: ${e.javaClass.simpleName}: ${e.message}")
             StreamResult.Error("network_error", e.message)
         }
     }
