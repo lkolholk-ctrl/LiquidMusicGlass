@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -264,7 +265,10 @@ fun SearchScreen(
                             verticalArrangement = Arrangement.spacedBy(10.dp),
                             contentPadding = PaddingValues(horizontal = 20.dp)
                         ) {
-                            items(chunkedCategories, key = { "cat_${it.first().id}" }) { pair ->
+                            itemsIndexed(
+                                items = chunkedCategories,
+                                key = { index, pair -> "cat_${index}_${pair.first().id}" }
+                            ) { _, pair ->
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -321,7 +325,10 @@ fun SearchScreen(
                             modifier = Modifier.fillMaxSize(),
                             verticalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
-                            items(history, key = { "hist_$it" }) { item ->
+                            itemsIndexed(
+                                items = history,
+                                key = { index, item -> "hist_${index}_${item.hashCode()}" }
+                            ) { _, item ->
                                 HistoryRow(
                                     query = item,
                                     onClick = {
@@ -413,7 +420,10 @@ fun SearchScreen(
                                         contentPadding = PaddingValues(horizontal = 20.dp),
                                         horizontalArrangement = Arrangement.spacedBy(16.dp)
                                     ) {
-                                        items(artists, key = { "artist_${it.id}" }) { artist ->
+                                        itemsIndexed(
+                                            items = artists,
+                                            key = { index, artist -> "artist_${index}_${artist.id}" }
+                                        ) { _, artist ->
                                             ArtistChip(
                                                 artist = artist,
                                                 onClick = {
@@ -438,7 +448,10 @@ fun SearchScreen(
                                         contentPadding = PaddingValues(horizontal = 20.dp),
                                         horizontalArrangement = Arrangement.spacedBy(14.dp)
                                     ) {
-                                        items(albums, key = { "album_${it.id}" }) { album ->
+                                        itemsIndexed(
+                                            items = albums,
+                                            key = { index, album -> "album_${index}_${album.id}" }
+                                        ) { _, album ->
                                             AlbumCard(
                                                 album = album,
                                                 onClick = {
@@ -458,7 +471,10 @@ fun SearchScreen(
                                     SearchSectionLabel("Songs")
                                 }
                                 val playableTracks = tracks.map { it.toTrack() }
-                                items(tracks, key = { "track_${it.id}" }) { item ->
+                                itemsIndexed(
+                                    items = tracks,
+                                    key = { index, track -> "track_${index}_${track.id}" }
+                                ) { _, item ->
                                     SearchResultRow(
                                         title = item.title,
                                         subtitle = item.displayArtist,
