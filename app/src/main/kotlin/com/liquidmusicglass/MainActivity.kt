@@ -18,6 +18,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
 
@@ -118,8 +119,15 @@ class MainActivity : ComponentActivity() {
                         IcmAuthRepository.issueSessionAfterTelegramAuth(apiKey)
                     }
                     if (loginResult.isSuccess) {
-                        // After token is issued, fetch profile & preferences (subscription)
-                        IcmAuthRepository.fetchUserData()
+                        // Fetch profile & preferences, then refresh UI on main thread
+                        val dataResult = IcmAuthRepository.fetchUserData()
+                        if (dataResult.isSuccess) {
+                            withContext(Dispatchers.Main) {
+                                // Trigger UI refresh — StateFlows will update automatically
+                                // but if profile screen is already open, force recreate
+                                recreate()
+                            }
+                        }
                     }
                 }
             }

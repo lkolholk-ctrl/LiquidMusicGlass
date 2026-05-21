@@ -317,19 +317,18 @@ object IcmAuthRepository {
         state: String?
     ) {
         val p = prefs
-        val existingUserId = p?.getString(KEY_USER_ID, null)
+        // Use ensurePartnerUserId() to get the SAME ID that was sent to /link.
+        // After logout prefs are cleared, so this generates a new one — but that's
+        // fine because /link was called with ensurePartnerUserId() too (at click time).
+        val partnerUserId = ensurePartnerUserId()
         p?.edit()?.apply {
             putString(KEY_TELEGRAM_ID, icmUserId)
             putString(KEY_AUTH_METHOD, "telegram")
-            // Preserve partner_user_id that was actually used during /link.
-            // Only set it if we have never had one (extreme edge case).
-            if (existingUserId.isNullOrBlank()) {
-                putString(KEY_USER_ID, "tg_${icmUserId}")
-            }
+            putString(KEY_USER_ID, partnerUserId)
             apply()
         }
         _telegramId.value = icmUserId
-        _partnerUserId.value = existingUserId?.takeIf { it.isNotBlank() } ?: "tg_${icmUserId}"
+        _partnerUserId.value = partnerUserId
         _isLoggedIn.value = true
         syncToIcmApi()
     }
