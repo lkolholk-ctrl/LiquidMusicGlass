@@ -441,7 +441,8 @@ fun IcmSearchItem.toTrack(uri: String? = null): com.liquidmusicglass.engine.Trac
         coverUrl = cover?.replace("1000x1000", "600x600") ?: cover,
         artists = artists,
         isExplicit = isExplicit,
-        isCustom = isCustom
+        isCustom = isCustom,
+        source = source
     )
 }
 
@@ -457,7 +458,8 @@ fun IcmAlbumTrack.toTrack(): com.liquidmusicglass.engine.Track {
         coverUrl = cover.replace("1000x1000", "600x600"),
         artists = emptyList(),
         isExplicit = isExplicit,
-        isCustom = isCustom
+        isCustom = isCustom,
+        source = source
     )
 }
 
@@ -473,7 +475,8 @@ fun IcmArtistSong.toTrack(): com.liquidmusicglass.engine.Track {
         coverUrl = cover.replace("300x300", "600x600"),
         artists = artists,
         isExplicit = isExplicit,
-        isCustom = isCustom
+        isCustom = isCustom,
+        source = source
     )
 }
 

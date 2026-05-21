@@ -20,7 +20,9 @@ data class Track(
     /** Список артистов трека (для фитов/коллабораций). Первый — основной. */
     val artists: List<com.liquidmusicglass.api.icm.IcmMiniArtist> = emptyList(),
     val isExplicit: Boolean = false,
-    val isCustom: Boolean = false
+    val isCustom: Boolean = false,
+    /** Music source: "apple", "vk", "wave", etc. Used for stream quality selection. */
+    val source: String? = null
 ) {
     /** Uri обложки альбома из MediaStore (для локальных треков). */
     val albumArtUri: Uri

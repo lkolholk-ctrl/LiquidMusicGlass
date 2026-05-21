@@ -495,22 +495,24 @@ object IcmAuthRepository {
     /**
      * Get effective quality for a track based on its catalog type (Apple vs VK)
      * and the user's subscription / premium status.
-     * Caps VK quality at 256K for non-premium, falls back ALAC to 320K for premium.
+     * VK tracks: always null (API rejects explicit quality for VK source).
+     * Apple tracks: cap based on subscription level.
      */
-    fun getEffectiveQuality(trackId: String): String? {
+    fun getEffectiveQuality(trackId: String, source: String? = null): String? {
+        // VK tracks: API rejects explicit quality — must be null
+        val isVk = source == "vk" || trackId.startsWith("secondary_") || trackId.startsWith("vk_")
+        if (isVk) return null
+
         val allowed = _allowedQualities.value
         val desired = IcmApi.getInstance().streamQuality ?: "256K"
         if (allowed.isNotEmpty() && !allowed.contains(desired)) {
             return if (allowed.contains("256K")) "256K" else allowed.firstOrNull() ?: "128K"
         }
-        val isSecondary = trackId.startsWith("secondary_") || trackId.startsWith("vk_")
-        if (isSecondary) {
-            val hasPremium = _isPremium.value
-            if (!hasPremium) {
-                if (desired == "ALAC" || desired == "320K") return "256K"
-            } else {
-                if (desired == "ALAC") return "320K"
-            }
+        val hasPremium = _isPremium.value
+        if (!hasPremium) {
+            if (desired == "ALAC" || desired == "320K") return "256K"
+        } else {
+            if (desired == "ALAC") return "320K"
         }
         return desired
     }

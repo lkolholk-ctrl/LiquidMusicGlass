@@ -672,7 +672,11 @@ object PlayerController {
     }
 
     private fun getEffectiveQuality(trackId: String): String? {
-        return com.liquidmusicglass.api.icm.IcmAuthRepository.getEffectiveQuality(trackId)
+        val track = queue.find { it.id == trackId }
+        return com.liquidmusicglass.api.icm.IcmAuthRepository.getEffectiveQuality(
+            trackId = trackId,
+            source = track?.source
+        )
     }
 
     // ═══════════════════════════════════════════════════════════
