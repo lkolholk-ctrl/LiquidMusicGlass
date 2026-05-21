@@ -76,6 +76,7 @@ class FavoriteTrackDatabase private constructor(context: Context) : SQLiteOpenHe
                 durationMs INTEGER DEFAULT 0,
                 imageUrl TEXT,
                 localPath TEXT NOT NULL,
+                quality TEXT,
                 downloadedAt INTEGER DEFAULT 0
             )
             """.trimIndent()
@@ -96,11 +97,15 @@ class FavoriteTrackDatabase private constructor(context: Context) : SQLiteOpenHe
                     durationMs INTEGER DEFAULT 0,
                     imageUrl TEXT,
                     localPath TEXT NOT NULL,
+                    quality TEXT,
                     downloadedAt INTEGER DEFAULT 0
                 )
                 """.trimIndent()
             )
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_downloaded_track_id ON downloaded_tracks(trackId)")
+        } else if (oldVersion < 3) {
+            // Migration: add quality column to existing downloaded_tracks table
+            db.execSQL("ALTER TABLE downloaded_tracks ADD COLUMN quality TEXT")
         } else {
             db.execSQL("DROP TABLE IF EXISTS favorite_tracks")
             db.execSQL("DROP TABLE IF EXISTS downloaded_tracks")
@@ -355,6 +360,7 @@ class FavoriteTrackDatabase private constructor(context: Context) : SQLiteOpenHe
             put("durationMs", entity.durationMs)
             put("imageUrl", entity.imageUrl)
             put("localPath", entity.localPath)
+            put("quality", entity.quality)
             put("downloadedAt", entity.downloadedAt)
         }
         writableDatabase.insertWithOnConflict(
@@ -408,13 +414,14 @@ class FavoriteTrackDatabase private constructor(context: Context) : SQLiteOpenHe
             durationMs = cursor.getLong(cursor.getColumnIndexOrThrow("durationMs")),
             imageUrl = cursor.getString(cursor.getColumnIndexOrThrow("imageUrl")),
             localPath = cursor.getString(cursor.getColumnIndexOrThrow("localPath")),
+            quality = cursor.getString(cursor.getColumnIndexOrThrow("quality")),
             downloadedAt = cursor.getLong(cursor.getColumnIndexOrThrow("downloadedAt"))
         )
     }
 
     companion object {
         private const val DB_NAME = "favorite_tracks.db"
-        private const val DB_VERSION = 2
+        private const val DB_VERSION = 3
 
         @Volatile
         private var INSTANCE: FavoriteTrackDatabase? = null

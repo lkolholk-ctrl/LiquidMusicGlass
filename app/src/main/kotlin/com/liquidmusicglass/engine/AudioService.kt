@@ -107,6 +107,9 @@ class AudioService : MediaSessionService() {
             mediaItem?.let {
                 PlayerController.onTrackChanged(it.mediaId)
             }
+            // Trigger LRU cache cleanup after track transition
+            // (new track may have been cached, old ones may need eviction)
+            MediaCacheManager.onCacheUpdated()
         }
 
         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {

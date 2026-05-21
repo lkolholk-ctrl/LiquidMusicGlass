@@ -6,6 +6,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.FileDataSource
 import androidx.media3.datasource.TransferListener
 import java.io.File
@@ -48,7 +49,7 @@ class StreamingDataSource private constructor(
         fun create(
             context: Context,
             httpDataSource: DefaultHttpDataSource.Factory,
-            fileDataSource: FileDataSource = FileDataSource()
+            fileDataSource: DataSource = DefaultDataSource.Factory(context).createDataSource()
         ): DataSource.Factory {
             return DataSource.Factory {
                 val http = httpDataSource.createDataSource()
@@ -65,6 +66,8 @@ class StreamingDataSource private constructor(
 
         val resolvedUri = resolveUri(uri)
         val resolvedSpec = dataSpec.withUri(resolvedUri)
+
+        android.util.Log.d("StreamingDataSource", "open uri=$uri resolved=$resolvedUri scheme=${resolvedUri.scheme}")
 
         currentDataSource = when (resolvedUri.scheme) {
             "file" -> fileDataSource
@@ -93,12 +96,12 @@ class StreamingDataSource private constructor(
 
         val trackId = uri.getQueryParameter(PARAM_TRACK_ID)
         if (trackId != null) {
-            // Aggregator rule: ONLY premium users can access downloaded offline files
-            if (com.liquidmusicglass.api.icm.IcmAuthRepository.isPremium.value) {
-                val offlineFile = File(context.filesDir, "downloads/$trackId.mp3")
-                if (offlineFile.exists() && offlineFile.length() > 0) {
-                    return Uri.fromFile(offlineFile)
-                }
+            // Check downloaded offline files first (regardless of premium status)
+            val offlineMp3 = File(context.filesDir, "downloads/.mp3")
+            val offlineM4a = File(context.filesDir, "downloads/.m4a")
+            when {
+                offlineMp3.exists() && offlineMp3.length() > 0 -> return Uri.fromFile(offlineMp3)
+                offlineM4a.exists() && offlineM4a.length() > 0 -> return Uri.fromFile(offlineM4a)
             }
 
             val cachedUri = PlayerController.getValidCachedUri(trackId)

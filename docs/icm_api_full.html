@@ -1,0 +1,2080 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Документация Partner API · ICM Music</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+<style>
+:root {
+  --bg: #0a0a0a;
+  --text: #e8e8e8;
+  --text-muted: #8a8a8a;
+  --text-secondary: #cdd6e0;
+  --heading: #fff;
+  --accent: #3a9bff;
+  --accent-bg: #16243a;
+  --sidebar-bg: #0d0d0d;
+  --sidebar-border: #1a1a1a;
+  --hover-bg: #141414;
+  --input-bg: #141414;
+  --input-border: #1f1f1f;
+  --code-bg: #161616;
+  --code-color: #ff8a65;
+  --pre-bg: #0c0c0c;
+  --pre-border: #1a1a1a;
+  --pre-text: #e0e0e0;
+  --table-stripe: #0d0d0d;
+  --blockquote-bg: #0e0e0e;
+  --crumbs: #666;
+  --footer: #555;
+  --shadow: 0 0 30px rgba(0,0,0,.5);
+}
+[data-theme="light"] {
+  --bg: #ffffff;
+  --text: #1a1a1a;
+  --text-muted: #6e7681;
+  --text-secondary: #424a53;
+  --heading: #0f1419;
+  --accent: #0969da;
+  --accent-bg: #ddf4ff;
+  --sidebar-bg: #f6f8fa;
+  --sidebar-border: #d0d7de;
+  --hover-bg: #eaeef2;
+  --input-bg: #ffffff;
+  --input-border: #d0d7de;
+  --code-bg: #f3f4f6;
+  --code-color: #c0440d;
+  --pre-bg: #f6f8fa;
+  --pre-border: #d0d7de;
+  --pre-text: #1a1a1a;
+  --table-stripe: #f6f8fa;
+  --blockquote-bg: #f6f8fa;
+  --crumbs: #6e7681;
+  --footer: #6e7681;
+  --shadow: 0 0 30px rgba(0,0,0,.1);
+}
+*{box-sizing:border-box}
+html{scrollbar-width:thin;scrollbar-color:var(--input-border) transparent}
+html::-webkit-scrollbar{width:8px;height:8px}
+html::-webkit-scrollbar-track{background:transparent}
+html::-webkit-scrollbar-thumb{background:var(--input-border);border-radius:4px}
+html::-webkit-scrollbar-thumb:hover{background:var(--text-muted)}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--text)}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;line-height:1.6;font-size:15px;min-height:100vh}
+.layout{display:grid;grid-template-columns:280px 1fr;min-height:100vh}
+aside{background:var(--sidebar-bg);border-right:1px solid var(--sidebar-border);padding:20px 0 40px;overflow-y:auto;position:sticky;top:0;height:100vh;scrollbar-width:thin;scrollbar-color:var(--input-border) transparent}
+aside::-webkit-scrollbar{width:6px}
+aside::-webkit-scrollbar-track{background:transparent}
+aside::-webkit-scrollbar-thumb{background:var(--input-border);border-radius:3px}
+aside::-webkit-scrollbar-thumb:hover{background:var(--text-muted)}
+main::-webkit-scrollbar{width:8px}
+main::-webkit-scrollbar-track{background:transparent}
+main::-webkit-scrollbar-thumb{background:var(--input-border);border-radius:4px}
+pre,pre[class*="language-"]{scrollbar-width:thin;scrollbar-color:var(--input-border) transparent}
+pre::-webkit-scrollbar,pre[class*="language-"]::-webkit-scrollbar{height:6px;width:6px}
+pre::-webkit-scrollbar-track,pre[class*="language-"]::-webkit-scrollbar-track{background:transparent}
+pre::-webkit-scrollbar-thumb,pre[class*="language-"]::-webkit-scrollbar-thumb{background:var(--input-border);border-radius:3px}
+pre::-webkit-scrollbar-thumb:hover,pre[class*="language-"]::-webkit-scrollbar-thumb:hover{background:var(--text-muted)}
+pre::-webkit-scrollbar-button,pre[class*="language-"]::-webkit-scrollbar-button{display:none;width:0;height:0}
+pre::-webkit-scrollbar-corner,pre[class*="language-"]::-webkit-scrollbar-corner{background:transparent}
+.brand{padding:0 22px 14px;border-bottom:1px solid var(--sidebar-border);margin-bottom:12px;display:flex;align-items:center;justify-content:space-between}
+.brand-left a{color:var(--accent);font-weight:800;font-size:1.05rem;text-decoration:none}
+.brand-left .sub{color:var(--text-muted);font-size:.78rem;margin-top:3px}
+.theme-toggle{background:var(--hover-bg);border:1px solid var(--input-border);color:var(--text);width:32px;height:32px;border-radius:6px;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;padding:0}
+.theme-toggle:hover{background:var(--input-bg)}
+.search{padding:0 18px 14px;position:relative}
+.search input{width:100%;background:var(--input-bg);border:1px solid var(--input-border);color:var(--text);padding:8px 12px;border-radius:6px;font-size:.85rem;font-family:inherit;outline:none}
+.search input:focus{border-color:var(--accent)}
+.search-results{position:absolute;top:42px;left:18px;right:18px;background:var(--sidebar-bg);border:1px solid var(--input-border);border-radius:6px;max-height:340px;overflow-y:auto;z-index:30;box-shadow:var(--shadow);display:none}
+.search-results.open{display:block}
+.search-results .result{display:block;padding:8px 12px;text-decoration:none;color:var(--text);border-bottom:1px solid var(--sidebar-border);font-size:.82rem;cursor:pointer}
+.search-results .result:last-child{border-bottom:none}
+.search-results .result:hover,.search-results .result.focused{background:var(--hover-bg)}
+.search-results .result .r-title{color:var(--heading);font-weight:600;font-size:.86rem}
+.search-results .result .r-section{color:var(--text-muted);font-size:.72rem;margin-top:2px}
+.search-results .result mark{background:var(--accent-bg);color:var(--accent);padding:0 2px;border-radius:2px}
+.search-results .empty-res{padding:12px;text-align:center;color:var(--text-muted);font-size:.82rem}
+.nav{padding:0 10px}
+.nav-group{margin-bottom:6px}
+.nav-h2{display:block;padding:7px 12px;color:var(--heading);font-weight:600;font-size:.88rem;border-radius:6px;text-decoration:none;cursor:pointer}
+.nav-h2:hover{background:var(--hover-bg)}
+.nav-h2.active{background:var(--accent-bg);color:var(--accent)}
+.nav-h3-list{margin:2px 0 6px 8px;padding-left:14px;border-left:1px solid var(--sidebar-border);display:none}
+.nav-group.open .nav-h3-list{display:block}
+.nav-h3{display:block;padding:4px 10px;color:var(--text-muted);text-decoration:none;font-size:.83rem;border-radius:4px;margin:1px 0}
+.nav-h3:hover{color:var(--text-secondary);background:var(--hover-bg)}
+.nav-h3.active{color:var(--accent);background:var(--accent-bg)}
+main{padding:36px 48px 80px;max-width:880px;overflow-x:hidden}
+.crumbs{font-size:.82rem;color:var(--crumbs);margin-bottom:18px}
+.crumbs a{color:var(--crumbs);text-decoration:none}
+.crumbs a:hover{color:var(--accent)}
+.section{display:none;animation:fadeIn .15s ease-out}
+.section.active{display:block}
+@keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+.section h1{font-size:1.95rem;margin:0 0 .5em;color:var(--heading);font-weight:700;line-height:1.2}
+.section h2{font-size:1.6rem;margin:0 0 1.1em;color:var(--heading);font-weight:700;line-height:1.2}
+.section h3{font-size:1.15rem;color:var(--heading);font-weight:600;margin-top:2em;margin-bottom:.5em;scroll-margin-top:20px;display:flex;align-items:center;gap:.4em}
+.section h3 .hash-anchor{opacity:0;color:var(--text-muted);font-weight:400;text-decoration:none;font-size:.85em;transition:opacity .15s}
+.section h3:hover .hash-anchor{opacity:1}
+.section h3 .hash-anchor:hover{color:var(--accent)}
+.section h4{font-size:1rem;color:var(--text-secondary);margin-top:1.4em;margin-bottom:.4em}
+.section p{margin:.7em 0;color:var(--text-secondary)}
+.section a{color:var(--accent);text-decoration:none}
+.section a:hover{text-decoration:underline}
+.section strong{color:var(--heading)}
+.section em{color:var(--text-secondary)}
+.section code{background:var(--code-bg);color:var(--code-color);padding:2px 6px;border-radius:4px;font-family:'SF Mono','Monaco','Consolas',monospace;font-size:.88em}
+.section pre{background:var(--pre-bg);border:1px solid var(--pre-border);border-radius:8px;padding:14px 16px;overflow-x:auto;margin:1em 0;font-size:.85rem;line-height:1.5;position:relative}
+.section pre code{background:transparent;color:var(--pre-text);padding:0;font-size:inherit}
+.section pre .copy-btn{position:absolute;top:8px;right:8px;background:var(--hover-bg);border:1px solid var(--input-border);color:var(--text-secondary);padding:4px 10px;border-radius:5px;font-size:.72rem;cursor:pointer;font-family:inherit;opacity:0;transition:opacity .15s, background .15s}
+.section pre:hover .copy-btn{opacity:1}
+.section pre .copy-btn:hover{background:var(--accent-bg);color:var(--accent)}
+.section pre .copy-btn.copied{background:var(--accent-bg);color:var(--accent);opacity:1}
+.section blockquote{border-left:3px solid var(--accent);padding:.4em 1em;color:var(--text-muted);margin:1em 0;background:var(--blockquote-bg);border-radius:0 4px 4px 0}
+.section ul,.section ol{padding-left:1.6em;margin:.7em 0}
+.section li{margin:.25em 0}
+.section hr{border:none;border-top:1px solid var(--sidebar-border);margin:2.5em 0}
+.section table{width:100%;border-collapse:collapse;margin:1em 0;font-size:.92em}
+.section th,.section td{border:1px solid var(--pre-border);padding:8px 12px;text-align:left;vertical-align:top}
+.section th{background:var(--hover-bg);color:var(--heading);font-weight:600}
+.section tr:nth-child(even) td{background:var(--table-stripe)}
+.section .toc{display:none}
+.doc-meta{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;background:var(--code-bg);border:1px solid var(--input-border);border-radius:999px;color:var(--text-muted);font-size:.78rem;margin:0 0 22px;font-family:'SF Mono','Monaco','Consolas',monospace}
+.doc-meta .dot{width:6px;height:6px;background:#22c55e;border-radius:50%;display:inline-block}
+.footer-note{margin-top:5em;padding-top:2em;border-top:1px solid var(--sidebar-border);color:var(--footer);font-size:.83rem}
+.menu-toggle{display:none;position:fixed;top:14px;left:14px;z-index:50;background:var(--hover-bg);border:1px solid var(--input-border);color:var(--text);padding:8px 12px;border-radius:6px;cursor:pointer;font-size:.85rem}
+@media (max-width: 900px){
+  .layout{grid-template-columns:1fr}
+  aside{position:fixed;top:0;left:0;width:280px;z-index:40;transform:translateX(-100%);transition:transform .18s ease;box-shadow:var(--shadow)}
+  aside.open{transform:translateX(0)}
+  main{padding:60px 22px 80px}
+  .menu-toggle{display:block}
+}
+.empty{color:var(--text-muted);padding:14px;text-align:center;font-size:.82rem}
+/* Prism подсветка перекрывается своими стилями. Здесь только сглаживаем фон. */
+pre[class*="language-"]{background:var(--pre-bg) !important;border:1px solid var(--pre-border)}
+[data-theme="light"] pre[class*="language-"] code,
+[data-theme="light"] pre[class*="language-"] .token{color:#1a1a1a}
+[data-theme="light"] .token.keyword,[data-theme="light"] .token.function{color:#8250df}
+[data-theme="light"] .token.string,[data-theme="light"] .token.attr-value{color:#0a3069}
+[data-theme="light"] .token.number,[data-theme="light"] .token.boolean{color:#0550ae}
+[data-theme="light"] .token.comment{color:#6e7681}
+[data-theme="light"] .token.punctuation{color:#1a1a1a}
+[data-theme="light"] .token.property,[data-theme="light"] .token.attr-name{color:#116329}
+</style>
+</head>
+<body>
+<button class="menu-toggle" id="menu-toggle" aria-label="Меню">☰ Меню</button>
+<div class="layout">
+<aside id="sidebar">
+<div class="brand">
+  <div class="brand-left">
+    <a href="/">ICM Music</a>
+    <div class="sub">Partner API · документация</div>
+  </div>
+  <button class="theme-toggle" id="theme-toggle" aria-label="Переключить тему" title="Переключить тему">🌙</button>
+</div>
+<div class="search">
+  <input type="text" id="nav-search" placeholder="Поиск по всей документации..." autocomplete="off">
+  <div class="search-results" id="search-results"></div>
+</div>
+<nav class="nav" id="nav-root">
+<div class="nav-group" data-key="overview"><a class="nav-h2" data-target="overview" href="#overview">Обзор</a></div>
+<div class="nav-group" data-key="авторизация"><a class="nav-h2" data-target="авторизация" href="#авторизация">Авторизация</a><div class="nav-h3-list"><a class="nav-h3" data-target="авторизация" data-anchor="какую-модель-выбрать" href="#авторизация/какую-модель-выбрать">Какую модель выбрать</a><a class="nav-h3" data-target="авторизация" data-anchor="session-токен-для-клиентов-в-браузере-мобилке" href="#авторизация/session-токен-для-клиентов-в-браузере-мобилке">Session-токен (для клиентов в браузере / мобилке)</a><a class="nav-h3" data-target="авторизация" data-anchor="cors-когда-и-зачем" href="#авторизация/cors-когда-и-зачем">CORS — когда и зачем</a></div></div>
+<div class="nav-group" data-key="эндпоинты"><a class="nav-h2" data-target="эндпоинты" href="#эндпоинты">Эндпоинты</a><div class="nav-h3-list"><a class="nav-h3" data-target="эндпоинты" data-anchor="health" href="#эндпоинты/health">Health</a><a class="nav-h3" data-target="эндпоинты" data-anchor="поиск" href="#эндпоинты/поиск">Поиск</a><a class="nav-h3" data-target="эндпоинты" data-anchor="получить-трек" href="#эндпоинты/получить-трек">Получить трек</a><a class="nav-h3" data-target="эндпоинты" data-anchor="стрим-аудио" href="#эндпоинты/стрим-аудио">Стрим аудио</a><a class="nav-h3" data-target="эндпоинты" data-anchor="альбом" href="#эндпоинты/альбом">Альбом</a><a class="nav-h3" data-target="эндпоинты" data-anchor="плейлисты-apple-music" href="#эндпоинты/плейлисты-apple-music">Плейлисты Apple Music</a><a class="nav-h3" data-target="эндпоинты" data-anchor="артист" href="#эндпоинты/артист">Артист</a><a class="nav-h3" data-target="эндпоинты" data-anchor="метаданные-трека" href="#эндпоинты/метаданные-трека">Метаданные трека</a><a class="nav-h3" data-target="эндпоинты" data-anchor="обложки" href="#эндпоинты/обложки">Обложки</a></div></div>
+<div class="nav-group" data-key="vk-music"><a class="nav-h2" data-target="vk-music" href="#vk-music">VK Music</a><div class="nav-h3-list"><a class="nav-h3" data-target="vk-music" data-anchor="включение" href="#vk-music/включение">Включение</a><a class="nav-h3" data-target="vk-music" data-anchor="идентификаторы" href="#vk-music/идентификаторы">Идентификаторы</a><a class="nav-h3" data-target="vk-music" data-anchor="поиск-vk" href="#vk-music/поиск-vk">Поиск VK</a><a class="nav-h3" data-target="vk-music" data-anchor="стрим-vk-трека" href="#vk-music/стрим-vk-трека">Стрим VK-трека</a><a class="nav-h3" data-target="vk-music" data-anchor="альбом-vk" href="#vk-music/альбом-vk">Альбом VK</a><a class="nav-h3" data-target="vk-music" data-anchor="артист-vk" href="#vk-music/артист-vk">Артист VK</a><a class="nav-h3" data-target="vk-music" data-anchor="метаданные-vk-трека" href="#vk-music/метаданные-vk-трека">Метаданные VK-трека</a><a class="nav-h3" data-target="vk-music" data-anchor="ограничения" href="#vk-music/ограничения">Ограничения</a></div></div>
+<div class="nav-group" data-key="тексты-треков-lyrics"><a class="nav-h2" data-target="тексты-треков-lyrics" href="#тексты-треков-lyrics">Тексты треков (lyrics)</a></div>
+<div class="nav-group" data-key="личный-кабинет-для-линкованных-юзеров"><a class="nav-h2" data-target="личный-кабинет-для-линкованных-юзеров" href="#личный-кабинет-для-линкованных-юзеров">Личный кабинет (для линкованных юзеров)</a><div class="nav-h3-list"><a class="nav-h3" data-target="личный-кабинет-для-линкованных-юзеров" data-anchor="выбор-качества-стрима" href="#личный-кабинет-для-линкованных-юзеров/выбор-качества-стрима">Выбор качества стрима</a><a class="nav-h3" data-target="личный-кабинет-для-линкованных-юзеров" data-anchor="профиль-линкованного-юзера" href="#личный-кабинет-для-линкованных-юзеров/профиль-линкованного-юзера">Профиль линкованного юзера</a></div></div>
+<div class="nav-group" data-key="медиатека"><a class="nav-h2" data-target="медиатека" href="#медиатека">Медиатека</a><div class="nav-h3-list"><a class="nav-h3" data-target="медиатека" data-anchor="лайки" href="#медиатека/лайки">Лайки</a><a class="nav-h3" data-target="медиатека" data-anchor="подписки-на-артистов" href="#медиатека/подписки-на-артистов">Подписки на артистов</a><a class="nav-h3" data-target="медиатека" data-anchor="моя-волна" href="#медиатека/моя-волна">Моя волна</a><a class="nav-h3" data-target="медиатека" data-anchor="онбординг-волны" href="#медиатека/онбординг-волны">Онбординг волны</a></div></div>
+<div class="nav-group" data-key="ошибки"><a class="nav-h2" data-target="ошибки" href="#ошибки">Ошибки</a></div>
+<div class="nav-group" data-key="лимиты"><a class="nav-h2" data-target="лимиты" href="#лимиты">Лимиты</a><div class="nav-h3-list"><a class="nav-h3" data-target="лимиты" data-anchor="что-и-как-кешировать-у-себя" href="#лимиты/что-и-как-кешировать-у-себя">Что и как кешировать у себя</a><a class="nav-h3" data-target="лимиты" data-anchor="что-не-кешировать" href="#лимиты/что-не-кешировать">Что НЕ кешировать</a><a class="nav-h3" data-target="лимиты" data-anchor="простой-расчёт" href="#лимиты/простой-расчёт">Простой расчёт</a></div></div>
+<div class="nav-group" data-key="batch-запросы"><a class="nav-h2" data-target="batch-запросы" href="#batch-запросы">Batch-запросы</a></div>
+<div class="nav-group" data-key="async-режим-для-track"><a class="nav-h2" data-target="async-режим-для-track" href="#async-режим-для-track">Async-режим для `/track`</a></div>
+<div class="nav-group" data-key="линковка-аккаунтов-привязка-к-icm"><a class="nav-h2" data-target="линковка-аккаунтов-привязка-к-icm" href="#линковка-аккаунтов-привязка-к-icm">Линковка аккаунтов (привязка к ICM)</a><div class="nav-h3-list"><a class="nav-h3" data-target="линковка-аккаунтов-привязка-к-icm" data-anchor="способ-1-через-telegram-html-редирект" href="#линковка-аккаунтов-привязка-к-icm/способ-1-через-telegram-html-редирект">Способ 1. Через Telegram (HTML-редирект)</a><a class="nav-h3" data-target="линковка-аккаунтов-привязка-к-icm" data-anchor="способ-2-через-email-json-api-с-авто-регистрацией" href="#линковка-аккаунтов-привязка-к-icm/способ-2-через-email-json-api-с-авто-регистрацией">Способ 2. Через email (JSON API, с авто-регистрацией)</a><a class="nav-h3" data-target="линковка-аккаунтов-привязка-к-icm" data-anchor="способ-21-смена-пароля-линкованного-юзера" href="#линковка-аккаунтов-привязка-к-icm/способ-21-смена-пароля-линкованного-юзера">Способ 2.1. Смена пароля линкованного юзера</a><a class="nav-h3" data-target="линковка-аккаунтов-привязка-к-icm" data-anchor="способ-22-сброс-пароля-линкованного-юзера-forgot-password" href="#линковка-аккаунтов-привязка-к-icm/способ-22-сброс-пароля-линкованного-юзера-forgot-password">Способ 2.2. Сброс пароля линкованного юзера (forgot password)</a><a class="nav-h3" data-target="линковка-аккаунтов-привязка-к-icm" data-anchor="что-это-даёт" href="#линковка-аккаунтов-привязка-к-icm/что-это-даёт">Что это даёт</a></div></div>
+<div class="nav-group" data-key="x-request-id"><a class="nav-h2" data-target="x-request-id" href="#x-request-id">X-Request-Id</a></div>
+<div class="nav-group" data-key="версионирование-api"><a class="nav-h2" data-target="версионирование-api" href="#версионирование-api">Версионирование API</a></div>
+<div class="nav-group" data-key="контакты"><a class="nav-h2" data-target="контакты" href="#контакты">Контакты</a></div>
+</nav>
+</aside>
+<main>
+<div class="crumbs"><a href="/">ICM Music</a> · Документация для партнёров</div>
+<section class="section" id="overview" data-key="overview"><div class="doc-meta"><span class="dot"></span>Обновлено: 2026-05-18 22:09 MSK</div><h1>ICM Music — Partner API</h1>
+<p>API для встраивания поиска и проигрывания музыки в сторонние приложения.</p>
+<p>База: <code>https://byicloud.online</code></p></section>
+<section class="section" id="авторизация" data-key="авторизация"><h2>Авторизация</h2><p>API-ключ выдаём при подключении, формат <code>pk_&lt;id&gt;_&lt;random&gt;</code>. Передавать в заголовке:</p>
+<pre><code>X-Partner-Key: pk_yourname_xxxxxxxxxxxx
+</code></pre>
+<p>Если ключ утерян — напиши, выпустим новый.</p>
+<p>Для запросов от лица конкретного юзера добавь <code>X-Partner-User-Id: &lt;id&gt;</code> — нужно для аналитики и per-user настроек (<code>hide_explicit</code>).</p>
+<h3 id="какую-модель-выбрать">Какую модель выбрать <a class="hash-anchor" href="#авторизация/какую-модель-выбрать" aria-label="Ссылка на этот раздел">#</a></h3>
+<table>
+<thead>
+<tr>
+<th>Сценарий</th>
+<th>Кто стучится к нам</th>
+<th>Как авторизоваться</th>
+<th>Нужен CORS?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Server-to-server</strong></td>
+<td>Твой backend → наш API. Клиент ходит только к твоему backend</td>
+<td><code>X-Partner-Key</code></td>
+<td>Нет</td>
+</tr>
+<tr>
+<td><strong>Client-direct</strong></td>
+<td>JS в браузере юзера → наш API напрямую</td>
+<td><code>partner_session_token</code> (выпускает твой backend)</td>
+<td>Да</td>
+</tr>
+<tr>
+<td><strong>Мобильный/нативный клиент</strong></td>
+<td>Приложение → наш API</td>
+<td><code>partner_session_token</code> или <code>X-Partner-Key</code></td>
+<td>Нет</td>
+</tr>
+</tbody>
+</table>
+<h3 id="session-токен-для-клиентов-в-браузере-мобилке">Session-токен (для клиентов в браузере / мобилке) <a class="hash-anchor" href="#авторизация/session-токен-для-клиентов-в-браузере-мобилке" aria-label="Ссылка на этот раздел">#</a></h3>
+<p>API-ключ нельзя светить во фронте — любой пользователь увидит его в DevTools. Поэтому для прямых запросов с клиента ваш бэкенд выпускает короткоживущий токен и отдаёт его клиенту. Сам API-ключ остаётся только у вас на сервере</p>
+<p><strong>Выпуск на твоём бэкенде:</strong></p>
+<pre><code class="language-bash">curl -X POST -H &quot;X-Partner-Key: pk_...&quot; -H &quot;Content-Type: application/json&quot; \
+  -d '{&quot;partner_user_id&quot;:&quot;u_42&quot;,&quot;hide_explicit&quot;:false}' \
+  https://byicloud.online/api/partner/session/issue
+</code></pre>
+<p><strong>Параметры:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Поле</th>
+<th>Что это</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>partner_user_id</code></td>
+<td>Любой стабильный id юзера в твоей системе (1–128 символов). Сюда привязывается аналитика и per-user настройки</td>
+</tr>
+<tr>
+<td><code>hide_explicit</code></td>
+<td><code>true</code> если этот юзер должен видеть отфильтрованный поиск/треки. По умолчанию <code>false</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Ответ:</strong></p>
+<pre><code class="language-json">{
+  &quot;partner_session_token&quot;: &quot;eyJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJpY20tcGFydG5lciIsInBpZCI6Im1zZ3IiLCJ1aWQiOiJ1XzQyIiwic2NwIjpbInNlYXJjaCIsInN0cmVhbSJdLCJpYXQiOjE3NDcyMDAwMDAsImV4cCI6MTc0NzIwMzYwMH0.signature&quot;,
+  &quot;expires_in&quot;: 3600,
+  &quot;partner_user_id&quot;: &quot;u_42&quot;,
+  &quot;scopes&quot;: [&quot;search&quot;, &quot;stream&quot;, &quot;album&quot;, &quot;artist&quot;, &quot;meta&quot;]
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Поле</th>
+<th>Описание</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>partner_session_token</code></td>
+<td>JWT, по умолчанию 1 час жизни. TTL настраивается админом</td>
+</tr>
+<tr>
+<td><code>expires_in</code></td>
+<td>Сколько секунд токен ещё валиден</td>
+</tr>
+<tr>
+<td><code>scopes</code></td>
+<td>Список разрешённых эндпоинтов на момент выпуска. Если потом в админке изменим скоупы — это коснётся только <strong>новых</strong> токенов</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Клиент использует токен</strong> так же как API-ключ, только в заголовке <code>Authorization</code>:</p>
+<pre><code class="language-js">fetch(&quot;https://byicloud.online/api/partner/search?q=test&quot;, {
+  headers: { &quot;Authorization&quot;: `Bearer ${sessionToken}` }
+})
+</code></pre>
+<h3 id="cors-когда-и-зачем">CORS — когда и зачем <a class="hash-anchor" href="#авторизация/cors-когда-и-зачем" aria-label="Ссылка на этот раздел">#</a></h3>
+<p>CORS актуален только если фронт ходит к нам <strong>из браузера напрямую</strong> (схема client-direct). Если у тебя сервер посередине (server-to-server) — пропусти этот раздел, тебя это не касается.</p>
+<p><strong>Что такое CORS в двух предложениях.</strong> Браузер перед каждым cross-origin запросом смотрит, разрешил ли сервер этот origin. Если сервер не отдаёт заголовок <code>Access-Control-Allow-Origin: https://chat.example.com</code> — Chrome/Safari/Firefox блокирует ответ, и ты в DevTools видишь красную ошибку «blocked by CORS policy».</p>
+<p><strong>Как разрешить твой домен.</strong> Скажи нам где будет фронт — например <code>https://chat.example.com</code>. Мы добавим в whitelist. После этого браузер пропустит запросы.</p>
+<p><strong>Что важно:</strong></p>
+<ul>
+<li>Указывай <strong>полный origin со схемой</strong>: <code>https://chat.example.com</code>, а не <code>chat.example.com</code> и не <code>https://chat.example.com/</code></li>
+<li>Поддомены нужно добавлять отдельно: <code>https://app.example.com</code> и <code>https://chat.example.com</code> — это два разных origin'а</li>
+<li><code>http://localhost:3000</code> для дев-разработки тоже можно добавить, не проблема</li>
+</ul>
+<p><strong>Как проверить что CORS настроен правильно.</strong> Открой консоль браузера, попробуй сделать <code>fetch</code> к нашему API с твоего домена. Если ошибки нет — настроено. Если есть «CORS error» — пиши, проверим.</p>
+<p><strong>Без CORS работает:</strong><br>
+- <code>curl</code> из терминала<br>
+- Серверный код (Python/Node/Go) на твоём backend<br>
+- Postman / Insomnia<br>
+- Нативные мобильные приложения (iOS/Android SDK)</p>
+<p><strong>CORS нужен только когда:</strong><br>
+- JS в браузере делает <code>fetch()</code> / <code>XMLHttpRequest</code> к нам<br>
+- WebView в мобильном приложении грузит твою веб-страницу и она ходит к нам</p>
+<p><strong>Когда обновлять токен:</strong></p>
+<ul>
+<li>Истёк (<code>expires_in</code> прошёл) → новый запрос за токеном из твоего бэкенда</li>
+<li>Сменился юзер (логин/логаут) → выпуски токены <strong>per юзер</strong>, для другого <code>partner_user_id</code> нужен свой</li>
+</ul>
+<p>Простая логика на клиенте:</p>
+<pre><code class="language-js">let token = null;
+let tokenExpiresAt = 0;
+
+async function getToken() {
+  if (token &amp;&amp; Date.now() &lt; tokenExpiresAt - 60_000) return token;
+  const r = await fetch(&quot;/your-backend/icm-session&quot;, { credentials: &quot;include&quot; });
+  const data = await r.json();
+  token = data.partner_session_token;
+  tokenExpiresAt = Date.now() + data.expires_in * 1000;
+  return token;
+}
+</code></pre>
+<p><strong>Чего не делать:</strong></p>
+<ul>
+<li>Не клади токен в <code>localStorage</code> — это XSS-вектор. Держи в памяти (<code>let token</code>) или в HttpOnly cookie на твоём же домене</li>
+<li>Не дёргай <code>/session/issue</code> на каждый запрос клиента — это съест твой <code>session_issue</code> rate-limit. Один токен живёт час, переиспользуй</li>
+<li>Не пытайся вытащить API-ключ из токена — его там нет. Токен подписан отдельным секретом, ключ остаётся только у тебя на сервере</li>
+</ul>
+<p><strong>Полный флоу:</strong></p>
+<pre><code>1. Юзер логинится у тебя           → ваша обычная авторизация
+2. Клиент: GET /your-backend/icm   → твой эндпоинт
+3. Твой бэкенд: POST /session/issue с X-Partner-Key + partner_user_id
+4. Возвращает клиенту partner_session_token
+5. Клиент ходит к /api/partner/* с Authorization: Bearer &lt;token&gt;
+6. Через час — повторяет с шага 2
+</code></pre>
+<hr></section>
+<section class="section" id="эндпоинты" data-key="эндпоинты"><h2>Эндпоинты</h2><h3 id="health">Health <a class="hash-anchor" href="#эндпоинты/health" aria-label="Ссылка на этот раздел">#</a></h3>
+<pre><code class="language-bash">curl -H &quot;X-Partner-Key: pk_...&quot; https://byicloud.online/api/partner/health
+</code></pre>
+<pre><code class="language-json">{
+  &quot;partner_id&quot;: &quot;yourname&quot;,
+  &quot;status&quot;: &quot;active&quot;,
+  &quot;scopes&quot;: [&quot;search&quot;, &quot;stream&quot;, &quot;album&quot;, &quot;artist&quot;, &quot;meta&quot;],
+  &quot;rate_limits&quot;: {
+    &quot;search&quot;: {&quot;rpm&quot;: 600, &quot;burst&quot;: 60},
+    &quot;stream&quot;: {&quot;rpm&quot;: 1200, &quot;burst&quot;: 120}
+  },
+  &quot;stream&quot;: {
+    &quot;max_quality&quot;: &quot;256K&quot;,
+    &quot;allowed_sources&quot;: [&quot;apple&quot;, &quot;vk&quot;],
+    &quot;signed_url_ttl_seconds&quot;: 600
+  },
+  &quot;search&quot;: {&quot;max_results&quot;: 30, &quot;regions_allowed&quot;: [&quot;us&quot;, &quot;ru&quot;]},
+  &quot;server_time&quot;: 1747200000
+}
+</code></pre>
+<h3 id="поиск">Поиск <a class="hash-anchor" href="#эндпоинты/поиск" aria-label="Ссылка на этот раздел">#</a></h3>
+<pre><code class="language-bash">curl -H &quot;X-Partner-Key: pk_...&quot; \
+  &quot;https://byicloud.online/api/partner/search?q=imagine+dragons&amp;region=us&quot;
+</code></pre>
+<pre><code class="language-json">{
+  &quot;query&quot;: &quot;imagine dragons&quot;,
+  &quot;region&quot;: &quot;us&quot;,
+  &quot;source&quot;: &quot;apple&quot;,
+  &quot;items&quot;: [
+    {
+      &quot;id&quot;: &quot;358714030&quot;,
+      &quot;title&quot;: &quot;Imagine Dragons&quot;,
+      &quot;artistName&quot;: &quot;Imagine Dragons&quot;,
+      &quot;artistId&quot;: &quot;358714030&quot;,
+      &quot;cover&quot;: &quot;https://.../1000x1000.jpg&quot;,
+      &quot;isArtist&quot;: true,
+      &quot;isAlbum&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;1440831203&quot;,
+      &quot;title&quot;: &quot;Believer&quot;,
+      &quot;artist&quot;: &quot;Imagine Dragons&quot;,
+      &quot;artistId&quot;: &quot;358714030&quot;,
+      &quot;cover&quot;: &quot;https://.../1000x1000.jpg&quot;,
+      &quot;preview&quot;: &quot;https://...m4a&quot;,
+      &quot;collectionId&quot;: &quot;1440831190&quot;,
+      &quot;album&quot;: &quot;Evolve&quot;,
+      &quot;is_explicit&quot;: false,
+      &quot;region&quot;: &quot;us&quot;,
+      &quot;isArtist&quot;: false,
+      &quot;isAlbum&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;1440831190&quot;,
+      &quot;title&quot;: &quot;Evolve&quot;,
+      &quot;artist&quot;: &quot;Imagine Dragons&quot;,
+      &quot;artistId&quot;: &quot;358714030&quot;,
+      &quot;cover&quot;: &quot;https://.../1000x1000.jpg&quot;,
+      &quot;collectionId&quot;: &quot;1440831190&quot;,
+      &quot;isAlbum&quot;: true,
+      &quot;isArtist&quot;: false
+    }
+  ]
+}
+</code></pre>
+<p><strong>Параметры запроса:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Поле</th>
+<th>Что это</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>q</code></td>
+<td>Строка поиска. До 200 символов. <strong>Минимум 2 буквенно-цифровых символа</strong> — пустые/мусорные запросы (<code>""</code>, <code>' '</code>) отбрасываются с <code>400 query_too_short</code>. Если шлёшь много мусора подряд (≥10/мин) — получишь <code>429 query_spam_detected</code></td>
+</tr>
+<tr>
+<td><code>region</code></td>
+<td><code>us</code> / <code>ru</code> / <code>nz</code>. Должен быть из <code>regions_allowed</code> твоего ключа. Если не разрешён — подменяется на первый из списка</td>
+</tr>
+<tr>
+<td><code>source</code></td>
+<td><code>apple</code> (по умолчанию) / <code>vk</code> / <code>all</code>. См. раздел <a href="#vk-music">VK Music</a>. <code>vk</code>/<code>all</code> требует чтобы <code>vk</code> был в твоём <code>stream.allowed_sources</code> — иначе <code>403 source_not_allowed</code></td>
+</tr>
+<tr>
+<td><code>limit</code></td>
+<td>Опционально. Сколько items вернуть. Клампится сверху до <code>partner.config.search.max_results</code> (по умолчанию 30, в <code>/health</code> точное значение). Если не передан — берётся max_results</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Что внутри <code>items</code></strong> — три типа сущностей вперемешку. Различай по флагам <code>isArtist</code> и <code>isAlbum</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Тип</th>
+<th>Условие</th>
+<th>Что делать дальше</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Артист</strong></td>
+<td><code>isArtist: true</code></td>
+<td>Открой страницу артиста через <code>GET /artist/{id}</code></td>
+</tr>
+<tr>
+<td><strong>Альбом</strong></td>
+<td><code>isAlbum: true</code></td>
+<td>Открой треклист через <code>GET /album/{id}</code></td>
+</tr>
+<tr>
+<td><strong>Трек</strong></td>
+<td>оба <code>false</code></td>
+<td>Проигрывай через <code>POST /track</code> с этим <code>id</code> как <code>trackId</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Поля результата:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Поле</th>
+<th>Кто использует</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>id</code></td>
+<td>Всегда. Для трека = <code>trackId</code>, для альбома = <code>collectionId</code>, для артиста = <code>artistId</code></td>
+</tr>
+<tr>
+<td><code>cover</code></td>
+<td>Всегда. URL-шаблон Apple Music, можно менять размер: <code>1000x1000</code> → <code>300x300</code></td>
+</tr>
+<tr>
+<td><code>preview</code></td>
+<td>Только у треков. 30-секундное превью с Apple Music. Не требует подписи, можно играть напрямую</td>
+</tr>
+<tr>
+<td><code>is_explicit</code></td>
+<td>Только у треков. <code>true</code> если 18+</td>
+</tr>
+<tr>
+<td><code>collectionId</code></td>
+<td>У треков — id альбома, к которому относится. У альбомов — то же что <code>id</code></td>
+</tr>
+<tr>
+<td><code>album</code></td>
+<td>У треков — название альбома. У альбомов и артистов отсутствует</td>
+</tr>
+<tr>
+<td><code>artistName</code></td>
+<td>Только у артистов (там же где <code>title</code>)</td>
+</tr>
+<tr>
+<td><code>isCustom</code></td>
+<td><code>true</code> для наших собственных релизов независимых артистов</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Региональная подмена.</strong> Если в запросе передан регион не из <code>regions_allowed</code>, мы подменим его на первый разрешённый и вернём в поле <code>region</code>. Всегда смотри что фактически использовано — это поле в ответе.</p>
+<p><strong>End-to-end сценарий:</strong></p>
+<pre><code class="language-bash"># 1) Юзер вбил «believer» — ищем
+curl -H &quot;X-Partner-Key: pk_...&quot; \
+  &quot;https://byicloud.online/api/partner/search?q=believer&amp;region=us&quot;
+# Берём первый объект где !isArtist &amp;&amp; !isAlbum → это трек, его id = 1440831203
+
+# 2) Получаем плейбэк-URL
+curl -X POST -H &quot;X-Partner-Key: pk_...&quot; -H &quot;Content-Type: application/json&quot; \
+  -d '{&quot;trackId&quot;:&quot;1440831203&quot;,&quot;region&quot;:&quot;us&quot;}' \
+  https://byicloud.online/api/partner/track
+# Берём поле url и отдаём в плеер
+</code></pre>
+<p><strong>Подсказка по UX.</strong> Используй debounce 300мс на вводе пользователя — не дёргай API на каждую букву. Локальный кеш на <code>(q, region)</code> ещё сэкономит запросов.</p>
+<h3 id="получить-трек">Получить трек <a class="hash-anchor" href="#эндпоинты/получить-трек" aria-label="Ссылка на этот раздел">#</a></h3>
+<p>Резолвит <code>trackId</code> в подписанный URL для проигрывания.</p>
+<pre><code class="language-bash">curl -X POST -H &quot;X-Partner-Key: pk_...&quot; -H &quot;Content-Type: application/json&quot; \
+  -d '{&quot;trackId&quot;:&quot;1440831203&quot;,&quot;region&quot;:&quot;us&quot;,&quot;quality&quot;:&quot;256K&quot;}' \
+  https://byicloud.online/api/partner/track
+</code></pre>
+<pre><code class="language-json">{
+  &quot;track_id&quot;: &quot;1440831203&quot;,
+  &quot;file_id&quot;: &quot;BAAdf...&quot;,
+  &quot;source&quot;: &quot;apple&quot;,
+  &quot;quality&quot;: &quot;256K&quot;,
+  &quot;artist_id&quot;: &quot;358714030&quot;,
+  &quot;url&quot;: &quot;https://byicloud.online/api/partner/audio/BAAdf...?ps=1747200600.AbC...&amp;pid=yourname&quot;,
+  &quot;expires_at&quot;: 1747200600
+}
+</code></pre>
+<p><strong>Параметры запроса:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Поле</th>
+<th>Что это</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>trackId</code></td>
+<td>id трека из <code>/search</code> или <code>tracks[].id</code> из <code>/album</code></td>
+</tr>
+<tr>
+<td><code>region</code></td>
+<td><code>us</code> / <code>ru</code> / <code>nz</code> (зависит от того, что разрешено ключу). По умолчанию <code>us</code></td>
+</tr>
+<tr>
+<td><code>quality</code></td>
+<td><code>128K</code>, <code>256K</code>, <code>320K</code>, <code>ALAC</code>. Пожелание — режется до <code>stream.max_quality</code> из <code>/health</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Что в ответе:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Поле</th>
+<th>Описание</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>source</code></td>
+<td><code>apple</code> / <code>vk</code> / <code>custom</code> / <code>special</code> — откуда взяли трек</td>
+</tr>
+<tr>
+<td><code>quality</code></td>
+<td>Реально отданное качество (после кэпа)</td>
+</tr>
+<tr>
+<td><code>url</code></td>
+<td>Абсолютная ссылка для стрима, действует до <code>expires_at</code></td>
+</tr>
+<tr>
+<td><code>expires_at</code></td>
+<td>Unix timestamp когда ссылка протухнет (обычно <code>now + 600</code>)</td>
+</tr>
+<tr>
+<td><code>file_id</code></td>
+<td>Внутренний id файла. Полезно кэшировать — потом по тому же <code>trackId</code> мы вернём этот же <code>file_id</code> мгновенно</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Возможные ошибки:</strong></p>
+<pre><code class="language-json">// Трек только в другом регионе
+{ &quot;error&quot;: &quot;region_unavailable&quot;, &quot;required_region&quot;: &quot;ru&quot; }   // 451
+</code></pre>
+<p>Повтори запрос с указанным <code>required_region</code>.</p>
+<pre><code class="language-json">// TIDAL-трек / source отключён в конфиге
+{ &quot;error&quot;: &quot;source_not_allowed&quot;, &quot;source&quot;: &quot;tidal&quot; }         // 403
+</code></pre>
+<pre><code class="language-json">// Трек не найден ни в одном регионе
+{ &quot;error&quot;: &quot;track_not_found&quot; }                                // 404
+</code></pre>
+<h3 id="стрим-аудио">Стрим аудио <a class="hash-anchor" href="#эндпоинты/стрим-аудио" aria-label="Ссылка на этот раздел">#</a></h3>
+<p>URL из поля <code>url</code> ответа <code>/track</code> подставляй прямо в плеер. Никаких заголовков авторизации не нужно — подпись уже в query-параметре.</p>
+<pre><code class="language-html">&lt;audio src=&quot;https://byicloud.online/api/partner/audio/BAAdf...?ps=...&amp;pid=yourname&quot; controls&gt;&lt;/audio&gt;
+</code></pre>
+<p><strong>Range / seek.</strong> Эндпоинт отдаёт <code>Accept-Ranges: bytes</code>, поэтому seek работает автоматически — <code>&lt;audio&gt;</code> сам делает Range-запросы при перемотке. Для своего плеера на <code>fetch()</code> можно явно:</p>
+<pre><code class="language-bash">curl -H &quot;Range: bytes=500000-1000000&quot; -o slice.m4a \
+  &quot;https://byicloud.online/api/partner/audio/BAAdf...?ps=...&amp;pid=yourname&quot;
+</code></pre>
+<p>Вернётся <code>206 Partial Content</code> с заголовком <code>Content-Range</code>.</p>
+<p><strong>Скачать целиком:</strong></p>
+<pre><code class="language-bash">curl -o track.m4a &quot;https://byicloud.online/api/partner/audio/BAAdf...?ps=...&amp;pid=yourname&quot;
+</code></pre>
+<p><strong>Когда URL истёк (10 минут).</strong> Если плеер ловит <code>403 invalid_or_expired_signature</code>, просто позови <code>/track</code> заново с тем же <code>trackId</code> — получишь свежий URL. У нас сработает свой кеш, ответ придёт за миллисекунды.</p>
+<pre><code class="language-js">const audio = document.querySelector('audio');
+audio.addEventListener('error', async () =&gt; {
+  const r = await fetch('/api/partner/track', {
+    method: 'POST',
+    headers: { 'X-Partner-Key': KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ trackId, region: 'us' })
+  });
+  const { url } = await r.json();
+  audio.src = url;
+  audio.play();
+});
+</code></pre>
+<p><strong>Форматы.</strong> В ответе приходит <code>audio/mp4</code> (m4a из Apple) или <code>audio/mpeg</code> (mp3 из VK) — все современные браузеры играют оба. Если в твоей платформе нужно строго одно — фильтруй по <code>source</code> (<code>apple</code> → m4a, <code>vk</code> → mp3).</p>
+<h3 id="альбом">Альбом <a class="hash-anchor" href="#эндпоинты/альбом" aria-label="Ссылка на этот раздел">#</a></h3>
+<pre><code class="language-bash">curl -H &quot;X-Partner-Key: pk_...&quot; \
+  &quot;https://byicloud.online/api/partner/album/1440831190?region=us&quot;
+</code></pre>
+<pre><code class="language-json">{
+  &quot;album&quot;: {
+    &quot;id&quot;: &quot;1440831190&quot;,
+    &quot;title&quot;: &quot;Evolve&quot;,
+    &quot;artist&quot;: &quot;Imagine Dragons&quot;,
+    &quot;artistId&quot;: &quot;358714030&quot;,
+    &quot;cover&quot;: &quot;https://.../1000x1000bb.jpg&quot;,
+    &quot;type&quot;: &quot;Album&quot;,
+    &quot;year&quot;: 2017,
+    &quot;trackCount&quot;: 11
+  },
+  &quot;tracks&quot;: [
+    {
+      &quot;id&quot;: &quot;1440831200&quot;,
+      &quot;title&quot;: &quot;I Don't Know Why&quot;,
+      &quot;artist&quot;: &quot;Imagine Dragons&quot;,
+      &quot;artistId&quot;: &quot;358714030&quot;,
+      &quot;cover&quot;: &quot;https://.../1000x1000bb.jpg&quot;,
+      &quot;collectionId&quot;: &quot;1440831190&quot;,
+      &quot;duration&quot;: 199853,
+      &quot;is_explicit&quot;: false,
+      &quot;trackNumber&quot;: 1
+    }
+  ]
+}
+</code></pre>
+<p><strong>Что внутри:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Поле</th>
+<th>Описание</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>album.type</code></td>
+<td><code>Album</code> / <code>Single</code> / <code>EP</code> / <code>playlist</code></td>
+</tr>
+<tr>
+<td><code>album.cover</code></td>
+<td>URL-шаблон Apple Music. Можно менять размер: <code>1000x1000</code> → <code>300x300</code></td>
+</tr>
+<tr>
+<td><code>tracks[].id</code></td>
+<td>Это тот самый <code>trackId</code> для <code>POST /track</code> — бери отсюда и проигрывай</td>
+</tr>
+<tr>
+<td><code>tracks[].duration</code></td>
+<td>Длительность трека в <strong>миллисекундах</strong></td>
+</tr>
+<tr>
+<td><code>tracks[].is_explicit</code></td>
+<td><code>true</code> если 18+. Скрывай если в твоём конфиге включён <code>hide_explicit</code></td>
+</tr>
+<tr>
+<td><code>tracks[].trackNumber</code></td>
+<td>Номер дорожки в альбоме (для сортировки)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Кастомные релизы.</strong> Кроме Apple Music каталога мы отдаём и собственные релизы независимых артистов — у них в ответе будет <code>"isCustom": true</code> и формат id типа <code>custom_album_123</code> или просто число. Работают так же — <code>trackId</code> подставляется в <code>/track</code>.</p>
+<p><strong>Пресейвы.</strong> Если альбом ещё не вышел (есть пресейв на будущую дату), вернётся <code>403 early_access</code> — это нормально, покажи юзеру обратный отсчёт до релиза.</p>
+<p><strong>Использовать дальше:</strong></p>
+<pre><code class="language-bash"># 1) Получили список треков альбома
+curl -H &quot;X-Partner-Key: pk_...&quot; \
+  &quot;https://byicloud.online/api/partner/album/1440831190?region=us&quot;
+
+# 2) Берём первый id из tracks[] и проигрываем
+curl -X POST -H &quot;X-Partner-Key: pk_...&quot; -H &quot;Content-Type: application/json&quot; \
+  -d '{&quot;trackId&quot;:&quot;1440831200&quot;,&quot;region&quot;:&quot;us&quot;}' \
+  https://byicloud.online/api/partner/track
+</code></pre>
+<h3 id="плейлисты-apple-music">Плейлисты Apple Music <a class="hash-anchor" href="#эндпоинты/плейлисты-apple-music" aria-label="Ссылка на этот раздел">#</a></h3>
+<p>Тот же эндпоинт <code>/album/{id}</code> принимает редакционные плейлисты Apple Music. Их id начинается с <code>pl.</code>, например <code>pl.f4d106fed2bd41149aaacabb233eb5eb</code> (Today's Hits) или <code>pl.acc464c750b94302b8806e6fcde56e17</code> (Pop Hits).</p>
+<pre><code class="language-bash">curl -H &quot;X-Partner-Key: pk_...&quot; \
+  &quot;https://byicloud.online/api/partner/album/pl.f4d106fed2bd41149aaacabb233eb5eb?region=us&quot;
+</code></pre>
+<p>Структура ответа та же, но с отличиями:</p>
+<pre><code class="language-json">{
+  &quot;album&quot;: {
+    &quot;id&quot;: &quot;pl.f4d106fed2bd41149aaacabb233eb5eb&quot;,
+    &quot;title&quot;: &quot;Today's Hits&quot;,
+    &quot;artist&quot;: &quot;Apple Music Pop&quot;,
+    &quot;cover&quot;: &quot;https://.../1000x1000bb.jpg&quot;,
+    &quot;type&quot;: &quot;playlist&quot;,
+    &quot;description&quot;: &quot;The biggest songs of the moment...&quot;,
+    &quot;motionCoverUrl&quot;: &quot;https://.../animated.mp4&quot;
+  },
+  &quot;tracks&quot;: [
+    {
+      &quot;id&quot;: &quot;1799855643&quot;,
+      &quot;title&quot;: &quot;Some Song&quot;,
+      &quot;artist&quot;: &quot;Some Artist&quot;,
+      &quot;collectionId&quot;: &quot;pl.f4d...&quot;,
+      &quot;cover&quot;: &quot;https://.../1000x1000bb.jpg&quot;
+    }
+  ]
+}
+</code></pre>
+<p>Отличия от обычного альбома:</p>
+<ul>
+<li><code>type: "playlist"</code> — отличай от <code>"Album"</code> / <code>"Single"</code></li>
+<li><code>artist</code> — имя куратора (Apple Music, Apple Music Pop, и т.п.), а не музыканта</li>
+<li><code>description</code> — текстовое описание плейлиста (может быть пустой строкой)</li>
+<li><code>motionCoverUrl</code> — анимированная обложка mp4, если есть (необязательное поле). Можно вставить в <code>&lt;video autoplay muted loop&gt;</code> вместо статичной картинки</li>
+<li>У каждого трека своя <code>cover</code> (в обычном альбоме всё с одной обложки)</li>
+</ul>
+<p><strong>Где брать <code>pl.</code> id:</strong></p>
+<ul>
+<li>Из ответа <code>/api/partner/artist/{id}</code> — в секции «куратор» / «featured»</li>
+<li>Скопировать из ссылки Apple Music: <code>music.apple.com/us/playlist/todays-hits/pl.f4d106fed2bd41149aaacabb233eb5eb</code> → id после последнего <code>/</code></li>
+<li>Пользовательские плейлисты юзеров Apple Music через этот API недоступны — только редакционные/каталожные</li>
+</ul>
+<p>Треки внутри плейлиста проигрываются точно так же — через <code>POST /track</code> с <code>trackId</code> оттуда.</p>
+<h3 id="артист">Артист <a class="hash-anchor" href="#эндпоинты/артист" aria-label="Ссылка на этот раздел">#</a></h3>
+<pre><code class="language-bash">curl -H &quot;X-Partner-Key: pk_...&quot; \
+  &quot;https://byicloud.online/api/partner/artist/358714030?region=us&quot;
+</code></pre>
+<p>Возвращает имя, обложку, топ-треки, альбомы и похожих артистов. Только числовые id.</p>
+<h3 id="метаданные-трека">Метаданные трека <a class="hash-anchor" href="#эндпоинты/метаданные-трека" aria-label="Ссылка на этот раздел">#</a></h3>
+<pre><code class="language-bash">curl -H &quot;X-Partner-Key: pk_...&quot; \
+  &quot;https://byicloud.online/api/partner/track/1440831203/meta&quot;
+</code></pre>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;1440831203&quot;,
+  &quot;collectionId&quot;: &quot;1440831190&quot;,
+  &quot;title&quot;: &quot;Believer&quot;,
+  &quot;artist&quot;: &quot;Imagine Dragons&quot;,
+  &quot;cover&quot;: &quot;https://...300x300...&quot;,
+  &quot;duration&quot;: 204347
+}
+</code></pre>
+<h3 id="обложки">Обложки <a class="hash-anchor" href="#эндпоинты/обложки" aria-label="Ссылка на этот раздел">#</a></h3>
+<p>Если в ответе пришёл прямой URL Apple Music — используй как есть.<br>
+Если пришёл <code>/api/avatar/...</code> (custom-обложки), нужен signed URL:</p>
+<pre><code class="language-bash">curl -H &quot;X-Partner-Key: pk_...&quot; \
+  &quot;https://byicloud.online/api/partner/cover-sign?file_id=AgACAg...&quot;
+</code></pre>
+<pre><code class="language-json">{
+  &quot;url&quot;: &quot;https://byicloud.online/api/partner/cover/AgACAg...?ps=...&amp;pid=yourname&quot;,
+  &quot;expires_at&quot;: 1747200600
+}
+</code></pre>
+<p>Подставь <code>url</code> в <code>&lt;img src=...&gt;</code>.</p>
+<hr></section>
+<section class="section" id="vk-music" data-key="vk-music"><h2>VK Music</h2><p>Партнёрский API поддерживает поиск и стрим из VK (через Moosic API) — полезно для треков, которых нет в Apple Music каталоге.</p>
+<h3 id="включение">Включение <a class="hash-anchor" href="#vk-music/включение" aria-label="Ссылка на этот раздел">#</a></h3>
+<p>Параметр <code>vk</code> должен быть в <code>stream.allowed_sources</code> твоего ключа (управляется админом в боте — попроси менеджера). Если выключен — любые <code>vk_*</code> запросы вернут <code>403 source_not_allowed</code>.</p>
+<h3 id="идентификаторы">Идентификаторы <a class="hash-anchor" href="#vk-music/идентификаторы" aria-label="Ссылка на этот раздел">#</a></h3>
+<table>
+<thead>
+<tr>
+<th>Префикс</th>
+<th>Что это</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>vk_track_&lt;id&gt;</code></td>
+<td>Трек VK</td>
+</tr>
+<tr>
+<td><code>vk_artist_&lt;id&gt;</code></td>
+<td>Артист VK</td>
+</tr>
+<tr>
+<td><code>vk_album_&lt;id&gt;</code></td>
+<td>Альбом VK</td>
+</tr>
+</tbody>
+</table>
+<p>Префиксы выдаются нами в <code>/search</code>, <code>/album</code>, <code>/artist</code> — ты подставляешь их в <code>/track</code>, <code>/album/{id}</code>, <code>/artist/{id}</code> как обычные id. Резолвер сам поймёт что это VK по префиксу.</p>
+<h3 id="поиск-vk">Поиск VK <a class="hash-anchor" href="#vk-music/поиск-vk" aria-label="Ссылка на этот раздел">#</a></h3>
+<pre><code class="language-bash">curl -H &quot;X-Partner-Key: pk_...&quot; \
+  &quot;https://byicloud.online/api/partner/search?q=imagine+dragons&amp;source=vk&quot;
+</code></pre>
+<p>Ответ — обычный <code>/search</code>, но все items имеют <code>source: "vk"</code> и префиксованные id:</p>
+<pre><code class="language-json">{
+  &quot;query&quot;: &quot;imagine dragons&quot;,
+  &quot;region&quot;: &quot;us&quot;,
+  &quot;source&quot;: &quot;vk&quot;,
+  &quot;items&quot;: [
+    {
+      &quot;id&quot;: &quot;vk_artist_aBcD&quot;,
+      &quot;title&quot;: &quot;Imagine Dragons&quot;,
+      &quot;artist&quot;: &quot;Исполнитель&quot;,
+      &quot;artistId&quot;: &quot;vk_artist_aBcD&quot;,
+      &quot;cover&quot;: &quot;https://...&quot;,
+      &quot;isArtist&quot;: true,
+      &quot;isAlbum&quot;: false,
+      &quot;source&quot;: &quot;vk&quot;
+    },
+    {
+      &quot;id&quot;: &quot;vk_track_xYz1&quot;,
+      &quot;trackId&quot;: &quot;vk_track_xYz1&quot;,
+      &quot;title&quot;: &quot;Believer&quot;,
+      &quot;artist&quot;: &quot;Imagine Dragons&quot;,
+      &quot;artistId&quot;: &quot;vk_artist_aBcD&quot;,
+      &quot;collectionId&quot;: &quot;vk_album_qWe2&quot;,
+      &quot;cover&quot;: &quot;https://...&quot;,
+      &quot;duration&quot;: 204,
+      &quot;source&quot;: &quot;vk&quot;
+    },
+    {
+      &quot;id&quot;: &quot;vk_album_qWe2&quot;,
+      &quot;title&quot;: &quot;Evolve&quot;,
+      &quot;artist&quot;: &quot;Imagine Dragons&quot;,
+      &quot;artistId&quot;: &quot;vk_artist_aBcD&quot;,
+      &quot;cover&quot;: &quot;https://...&quot;,
+      &quot;isAlbum&quot;: true,
+      &quot;source&quot;: &quot;vk&quot;
+    }
+  ]
+}
+</code></pre>
+<p><code>?source=all</code> склеит Apple + VK выдачу (Apple первой, VK дальше) с учётом твоего <code>max_results</code>. По умолчанию <code>source=apple</code> — обратная совместимость.</p>
+<p><strong>Важно:</strong> в выдаче <code>/search</code> (а также <code>/album/{id}.tracks</code> и <code>/artist/{id}.topSongs</code>) VK-треки <strong>не содержат поля <code>url</code></strong>. Подписанная стрим-ссылка выдаётся только через <code>POST /track</code> — это нужно для логирования стримов, rate-limit и чтобы партнёр всегда работал со свежим URL (подпись живёт 10 мин).</p>
+<h3 id="стрим-vk-трека">Стрим VK-трека <a class="hash-anchor" href="#vk-music/стрим-vk-трека" aria-label="Ссылка на этот раздел">#</a></h3>
+<pre><code class="language-bash">curl -X POST -H &quot;X-Partner-Key: pk_...&quot; -H &quot;Content-Type: application/json&quot; \
+  -d '{&quot;trackId&quot;:&quot;vk_track_xYz1&quot;}' \
+  https://byicloud.online/api/partner/track
+</code></pre>
+<pre><code class="language-json">{
+  &quot;track_id&quot;: &quot;vk_track_xYz1&quot;,
+  &quot;file_id&quot;: &quot;BAAdf...&quot;,
+  &quot;source&quot;: &quot;vk&quot;,
+  &quot;quality&quot;: &quot;MP3 256K&quot;,
+  &quot;url&quot;: &quot;https://byicloud.online/api/partner/audio/BAAdf...?ps=1747200600.AbC...&amp;pid=yourname&quot;,
+  &quot;expires_at&quot;: 1747200600,
+  &quot;artist_id&quot;: &quot;vk_artist_aBcD&quot;
+}
+</code></pre>
+<p><strong>Чем отличается от Apple-трека:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Поле</th>
+<th>Apple</th>
+<th>VK</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>file_id</code></td>
+<td>Telegram file id</td>
+<td>Telegram file id (VK-mp3 кешируется так же)</td>
+</tr>
+<tr>
+<td><code>url</code></td>
+<td>Подписанный URL на <code>/api/partner/audio/{file_id}</code></td>
+<td>То же — VK и Apple используют один эндпоинт</td>
+</tr>
+<tr>
+<td><code>quality</code></td>
+<td><code>128K</code> / <code>256K</code> / <code>320K</code> / <code>ALAC</code></td>
+<td><code>MP3 256K</code> (по умолчанию) или <code>MP3 320K</code> (для линкованных подписчиков ICM)</td>
+</tr>
+<tr>
+<td><code>region</code></td>
+<td>Влияет на стрим</td>
+<td>Игнорируется</td>
+</tr>
+<tr>
+<td><code>expires_at</code></td>
+<td>10 минут (signed_url_ttl_seconds)</td>
+<td>10 минут (signed_url_ttl_seconds)</td>
+</tr>
+</tbody>
+</table>
+<p>Подставляй <code>url</code> в <code>&lt;audio src=...&gt;</code> или плеер — авторизация в query-параметре <code>ps</code>, заголовки не нужны. Range-запросы поддерживаются из коробки.</p>
+<p><strong>Внутри.</strong> Mp3 хранится на стороннем CDN с авторизацией — мы не отдаём прямой URL партнёру. При первом запросе на пару (трек, битрейт) мы готовим файл нужного качества и кладём его в наш кеш; последующие запросы того же трека возвращают <code>file_id</code> мгновенно. Партнёру видна только наша подписанная ссылка. Если истекли 10 минут (<code>expires_at</code>) и плеер ловит <code>403 invalid_or_expired_signature</code> — позови <code>POST /track</code> заново с тем же <code>trackId</code>, получишь свежий URL.</p>
+<h3 id="альбом-vk">Альбом VK <a class="hash-anchor" href="#vk-music/альбом-vk" aria-label="Ссылка на этот раздел">#</a></h3>
+<pre><code class="language-bash">curl -H &quot;X-Partner-Key: pk_...&quot; \
+  &quot;https://byicloud.online/api/partner/album/vk_album_qWe2&quot;
+</code></pre>
+<pre><code class="language-json">{
+  &quot;album&quot;: {
+    &quot;id&quot;: &quot;vk_album_qWe2&quot;,
+    &quot;collectionId&quot;: &quot;vk_album_qWe2&quot;,
+    &quot;title&quot;: &quot;Evolve&quot;,
+    &quot;artist&quot;: &quot;Imagine Dragons&quot;,
+    &quot;artistId&quot;: &quot;vk_artist_aBcD&quot;,
+    &quot;cover&quot;: &quot;https://...&quot;,
+    &quot;year&quot;: 2017,
+    &quot;source&quot;: &quot;vk&quot;
+  },
+  &quot;tracks&quot;: [
+    {
+      &quot;id&quot;: &quot;vk_track_xYz1&quot;,
+      &quot;trackId&quot;: &quot;vk_track_xYz1&quot;,
+      &quot;title&quot;: &quot;Believer&quot;,
+      &quot;artist&quot;: &quot;Imagine Dragons&quot;,
+      &quot;artistId&quot;: &quot;vk_artist_aBcD&quot;,
+      &quot;collectionId&quot;: &quot;vk_album_qWe2&quot;,
+      &quot;duration&quot;: 204,
+      &quot;source&quot;: &quot;vk&quot;
+    }
+  ]
+}
+</code></pre>
+<h3 id="артист-vk">Артист VK <a class="hash-anchor" href="#vk-music/артист-vk" aria-label="Ссылка на этот раздел">#</a></h3>
+<pre><code class="language-bash">curl -H &quot;X-Partner-Key: pk_...&quot; \
+  &quot;https://byicloud.online/api/partner/artist/vk_artist_aBcD&quot;
+</code></pre>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;vk_artist_aBcD&quot;,
+  &quot;name&quot;: &quot;Imagine Dragons&quot;,
+  &quot;cover&quot;: &quot;https://...&quot;,
+  &quot;bio&quot;: null,
+  &quot;followers&quot;: 1234567,
+  &quot;source&quot;: &quot;vk&quot;,
+  &quot;topSongs&quot;:       [ { &quot;id&quot;: &quot;vk_track_...&quot;, &quot;title&quot;: &quot;...&quot;, ... } ],
+  &quot;singles&quot;:        [ { &quot;id&quot;: &quot;vk_track_...&quot;, &quot;title&quot;: &quot;...&quot;, ... } ],
+  &quot;albums&quot;:         [ { &quot;id&quot;: &quot;vk_album_...&quot;, &quot;title&quot;: &quot;...&quot;, ... } ],
+  &quot;featuring&quot;:      [ { &quot;id&quot;: &quot;vk_album_...&quot;, &quot;title&quot;: &quot;...&quot;, ... } ],
+  &quot;similarArtists&quot;: [ { &quot;id&quot;: &quot;vk_artist_...&quot;, &quot;name&quot;: &quot;...&quot;, ... } ],
+  &quot;latestRelease&quot;:  { &quot;id&quot;: &quot;vk_album_...&quot;, &quot;title&quot;: &quot;...&quot;, &quot;year&quot;: 2024, ... }
+}
+</code></pre>
+<p><strong>Поля:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Поле</th>
+<th>Что это</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>topSongs</code></td>
+<td>Топ-20 треков артиста</td>
+</tr>
+<tr>
+<td><code>singles</code></td>
+<td>Синглы артиста</td>
+</tr>
+<tr>
+<td><code>albums</code></td>
+<td>Полноформатные альбомы (без синглов/EP), дедуплицированы по названию</td>
+</tr>
+<tr>
+<td><code>featuring</code></td>
+<td>Альбомы где артист в качестве feature</td>
+</tr>
+<tr>
+<td><code>similarArtists</code></td>
+<td>Похожие артисты (по Moosic relevant_artists)</td>
+</tr>
+<tr>
+<td><code>latestRelease</code></td>
+<td>Самый свежий релиз (любого типа: альбом/сингл/EP) или <code>null</code></td>
+</tr>
+</tbody>
+</table>
+<p>Все вложенные id префиксованы (<code>vk_track_*</code> / <code>vk_album_*</code> / <code>vk_artist_*</code>) — подставляй в <code>/track</code>, <code>/album</code>, <code>/artist</code> как обычно.</p>
+<h3 id="метаданные-vk-трека">Метаданные VK-трека <a class="hash-anchor" href="#vk-music/метаданные-vk-трека" aria-label="Ссылка на этот раздел">#</a></h3>
+<pre><code class="language-bash">curl -H &quot;X-Partner-Key: pk_...&quot; \
+  &quot;https://byicloud.online/api/partner/track/vk_track_xYz1/meta&quot;
+</code></pre>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;vk_track_xYz1&quot;,
+  &quot;title&quot;: &quot;Believer&quot;,
+  &quot;artist&quot;: &quot;Imagine Dragons&quot;,
+  &quot;artistId&quot;: &quot;vk_artist_aBcD&quot;,
+  &quot;collectionId&quot;: &quot;vk_album_qWe2&quot;,
+  &quot;cover&quot;: &quot;https://...&quot;,
+  &quot;duration&quot;: 204,
+  &quot;source&quot;: &quot;vk&quot;
+}
+</code></pre>
+<h3 id="ограничения">Ограничения <a class="hash-anchor" href="#vk-music/ограничения" aria-label="Ссылка на этот раздел">#</a></h3>
+<ul>
+<li>Lyrics и batch <code>/tracks/meta</code> для VK сейчас не поддерживаются — только Apple.</li>
+<li>VK не имеет региональной привязки — параметр <code>region</code> для VK игнорируется.</li>
+<li>Квалити: без линковки/подписки — <code>MP3 256K</code>, с активной подпиской ICM — <code>MP3 320K</code>. ALAC для VK недоступен (отдаём 320K вместо).</li>
+<li>Первый запрос холодного VK-трека идёт 3–10 секунд (мы готовим файл нужного качества и кладём в кеш). Используй <code>?async=1</code> чтобы не блокировать клиент (см. раздел «Async-режим для <code>/track</code>»). Повторные запросы того же трека отдают <code>file_id</code> мгновенно.</li>
+</ul>
+<hr></section>
+<section class="section" id="тексты-треков-lyrics" data-key="тексты-треков-lyrics"><h2>Тексты треков (lyrics)</h2><p>LRC-текст для трека. Сейчас поддерживаются:<br>
+- <strong>Apple Music</strong> — если файла нет на диске, скачиваем (1–10 сек).<br>
+- <strong>TIDAL</strong> — кешированный файл либо запрос к TIDAL API.<br>
+- <strong>Custom-треки</strong> — текстов нет, всегда <code>404 lyrics_not_found</code>.</p>
+<p>Scope: <code>lyrics</code>. Если выключен — <code>403 scope_not_allowed</code>.</p>
+<pre><code class="language-bash">curl -H &quot;X-Partner-Key: pk_...&quot; \
+  &quot;https://byicloud.online/api/partner/track/1440831203/lyrics?region=us&quot;
+</code></pre>
+<pre><code class="language-json">{
+  &quot;track_id&quot;: &quot;1440831203&quot;,
+  &quot;source&quot;: &quot;apple&quot;,
+  &quot;format&quot;: &quot;lrc&quot;,
+  &quot;lyrics&quot;: &quot;[00:00.00] First we found...\n[00:08.34] ...&quot;
+}
+</code></pre>
+<p><strong>Параметры:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Поле</th>
+<th>Что это</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>track_id</code></td>
+<td>Apple id (<code>123...</code>), <code>tidal_track_&lt;n&gt;</code> или <code>custom_&lt;n&gt;</code></td>
+</tr>
+<tr>
+<td><code>region</code></td>
+<td>Опционально. По умолчанию первый из <code>regions_allowed</code> ключа</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Ошибки:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Код</th>
+<th>Когда</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>403 scope_not_allowed</code></td>
+<td>Scope <code>lyrics</code> выключен в админке</td>
+</tr>
+<tr>
+<td><code>404 lyrics_not_found</code></td>
+<td>Текст не найден ни на диске, ни в Apple/TIDAL API</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Альтернатива по query.</strong> Есть зеркальный эндпоинт <code>GET /api/partner/lyrics?track_id=...&amp;region=...</code> — он эквивалентен <code>track/{id}/lyrics</code>. Используй любой.</p>
+<p><strong>Что важно.</strong> На холодных Apple-треках первый запрос может занять до 10 секунд. Последующие — мгновенно из кеша. Не дёргай lyrics пачкой на 100 треков сразу — лучше lazy load при открытии плеера.</p>
+<hr></section>
+<section class="section" id="личный-кабинет-для-линкованных-юзеров" data-key="личный-кабинет-для-линкованных-юзеров"><h2>Личный кабинет (для линкованных юзеров)</h2><p>Эндпоинты под <code>/me/*</code> работают только если запрос пришёл <strong>от линкованного юзера с активной подпиской ICM</strong> (через <code>X-Partner-User-Id</code> или <code>partner_session_token</code>).</p>
+<p>Иначе:<br>
+- <code>401 partner_user_required</code> — <code>partner_user_id</code> не передан<br>
+- <code>403 user_not_linked</code> — юзер ещё не привязан (см. «Линковка аккаунтов»)<br>
+- <code>403 subscription_required</code> — линковка есть, но подписка истекла или нет<br>
+- <code>403 scope_not_allowed</code> — scope <code>user_quality_choice</code> выключен</p>
+<p>Scope для всех <code>/me/*</code> — <code>user_quality_choice</code>.</p>
+<h3 id="выбор-качества-стрима">Выбор качества стрима <a class="hash-anchor" href="#личный-кабинет-для-линкованных-юзеров/выбор-качества-стрима" aria-label="Ссылка на этот раздел">#</a></h3>
+<p>Линкованный юзер с подпиской может выбрать качество выше лимита партнёра. Например, у партнёра <code>max_quality: 256K</code>, но юзер с ICM-подпиской хочет 320K — это делается через preferences.</p>
+<p><strong>Получить текущий выбор:</strong></p>
+<pre><code class="language-bash">curl -H &quot;X-Partner-Key: pk_...&quot; -H &quot;X-Partner-User-Id: u_42&quot; \
+  https://byicloud.online/api/partner/me/preferences
+</code></pre>
+<pre><code class="language-json">{
+  &quot;partner_user_id&quot;: &quot;u_42&quot;,
+  &quot;quality_preference&quot;: &quot;320K&quot;,
+  &quot;max_quality&quot;: &quot;320K&quot;,
+  &quot;allowed_qualities&quot;: [&quot;128K&quot;, &quot;256K&quot;, &quot;320K&quot;, &quot;ALAC&quot;],
+  &quot;updated_at&quot;: 1747200000
+}
+</code></pre>
+<p><strong>Сохранить выбор:</strong></p>
+<pre><code class="language-bash">curl -X PUT -H &quot;X-Partner-Key: pk_...&quot; -H &quot;X-Partner-User-Id: u_42&quot; \
+  -H &quot;Content-Type: application/json&quot; \
+  -d '{&quot;quality&quot;:&quot;320K&quot;}' \
+  https://byicloud.online/api/partner/me/preferences
+</code></pre>
+<p>Передай <code>{"quality": null}</code> чтобы сбросить выбор (вернётся auto = max доступное по подписке).</p>
+<p><strong>Что важно:</strong></p>
+<ul>
+<li><code>quality_preference</code> применяется автоматически в <code>/track</code> если у юзера активна подписка. Параметр <code>quality</code> в <code>/track</code> имеет приоритет — это override на конкретный запрос.</li>
+<li>Если у юзера нет линковки/подписки/scope — сохранённый preference игнорируется и работает старая логика (<code>cap_quality</code> до тарифа партнёра).</li>
+<li>В <code>/health</code> для линкованного юзера со scope появится <code>linked_user.user_quality_choice: true</code> и <code>linked_user.current_preference: "320K"</code>.</li>
+</ul>
+<h3 id="профиль-линкованного-юзера">Профиль линкованного юзера <a class="hash-anchor" href="#личный-кабинет-для-линкованных-юзеров/профиль-линкованного-юзера" aria-label="Ссылка на этот раздел">#</a></h3>
+<p>Имя и аватар линкованного юзера для UI плеера на стороне партнёра.</p>
+<pre><code class="language-bash">curl -H &quot;X-Partner-Key: pk_...&quot; -H &quot;X-Partner-User-Id: u_42&quot; \
+  https://byicloud.online/api/partner/me/profile
+</code></pre>
+<pre><code class="language-json">{
+  &quot;partner_user_id&quot;: &quot;u_42&quot;,
+  &quot;name&quot;: &quot;Иван&quot;,
+  &quot;username&quot;: &quot;ivan_123&quot;,
+  &quot;avatar_url&quot;: &quot;https://api.telegram.org/file/.../photo.jpg&quot;
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Поле</th>
+<th>Описание</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name</code></td>
+<td>Имя юзера (<code>first_name [last_name]</code> из Telegram). Минимум <code>"User"</code> если ничего не задано</td>
+</tr>
+<tr>
+<td><code>username</code></td>
+<td>Telegram @username. <code>null</code> если не задан</td>
+</tr>
+<tr>
+<td><code>avatar_url</code></td>
+<td>URL аватара. <code>null</code> если фото в Telegram не загружено</td>
+</tr>
+</tbody>
+</table>
+<p>Scope: <code>user_profile</code>. Требует линковки (<code>403 user_not_linked</code> иначе), подписка ICM <strong>не</strong> требуется — это display-data. Чувствительные поля (email, phone, referral) через этот эндпоинт не возвращаются никогда.</p>
+<hr></section>
+<section class="section" id="медиатека" data-key="медиатека"><h2>Медиатека</h2><p>Эндпоинты <code>/library/*</code> отдают данные линкованного юзера: лайки, подписки на артистов, «Моя волна». Требуется линковка (<code>403 user_not_linked</code> иначе).</p>
+<h3 id="лайки">Лайки <a class="hash-anchor" href="#медиатека/лайки" aria-label="Ссылка на этот раздел">#</a></h3>
+<pre><code class="language-bash">curl -H &quot;X-Partner-Key: pk_...&quot; -H &quot;X-Partner-User-Id: u_42&quot; \
+  &quot;https://byicloud.online/api/partner/library/likes?source=apple&amp;limit=50&quot;
+</code></pre>
+<pre><code class="language-json">{
+  &quot;count&quot;: 12,
+  &quot;total&quot;: 12,
+  &quot;offset&quot;: 0,
+  &quot;limit&quot;: 50,
+  &quot;items&quot;: [
+    {
+      &quot;id&quot;: &quot;1440831203&quot;,
+      &quot;trackId&quot;: &quot;1440831203&quot;,
+      &quot;title&quot;: &quot;Believer&quot;,
+      &quot;artist&quot;: &quot;Imagine Dragons&quot;,
+      &quot;cover&quot;: &quot;https://.../1000x1000.jpg&quot;,
+      &quot;duration&quot;: 204347,
+      &quot;collectionId&quot;: &quot;1440831190&quot;,
+      &quot;artistId&quot;: &quot;358714030&quot;,
+      &quot;is_explicit&quot;: false,
+      &quot;liked_at&quot;: 1747200000
+    }
+  ]
+}
+</code></pre>
+<p><strong>Параметры:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Поле</th>
+<th>Что это</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>source</code></td>
+<td><code>all</code> (по умолчанию) / <code>apple</code> / <code>tidal</code>. Custom-треки видны в <code>apple</code> и <code>tidal</code></td>
+</tr>
+<tr>
+<td><code>limit</code></td>
+<td>1–200</td>
+</tr>
+<tr>
+<td><code>offset</code></td>
+<td>Пагинация</td>
+</tr>
+</tbody>
+</table>
+<p>Scope: <code>library_likes</code>.</p>
+<h3 id="подписки-на-артистов">Подписки на артистов <a class="hash-anchor" href="#медиатека/подписки-на-артистов" aria-label="Ссылка на этот раздел">#</a></h3>
+<pre><code class="language-bash">curl -H &quot;X-Partner-Key: pk_...&quot; -H &quot;X-Partner-User-Id: u_42&quot; \
+  &quot;https://byicloud.online/api/partner/library/subscriptions?source=tidal&quot;
+</code></pre>
+<pre><code class="language-json">{
+  &quot;count&quot;: 3,
+  &quot;total&quot;: 3,
+  &quot;offset&quot;: 0,
+  &quot;limit&quot;: 50,
+  &quot;items&quot;: [
+    {
+      &quot;id&quot;: &quot;tidal_artist_5300248&quot;,
+      &quot;name&quot;: &quot;Tame Impala&quot;,
+      &quot;image&quot;: &quot;https://resources.tidal.com/.../320x320.jpg&quot;,
+      &quot;isCustom&quot;: false,
+      &quot;isTidal&quot;: true
+    }
+  ]
+}
+</code></pre>
+<p><code>source</code> фильтрует так же как и в лайках. Scope: <code>library_subscriptions</code>.</p>
+<h3 id="моя-волна">Моя волна <a class="hash-anchor" href="#медиатека/моя-волна" aria-label="Ссылка на этот раздел">#</a></h3>
+<p>Только Apple Music. Возвращает один следующий трек: либо персональная волна юзера (по умолчанию), либо «станция по треку» (если задан <code>seed_track_id</code>).</p>
+<p><strong>Следующий трек (личная волна):</strong></p>
+<pre><code class="language-bash">curl -H &quot;X-Partner-Key: pk_...&quot; -H &quot;X-Partner-User-Id: u_42&quot; \
+  &quot;https://byicloud.online/api/partner/library/wave/next&quot;
+</code></pre>
+<pre><code class="language-json">{
+  &quot;track&quot;: {
+    &quot;id&quot;: &quot;1440831203&quot;,
+    &quot;title&quot;: &quot;Believer&quot;,
+    &quot;artist&quot;: &quot;Imagine Dragons&quot;,
+    &quot;cover&quot;: &quot;https://.../1000x1000.jpg&quot;,
+    &quot;duration&quot;: 204347,
+    &quot;collectionId&quot;: &quot;1440831190&quot;,
+    &quot;artistId&quot;: &quot;358714030&quot;,
+    &quot;is_explicit&quot;: false
+  },
+  &quot;status&quot;: &quot;ok&quot;,
+  &quot;region&quot;: &quot;us&quot;
+}
+</code></pre>
+<p><strong>Параметры:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Поле</th>
+<th>Что это</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>exclude</code></td>
+<td>Через запятую: track_ids, которые исключить (текущая очередь клиента)</td>
+</tr>
+<tr>
+<td><code>seed_track_id</code></td>
+<td>Если задан — волна вокруг этого трека (Apple station)</td>
+</tr>
+<tr>
+<td><code>recent_skips</code></td>
+<td>Сколько подряд клиент пропустил последних треков (для skip-streak fallback)</td>
+</tr>
+<tr>
+<td><code>region</code></td>
+<td>По умолчанию первый из <code>regions_allowed</code></td>
+</tr>
+</tbody>
+</table>
+<p>Если status <code>empty</code> — кандидатов нет (юзер ничего не лайкал или всё исключил). Покажи онбординг.</p>
+<p>Дальше — <code>POST /track</code> с <code>id</code> из ответа, как обычно.</p>
+<p>Scope: <code>library_wave</code>.</p>
+<p><strong>Фидбек по волне:</strong></p>
+<pre><code class="language-bash">curl -X POST -H &quot;X-Partner-Key: pk_...&quot; -H &quot;X-Partner-User-Id: u_42&quot; \
+  -H &quot;Content-Type: application/json&quot; \
+  -d '{&quot;feedback_type&quot;:&quot;less_artist&quot;,&quot;value&quot;:&quot;358714030&quot;}' \
+  https://byicloud.online/api/partner/library/wave/feedback
+</code></pre>
+<p><code>feedback_type</code>: <code>less_track</code> / <code>less_artist</code> / <code>less_genre</code> / <code>more_track</code> / <code>more_artist</code> / <code>more_genre</code>. <code>value</code> — id трека/артиста или название жанра.</p>
+<p><strong>Кнопки «чаще / реже»</strong> в UI плеера — это <strong>тот же</strong> эндпоинт <code>/library/wave/feedback</code>, отдельной ручки нет:</p>
+<table>
+<thead>
+<tr>
+<th>Кнопка в UI</th>
+<th>Что слать</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>👍 Чаще этот трек</td>
+<td><code>{"feedback_type":"more_track","value":"&lt;track_id&gt;"}</code></td>
+</tr>
+<tr>
+<td>👎 Реже этот трек</td>
+<td><code>{"feedback_type":"less_track","value":"&lt;track_id&gt;"}</code></td>
+</tr>
+<tr>
+<td>👍 Чаще артиста</td>
+<td><code>{"feedback_type":"more_artist","value":"&lt;artist_id&gt;"}</code></td>
+</tr>
+<tr>
+<td>👎 Реже артиста</td>
+<td><code>{"feedback_type":"less_artist","value":"&lt;artist_id&gt;"}</code></td>
+</tr>
+</tbody>
+</table>
+<p>Фидбек применяется с decay (полураспад 30 дней) — старые сигналы постепенно теряют вес, повторное нажатие на тот же трек идемпотентно.</p>
+<p><strong>Логирование прослушивания:</strong></p>
+<pre><code class="language-bash">curl -X POST -H &quot;X-Partner-Key: pk_...&quot; -H &quot;X-Partner-User-Id: u_42&quot; \
+  -H &quot;Content-Type: application/json&quot; \
+  -d '{&quot;track_id&quot;:&quot;1440831203&quot;,&quot;played_seconds&quot;:180.5,&quot;total_seconds&quot;:204.3}' \
+  https://byicloud.online/api/partner/library/wave/playback
+</code></pre>
+<pre><code class="language-json">{ &quot;status&quot;: &quot;ok&quot;, &quot;logged&quot;: true }
+</code></pre>
+<p>Когда юзер послушал трек из волны (дослушал / пропустил / переключил в середине) — отправь это событие. Сигналы попадают в <code>playback_history</code>, и ранжирование волны автоматически их подхватит: <code>avg_completion</code> бустит знакомые треки, <code>skip_count</code> штрафует.</p>
+<p><strong>Параметры:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Поле</th>
+<th>Что это</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>track_id</code></td>
+<td>Apple track_id из ответа <code>/library/wave/next</code>. Обязательный.</td>
+</tr>
+<tr>
+<td><code>played_seconds</code></td>
+<td>Сколько секунд реально слушал (не позиция плеера, а накопленная игра). Обязательный.</td>
+</tr>
+<tr>
+<td><code>total_seconds</code></td>
+<td>Длительность трека. Опциональный — но без него мы не сможем посчитать <code>completed/skipped</code>, и тогда волна не учтёт сигнал в полной мере.</td>
+</tr>
+<tr>
+<td><code>completed</code></td>
+<td>Опциональный bool. Если не указан — считаем по <code>played &gt;= 0.85 * total</code>.</td>
+</tr>
+<tr>
+<td><code>skipped</code></td>
+<td>Опциональный bool. Если не указан — считаем по <code>played &lt; 0.15 * total</code>.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Поле <code>logged</code> в ответе:</strong> <code>true</code> если событие записалось. <code>false</code> для не-Apple <code>track_id</code> (VK/TIDAL/custom) — волна их не ранжирует, поэтому сигнал тихо игнорируется. На клиенте можно слать одинаково для всех треков, нам это не вредит.</p>
+<p>Scope: <code>library_wave_playback</code>. Когда слать — рекомендуем после <code>audio.ended</code> или при переключении трека (вычитай <code>played_seconds</code> из <code>audio.currentTime</code> минус скипы вперёд).</p>
+<p><strong>Сброс волны:</strong></p>
+<pre><code class="language-bash">curl -X POST -H &quot;X-Partner-Key: pk_...&quot; -H &quot;X-Partner-User-Id: u_42&quot; \
+  https://byicloud.online/api/partner/library/wave/reset
+</code></pre>
+<pre><code class="language-json">{ &quot;status&quot;: &quot;ok&quot;, &quot;removed&quot;: 142 }
+</code></pre>
+<p>Удаляет историю показов, seed-артистов и накопленные предпочтения. <code>removed</code> — сколько строк удалили суммарно. Лайки сохраняются.</p>
+<h3 id="онбординг-волны">Онбординг волны <a class="hash-anchor" href="#медиатека/онбординг-волны" aria-label="Ссылка на этот раздел">#</a></h3>
+<p>Если <code>wave/next</code> возвращает <code>status: "empty"</code> — у юзера нет seed-артистов (не проходил онбординг или сбросил). Нужно показать выбор и сохранить через onboarding-эндпоинты.</p>
+<p><strong>Получить список популярных артистов</strong> (карточки для выбора):</p>
+<pre><code class="language-bash">curl -H &quot;X-Partner-Key: pk_...&quot; \
+  https://byicloud.online/api/partner/library/wave/popular-artists
+</code></pre>
+<pre><code class="language-json">[
+  { &quot;id&quot;: &quot;1419227&quot;, &quot;name&quot;: &quot;The Weeknd&quot;, &quot;image&quot;: &quot;https://.../300x300.jpg&quot; },
+  { &quot;id&quot;: &quot;358714030&quot;, &quot;name&quot;: &quot;Drake&quot;, &quot;image&quot;: &quot;https://.../300x300.jpg&quot; }
+]
+</code></pre>
+<p>Не требует <code>X-Partner-User-Id</code> — можно вызвать до линковки. Кеш 24ч.</p>
+<p><strong>Проверить статус онбординга</strong> (есть ли уже seed-артисты):</p>
+<pre><code class="language-bash">curl -H &quot;X-Partner-Key: pk_...&quot; -H &quot;X-Partner-User-Id: u_42&quot; \
+  https://byicloud.online/api/partner/library/wave/onboarding
+</code></pre>
+<pre><code class="language-json">{
+  &quot;artists&quot;: [{&quot;id&quot;:&quot;358714030&quot;,&quot;name&quot;:&quot;Drake&quot;}],
+  &quot;completed&quot;: true
+}
+</code></pre>
+<p><strong>Сохранить выбор юзера:</strong></p>
+<pre><code class="language-bash">curl -X POST -H &quot;X-Partner-Key: pk_...&quot; -H &quot;X-Partner-User-Id: u_42&quot; \
+  -H &quot;Content-Type: application/json&quot; \
+  -d '{&quot;artists&quot;:[{&quot;id&quot;:&quot;358714030&quot;,&quot;name&quot;:&quot;Drake&quot;},{&quot;id&quot;:&quot;1419227&quot;,&quot;name&quot;:&quot;The Weeknd&quot;}]}' \
+  https://byicloud.online/api/partner/library/wave/onboarding
+</code></pre>
+<pre><code class="language-json">{ &quot;ok&quot;: true, &quot;saved&quot;: 2 }
+</code></pre>
+<p>Минимум 1 артист, рекомендуется 3–5. После сохранения сразу зови <code>wave/next</code> — волна персонализируется по выбранным.</p>
+<hr></section>
+<section class="section" id="ошибки" data-key="ошибки"><h2>Ошибки</h2><p>Формат: <code>{"error": "код", "message": "опц"}</code></p>
+<table>
+<thead>
+<tr>
+<th>Код</th>
+<th>Значение</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>401 missing_api_key</code></td>
+<td>Нет заголовка <code>X-Partner-Key</code></td>
+</tr>
+<tr>
+<td><code>401 invalid_session_token</code></td>
+<td>Session-токен битый или истёк</td>
+</tr>
+<tr>
+<td><code>403 invalid_api_key</code></td>
+<td>Ключ не найден или формат битый</td>
+</tr>
+<tr>
+<td><code>403 partner_suspended</code></td>
+<td>Доступ приостановлен</td>
+</tr>
+<tr>
+<td><code>403 scope_not_allowed</code></td>
+<td>Эта функция отключена в твоём конфиге</td>
+</tr>
+<tr>
+<td><code>403 source_not_allowed</code></td>
+<td>Источник трека отключён</td>
+</tr>
+<tr>
+<td><code>403 invalid_or_expired_signature</code></td>
+<td>Signed URL истёк — запроси через <code>/track</code></td>
+</tr>
+<tr>
+<td><code>400 query_too_short</code></td>
+<td><code>q</code> пустой / меньше 2 буквенно-цифровых символов после trim. Не отправляй запрос если у юзера пустое поле</td>
+</tr>
+<tr>
+<td><code>429 query_spam_detected</code></td>
+<td>Слал ≥10 мусорных <code>q</code> за минуту. Жди 60 сек или почини клиент чтобы он не дёргал API на пустом инпуте</td>
+</tr>
+<tr>
+<td><code>400 invalid_source</code></td>
+<td>Параметр <code>source</code> в /search не из <code>apple|vk|all</code></td>
+</tr>
+<tr>
+<td><code>403 source_not_allowed source=vk</code></td>
+<td>VK не в <code>allowed_sources</code> твоего ключа</td>
+</tr>
+<tr>
+<td><code>404 album_not_found</code></td>
+<td>VK альбом не найден в Moosic</td>
+</tr>
+<tr>
+<td><code>404 artist_not_found</code></td>
+<td>VK артист не найден в Moosic</td>
+</tr>
+<tr>
+<td><code>404 track_not_found</code></td>
+<td>Трек не найден ни в одном регионе (Apple) или в Moosic (VK)</td>
+</tr>
+<tr>
+<td><code>404 lyrics_not_found</code></td>
+<td>Текста нет ни на диске, ни в Apple/TIDAL API</td>
+</tr>
+<tr>
+<td><code>401 partner_user_required</code></td>
+<td>Эндпоинт <code>/me/*</code> или <code>/library/*</code> требует <code>partner_user_id</code></td>
+</tr>
+<tr>
+<td><code>403 user_not_linked</code></td>
+<td>Юзер не привязан к ICM-аккаунту</td>
+</tr>
+<tr>
+<td><code>403 subscription_required</code></td>
+<td>Нет активной ICM-подписки для <code>/me/*</code></td>
+</tr>
+<tr>
+<td><code>429 rate_limited</code></td>
+<td>Превышен лимит запросов</td>
+</tr>
+<tr>
+<td><code>451 region_unavailable</code></td>
+<td>Трек недоступен в этом регионе, в ответе есть <code>required_region</code></td>
+</tr>
+<tr>
+<td><code>401 invalid_api_key_format</code></td>
+<td>Ключ не в формате <code>pk_&lt;partner_id&gt;_&lt;32-символьный-секрет&gt;</code></td>
+</tr>
+<tr>
+<td><code>401 token_revoked</code></td>
+<td>Session-токен был отозван (например, ротация ключей)</td>
+</tr>
+<tr>
+<td><code>403 s2s_only</code></td>
+<td>Эндпоинт требует API-ключ (<code>/session/issue</code>, <code>/link/email/*</code>) — нельзя вызывать с session-токеном</td>
+</tr>
+<tr>
+<td><code>404 job_not_found_or_expired</code></td>
+<td><code>/track/job/{id}</code> — job старше 10 минут или не существует</td>
+</tr>
+<tr>
+<td><code>403 job_belongs_to_another_partner</code></td>
+<td>Полез за чужим job_id</td>
+</tr>
+<tr>
+<td><code>404 user_not_found</code></td>
+<td><code>/me/profile</code> — линковка есть, но юзер в <code>users</code> отсутствует (теоретически невозможно, защита)</td>
+</tr>
+</tbody>
+</table>
+<p>При 429 в ответе и заголовке <code>Retry-After</code> — сколько секунд ждать.</p>
+<hr></section>
+<section class="section" id="лимиты" data-key="лимиты"><h2>Лимиты</h2><p>Лимиты — запросы в минуту на ключ. Считаются раздельно по группам:</p>
+<ul>
+<li><code>search</code> — <code>/search</code></li>
+<li><code>stream</code> — <code>/track</code></li>
+<li><code>session_issue</code> — <code>/session/issue</code></li>
+<li><code>default</code> — <code>/album</code>, <code>/artist</code>, <code>/track/{id}/meta</code>, <code>/cover-sign</code>, <code>/lyrics</code>, <code>/track/{id}/lyrics</code>, <code>/me/preferences</code>, <code>/me/profile</code>, <code>/library/likes</code>, <code>/library/subscriptions</code>, <code>/library/wave/*</code> (включая <code>/library/wave/playback</code>)</li>
+</ul>
+<p>Сам стрим (<code>/audio</code>, <code>/cover</code>) лимитом не считается.</p>
+<p>Точные значения — в ответе <code>/health</code>.</p>
+<h3 id="что-и-как-кешировать-у-себя">Что и как кешировать у себя <a class="hash-anchor" href="#лимиты/что-и-как-кешировать-у-себя" aria-label="Ссылка на этот раздел">#</a></h3>
+<p>У нас уже стоит свой кеш (search ~10 минут, метаданные треков ~7 дней), так что повторные запросы к нам быстрые. Но кеш на твоей стороне экономит твой rate-limit и убирает сетевой round-trip:</p>
+<p><strong><code>/search</code></strong> — кешируй ответы на <strong>60 секунд</strong> по ключу <code>(query + region)</code>. Чаще всего пользователи дотыпывают одну букву — каждый раз бить в API не нужно.</p>
+<pre><code class="language-js">// псевдо
+const KEY = `search:${region}:${q.toLowerCase()}`;
+const cached = cache.get(KEY);
+if (cached) return cached;
+const data = await fetch(...);
+cache.set(KEY, data, 60);
+</code></pre>
+<p><strong>Метаданные треков и альбомов</strong> (<code>/track/{id}/meta</code>, <code>/album/{id}</code>) — кешируй на <strong>сутки и больше</strong>. Альбом редко меняется. Инвалидируй вручную если пользователь жалуется на устаревшую обложку.</p>
+<p><strong><code>file_id</code></strong> из ответа <code>/track</code> — кешируй на <strong>сутки и больше</strong> по ключу <code>(trackId + region + quality)</code>. Сам трек в нашем хранилище не меняется. Имея сохранённый <code>file_id</code>, можно потом перевыдавать только signed URL — но проще снова дёргать <code>/track</code>: у нас сработает наш кеш и ответ придёт за миллисекунды.</p>
+<p><strong><code>partner_session_token</code></strong> — кешируй пока не истёк (<code>expires_in</code> секунд). Не дёргай <code>/session/issue</code> на каждый запрос клиента.</p>
+<h3 id="что-не-кешировать">Что НЕ кешировать <a class="hash-anchor" href="#лимиты/что-не-кешировать" aria-label="Ссылка на этот раздел">#</a></h3>
+<ul>
+<li><strong>Поле <code>url</code></strong> из ответа <code>/track</code> и <code>/cover-sign</code> — это короткоживущая подпись (10 минут). Когда истечёт — снова позови <code>/track</code> или <code>/cover-sign</code>, получишь свежий URL.</li>
+<li><strong>Сам аудио-файл</strong> (<code>/audio/{file_id}</code>) — это твой собственный стрим из кеша Telegram через нас, его никуда сохранять не надо. Браузер сам закеширует через <code>Cache-Control: public, max-age=604800</code> (неделя).</li>
+</ul>
+<h3 id="простой-расчёт">Простой расчёт <a class="hash-anchor" href="#лимиты/простой-расчёт" aria-label="Ссылка на этот раздел">#</a></h3>
+<p>С нормальным кешем у тебя на 100k активных юзеров в день получится примерно:<br>
+- <code>/search</code>: 1-2 rpm от твоего бэкенда (всё гасится локальным кешем)<br>
+- <code>/track</code>: всплески при старте плеера, ~10-20 rpm<br>
+- <code>/album</code>, <code>/artist</code>, <code>/meta</code>: единицы rpm</p>
+<p>То есть дефолтных лимитов хватит на старт даже большого приложения. Если упрёшься — напиши, поднимем.</p>
+<hr></section>
+<section class="section" id="batch-запросы" data-key="batch-запросы"><h2>Batch-запросы</h2><p>Если нужно загрузить метаданные нескольких треков (например, плейлиста) — не дёргай <code>/track/{id}/meta</code> в цикле, а отправь один batch:</p>
+<pre><code class="language-bash">curl -X POST -H &quot;X-Partner-Key: pk_...&quot; -H &quot;Content-Type: application/json&quot; \
+  -d '{&quot;track_ids&quot;:[&quot;1440831200&quot;,&quot;1440831201&quot;,&quot;1440831203&quot;]}' \
+  https://byicloud.online/api/partner/tracks/meta
+</code></pre>
+<pre><code class="language-json">{
+  &quot;count&quot;: 3,
+  &quot;items&quot;: [
+    { &quot;id&quot;: &quot;1440831200&quot;, &quot;title&quot;: &quot;...&quot;, &quot;artist&quot;: &quot;...&quot;, &quot;cover&quot;: &quot;...&quot;, &quot;duration&quot;: 199853 },
+    { &quot;track_id&quot;: &quot;1440831201&quot;, &quot;error&quot;: &quot;not_found&quot; },
+    { &quot;id&quot;: &quot;1440831203&quot;, &quot;title&quot;: &quot;Believer&quot;, ... }
+  ]
+}
+</code></pre>
+<p>До <strong>50 треков за запрос</strong>. Запрос съедает один <code>meta</code> rate-limit-hit вместо 50.</p>
+<hr></section>
+<section class="section" id="async-режим-для-track" data-key="async-режим-для-track"><h2>Async-режим для `/track`</h2><p>Если трек ещё не закеширован у нас — <code>/track</code> может ждать 1–5 секунд (а ALAC и до минуты), пока мы скачаем и подготовим файл. Чтобы не блокировать клиент — добавь <code>?async=1</code>:</p>
+<pre><code class="language-bash">curl -X POST -H &quot;X-Partner-Key: pk_...&quot; -H &quot;Content-Type: application/json&quot; \
+  -d '{&quot;trackId&quot;:&quot;1440831203&quot;}' \
+  &quot;https://byicloud.online/api/partner/track?async=1&quot;
+</code></pre>
+<p>Если трек тёплый — приходит обычный 200 с <code>url</code>.<br>
+Если холодный — приходит <strong>202 Accepted</strong>:</p>
+<pre><code class="language-json">{
+  &quot;job_id&quot;: &quot;a3f5b1c20d8e4f72&quot;,
+  &quot;status&quot;: &quot;pending&quot;,
+  &quot;poll_url&quot;: &quot;https://byicloud.online/api/partner/track/job/a3f5b1c20d8e4f72&quot;,
+  &quot;poll_after&quot;: 2
+}
+</code></pre>
+<p>Опрашивай <code>poll_url</code> раз в 2 секунды:</p>
+<pre><code class="language-bash">curl -H &quot;X-Partner-Key: pk_...&quot; \
+  https://byicloud.online/api/partner/track/job/a3f5b1c20d8e4f72
+</code></pre>
+<p>Пока <code>status: pending</code> — продолжай. Когда <code>status: ready</code> — внутри ответа есть <code>url</code>, <code>expires_at</code> и всё остальное как у обычного <code>/track</code>. Job хранится 10 минут.</p>
+<hr></section>
+<section class="section" id="линковка-аккаунтов-привязка-к-icm" data-key="линковка-аккаунтов-привязка-к-icm"><h2>Линковка аккаунтов (привязка к ICM)</h2><p>Если хочешь, чтобы юзер с подпиской ICM Music автоматически получал её преимущества (высокое качество, расширенные источники) — нужно связать его <code>partner_user_id</code> с его аккаунтом ICM. Есть два способа: через Telegram (HTML-редирект) и через email (чистый JSON API).</p>
+<h3 id="способ-1-через-telegram-html-редирект">Способ 1. Через Telegram (HTML-редирект) <a class="hash-anchor" href="#линковка-аккаунтов-привязка-к-icm/способ-1-через-telegram-html-редирект" aria-label="Ссылка на этот раздел">#</a></h3>
+<p><strong>Кратко:</strong> ты редиректишь юзера на нашу страницу с кнопкой Telegram Login, он нажимает её, мы получаем подтверждение от Telegram и редиректим обратно к тебе с <code>icm_user_id</code>.</p>
+<h4>Схема URL</h4>
+<pre><code>Твой UI ───► https://byicloud.online/partner/&lt;partner_id&gt;/link?partner_user_id=u_42&amp;redirect_uri=https://chat.example.com/callback&amp;state=&lt;random&gt;
+                                          │
+                                          ▼ (наш сервер рендерит страницу с виджетом)
+                       https://telegram.org/js/telegram-widget.js
+                                          │
+                                          ▼ (юзер нажал Login, Telegram редиректит)
+                       https://byicloud.online/partner/link/complete?nonce=...&amp;id=...&amp;hash=...
+                                          │
+                                          ▼ (наш сервер линкует и редиректит)
+Твой UI ◄───  https://chat.example.com/callback?state=&lt;random&gt;&amp;linked=1&amp;icm_user_id=1406840236
+</code></pre>
+<p><strong>Важно:</strong> <code>/partner/link/complete</code> — это <strong>наш внутренний URL</strong>, его задаёт сервер автоматически (в <code>data-auth-url</code> виджета). Ты этим URL не пользуешься, твоя задача — только редиректнуть юзера на <code>/partner/&lt;partner_id&gt;/link</code> и принять финальный редирект на свой <code>redirect_uri</code>.</p>
+<h4>Параметры запроса (<code>/partner/&lt;partner_id&gt;/link</code>)</h4>
+<table>
+<thead>
+<tr>
+<th>Поле</th>
+<th>Что это</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>partner_user_id</code></td>
+<td>id юзера в твоей системе (1–128 символов). Именно сюда привяжется ICM-аккаунт</td>
+</tr>
+<tr>
+<td><code>redirect_uri</code></td>
+<td>Куда мы редиректим после линковки. <strong>Должен быть в whitelist</strong> твоих origins (<code>config.session.allow_origins</code>)</td>
+</tr>
+<tr>
+<td><code>state</code></td>
+<td>Любая твоя случайная строка. Вернём её в редиректе. Проверяй для защиты от CSRF</td>
+</tr>
+</tbody>
+</table>
+<h4>Что возвращается в <code>redirect_uri</code></h4>
+<p><strong>Успех:</strong></p>
+<pre><code>https://chat.example.com/callback?state=&lt;твой&gt;&amp;linked=1&amp;icm_user_id=1406840236
+</code></pre>
+<p><strong>Ошибка авторизации Telegram:</strong></p>
+<pre><code>https://chat.example.com/callback?state=&lt;твой&gt;&amp;linked=0&amp;error=telegram_auth_failed
+</code></pre>
+<p><strong>Ошибка БД при линковке:</strong></p>
+<pre><code>https://chat.example.com/callback?state=&lt;твой&gt;&amp;linked=0&amp;error=link_failed
+</code></pre>
+<h4>Что важно</h4>
+<ul>
+<li><code>redirect_uri</code> сверяется по схеме+хосту (<code>https://chat.example.com</code>) с whitelist'ом в твоём конфиге. Trailing-slash и path значения не имеют. Если хоста нет в whitelist → <code>400 redirect_uri_not_allowed</code> (страница не откроется).</li>
+<li><code>state</code> — твоя случайная строка, проверь её при возврате (защита от CSRF).</li>
+<li><code>icm_user_id</code> — это Telegram-id юзера (он же <code>users.user_id</code> в нашей БД). Можешь сохранить у себя для связи в дальнейшем.</li>
+<li>Линковка идемпотентна — повторный проход того же юзера просто обновит маппинг.</li>
+</ul>
+<h4>Если ты разрабатываешь мобильное приложение</h4>
+<p>Telegram Login Widget — это веб-виджет. Он <strong>требует cookies, redirect и JS</strong> — то есть полноценный браузер. Внутри обычного WebView (особенно WKWebView на iOS) виджет работает нестабильно.</p>
+<p><strong>Правильно:</strong></p>
+<ol>
+<li>Открывай страницу <code>/partner/&lt;id&gt;/link?...</code> в <strong>системном браузере</strong>:<br>
+   - <strong>Android:</strong> Chrome Custom Tabs (<code>androidx.browser.customtabs.CustomTabsIntent</code>)<br>
+   - <strong>iOS:</strong> <code>SFSafariViewController</code> или <code>ASWebAuthenticationSession</code></li>
+<li>В <code>redirect_uri</code> используй <strong>custom-scheme deep link</strong> твоего приложения, например <code>myapp://oauth/icm</code>. Мы делаем стандартный 302 на любой URL из whitelist — браузер передаст deep link обратно в твоё приложение.</li>
+<li>Чтобы мы приняли <code>myapp://</code> в <code>redirect_uri</code>, попроси нашего менеджера (<a href="https://t.me/trmrcd">t.me/trmrcd</a>) добавить <code>myapp://</code> в твой whitelist.</li>
+</ol>
+<p><strong>Не работает:</strong> обычный WebView с <code>redirect_uri=https://...</code>. Telegram перенаправит, но твой WebView не сможет перехватить редирект и закрыть себя.</p>
+<h4>Распространённые ошибки</h4>
+<p><strong><code>Открывается главная страница вместо виджета</code></strong><br>
+- Проверь URL: должно быть <code>/partner/&lt;id&gt;/link</code> (с <code>/link</code> в конце и <code>partner</code> <strong>без <code>s</code></strong>).<br>
+- Хост в <code>redirect_uri</code> не в whitelist — попроси менеджера добавить.</p>
+<p><strong><code>404 Not Found на /api/partner/auth/telegram</code></strong><br>
+- Такого эндпоинта нет. Используй <code>/partner/&lt;partner_id&gt;/link</code> (HTML) или <code>/api/partner/link/email/request</code> (JSON).</p>
+<p><strong><code>401 invalid_api_key_format</code> на <code>/session/issue</code></strong><br>
+- Формат ключа — <code>pk_&lt;partner_id&gt;_&lt;32-символьный-секрет&gt;</code>, а не просто <code>pk_&lt;partner_id&gt;</code>. Полный ключ выдан <strong>один раз</strong> при создании партнёра. Если потерял — попроси менеджера ротировать (старый ключ сразу инвалидируется).</p>
+<p><strong><code>400 redirect_uri_not_allowed</code></strong><br>
+- Хост в <code>redirect_uri</code> не в whitelist (<code>config.session.allow_origins</code>). Точное совпадение по <code>scheme://host[:port]</code>. Передай менеджеру нужный origin.</p>
+<p><strong><code>400 Link session expired or invalid</code> на <code>/partner/link/complete</code></strong><br>
+- Юзер прошёл по ссылке старше 10 минут или дёрнул callback напрямую. Начни флоу заново.</p>
+<h3 id="способ-2-через-email-json-api-с-авто-регистрацией">Способ 2. Через email (JSON API, с авто-регистрацией) <a class="hash-anchor" href="#линковка-аккаунтов-привязка-к-icm/способ-2-через-email-json-api-с-авто-регистрацией" aria-label="Ссылка на этот раздел">#</a></h3>
+<p>Если ты не хочешь редиректить юзера на нашу страницу — используй OTP-флоу. Партнёр сам рисует UI (поле для email и поле для 6-значного кода), а наш API только верифицирует.</p>
+<p><strong>Регистрация on-demand.</strong> Если введённого email ещё нет в нашей системе — мы автоматически создадим ICM-аккаунт при первом <code>/request</code>. Юзеру не нужно отдельно регистрироваться у нас заранее. После успешного <code>/verify</code> его email будет считаться подтверждённым, и <strong>мы отправим юзеру отдельным письмом сгенерированный временный пароль</strong>, которым он может зайти в ICM напрямую (на <code>byicloud.online</code>). Этот пароль рекомендуем сразу сменить — либо через эндпоинт <code>/password/change</code> (см. ниже), либо в настройках ICM.</p>
+<p><strong>Шаг 1 — попросить код:</strong></p>
+<pre><code class="language-bash">curl -X POST -H &quot;X-Partner-Key: pk_...&quot; -H &quot;Content-Type: application/json&quot; \
+  -d '{&quot;partner_user_id&quot;:&quot;u_42&quot;,&quot;email&quot;:&quot;user@example.com&quot;,&quot;state&quot;:&quot;optional&quot;}' \
+  https://byicloud.online/api/partner/link/email/request
+</code></pre>
+<pre><code class="language-json">{
+  &quot;sent&quot;: true,
+  &quot;nonce&quot;: &quot;Bx7y...urlsafe24&quot;,
+  &quot;expires_in&quot;: 600
+}
+</code></pre>
+<p>На указанный email уходит письмо с 6-значным кодом. Ответ одинаковый и для новых, и для существующих аккаунтов — партнёру не нужно различать кейсы. На один email — не чаще одного запроса в минуту (429 <code>rate_limited</code>).</p>
+<p><strong>Шаг 2 — ввести код:</strong></p>
+<pre><code class="language-bash">curl -X POST -H &quot;X-Partner-Key: pk_...&quot; -H &quot;Content-Type: application/json&quot; \
+  -d '{&quot;nonce&quot;:&quot;Bx7y...&quot;,&quot;otp&quot;:&quot;123456&quot;}' \
+  https://byicloud.online/api/partner/link/email/verify
+</code></pre>
+<pre><code class="language-json">{
+  &quot;linked&quot;: true,
+  &quot;icm_user_id&quot;: 1406840236,
+  &quot;state&quot;: &quot;optional&quot;,
+  &quot;password_issued&quot;: true
+}
+</code></pre>
+<p><strong>Поле <code>password_issued</code></strong> — <code>true</code>, когда юзер был только что зарегистрирован/верифицирован и на его email отправлено письмо со сгенерированным временным паролем. Покажи ему сообщение вроде «мы отправили вам пароль на почту — проверьте». Для уже верифицированных юзеров (повторный линк, например, после смены <code>partner_user_id</code>) — <code>false</code>, пароль не трогаем.</p>
+<p><strong>Возможные ошибки:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Код</th>
+<th>Ответ</th>
+<th>Когда</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>400</td>
+<td><code>{"error":"invalid_nonce"}</code></td>
+<td>nonce истёк (&gt;10 минут) или не существует</td>
+</tr>
+<tr>
+<td>400</td>
+<td><code>{"error":"invalid_otp","attempts_left":N}</code></td>
+<td>код неправильный; можно повторить, всего 5 попыток на nonce</td>
+</tr>
+<tr>
+<td>400</td>
+<td><code>{"error":"nonce_locked"}</code></td>
+<td>израсходованы все 5 попыток — nonce и OTP удалены, нужно запрашивать заново</td>
+</tr>
+<tr>
+<td>403</td>
+<td><code>{"error":"nonce_belongs_to_another_partner"}</code></td>
+<td>nonce был выдан другому партнёру</td>
+</tr>
+<tr>
+<td>429</td>
+<td><code>{"error":"rate_limited","retry_after":N}</code></td>
+<td>request на тот же email чаще раза в минуту</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Что важно:</strong></p>
+<ul>
+<li>Оба эндпоинта работают <strong>только по <code>X-Partner-Key</code></strong> (S2S). Не пытайся вызывать их с <code>partner_session_token</code> — вернёт 403 <code>s2s_only</code>.</li>
+<li>nonce одноразовый: после успешного verify сразу удаляется. Если линковка нужна повторно (например, юзер сменил email-аккаунт) — запрашивай новый nonce.</li>
+<li><code>state</code> опциональный — если передал, мы вернём его в ответе verify, удобно для корреляции с твоим UI.</li>
+<li>OTP живёт 10 минут.</li>
+</ul>
+<h3 id="способ-21-смена-пароля-линкованного-юзера">Способ 2.1. Смена пароля линкованного юзера <a class="hash-anchor" href="#линковка-аккаунтов-привязка-к-icm/способ-21-смена-пароля-линкованного-юзера" aria-label="Ссылка на этот раздел">#</a></h3>
+<p>После авто-регистрации юзер получает сгенерированный пароль на email. Чтобы он мог сменить его прямо из твоего UI — есть отдельный эндпоинт:</p>
+<pre><code class="language-bash">curl -X POST -H &quot;X-Partner-Key: pk_...&quot; -H &quot;Content-Type: application/json&quot; \
+  -d '{&quot;partner_user_id&quot;:&quot;u_42&quot;,&quot;current_password&quot;:&quot;oldPass123&quot;,&quot;new_password&quot;:&quot;myNewPass456&quot;}' \
+  https://byicloud.online/api/partner/link/email/password/change
+</code></pre>
+<pre><code class="language-json">{ &quot;changed&quot;: true }
+</code></pre>
+<p><strong>Что важно:</strong></p>
+<ul>
+<li>Только S2S (<code>X-Partner-Key</code>). 403 <code>s2s_only</code> иначе.</li>
+<li>Юзер должен быть уже залинкован к <strong>твоему</strong> partner_id. Если линка нет или он принадлежит другому партнёру — 404 <code>user_not_linked</code>.</li>
+<li><code>current_password</code> обязателен — это доказательство, что юзер реально владеет аккаунтом. Партнёр выступает транспортом: запроси оба пароля у юзера в форме, передай нам, мы сравним server-side. Сами пароли не логируем.</li>
+<li><code>new_password</code> — минимум 8 символов. Должен отличаться от текущего, иначе 400 <code>new_password_must_differ</code>.</li>
+<li>При неправильном <code>current_password</code> — 401 <code>invalid_current_password</code>.</li>
+<li>Если юзер забыл пароль — используй <code>/password/reset</code> (см. ниже). Мы сгенерируем новый пароль и пришлём на email юзера.</li>
+</ul>
+<h3 id="способ-22-сброс-пароля-линкованного-юзера-forgot-password">Способ 2.2. Сброс пароля линкованного юзера (forgot password) <a class="hash-anchor" href="#линковка-аккаунтов-привязка-к-icm/способ-22-сброс-пароля-линкованного-юзера-forgot-password" aria-label="Ссылка на этот раздел">#</a></h3>
+<pre><code class="language-bash">curl -X POST -H &quot;X-Partner-Key: pk_...&quot; -H &quot;Content-Type: application/json&quot; \
+  -d '{&quot;partner_user_id&quot;:&quot;u_42&quot;}' \
+  https://byicloud.online/api/partner/link/email/password/reset
+</code></pre>
+<pre><code class="language-json">{ &quot;reset&quot;: true }
+</code></pre>
+<p>Мы генерируем новый пароль, обновляем хеш в БД и шлём пароль письмом на email юзера. <strong>Старый пароль сразу инвалидируется</strong> — то есть если юзер где-то залогинен через <code>/api/auth/email/login</code>, его сессия по-прежнему работает (мы их не отзываем), но новые попытки войти со старым паролем будут падать. Партнёру сам пароль НЕ возвращается.</p>
+<p><strong>Что важно:</strong></p>
+<ul>
+<li>Только S2S. Партнёр может ресетить только своих линкованных юзеров (404 <code>user_not_linked</code> иначе).</li>
+<li>Per-email cooldown 60 сек — иначе 429 <code>rate_limited</code> с <code>retry_after</code>.</li>
+<li>Если у юзера нет email-аккаунта в ICM (например, был линкован через Telegram-флоу, у него только Telegram-id) — 404 <code>email_account_missing</code>. Для таких юзеров reset через партнёра не работает.</li>
+<li>Если SMTP временно недоступен — пароль в БД всё равно меняется. Юзеру придётся повторить reset, когда почта починится.</li>
+</ul>
+<h3 id="что-это-даёт">Что это даёт <a class="hash-anchor" href="#линковка-аккаунтов-привязка-к-icm/что-это-даёт" aria-label="Ссылка на этот раздел">#</a></h3>
+<p>После линковки в нашей БД появляется связь <code>partner_user_id ↔ users.user_id</code>, и для запросов с этим <code>partner_user_id</code> (через <code>X-Partner-User-Id</code> или <code>partner_session_token</code>) мы <strong>на лету апгрейдим конфиг</strong>, если у юзера активная ICM-подписка:</p>
+<table>
+<thead>
+<tr>
+<th>Поле</th>
+<th>Без подписки (или без линковки)</th>
+<th>Линкованный + подписка</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>stream.max_quality</code></td>
+<td>по тарифу партнёра (обычно <code>256K</code>)</td>
+<td><code>320K</code></td>
+</tr>
+<tr>
+<td><code>stream.allowed_sources</code></td>
+<td>по тарифу партнёра (обычно <code>[apple, vk]</code>)</td>
+<td><code>[apple, vk, special, custom]</code></td>
+</tr>
+<tr>
+<td><code>stream.block_special_releases</code></td>
+<td><code>true</code> (по умолчанию)</td>
+<td><code>false</code></td>
+</tr>
+</tbody>
+</table>
+<p>Эффект применяется к <code>/search</code>, <code>/track</code> и <code>/health</code>. Чтобы партнёр мог отдебажить — в <code>/health</code> для линкованного подписчика появится дополнительное поле:</p>
+<pre><code class="language-json">{
+  &quot;...&quot;: &quot;обычные поля /health&quot;,
+  &quot;linked_user&quot;: {
+    &quot;icm_user_id&quot;: 1406840236,
+    &quot;subscription_upgrade&quot;: true,
+    &quot;effective_stream&quot;: {
+      &quot;max_quality&quot;: &quot;320K&quot;,
+      &quot;allowed_sources&quot;: [&quot;apple&quot;, &quot;custom&quot;, &quot;special&quot;, &quot;vk&quot;]
+    }
+  }
+}
+</code></pre>
+<p>Если линковки нет или подписка истекла — секция <code>linked_user</code> отсутствует.</p>
+<p><strong>Подписка проверяется на каждый запрос, но кешируется на 60 секунд</strong> — после оплаты или истечения подписки эффект применяется в течение минуты.</p>
+<hr></section>
+<section class="section" id="x-request-id" data-key="x-request-id"><h2>X-Request-Id</h2><p>Каждый ответ от нашего API содержит заголовок:</p>
+<pre><code>X-Request-Id: a3f5b1c20d8e4f72
+</code></pre>
+<p>Если что-то пошло не так — пришли этот id, мы найдём конкретный запрос в логах. Можешь передавать свой <code>X-Request-Id</code> в запросе — мы используем его (полезно когда у тебя сквозной trace через несколько сервисов).</p>
+<hr></section>
+<section class="section" id="версионирование-api" data-key="версионирование-api"><h2>Версионирование API</h2><p>В каждом ответе от <code>/api/partner/*</code> есть заголовок:</p>
+<pre><code>X-API-Version: 1
+</code></pre>
+<p>В разделе <code>/health</code> это поле тоже есть: <code>"api_version": "1"</code>.</p>
+<p>Гарантируем что в рамках <code>v1</code>:<br>
+- URL и формы запросов не меняются<br>
+- Существующие поля в ответах остаются (могут добавляться новые)<br>
+- Коды ошибок остаются стабильными</p>
+<p>Если будем менять что-то ломающее — выкатим <code>v2</code> под другим префиксом, оставив <code>v1</code> рабочим минимум 6 месяцев.</p>
+<hr></section>
+<section class="section" id="контакты" data-key="контакты"><h2>Контакты</h2><p>По всем вопросам — пиши менеджеру t.me/trmrcd</p></section>
+<div class="footer-note">© ICM Music · По всем вопросам — <a href="https://t.me/trmrcd" target="_blank" rel="noopener">t.me/trmrcd</a></div>
+</main>
+</div>
+
+<!-- Prism для подсветки кода. Авто-loader подтянет нужные грамматики. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-json.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-javascript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-markup.min.js"></script>
+
+<script>
+(function() {
+  var DEFAULT_KEY = "overview";
+  var SEARCH_INDEX = [{"section_slug": "overview", "section_title": "Обзор", "h3_slug": "", "h3_title": "", "text": "Обновлено: 2026-05-18 22:09 MSK ICM Music — Partner API API для встраивания поиска и проигрывания музыки в сторонние приложения. База: https://byicloud.online"}, {"section_slug": "авторизация", "section_title": "Авторизация", "h3_slug": "какую-модель-выбрать", "h3_title": "Какую модель выбрать", "text": "Сценарий Кто стучится к нам Как авторизоваться Нужен CORS? Server-to-server Твой backend → наш API. Клиент ходит только к твоему backend X-Partner-Key Нет Client-direct JS в браузере юзера → наш API напрямую partner_session_token (выпускает твой backend) Да Мобильный/нативный клиент Приложение → наш API partner_session_token или X-Partner-Key Нет"}, {"section_slug": "авторизация", "section_title": "Авторизация", "h3_slug": "session-токен-для-клиентов-в-браузере-мобилке", "h3_title": "Session-токен (для клиентов в браузере / мобилке)", "text": "API-ключ нельзя светить во фронте — любой пользователь увидит его в DevTools. Поэтому для прямых запросов с клиента ваш бэкенд выпускает короткоживущий токен и отдаёт его клиенту. Сам API-ключ остаётся только у вас на сервере Выпуск на твоём бэкенде: Параметры: Поле Что это partner_user_id Любой стабильный id юзера в твоей системе (1–128 символов). Сюда привязывается аналитика и per-user настройки hide_explicit true если этот юзер должен видеть отфильтрованный поиск/треки. По умолчанию false Ответ: Поле Описание partner_session_token JWT, по умолчанию 1 час жизни. TTL настраивается админом expires_in Сколько секунд токен ещё валиден scopes Список разрешённых эндпоинтов на момент выпуска. Если потом в админке изменим скоупы — это коснётся только новых токенов Клиент использует токен так же как API-ключ, только в заголовке Authorization :"}, {"section_slug": "авторизация", "section_title": "Авторизация", "h3_slug": "cors-когда-и-зачем", "h3_title": "CORS — когда и зачем", "text": "CORS актуален только если фронт ходит к нам из браузера напрямую (схема client-direct). Если у тебя сервер посередине (server-to-server) — пропусти этот раздел, тебя это не касается. Что такое CORS в двух предложениях. Браузер перед каждым cross-origin запросом смотрит, разрешил ли сервер этот origin. Если сервер не отдаёт заголовок Access-Control-Allow-Origin: https://chat.example.com — Chrome/Safari/Firefox блокирует ответ, и ты в DevTools видишь красную ошибку «blocked by CORS policy». Как разрешить твой домен. Скажи нам где будет фронт — например https://chat.example.com . Мы добавим в whitelist. После этого браузер пропустит запросы. Что важно: Указывай полный origin со схемой : https://chat.example.com , а не chat.example.com и не https://chat.example.com/ Поддомены нужно добавлять отдельно: https://app.example.com и https://chat.example.com — это два разных origin'а http://localhost:3000 для дев-разработки тоже можно добавить, не проблема Как проверить что CORS настроен правильно. Открой консоль браузера, попробуй сделать fetch к нашему API с твоего домена. Если ошибки нет — настроено. Если есть «CORS error» — пиши, проверим. Без CORS работает: - curl из терминала - Серверный код (Python/Node/Go) на твоём backend - Postman / Insomnia - Нативные мобильные приложения (iOS/Android SDK) CORS нужен только когда: - JS в браузере делает fetch() / XMLHttpRequest к нам - WebView в мобильном приложении грузит твою веб-страницу и она ходит к нам Когда обновлять токен: Истёк ( expires_in прошёл) → новый запрос за токеном из твоего бэкенда Сменился юзер (логин/логаут) → выпуски токены per юзер , для другого partner_user_id нужен свой Простая логика на клиенте: Чего не делать: Не клади токен в localStorage — это XSS-вектор. Держи в памяти ( let token ) или в HttpOnly cookie на твоём же домене Не дёргай /session/issue на каждый запрос клиента — это съест твой session_issue rate-limit. Один токен живёт час, переиспользуй Не пытайся вытащить API-ключ из токена — его там нет. Токен подписан отдельным секретом, ключ остаётся только у тебя на сервере Полный флоу:"}, {"section_slug": "эндпоинты", "section_title": "Эндпоинты", "h3_slug": "поиск", "h3_title": "Поиск", "text": "Параметры запроса: Поле Что это q Строка поиска. До 200 символов. Минимум 2 буквенно-цифровых символа — пустые/мусорные запросы ( \"\" , ' ' ) отбрасываются с 400 query_too_short . Если шлёшь много мусора подряд (≥10/мин) — получишь 429 query_spam_detected region us / ru / nz . Должен быть из regions_allowed твоего ключа. Если не разрешён — подменяется на первый из списка source apple (по умолчанию) / vk / all . См. раздел VK Music . vk / all требует чтобы vk был в твоём stream.allowed_sources — иначе 403 source_not_allowed limit Опционально. Сколько items вернуть. Клампится сверху до partner.config.search.max_results (по умолчанию 30, в /health точное значение). Если не передан — берётся max_results Что внутри items — три типа сущностей вперемешку. Различай по флагам isArtist и isAlbum : Тип Условие Что делать дальше Артист isArtist: true Открой страницу артиста через GET /artist/{id} Альбом isAlbum: true Открой треклист через GET /album/{id} Трек оба false Проигрывай через POST /track с этим id как trackId Поля результата: Поле Кто использует id Всегда. Для трека = trackId , для альбома = collectionId , для артиста = artistId cover Всегда. URL-шаблон Apple Music, можно менять размер: 1000x1000 → 300x300 preview Только у треков. 30-секундное превью с Apple Music. Не требует подписи, можно играть напрямую is_explicit Только у треков. true если 18+ collectionId У треков — id альбома, к которому относится. У альбомов — то же что id album У треков — название альбома. У альбомов и артистов отсутствует artistName Только у артистов (там же где title ) isCustom true для наших собственных релизов независимых артистов Региональная подмена. Если в запросе передан регион не из regions_allowed , мы подменим его на первый разрешённый и вернём в поле region . Всегда смотри что фактически использовано — это поле в ответе. End-to-end сценарий: Подсказка по UX. Используй debounce 300мс на вводе пользователя — не дёргай API на каждую букву. Локальный кеш на (q, region) ещё сэкономит запросов."}, {"section_slug": "эндпоинты", "section_title": "Эндпоинты", "h3_slug": "получить-трек", "h3_title": "Получить трек", "text": "Резолвит trackId в подписанный URL для проигрывания. Параметры запроса: Поле Что это trackId id трека из /search или tracks[].id из /album region us / ru / nz (зависит от того, что разрешено ключу). По умолчанию us quality 128K , 256K , 320K , ALAC . Пожелание — режется до stream.max_quality из /health Что в ответе: Поле Описание source apple / vk / custom / special — откуда взяли трек quality Реально отданное качество (после кэпа) url Абсолютная ссылка для стрима, действует до expires_at expires_at Unix timestamp когда ссылка протухнет (обычно now + 600 ) file_id Внутренний id файла. Полезно кэшировать — потом по тому же trackId мы вернём этот же file_id мгновенно Возможные ошибки: Повтори запрос с указанным required_region ."}, {"section_slug": "эндпоинты", "section_title": "Эндпоинты", "h3_slug": "стрим-аудио", "h3_title": "Стрим аудио", "text": "URL из поля url ответа /track подставляй прямо в плеер. Никаких заголовков авторизации не нужно — подпись уже в query-параметре. Range / seek. Эндпоинт отдаёт Accept-Ranges: bytes , поэтому seek работает автоматически — &lt;audio&gt; сам делает Range-запросы при перемотке. Для своего плеера на fetch() можно явно: Вернётся 206 Partial Content с заголовком Content-Range . Скачать целиком: Когда URL истёк (10 минут). Если плеер ловит 403 invalid_or_expired_signature , просто позови /track заново с тем же trackId — получишь свежий URL. У нас сработает свой кеш, ответ придёт за миллисекунды. Форматы. В ответе приходит audio/mp4 (m4a из Apple) или audio/mpeg (mp3 из VK) — все современные браузеры играют оба. Если в твоей платформе нужно строго одно — фильтруй по source ( apple → m4a, vk → mp3)."}, {"section_slug": "эндпоинты", "section_title": "Эндпоинты", "h3_slug": "альбом", "h3_title": "Альбом", "text": "Что внутри: Поле Описание album.type Album / Single / EP / playlist album.cover URL-шаблон Apple Music. Можно менять размер: 1000x1000 → 300x300 tracks[].id Это тот самый trackId для POST /track — бери отсюда и проигрывай tracks[].duration Длительность трека в миллисекундах tracks[].is_explicit true если 18+. Скрывай если в твоём конфиге включён hide_explicit tracks[].trackNumber Номер дорожки в альбоме (для сортировки) Кастомные релизы. Кроме Apple Music каталога мы отдаём и собственные релизы независимых артистов — у них в ответе будет \"isCustom\": true и формат id типа custom_album_123 или просто число. Работают так же — trackId подставляется в /track . Пресейвы. Если альбом ещё не вышел (есть пресейв на будущую дату), вернётся 403 early_access — это нормально, покажи юзеру обратный отсчёт до релиза. Использовать дальше:"}, {"section_slug": "эндпоинты", "section_title": "Эндпоинты", "h3_slug": "плейлисты-apple-music", "h3_title": "Плейлисты Apple Music", "text": "Тот же эндпоинт /album/{id} принимает редакционные плейлисты Apple Music. Их id начинается с pl. , например pl.f4d106fed2bd41149aaacabb233eb5eb (Today's Hits) или pl.acc464c750b94302b8806e6fcde56e17 (Pop Hits). Структура ответа та же, но с отличиями: Отличия от обычного альбома: type: \"playlist\" — отличай от \"Album\" / \"Single\" artist — имя куратора (Apple Music, Apple Music Pop, и т.п.), а не музыканта description — текстовое описание плейлиста (может быть пустой строкой) motionCoverUrl — анимированная обложка mp4, если есть (необязательное поле). Можно вставить в &lt;video autoplay muted loop&gt; вместо статичной картинки У каждого трека своя cover (в обычном альбоме всё с одной обложки) Где брать pl. id: Из ответа /api/partner/artist/{id} — в секции «куратор» / «featured» Скопировать из ссылки Apple Music: music.apple.com/us/playlist/todays-hits/pl.f4d106fed2bd41149aaacabb233eb5eb → id после последнего / Пользовательские плейлисты юзеров Apple Music через этот API недоступны — только редакционные/каталожные Треки внутри плейлиста проигрываются точно так же — через POST /track с trackId оттуда."}, {"section_slug": "эндпоинты", "section_title": "Эндпоинты", "h3_slug": "артист", "h3_title": "Артист", "text": "Возвращает имя, обложку, топ-треки, альбомы и похожих артистов. Только числовые id."}, {"section_slug": "эндпоинты", "section_title": "Эндпоинты", "h3_slug": "обложки", "h3_title": "Обложки", "text": "Если в ответе пришёл прямой URL Apple Music — используй как есть. Если пришёл /api/avatar/... (custom-обложки), нужен signed URL: Подставь url в &lt;img src=...&gt; ."}, {"section_slug": "vk-music", "section_title": "VK Music", "h3_slug": "включение", "h3_title": "Включение", "text": "Параметр vk должен быть в stream.allowed_sources твоего ключа (управляется админом в боте — попроси менеджера). Если выключен — любые vk_* запросы вернут 403 source_not_allowed ."}, {"section_slug": "vk-music", "section_title": "VK Music", "h3_slug": "идентификаторы", "h3_title": "Идентификаторы", "text": "Префикс Что это vk_track_&lt;id&gt; Трек VK vk_artist_&lt;id&gt; Артист VK vk_album_&lt;id&gt; Альбом VK Префиксы выдаются нами в /search , /album , /artist — ты подставляешь их в /track , /album/{id} , /artist/{id} как обычные id. Резолвер сам поймёт что это VK по префиксу."}, {"section_slug": "vk-music", "section_title": "VK Music", "h3_slug": "поиск-vk", "h3_title": "Поиск VK", "text": "Ответ — обычный /search , но все items имеют source: \"vk\" и префиксованные id: ?source=all склеит Apple + VK выдачу (Apple первой, VK дальше) с учётом твоего max_results . По умолчанию source=apple — обратная совместимость. Важно: в выдаче /search (а также /album/{id}.tracks и /artist/{id}.topSongs ) VK-треки не содержат поля url . Подписанная стрим-ссылка выдаётся только через POST /track — это нужно для логирования стримов, rate-limit и чтобы партнёр всегда работал со свежим URL (подпись живёт 10 мин)."}, {"section_slug": "vk-music", "section_title": "VK Music", "h3_slug": "стрим-vk-трека", "h3_title": "Стрим VK-трека", "text": "Чем отличается от Apple-трека: Поле Apple VK file_id Telegram file id Telegram file id (VK-mp3 кешируется так же) url Подписанный URL на /api/partner/audio/{file_id} То же — VK и Apple используют один эндпоинт quality 128K / 256K / 320K / ALAC MP3 256K (по умолчанию) или MP3 320K (для линкованных подписчиков ICM) region Влияет на стрим Игнорируется expires_at 10 минут (signed_url_ttl_seconds) 10 минут (signed_url_ttl_seconds) Подставляй url в &lt;audio src=...&gt; или плеер — авторизация в query-параметре ps , заголовки не нужны. Range-запросы поддерживаются из коробки. Внутри. Mp3 хранится на стороннем CDN с авторизацией — мы не отдаём прямой URL партнёру. При первом запросе на пару (трек, битрейт) мы готовим файл нужного качества и кладём его в наш кеш; последующие запросы того же трека возвращают file_id мгновенно. Партнёру видна только наша подписанная ссылка. Если истекли 10 минут ( expires_at ) и плеер ловит 403 invalid_or_expired_signature — позови POST /track заново с тем же trackId , получишь свежий URL."}, {"section_slug": "vk-music", "section_title": "VK Music", "h3_slug": "артист-vk", "h3_title": "Артист VK", "text": "Поля: Поле Что это topSongs Топ-20 треков артиста singles Синглы артиста albums Полноформатные альбомы (без синглов/EP), дедуплицированы по названию featuring Альбомы где артист в качестве feature similarArtists Похожие артисты (по Moosic relevant_artists) latestRelease Самый свежий релиз (любого типа: альбом/сингл/EP) или null Все вложенные id префиксованы ( vk_track_* / vk_album_* / vk_artist_* ) — подставляй в /track , /album , /artist как обычно."}, {"section_slug": "vk-music", "section_title": "VK Music", "h3_slug": "ограничения", "h3_title": "Ограничения", "text": "Lyrics и batch /tracks/meta для VK сейчас не поддерживаются — только Apple. VK не имеет региональной привязки — параметр region для VK игнорируется. Квалити: без линковки/подписки — MP3 256K , с активной подпиской ICM — MP3 320K . ALAC для VK недоступен (отдаём 320K вместо). Первый запрос холодного VK-трека идёт 3–10 секунд (мы готовим файл нужного качества и кладём в кеш). Используй ?async=1 чтобы не блокировать клиент (см. раздел «Async-режим для /track »). Повторные запросы того же трека отдают file_id мгновенно."}, {"section_slug": "тексты-треков-lyrics", "section_title": "Тексты треков (lyrics)", "h3_slug": "", "h3_title": "", "text": "LRC-текст для трека. Сейчас поддерживаются: - Apple Music — если файла нет на диске, скачиваем (1–10 сек). - TIDAL — кешированный файл либо запрос к TIDAL API. - Custom-треки — текстов нет, всегда 404 lyrics_not_found . Scope: lyrics . Если выключен — 403 scope_not_allowed . Параметры: Поле Что это track_id Apple id ( 123... ), tidal_track_&lt;n&gt; или custom_&lt;n&gt; region Опционально. По умолчанию первый из regions_allowed ключа Ошибки: Код Когда 403 scope_not_allowed Scope lyrics выключен в админке 404 lyrics_not_found Текст не найден ни на диске, ни в Apple/TIDAL API Альтернатива по query. Есть зеркальный эндпоинт GET /api/partner/lyrics?track_id=...&amp;region=... — он эквивалентен track/{id}/lyrics . Используй любой. Что важно. На холодных Apple-треках первый запрос может занять до 10 секунд. Последующие — мгновенно из кеша. Не дёргай lyrics пачкой на 100 треков сразу — лучше lazy load при открытии плеера."}, {"section_slug": "личный-кабинет-для-линкованных-юзеров", "section_title": "Личный кабинет (для линкованных юзеров)", "h3_slug": "выбор-качества-стрима", "h3_title": "Выбор качества стрима", "text": "Линкованный юзер с подпиской может выбрать качество выше лимита партнёра. Например, у партнёра max_quality: 256K , но юзер с ICM-подпиской хочет 320K — это делается через preferences. Получить текущий выбор: Сохранить выбор: Передай {\"quality\": null} чтобы сбросить выбор (вернётся auto = max доступное по подписке). Что важно: quality_preference применяется автоматически в /track если у юзера активна подписка. Параметр quality в /track имеет приоритет — это override на конкретный запрос. Если у юзера нет линковки/подписки/scope — сохранённый preference игнорируется и работает старая логика ( cap_quality до тарифа партнёра). В /health для линкованного юзера со scope появится linked_user.user_quality_choice: true и linked_user.current_preference: \"320K\" ."}, {"section_slug": "личный-кабинет-для-линкованных-юзеров", "section_title": "Личный кабинет (для линкованных юзеров)", "h3_slug": "профиль-линкованного-юзера", "h3_title": "Профиль линкованного юзера", "text": "Имя и аватар линкованного юзера для UI плеера на стороне партнёра. Поле Описание name Имя юзера ( first_name [last_name] из Telegram). Минимум \"User\" если ничего не задано username Telegram @username. null если не задан avatar_url URL аватара. null если фото в Telegram не загружено Scope: user_profile . Требует линковки ( 403 user_not_linked иначе), подписка ICM не требуется — это display-data. Чувствительные поля (email, phone, referral) через этот эндпоинт не возвращаются никогда."}, {"section_slug": "медиатека", "section_title": "Медиатека", "h3_slug": "лайки", "h3_title": "Лайки", "text": "Параметры: Поле Что это source all (по умолчанию) / apple / tidal . Custom-треки видны в apple и tidal limit 1–200 offset Пагинация Scope: library_likes ."}, {"section_slug": "медиатека", "section_title": "Медиатека", "h3_slug": "подписки-на-артистов", "h3_title": "Подписки на артистов", "text": "source фильтрует так же как и в лайках. Scope: library_subscriptions ."}, {"section_slug": "медиатека", "section_title": "Медиатека", "h3_slug": "моя-волна", "h3_title": "Моя волна", "text": "Только Apple Music. Возвращает один следующий трек: либо персональная волна юзера (по умолчанию), либо «станция по треку» (если задан seed_track_id ). Следующий трек (личная волна): Параметры: Поле Что это exclude Через запятую: track_ids, которые исключить (текущая очередь клиента) seed_track_id Если задан — волна вокруг этого трека (Apple station) recent_skips Сколько подряд клиент пропустил последних треков (для skip-streak fallback) region По умолчанию первый из regions_allowed Если status empty — кандидатов нет (юзер ничего не лайкал или всё исключил). Покажи онбординг. Дальше — POST /track с id из ответа, как обычно. Scope: library_wave . Фидбек по волне: feedback_type : less_track / less_artist / less_genre / more_track / more_artist / more_genre . value — id трека/артиста или название жанра. Кнопки «чаще / реже» в UI плеера — это тот же эндпоинт /library/wave/feedback , отдельной ручки нет: Кнопка в UI Что слать 👍 Чаще этот трек {\"feedback_type\":\"more_track\",\"value\":\"&lt;track_id&gt;\"} 👎 Реже этот трек {\"feedback_type\":\"less_track\",\"value\":\"&lt;track_id&gt;\"} 👍 Чаще артиста {\"feedback_type\":\"more_artist\",\"value\":\"&lt;artist_id&gt;\"} 👎 Реже артиста {\"feedback_type\":\"less_artist\",\"value\":\"&lt;artist_id&gt;\"} Фидбек применяется с decay (полураспад 30 дней) — старые сигналы постепенно теряют вес, повторное нажатие на тот же трек идемпотентно. Логирование прослушивания: Когда юзер послушал трек из волны (дослушал / пропустил / переключил в середине) — отправь это событие. Сигналы попадают в playback_history , и ранжирование волны автоматически их подхватит: avg_completion бустит знакомые треки, skip_count штрафует. Параметры: Поле Что это track_id Apple track_id из ответа /library/wave/next . Обязательный. played_seconds Сколько секунд реально слушал (не позиция плеера, а накопленная игра). Обязательный. total_seconds Длительность трека. Опциональный — но без него мы не сможем посчитать completed/skipped , и тогда волна не учтёт сигнал в полной мере. completed Опциональный bool. Если не указан — считаем по played &gt;= 0.85 * total . skipped Опциональный bool. Если не указан — считаем по played &lt; 0.15 * total . Поле logged в ответе: true если событие записалось. false для не-Apple track_id (VK/TIDAL/custom) — волна их не ранжирует, поэтому сигнал тихо игнорируется. На клиенте можно слать одинаково для всех треков, нам это не вредит. Scope: library_wave_playback . Когда слать — рекомендуем после audio.ended или при переключении трека (вычитай played_seconds из audio.currentTime минус скипы вперёд). Сброс волны: Удаляет историю показов, seed-артистов и накопленные предпочтения. removed — сколько строк удалили суммарно. Лайки сохраняются."}, {"section_slug": "медиатека", "section_title": "Медиатека", "h3_slug": "онбординг-волны", "h3_title": "Онбординг волны", "text": "Если wave/next возвращает status: \"empty\" — у юзера нет seed-артистов (не проходил онбординг или сбросил). Нужно показать выбор и сохранить через onboarding-эндпоинты. Получить список популярных артистов (карточки для выбора): Не требует X-Partner-User-Id — можно вызвать до линковки. Кеш 24ч. Проверить статус онбординга (есть ли уже seed-артисты): Сохранить выбор юзера: Минимум 1 артист, рекомендуется 3–5. После сохранения сразу зови wave/next — волна персонализируется по выбранным."}, {"section_slug": "ошибки", "section_title": "Ошибки", "h3_slug": "", "h3_title": "", "text": "Формат: {\"error\": \"код\", \"message\": \"опц\"} Код Значение 401 missing_api_key Нет заголовка X-Partner-Key 401 invalid_session_token Session-токен битый или истёк 403 invalid_api_key Ключ не найден или формат битый 403 partner_suspended Доступ приостановлен 403 scope_not_allowed Эта функция отключена в твоём конфиге 403 source_not_allowed Источник трека отключён 403 invalid_or_expired_signature Signed URL истёк — запроси через /track 400 query_too_short q пустой / меньше 2 буквенно-цифровых символов после trim. Не отправляй запрос если у юзера пустое поле 429 query_spam_detected Слал ≥10 мусорных q за минуту. Жди 60 сек или почини клиент чтобы он не дёргал API на пустом инпуте 400 invalid_source Параметр source в /search не из apple|vk|all 403 source_not_allowed source=vk VK не в allowed_sources твоего ключа 404 album_not_found VK альбом не найден в Moosic 404 artist_not_found VK артист не найден в Moosic 404 track_not_found Трек не найден ни в одном регионе (Apple) или в Moosic (VK) 404 lyrics_not_found Текста нет ни на диске, ни в Apple/TIDAL API 401 partner_user_required Эндпоинт /me/* или /library/* требует partner_user_id 403 user_not_linked Юзер не привязан к ICM-аккаунту 403 subscription_required Нет активной ICM-подписки для /me/* 429 rate_limited Превышен лимит запросов 451 region_unavailable Трек недоступен в этом регионе, в ответе есть required_region 401 invalid_api_key_format Ключ не в формате pk_&lt;partner_id&gt;_&lt;32-символьный-секрет&gt; 401 token_revoked Session-токен был отозван (например, ротация ключей) 403 s2s_only Эндпоинт требует API-ключ ( /session/issue , /link/email/* ) — нельзя вызывать с session-токеном 404 job_not_found_or_expired /track/job/{id} — job старше 10 минут или не существует 403 job_belongs_to_another_partner Полез за чужим job_id 404 user_not_found /me/profile — линковка есть, но юзер в users отсутствует (теоретически невозможно, защита) При 429 в ответе и заголовке Retry-After — сколько секунд ждать."}, {"section_slug": "лимиты", "section_title": "Лимиты", "h3_slug": "что-и-как-кешировать-у-себя", "h3_title": "Что и как кешировать у себя", "text": "У нас уже стоит свой кеш (search ~10 минут, метаданные треков ~7 дней), так что повторные запросы к нам быстрые. Но кеш на твоей стороне экономит твой rate-limit и убирает сетевой round-trip: /search — кешируй ответы на 60 секунд по ключу (query + region) . Чаще всего пользователи дотыпывают одну букву — каждый раз бить в API не нужно. Метаданные треков и альбомов ( /track/{id}/meta , /album/{id} ) — кешируй на сутки и больше . Альбом редко меняется. Инвалидируй вручную если пользователь жалуется на устаревшую обложку. file_id из ответа /track — кешируй на сутки и больше по ключу (trackId + region + quality) . Сам трек в нашем хранилище не меняется. Имея сохранённый file_id , можно потом перевыдавать только signed URL — но проще снова дёргать /track : у нас сработает наш кеш и ответ придёт за миллисекунды. partner_session_token — кешируй пока не истёк ( expires_in секунд). Не дёргай /session/issue на каждый запрос клиента."}, {"section_slug": "лимиты", "section_title": "Лимиты", "h3_slug": "что-не-кешировать", "h3_title": "Что НЕ кешировать", "text": "Поле url из ответа /track и /cover-sign — это короткоживущая подпись (10 минут). Когда истечёт — снова позови /track или /cover-sign , получишь свежий URL. Сам аудио-файл ( /audio/{file_id} ) — это твой собственный стрим из кеша Telegram через нас, его никуда сохранять не надо. Браузер сам закеширует через Cache-Control: public, max-age=604800 (неделя)."}, {"section_slug": "лимиты", "section_title": "Лимиты", "h3_slug": "простой-расчёт", "h3_title": "Простой расчёт", "text": "С нормальным кешем у тебя на 100k активных юзеров в день получится примерно: - /search : 1-2 rpm от твоего бэкенда (всё гасится локальным кешем) - /track : всплески при старте плеера, ~10-20 rpm - /album , /artist , /meta : единицы rpm То есть дефолтных лимитов хватит на старт даже большого приложения. Если упрёшься — напиши, поднимем."}, {"section_slug": "batch-запросы", "section_title": "Batch-запросы", "h3_slug": "", "h3_title": "", "text": "Если нужно загрузить метаданные нескольких треков (например, плейлиста) — не дёргай /track/{id}/meta в цикле, а отправь один batch: До 50 треков за запрос . Запрос съедает один meta rate-limit-hit вместо 50."}, {"section_slug": "async-режим-для-track", "section_title": "Async-режим для `/track`", "h3_slug": "", "h3_title": "", "text": "Если трек ещё не закеширован у нас — /track может ждать 1–5 секунд (а ALAC и до минуты), пока мы скачаем и подготовим файл. Чтобы не блокировать клиент — добавь ?async=1 : Если трек тёплый — приходит обычный 200 с url . Если холодный — приходит 202 Accepted : Опрашивай poll_url раз в 2 секунды: Пока status: pending — продолжай. Когда status: ready — внутри ответа есть url , expires_at и всё остальное как у обычного /track . Job хранится 10 минут."}, {"section_slug": "линковка-аккаунтов-привязка-к-icm", "section_title": "Линковка аккаунтов (привязка к ICM)", "h3_slug": "способ-1-через-telegram-html-редирект", "h3_title": "Способ 1. Через Telegram (HTML-редирект)", "text": "Кратко: ты редиректишь юзера на нашу страницу с кнопкой Telegram Login, он нажимает её, мы получаем подтверждение от Telegram и редиректим обратно к тебе с icm_user_id . Схема URL Важно: /partner/link/complete — это наш внутренний URL , его задаёт сервер автоматически (в data-auth-url виджета). Ты этим URL не пользуешься, твоя задача — только редиректнуть юзера на /partner/&lt;partner_id&gt;/link и принять финальный редирект на свой redirect_uri . Параметры запроса ( /partner/&lt;partner_id&gt;/link ) Поле Что это partner_user_id id юзера в твоей системе (1–128 символов). Именно сюда привяжется ICM-аккаунт redirect_uri Куда мы редиректим после линковки. Должен быть в whitelist твоих origins ( config.session.allow_origins ) state Любая твоя случайная строка. Вернём её в редиректе. Проверяй для защиты от CSRF Что возвращается в redirect_uri Успех: Ошибка авторизации Telegram: Ошибка БД при линковке: Что важно redirect_uri сверяется по схеме+хосту ( https://chat.example.com ) с whitelist'ом в твоём конфиге. Trailing-slash и path значения не имеют. Если хоста нет в whitelist → 400 redirect_uri_not_allowed (страница не откроется). state — твоя случайная строка, проверь её при возврате (защита от CSRF). icm_user_id — это Telegram-id юзера (он же users.user_id в нашей БД). Можешь сохранить у себя для связи в дальнейшем. Линковка идемпотентна — повторный проход того же юзера просто обновит маппинг. Если ты разрабатываешь мобильное приложение Telegram Login Widget — это веб-виджет. Он требует cookies, redirect и JS — то есть полноценный браузер. Внутри обычного WebView (особенно WKWebView на iOS) виджет работает нестабильно. Правильно: Открывай страницу /partner/&lt;id&gt;/link?... в системном браузере : - Android: Chrome Custom Tabs ( androidx.browser.customtabs.CustomTabsIntent ) - iOS: SFSafariViewController или ASWebAuthenticationSession В redirect_uri используй custom-scheme deep link твоего приложения, например myapp://oauth/icm . Мы делаем стандартный 302 на любой URL из whitelist — браузер передаст deep link обратно в твоё приложение. Чтобы мы приняли myapp:// в redirect_uri , попроси нашего менеджера ( t.me/trmrcd ) добавить myapp:// в твой whitelist. Не работает: обычный WebView с redirect_uri=https://... . Telegram перенаправит, но твой WebView не сможет перехватить редирект и закрыть себя. Распространённые ошибки Открывается главная страница вместо виджета - Проверь URL: должно быть /partner/&lt;id&gt;/link (с /link в конце и partner без s ). - Хост в redirect_uri не в whitelist — попроси менеджера добавить. 404 Not Found на /api/partner/auth/telegram - Такого эндпоинта нет. Используй /partner/&lt;partner_id&gt;/link (HTML) или /api/partner/link/email/request (JSON). 401 invalid_api_key_format на /session/issue - Формат ключа — pk_&lt;partner_id&gt;_&lt;32-символьный-секрет&gt; , а не просто pk_&lt;partner_id&gt; . Полный ключ выдан один раз при создании партнёра. Если потерял — попроси менеджера ротировать (старый ключ сразу инвалидируется). 400 redirect_uri_not_allowed - Хост в redirect_uri не в whitelist ( config.session.allow_origins ). Точное совпадение по scheme://host[:port] . Передай менеджеру нужный origin. 400 Link session expired or invalid на /partner/link/complete - Юзер прошёл по ссылке старше 10 минут или дёрнул callback напрямую. Начни флоу заново."}, {"section_slug": "линковка-аккаунтов-привязка-к-icm", "section_title": "Линковка аккаунтов (привязка к ICM)", "h3_slug": "способ-2-через-email-json-api-с-авто-регистрацией", "h3_title": "Способ 2. Через email (JSON API, с авто-регистрацией)", "text": "Если ты не хочешь редиректить юзера на нашу страницу — используй OTP-флоу. Партнёр сам рисует UI (поле для email и поле для 6-значного кода), а наш API только верифицирует. Регистрация on-demand. Если введённого email ещё нет в нашей системе — мы автоматически создадим ICM-аккаунт при первом /request . Юзеру не нужно отдельно регистрироваться у нас заранее. После успешного /verify его email будет считаться подтверждённым, и мы отправим юзеру отдельным письмом сгенерированный временный пароль , которым он может зайти в ICM напрямую (на byicloud.online ). Этот пароль рекомендуем сразу сменить — либо через эндпоинт /password/change (см. ниже), либо в настройках ICM. Шаг 1 — попросить код: На указанный email уходит письмо с 6-значным кодом. Ответ одинаковый и для новых, и для существующих аккаунтов — партнёру не нужно различать кейсы. На один email — не чаще одного запроса в минуту (429 rate_limited ). Шаг 2 — ввести код: Поле password_issued — true , когда юзер был только что зарегистрирован/верифицирован и на его email отправлено письмо со сгенерированным временным паролем. Покажи ему сообщение вроде «мы отправили вам пароль на почту — проверьте». Для уже верифицированных юзеров (повторный линк, например, после смены partner_user_id ) — false , пароль не трогаем. Возможные ошибки: Код Ответ Когда 400 {\"error\":\"invalid_nonce\"} nonce истёк (&gt;10 минут) или не существует 400 {\"error\":\"invalid_otp\",\"attempts_left\":N} код неправильный; можно повторить, всего 5 попыток на nonce 400 {\"error\":\"nonce_locked\"} израсходованы все 5 попыток — nonce и OTP удалены, нужно запрашивать заново 403 {\"error\":\"nonce_belongs_to_another_partner\"} nonce был выдан другому партнёру 429 {\"error\":\"rate_limited\",\"retry_after\":N} request на тот же email чаще раза в минуту Что важно: Оба эндпоинта работают только по X-Partner-Key (S2S). Не пытайся вызывать их с partner_session_token — вернёт 403 s2s_only . nonce одноразовый: после успешного verify сразу удаляется. Если линковка нужна повторно (например, юзер сменил email-аккаунт) — запрашивай новый nonce. state опциональный — если передал, мы вернём его в ответе verify, удобно для корреляции с твоим UI. OTP живёт 10 минут."}, {"section_slug": "линковка-аккаунтов-привязка-к-icm", "section_title": "Линковка аккаунтов (привязка к ICM)", "h3_slug": "способ-21-смена-пароля-линкованного-юзера", "h3_title": "Способ 2.1. Смена пароля линкованного юзера", "text": "После авто-регистрации юзер получает сгенерированный пароль на email. Чтобы он мог сменить его прямо из твоего UI — есть отдельный эндпоинт: Что важно: Только S2S ( X-Partner-Key ). 403 s2s_only иначе. Юзер должен быть уже залинкован к твоему partner_id. Если линка нет или он принадлежит другому партнёру — 404 user_not_linked . current_password обязателен — это доказательство, что юзер реально владеет аккаунтом. Партнёр выступает транспортом: запроси оба пароля у юзера в форме, передай нам, мы сравним server-side. Сами пароли не логируем. new_password — минимум 8 символов. Должен отличаться от текущего, иначе 400 new_password_must_differ . При неправильном current_password — 401 invalid_current_password . Если юзер забыл пароль — используй /password/reset (см. ниже). Мы сгенерируем новый пароль и пришлём на email юзера."}, {"section_slug": "линковка-аккаунтов-привязка-к-icm", "section_title": "Линковка аккаунтов (привязка к ICM)", "h3_slug": "способ-22-сброс-пароля-линкованного-юзера-forgot-password", "h3_title": "Способ 2.2. Сброс пароля линкованного юзера (forgot password)", "text": "Мы генерируем новый пароль, обновляем хеш в БД и шлём пароль письмом на email юзера. Старый пароль сразу инвалидируется — то есть если юзер где-то залогинен через /api/auth/email/login , его сессия по-прежнему работает (мы их не отзываем), но новые попытки войти со старым паролем будут падать. Партнёру сам пароль НЕ возвращается. Что важно: Только S2S. Партнёр может ресетить только своих линкованных юзеров (404 user_not_linked иначе). Per-email cooldown 60 сек — иначе 429 rate_limited с retry_after . Если у юзера нет email-аккаунта в ICM (например, был линкован через Telegram-флоу, у него только Telegram-id) — 404 email_account_missing . Для таких юзеров reset через партнёра не работает. Если SMTP временно недоступен — пароль в БД всё равно меняется. Юзеру придётся повторить reset, когда почта починится."}, {"section_slug": "линковка-аккаунтов-привязка-к-icm", "section_title": "Линковка аккаунтов (привязка к ICM)", "h3_slug": "что-это-даёт", "h3_title": "Что это даёт", "text": "После линковки в нашей БД появляется связь partner_user_id ↔ users.user_id , и для запросов с этим partner_user_id (через X-Partner-User-Id или partner_session_token ) мы на лету апгрейдим конфиг , если у юзера активная ICM-подписка: Поле Без подписки (или без линковки) Линкованный + подписка stream.max_quality по тарифу партнёра (обычно 256K ) 320K stream.allowed_sources по тарифу партнёра (обычно [apple, vk] ) [apple, vk, special, custom] stream.block_special_releases true (по умолчанию) false Эффект применяется к /search , /track и /health . Чтобы партнёр мог отдебажить — в /health для линкованного подписчика появится дополнительное поле: Если линковки нет или подписка истекла — секция linked_user отсутствует. Подписка проверяется на каждый запрос, но кешируется на 60 секунд — после оплаты или истечения подписки эффект применяется в течение минуты."}, {"section_slug": "x-request-id", "section_title": "X-Request-Id", "h3_slug": "", "h3_title": "", "text": "Каждый ответ от нашего API содержит заголовок: Если что-то пошло не так — пришли этот id, мы найдём конкретный запрос в логах. Можешь передавать свой X-Request-Id в запросе — мы используем его (полезно когда у тебя сквозной trace через несколько сервисов)."}, {"section_slug": "версионирование-api", "section_title": "Версионирование API", "h3_slug": "", "h3_title": "", "text": "В каждом ответе от /api/partner/* есть заголовок: В разделе /health это поле тоже есть: \"api_version\": \"1\" . Гарантируем что в рамках v1 : - URL и формы запросов не меняются - Существующие поля в ответах остаются (могут добавляться новые) - Коды ошибок остаются стабильными Если будем менять что-то ломающее — выкатим v2 под другим префиксом, оставив v1 рабочим минимум 6 месяцев."}, {"section_slug": "контакты", "section_title": "Контакты", "h3_slug": "", "h3_title": "", "text": "По всем вопросам — пиши менеджеру t.me/trmrcd"}];
+
+  // ── Hash routing ─────────────────────────────────────────────────────────
+  function getHashRoute() {
+    var raw = (location.hash || '').replace(/^#/, '');
+    if (!raw) return {section: DEFAULT_KEY, anchor: null};
+    var parts = raw.split('/');
+    return {section: decodeURIComponent(parts[0] || DEFAULT_KEY), anchor: parts[1] ? decodeURIComponent(parts[1]) : null};
+  }
+
+  function showSection(key, anchor) {
+    var found = false;
+    document.querySelectorAll('section.section').forEach(function(sec) {
+      var match = sec.getAttribute('data-key') === key;
+      sec.classList.toggle('active', match);
+      if (match) found = true;
+    });
+    if (!found) {
+      var first = document.querySelector('section.section');
+      if (first) first.classList.add('active');
+    }
+    document.querySelectorAll('.nav-group').forEach(function(g) {
+      var match = g.getAttribute('data-key') === key;
+      g.classList.toggle('open', match);
+      var h2 = g.querySelector('.nav-h2');
+      if (h2) h2.classList.toggle('active', match);
+    });
+    document.querySelectorAll('.nav-h3').forEach(function(a) {
+      a.classList.toggle('active', !!(anchor && a.getAttribute('data-anchor') === anchor));
+    });
+    if (anchor) {
+      var target = document.getElementById(anchor);
+      if (target) {
+        setTimeout(function() {
+          target.scrollIntoView({behavior: 'smooth', block: 'start'});
+        }, 30);
+      }
+    } else {
+      window.scrollTo({top: 0, behavior: 'instant'});
+    }
+    if (window.innerWidth <= 900) {
+      var sb = document.getElementById('sidebar');
+      if (sb) sb.classList.remove('open');
+    }
+  }
+
+  function onHashChange() {
+    var route = getHashRoute();
+    showSection(route.section, route.anchor);
+  }
+
+  // ── Copy кнопки на pre блоках ────────────────────────────────────────────
+  function addCopyButtons() {
+    document.querySelectorAll('main pre').forEach(function(pre) {
+      if (pre.querySelector('.copy-btn')) return;
+      var btn = document.createElement('button');
+      btn.className = 'copy-btn';
+      btn.type = 'button';
+      btn.textContent = 'Copy';
+      btn.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var code = pre.querySelector('code');
+        var text = code ? code.innerText : pre.innerText;
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(function() {
+            btn.textContent = '✓ Copied';
+            btn.classList.add('copied');
+            setTimeout(function() {
+              btn.textContent = 'Copy';
+              btn.classList.remove('copied');
+            }, 1500);
+          }).catch(function() {
+            btn.textContent = 'Failed';
+          });
+        } else {
+          // fallback для старых браузеров
+          var ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          try { document.execCommand('copy'); btn.textContent = '✓ Copied'; }
+          catch(e) { btn.textContent = 'Failed'; }
+          document.body.removeChild(ta);
+          setTimeout(function() { btn.textContent = 'Copy'; }, 1500);
+        }
+      });
+      pre.appendChild(btn);
+    });
+  }
+
+  // ── Theme toggle ─────────────────────────────────────────────────────────
+  function applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    try { localStorage.setItem('icm-docs-theme', theme); } catch(e) {}
+    var btn = document.getElementById('theme-toggle');
+    if (btn) btn.textContent = theme === 'light' ? '☀️' : '🌙';
+  }
+  function initTheme() {
+    var saved = null;
+    try { saved = localStorage.getItem('icm-docs-theme'); } catch(e) {}
+    if (!saved) {
+      saved = (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark';
+    }
+    applyTheme(saved);
+  }
+  initTheme();
+  var themeBtn = document.getElementById('theme-toggle');
+  if (themeBtn) {
+    themeBtn.addEventListener('click', function() {
+      var cur = document.documentElement.getAttribute('data-theme') || 'dark';
+      applyTheme(cur === 'dark' ? 'light' : 'dark');
+    });
+  }
+
+  // ── Глобальный поиск по контенту ─────────────────────────────────────────
+  var searchInput = document.getElementById('nav-search');
+  var searchResults = document.getElementById('search-results');
+  var focusedIdx = -1;
+  var lastResults = [];
+
+  function highlight(text, q) {
+    if (!q) return text;
+    var idx = text.toLowerCase().indexOf(q.toLowerCase());
+    if (idx === -1) return text;
+    var start = Math.max(0, idx - 30);
+    var end = Math.min(text.length, idx + q.length + 50);
+    var snippet = (start > 0 ? '…' : '') + text.slice(start, end) + (end < text.length ? '…' : '');
+    // подсветка
+    var lower = snippet.toLowerCase();
+    var qLower = q.toLowerCase();
+    var pos = lower.indexOf(qLower);
+    if (pos === -1) return escapeHtml(snippet);
+    return escapeHtml(snippet.slice(0, pos)) + '<mark>' + escapeHtml(snippet.slice(pos, pos + q.length)) + '</mark>' + escapeHtml(snippet.slice(pos + q.length));
+  }
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, function(c) {
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+    });
+  }
+
+  function runSearch(q) {
+    if (!q || q.length < 2) {
+      searchResults.classList.remove('open');
+      searchResults.innerHTML = '';
+      // Сбрасываем фильтр sidebar
+      document.querySelectorAll('.nav-group').forEach(function(g) { g.style.display = ''; });
+      document.querySelectorAll('.nav-h3').forEach(function(a) { a.style.display = ''; });
+      lastResults = [];
+      focusedIdx = -1;
+      return;
+    }
+    var qLower = q.toLowerCase();
+    var hits = [];
+    for (var i = 0; i < SEARCH_INDEX.length; i++) {
+      var entry = SEARCH_INDEX[i];
+      var titleMatch = entry.section_title.toLowerCase().indexOf(qLower) !== -1
+                    || (entry.h3_title && entry.h3_title.toLowerCase().indexOf(qLower) !== -1);
+      var textMatch = entry.text && entry.text.toLowerCase().indexOf(qLower) !== -1;
+      if (titleMatch || textMatch) {
+        hits.push({
+          entry: entry,
+          score: titleMatch ? 2 : 1,
+        });
+      }
+      if (hits.length >= 30) break;
+    }
+    hits.sort(function(a, b) { return b.score - a.score; });
+    lastResults = hits;
+    if (!hits.length) {
+      searchResults.innerHTML = '<div class="empty-res">Ничего не найдено</div>';
+      searchResults.classList.add('open');
+      return;
+    }
+    var html = hits.map(function(h, idx) {
+      var e = h.entry;
+      var href = '#' + e.section_slug + (e.h3_slug ? '/' + e.h3_slug : '');
+      var title = e.h3_title || e.section_title;
+      var section = e.h3_title ? e.section_title : 'Раздел';
+      var snippet = e.text ? highlight(e.text, q) : '';
+      return '<a class="result" data-idx="' + idx + '" href="' + href + '">' +
+             '<div class="r-title">' + escapeHtml(title) + '</div>' +
+             '<div class="r-section">' + escapeHtml(section) + '</div>' +
+             (snippet ? '<div class="r-section">' + snippet + '</div>' : '') +
+             '</a>';
+    }).join('');
+    searchResults.innerHTML = html;
+    searchResults.classList.add('open');
+    focusedIdx = -1;
+  }
+
+  if (searchInput) {
+    searchInput.addEventListener('input', function(e) {
+      runSearch(e.target.value.trim());
+    });
+    searchInput.addEventListener('focus', function(e) {
+      if (e.target.value.trim()) searchResults.classList.add('open');
+    });
+    searchInput.addEventListener('keydown', function(e) {
+      var items = searchResults.querySelectorAll('.result');
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        focusedIdx = Math.min(items.length - 1, focusedIdx + 1);
+        items.forEach(function(it, i) { it.classList.toggle('focused', i === focusedIdx); });
+        if (items[focusedIdx]) items[focusedIdx].scrollIntoView({block: 'nearest'});
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        focusedIdx = Math.max(0, focusedIdx - 1);
+        items.forEach(function(it, i) { it.classList.toggle('focused', i === focusedIdx); });
+        if (items[focusedIdx]) items[focusedIdx].scrollIntoView({block: 'nearest'});
+      } else if (e.key === 'Enter' && focusedIdx >= 0 && items[focusedIdx]) {
+        e.preventDefault();
+        items[focusedIdx].click();
+      } else if (e.key === 'Escape') {
+        searchResults.classList.remove('open');
+        searchInput.blur();
+      }
+    });
+    // Клик вне — закрыть
+    document.addEventListener('click', function(e) {
+      if (!searchInput.contains(e.target) && !searchResults.contains(e.target)) {
+        searchResults.classList.remove('open');
+      }
+    });
+    // После выбора результата — очищаем и закрываем
+    searchResults.addEventListener('click', function(e) {
+      setTimeout(function() {
+        searchResults.classList.remove('open');
+        searchInput.value = '';
+      }, 50);
+    });
+  }
+
+  // ── Mobile sidebar toggle ────────────────────────────────────────────────
+  var toggle = document.getElementById('menu-toggle');
+  if (toggle) {
+    toggle.addEventListener('click', function() {
+      var sb = document.getElementById('sidebar');
+      if (sb) sb.classList.toggle('open');
+    });
+  }
+
+  // ── Init ─────────────────────────────────────────────────────────────────
+  addCopyButtons();
+  window.addEventListener('hashchange', onHashChange);
+  onHashChange();
+})();
+</script>
+</body>
+</html>

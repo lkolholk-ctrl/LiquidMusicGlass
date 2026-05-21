@@ -223,12 +223,11 @@ fun LibraryScreen(
                     )
                 }
                 selectedTab == LibraryTab.DOWNLOADS -> {
-                    if (!isPremium) {
+                    if (!isPremium && downloadedTracksEntityList.isEmpty()) {
                         PremiumDownloadsPromo(backdrop = backdrop)
+                    } else if (downloadedTracksEntityList.isEmpty()) {
+                        EmptyState("No downloaded tracks yet")
                     } else {
-                        if (downloadedTracksEntityList.isEmpty()) {
-                            EmptyState("No downloaded tracks yet")
-                        } else {
                             LazyColumn(
                                 modifier = Modifier.fillMaxSize(),
                                 contentPadding = PaddingValues(vertical = 8.dp)
@@ -244,7 +243,7 @@ fun LibraryScreen(
                                                         title = entity.title,
                                                         artist = entity.artistName ?: "Unknown Artist",
                                                         albumName = entity.albumTitle ?: "",
-                                                        uri = Uri.parse("https://byicloud.online/track/${entity.trackId}"),
+                                                        uri = Uri.fromFile(java.io.File(entity.localPath)),
                                                         durationMs = entity.durationMs,
                                                         albumId = entity.albumTitle?.hashCode()?.toLong() ?: -1L,
                                                         coverUrl = entity.imageUrl
@@ -271,7 +270,6 @@ fun LibraryScreen(
                             }
                         }
                     }
-                }
             }
         }
 

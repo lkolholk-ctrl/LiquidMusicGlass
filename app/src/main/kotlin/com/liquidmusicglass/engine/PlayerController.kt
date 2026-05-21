@@ -162,9 +162,9 @@ object PlayerController {
                         val player = getPlayer(context)
                         if (player != null) {
                             val currentMediaItem = buildMediaItem(track, streamResult.uri)
+                            player.playWhenReady = true
                             player.setMediaItem(currentMediaItem)
                             player.prepare()
-                            player.play()
                             resetPlaybackLogging(track.durationMs)
 
                             // Запускаем предзагрузку оконных треков
@@ -284,6 +284,7 @@ object PlayerController {
 
                         val player = getPlayer(context)
                         player?.let {
+                            it.playWhenReady = true
                             it.setMediaItems(mediaItems, startIndex, 0L)
                             it.prepare()
                             it.play()
@@ -432,7 +433,7 @@ object PlayerController {
                     val player = getPlayer(ctx)
                     if (player != null && nextIndex > currentIndex && player.mediaItemCount > nextIndex) {
                         player.seekToNextMediaItem()
-                        player.play()
+                        player.playWhenReady = true
                     } else {
                         playTrack(ctx, nextIndex)
                     }
@@ -652,7 +653,7 @@ object PlayerController {
                             player.replaceMediaItem(currentIndex, newItem)
                             player.seekTo(currentIndex, currentPosition)
                             player.prepare()
-                            player.play()
+                            player.playWhenReady = true
                         }
                     }
                 }
@@ -713,7 +714,7 @@ object PlayerController {
     private fun buildMediaItem(track: Track, uri: Uri = track.uri): MediaItem {
         // Для онлайн треков — используем liquid:// URI с track ID
         // DataSource лениво резолвит URL если нужно
-        val mediaUri = if (track.isOnlineTrack) {
+        val mediaUri = if (track.isOnlineTrack && uri.scheme != "file") {
             Uri.Builder()
                 .scheme(StreamingDataSource.SCHEME_LIQUID)
                 .authority("track")

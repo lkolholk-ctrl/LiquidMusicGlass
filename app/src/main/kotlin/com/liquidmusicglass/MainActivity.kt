@@ -1,6 +1,10 @@
 package com.liquidmusicglass
 
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -24,6 +28,26 @@ class MainActivity : ComponentActivity() {
 
     private val authScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    @Volatile
+    private var isNetworkCallbackRegistered = false
+
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        private var wasOffline = true
+
+        override fun onAvailable(network: Network) {
+            if (wasOffline && IcmAuthRepository.isLoggedIn.value) {
+                wasOffline = false
+                authScope.launch {
+                    IcmAuthRepository.fetchUserData()
+                }
+            }
+        }
+
+        override fun onLost(network: Network) {
+            wasOffline = true
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -35,8 +59,31 @@ class MainActivity : ComponentActivity() {
 
         enableEdgeToEdge()
 
+        // Register network callback to auto-refresh profile when coming back online
+        val connectivityManager = getSystemService(ConnectivityManager::class.java)
+        val networkRequest = NetworkRequest.Builder()
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .build()
+        connectivityManager?.registerNetworkCallback(networkRequest, networkCallback)
+        isNetworkCallbackRegistered = true
+
         // Handle Telegram auth redirect
         handleTelegramAuth(intent)
+
+        // Refresh profile on app start if user is logged in
+        if (IcmAuthRepository.isLoggedIn.value) {
+            authScope.launch {
+                val apiKey = try {
+                    IcmKeyProvider.getApiKey(this@MainActivity)
+                } catch (_: Throwable) { "" }.ifBlank { BuildConfig.ICM_API_KEY }
+                
+                if (apiKey.isNotBlank()) {
+                    IcmAuthRepository.refreshTokenIfNeeded(apiKey)
+                }
+                // Always refresh profile data on startup
+                IcmAuthRepository.fetchUserData()
+            }
+        }
 
         // Security checks: Root & Emulator detection
         if (com.liquidmusicglass.engine.SecurityUtils.isDeviceRooted() || com.liquidmusicglass.engine.SecurityUtils.isEmulator()) {
@@ -50,6 +97,18 @@ class MainActivity : ComponentActivity() {
                 AppRoot()
             }
         }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        if (!isNetworkCallbackRegistered) return
+        val connectivityManager = getSystemService(ConnectivityManager::class.java)
+        try {
+            connectivityManager?.unregisterNetworkCallback(networkCallback)
+        } catch (e: IllegalArgumentException) {
+            // Callback was not registered — ignore
+        }
+        isNetworkCallbackRegistered = false
     }
 
     override fun onNewIntent(intent: Intent) {

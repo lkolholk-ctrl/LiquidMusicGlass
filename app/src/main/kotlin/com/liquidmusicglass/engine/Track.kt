@@ -28,7 +28,7 @@ data class Track(
 
     /** Является ли трек онлайн-треком из ICM API. */
     val isOnlineTrack: Boolean
-        get() = uri.toString().startsWith("https://byicloud.online") || coverUrl != null
+        get() = uri.toString().startsWith("https://byicloud.online") || uri.toString().startsWith("http://byicloud.online")
 
     /** URI для отображения обложки (coverUrl имеет приоритет). */
     val displayArtUri: Uri
