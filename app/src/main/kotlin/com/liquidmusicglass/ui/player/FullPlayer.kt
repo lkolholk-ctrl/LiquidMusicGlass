@@ -3,6 +3,7 @@ package com.liquidmusicglass.ui.player
 import android.content.Context
 import android.media.AudioManager
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
@@ -504,36 +505,14 @@ fun FullPlayer(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
-                        Spacer(Modifier.height(2.dp))
-                        // Artist name — wrapped in Box for minimum 48.dp touch target
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(48.dp)
-                                .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null
-                                ) {
-                                    when {
-                                        artists.size == 1 && artists[0].id != null -> {
-                                            artists[0].id?.let { onNavigateToArtist(it) }
-                                        }
-                                        artists.size > 1 -> {
-                                            showArtistSheet = true
-                                        }
-                                    }
-                                }
-                                .padding(vertical = 12.dp),
-                            contentAlignment = Alignment.CenterStart
-                        ) {
-                            Text(
-                                text = artistName,
-                                color = Color.White.copy(alpha = 0.60f),
-                                fontSize = 16.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = artistName,
+                            color = Color.White.copy(alpha = 0.60f),
+                            fontSize = 16.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                     Spacer(Modifier.width(12.dp))
                     Box(
@@ -911,7 +890,20 @@ fun FullPlayer(
         // ═══ Queue ═══
         QueueSheet(
             visible = showQueue,
-            onDismiss = { showQueue = false }
+            onDismiss = { showQueue = false },
+            albumArtUri = albumArtUri,
+            coverUrl = coverUrl,
+            audioFileUri = audioFileUri,
+            albumId = albumId,
+            albumColors = albumColors,
+            currentTrack = currentTrackObj,
+            isPlaying = isPlaying,
+            onPlayPause = onPlayPause,
+            onSkipNext = onSkipNext,
+            onSkipPrevious = onSkipPrevious,
+            onSeek = onSeek,
+            currentPositionMs = currentPositionMs,
+            durationMs = durationMs
         )
 
         // ═══ Artist Selection BottomSheet (for multi-artist tracks) ═══

@@ -162,10 +162,6 @@ internal class EndlessPlaybackEngine(
 
                 val waveTrack = response.track ?: return@repeat
 
-                if (waveTrack.id in excludeIds || waveTrack.id in playedIds) {
-                    return@repeat
-                }
-
                 val track = Track(
                     id = waveTrack.id,
                     title = waveTrack.title,
@@ -178,6 +174,8 @@ internal class EndlessPlaybackEngine(
                 )
                 tracks.add(track)
                 excludeIds.add(waveTrack.id)
+                // Also register in local playedIds for this engine instance
+                playedIds.add(waveTrack.id)
 
             } catch (e: Exception) {
                 android.util.Log.e("EndlessEngine", "Wave error: ${e.message}")

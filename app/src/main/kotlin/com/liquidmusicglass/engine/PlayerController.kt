@@ -284,7 +284,6 @@ object PlayerController {
 
                         val player = getPlayer(context)
                         player?.let {
-                            it.playWhenReady = true
                             it.setMediaItems(mediaItems, startIndex, 0L)
                             it.prepare()
                             it.play()

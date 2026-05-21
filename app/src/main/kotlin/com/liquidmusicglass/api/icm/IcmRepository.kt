@@ -24,6 +24,9 @@ object IcmRepository {
 
     private var _lastException: Exception? = null
 
+    /** Global exclude set for wave tracks — shared across all callers */
+    private val waveExcludeIds = mutableSetOf<String>()
+
     /** Default region */
     var region: String
         get() = api.defaultRegion
@@ -86,6 +89,14 @@ object IcmRepository {
         _isInitialized.value = false
         _lastError.value = null
         _lastException = null
+        waveExcludeIds.clear()
+    }
+
+    /**
+     * Clear global wave exclude set (e.g. after pull-to-refresh).
+     */
+    fun clearWaveExclude() {
+        waveExcludeIds.clear()
     }
 
     /**
@@ -304,6 +315,7 @@ object IcmRepository {
                     recentSkips = 0
                 )
                 if (response != null && response.status == "ok" && response.track != null) {
+                    // Already added to global waveExcludeIds inside getWaveNext()
                     waveItems.add(
                         IcmHomeItem(
                             id = response.track.id,
@@ -520,7 +532,14 @@ object IcmRepository {
         region: String? = null,
         source: String? = null
     ): IcmWaveResponse? {
-        val result = api.getWaveNext(seedTrackId, exclude, recentSkips, region, source)
+        // Merge caller-provided exclude with global wave exclude set
+        val mergedExclude = (exclude ?: emptyList()) + waveExcludeIds
+        val result = api.getWaveNext(seedTrackId, mergedExclude.takeIf { it.isNotEmpty() }, recentSkips, region, source)
+        result.getOrNull()?.track?.id?.let { waveExcludeIds.add(it) }
+        // Trim global set if it grows too large
+        if (waveExcludeIds.size > 500) {
+            waveExcludeIds.take(400).toMutableSet().also { waveExcludeIds.clear(); waveExcludeIds.addAll(it) }
+        }
         result.exceptionOrNull()?.let {
             _lastException = it as? Exception
             _lastError.value = it.message

@@ -77,7 +77,7 @@ class AudioService : MediaSessionService() {
             }
             AudioManager.AUDIOFOCUS_GAIN -> {
                 setDucked(false)
-                if (!player.isPlaying && player.playbackState == Player.STATE_READY) {
+                if (!player.isPlaying) {
                     player.play()
                 }
             }
@@ -237,7 +237,7 @@ class AudioService : MediaSessionService() {
                     .setUsage(C.USAGE_MEDIA)
                     .build()
 
-                setAudioAttributes(audioAttributes, true)
+                setAudioAttributes(audioAttributes, false)
                 setHandleAudioBecomingNoisy(true)
                 playWhenReady = false
             }

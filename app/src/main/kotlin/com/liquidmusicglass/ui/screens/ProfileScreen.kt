@@ -164,7 +164,7 @@ fun ProfileScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(56.dp)
-                        .clip(RoundedCornerShape(16.dp))
+                        .clip(RoundedCornerShape(28.dp))
                         .background(PremiumPurple.copy(alpha = 0.15f))
                         .padding(horizontal = 16.dp),
                     contentAlignment = Alignment.CenterStart
@@ -203,7 +203,7 @@ fun ProfileScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(80.dp)
-                        .clip(RoundedCornerShape(16.dp))
+                        .clip(RoundedCornerShape(26.dp))
                         .background(Color(0xFF1A1A1A))
                         .padding(horizontal = 16.dp),
                     contentAlignment = Alignment.CenterStart
@@ -360,7 +360,7 @@ private fun ProfileMenuItem(
         modifier = Modifier
             .fillMaxWidth()
             .height(64.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(22.dp))
             .background(Color(0xFF1A1A1A))
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
@@ -408,7 +408,7 @@ private fun SubscriptionCard(
         modifier = Modifier
             .fillMaxWidth()
             .height(72.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(22.dp))
             .background(Color(0xFF1A1A1A))
             .padding(horizontal = 16.dp),
         contentAlignment = Alignment.CenterStart

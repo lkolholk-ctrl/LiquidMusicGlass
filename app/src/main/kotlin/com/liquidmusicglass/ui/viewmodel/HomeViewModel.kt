@@ -55,6 +55,7 @@ class HomeViewModel : ViewModel() {
      */
     fun refresh() {
         _homeContent.value = null
+        IcmRepository.clearWaveExclude()
         loadHomeContent()
     }
 
