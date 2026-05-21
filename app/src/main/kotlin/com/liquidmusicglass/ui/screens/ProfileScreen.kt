@@ -30,7 +30,6 @@ import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -45,7 +44,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import coil.request.ImageRequest
 import com.liquidmusicglass.api.icm.IcmAuthRepository
 import com.liquidmusicglass.data.local.LocalAuthManager
 import com.liquidmusicglass.ui.theme.LiquidTheme
@@ -64,6 +62,7 @@ fun ProfileScreen(
 ) {
     val scroll = rememberScrollState()
     val context = LocalContext.current
+
     val isLoggedIn by IcmAuthRepository.isLoggedIn.collectAsState()
     val isPremium by IcmAuthRepository.isPremium.collectAsState()
     val userEmail by IcmAuthRepository.userEmail.collectAsState()
@@ -72,14 +71,8 @@ fun ProfileScreen(
     val profileName by IcmAuthRepository.profileName.collectAsState()
     val avatarUrl by IcmAuthRepository.avatarUrl.collectAsState()
 
-    // Fetch profile/preferences when screen opens and user is logged in
-    LaunchedEffect(isLoggedIn) {
-        if (isLoggedIn) {
-            IcmAuthRepository.fetchUserData()
-        }
-    }
-
-    val displayName = profileName?.takeIf { it.isNotBlank() } ?: when {
+    val displayName = when {
+        !profileName.isNullOrBlank() -> profileName!!
         userEmail != null -> userEmail!!.substringBefore("@").replaceFirstChar { it.uppercase() }
         telegramId != null -> "Telegram user"
         else -> "Guest"
@@ -120,18 +113,13 @@ fun ProfileScreen(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (avatarUrl != null) {
+                if (!avatarUrl.isNullOrBlank()) {
                     AsyncImage(
-                        model = ImageRequest.Builder(context)
-                            .data(avatarUrl)
-                            .crossfade(true)
-                            .build(),
-                        contentDescription = "Avatar",
+                        model = avatarUrl,
+                        contentDescription = null,
                         modifier = Modifier
                             .size(72.dp)
-                            .clip(CircleShape),
-                        placeholder = null,
-                        error = null
+                            .clip(CircleShape)
                     )
                 } else {
                     Box(
