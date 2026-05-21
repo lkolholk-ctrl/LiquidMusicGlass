@@ -13,6 +13,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -56,12 +57,19 @@ import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.ThumbUp
 import androidx.compose.material.icons.rounded.ThumbDown
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.rememberModalBottomSheetState
 import com.liquidmusicglass.api.icm.IcmMiniArtist
+import com.liquidmusicglass.api.icm.IcmAuthRepository
+import com.liquidmusicglass.engine.AudioDownloadManager
+import com.liquidmusicglass.data.local.db.FavoriteTrackDatabase
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -101,6 +109,7 @@ import com.kyant.backdrop.shadow.Shadow
 import com.kyant.shapes.Capsule
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.api.icm.IcmRepository
+import com.liquidmusicglass.ui.glass.GlassKit
 import com.liquidmusicglass.ui.glass.AlbumArtImage
 import com.liquidmusicglass.ui.glass.pressScale
 import com.liquidmusicglass.ui.glass.rememberAlbumColors
@@ -142,6 +151,16 @@ fun FullPlayer(
     val currentTrackObj by PlayerController.currentTrack.collectAsState()
     val trackId = currentTrackObj?.id ?: ""
     val isFavorite by libraryRepo.isFavoriteFlow(trackId).collectAsState(initial = false)
+    val isPremium by IcmAuthRepository.isPremium.collectAsState()
+    val db = remember { FavoriteTrackDatabase.getInstance(context) }
+    val isDownloaded by db.isDownloadedFlow(trackId).collectAsState(initial = false)
+    val downloadProgressMap by AudioDownloadManager.downloadProgress.collectAsState()
+    val progress = downloadProgressMap[trackId]
+    val isDownloading = progress != null
+
+    var showPromoDialog by remember { mutableStateOf(false) }
+    var showDeleteConfirmDialog by remember { mutableStateOf(false) }
+
     var showAirPlay by remember { mutableStateOf(false) }
     var showQueue by remember { mutableStateOf(false) }
     var showLyrics by remember { mutableStateOf(false) }
@@ -537,6 +556,51 @@ fun FullPlayer(
                             modifier = Modifier.size(26.dp)
                         )
                     }
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .pressScale {
+                                if (!isPremium) {
+                                    showPromoDialog = true
+                                } else {
+                                    if (isDownloaded) {
+                                        showDeleteConfirmDialog = true
+                                    } else if (!isDownloading) {
+                                        currentTrackObj?.let { track ->
+                                            AudioDownloadManager.downloadTrack(context, track)
+                                        }
+                                    }
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        when {
+                            isDownloading -> {
+                                CircularProgressIndicator(
+                                    progress = { progress ?: 0f },
+                                    modifier = Modifier.size(24.dp),
+                                    color = Color(0xFFFC3C44),
+                                    strokeWidth = 2.5.dp
+                                )
+                            }
+                            isDownloaded -> {
+                                Icon(
+                                    imageVector = Icons.Rounded.CheckCircle,
+                                    contentDescription = "Downloaded",
+                                    tint = Color(0xFF4CAF50),
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                            else -> {
+                                Icon(
+                                    imageVector = Icons.Rounded.Download,
+                                    contentDescription = "Download",
+                                    tint = Color.White.copy(alpha = 0.70f),
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                        }
+                    }
                     // ThumbUp — wave feedback (more track/artist)
                     Box(
                         modifier = Modifier
@@ -912,6 +976,180 @@ fun FullPlayer(
                                     .height(0.5.dp)
                                     .background(Color.White.copy(alpha = 0.10f))
                             )
+                        }
+                    }
+                }
+            }
+        }
+
+        // --- Premium Promo Dialog ---
+        if (showPromoDialog) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.6f))
+                    .clickable(remember { MutableInteractionSource() }, null) {
+                        showPromoDialog = false
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 32.dp)
+                        .clip(RoundedCornerShape(28.dp))
+                        .background(Color(0xFF1C1C1E))
+                        .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(28.dp))
+                        .padding(28.dp)
+                        .clickable(remember { MutableInteractionSource() }, null) { } // prevent dismissing
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Download,
+                            contentDescription = null,
+                            tint = Color(0xFFFC3C44),
+                            modifier = Modifier.size(48.dp)
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "Premium Required",
+                            color = Color.White,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "Offline listening is strictly an exclusive feature for Premium subscribers under aggregator rules. Upgrade to save tracks and play offline.",
+                            color = Color.White.copy(alpha = 0.7f),
+                            fontSize = 14.sp,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            lineHeight = 20.sp
+                        )
+                        Spacer(modifier = Modifier.height(24.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(46.dp)
+                                    .clip(RoundedCornerShape(23.dp))
+                                    .background(Color.White.copy(alpha = 0.08f))
+                                    .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(23.dp))
+                                    .clickable(remember { MutableInteractionSource() }, null) {
+                                        showPromoDialog = false
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("Cancel", color = Color.White.copy(alpha = 0.7f), fontWeight = FontWeight.SemiBold)
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(46.dp)
+                                    .clip(RoundedCornerShape(23.dp))
+                                    .background(Color(0xFFFC3C44))
+                                    .clickable(remember { MutableInteractionSource() }, null) {
+                                        showPromoDialog = false
+                                        val intent = android.content.Intent(
+                                            android.content.Intent.ACTION_VIEW,
+                                            android.net.Uri.parse("https://t.me/byicmbot")
+                                        )
+                                        context.startActivity(intent)
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("Upgrade", color = Color.White, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // --- Delete Confirmation Dialog ---
+        if (showDeleteConfirmDialog) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.6f))
+                    .clickable(remember { MutableInteractionSource() }, null) {
+                        showDeleteConfirmDialog = false
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 32.dp)
+                        .clip(RoundedCornerShape(28.dp))
+                        .background(Color(0xFF1C1C1E))
+                        .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(28.dp))
+                        .padding(28.dp)
+                        .clickable(remember { MutableInteractionSource() }, null) { } // prevent dismissing
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Delete,
+                            contentDescription = null,
+                            tint = Color(0xFFFF5252),
+                            modifier = Modifier.size(48.dp)
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "Delete Download?",
+                            color = Color.White,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "Are you sure you want to delete this track from your device? You will need an internet connection to stream it again.",
+                            color = Color.White.copy(alpha = 0.7f),
+                            fontSize = 14.sp,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            lineHeight = 20.sp
+                        )
+                        Spacer(modifier = Modifier.height(24.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(46.dp)
+                                    .clip(RoundedCornerShape(23.dp))
+                                    .background(Color.White.copy(alpha = 0.08f))
+                                    .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(23.dp))
+                                    .clickable(remember { MutableInteractionSource() }, null) {
+                                        showDeleteConfirmDialog = false
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("Cancel", color = Color.White.copy(alpha = 0.7f), fontWeight = FontWeight.SemiBold)
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(46.dp)
+                                    .clip(RoundedCornerShape(23.dp))
+                                    .background(Color(0xFFFF5252))
+                                    .clickable(remember { MutableInteractionSource() }, null) {
+                                        showDeleteConfirmDialog = false
+                                        AudioDownloadManager.deleteDownloadedTrack(context, trackId)
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("Delete", color = Color.White, fontWeight = FontWeight.SemiBold)
+                            }
                         }
                     }
                 }

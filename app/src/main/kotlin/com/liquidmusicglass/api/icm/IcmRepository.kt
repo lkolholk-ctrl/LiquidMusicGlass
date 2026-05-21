@@ -567,7 +567,7 @@ object IcmRepository {
             _lastException = it as? Exception
             _lastError.value = it.message
         }
-        return result.getOrNull()?.ok == true
+        return result.getOrNull()?.isSuccess == true
     }
 
     /**

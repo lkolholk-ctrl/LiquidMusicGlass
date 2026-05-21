@@ -203,6 +203,13 @@ fun SettingsScreen(
                                     context.getSharedPreferences("icm", Context.MODE_PRIVATE)
                                         .edit().putString("stream_quality", quality).apply()
                                     com.liquidmusicglass.api.icm.IcmRepository.streamQuality = quality
+                                    
+                                    // Sync preference to server
+                                    scope.launch {
+                                        com.liquidmusicglass.api.icm.IcmRepository.updateUserPreferences(
+                                            com.liquidmusicglass.api.icm.IcmUserPreferences(qualityPreference = quality)
+                                        )
+                                    }
                                 }
                                 .padding(horizontal = 16.dp, vertical = 12.dp)
                                 .graphicsLayer { alpha = if (isAvailable) 1f else 0.4f },

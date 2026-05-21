@@ -18,8 +18,15 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.*
+import com.liquidmusicglass.api.icm.IcmAuthRepository
+import com.liquidmusicglass.data.local.db.FavoriteTrackDatabase
+import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.liquidmusicglass.ui.glass.GlassKit
+import com.liquidmusicglass.engine.AudioDownloadManager
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,13 +48,14 @@ import com.liquidmusicglass.engine.Track
 import com.liquidmusicglass.ui.viewmodel.LibraryViewModel
 import kotlinx.coroutines.launch
 
-private enum class LibraryTab { LIKES, SUBSCRIPTIONS }
+private enum class LibraryTab { LIKES, SUBSCRIPTIONS, DOWNLOADS }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryScreen(
     onNavigateToAlbum: (String) -> Unit = {},
-    onNavigateToArtist: (String) -> Unit = {}
+    onNavigateToArtist: (String) -> Unit = {},
+    backdrop: LayerBackdrop? = null
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -59,6 +67,10 @@ fun LibraryScreen(
     val isSyncing by viewModel.isSyncing.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
     val favoriteIds by viewModel.favoriteIds.collectAsState()
+
+    val isPremium by IcmAuthRepository.isPremium.collectAsState()
+    val db = remember { FavoriteTrackDatabase.getInstance(context) }
+    val downloadedTracksEntityList by db.downloadsFlow.collectAsState(initial = emptyList())
 
     Column(
         modifier = Modifier
@@ -122,6 +134,13 @@ fun LibraryScreen(
                         icon = Icons.Default.Person,
                         isSelected = selectedTab == LibraryTab.SUBSCRIPTIONS,
                         onClick = { selectedTab = LibraryTab.SUBSCRIPTIONS },
+                        modifier = Modifier.weight(1f)
+                    )
+                    TabButton(
+                        text = "Downloads",
+                        icon = Icons.Default.Download,
+                        isSelected = selectedTab == LibraryTab.DOWNLOADS,
+                        onClick = { selectedTab = LibraryTab.DOWNLOADS },
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -202,6 +221,56 @@ fun LibraryScreen(
                     SubscriptionsContent(
                         onNavigateToArtist = onNavigateToArtist
                     )
+                }
+                selectedTab == LibraryTab.DOWNLOADS -> {
+                    if (!isPremium) {
+                        PremiumDownloadsPromo(backdrop = backdrop)
+                    } else {
+                        if (downloadedTracksEntityList.isEmpty()) {
+                            EmptyState("No downloaded tracks yet")
+                        } else {
+                            LazyColumn(
+                                modifier = Modifier.fillMaxSize(),
+                                contentPadding = PaddingValues(vertical = 8.dp)
+                            ) {
+                                items(downloadedTracksEntityList, key = { it.trackId }) { trackEntity ->
+                                    DownloadedTrackItem(
+                                        track = trackEntity,
+                                        onClick = {
+                                            scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                                val tracks = downloadedTracksEntityList.map { entity ->
+                                                    Track(
+                                                        id = entity.trackId,
+                                                        title = entity.title,
+                                                        artist = entity.artistName ?: "Unknown Artist",
+                                                        albumName = entity.albumTitle ?: "",
+                                                        uri = Uri.parse("https://byicloud.online/track/${entity.trackId}"),
+                                                        durationMs = entity.durationMs,
+                                                        albumId = entity.albumTitle?.hashCode()?.toLong() ?: -1L,
+                                                        coverUrl = entity.imageUrl
+                                                    )
+                                                }
+                                                val startIndex = tracks.indexOfFirst { it.id == trackEntity.trackId }
+                                                if (startIndex >= 0) {
+                                                    PlayerController.playFromList(
+                                                        context = context,
+                                                        tracks = tracks,
+                                                        startIndex = startIndex,
+                                                        autoRefillType = "library",
+                                                        autoRefillId = "downloads",
+                                                        autoRefillName = "Downloads"
+                                                    )
+                                                }
+                                            }
+                                        },
+                                        onDelete = {
+                                            AudioDownloadManager.deleteDownloadedTrack(context, trackEntity.trackId)
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -550,3 +619,246 @@ private fun formatDuration(ms: Long): String {
     val seconds = totalSeconds % 60
     return "%d:%02d".format(minutes, seconds)
 }
+
+@Composable
+private fun PremiumDownloadsPromo(backdrop: LayerBackdrop? = null) {
+    val context = LocalContext.current
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        if (backdrop != null) {
+            GlassKit.Card(
+                backdrop = backdrop,
+                cornerRadius = 24.dp,
+                contentPadding = 32.dp,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                PremiumDownloadsPromoContent(context)
+            }
+        } else {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(Color(0xFF1C1C1E))
+                    .padding(32.dp)
+            ) {
+                PremiumDownloadsPromoContent(context)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PremiumDownloadsPromoContent(context: Context) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Icon(
+            imageVector = Icons.Default.Download,
+            contentDescription = null,
+            tint = Color(0xFFFC3C44),
+            modifier = Modifier.size(64.dp)
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            text = "Premium Exclusive",
+            color = Color.White,
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Bold
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        Text(
+            text = "Offline downloads are strictly a Premium feature under Aggregator requirements. Listen to music without connection.",
+            color = Color.Gray,
+            fontSize = 14.sp,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            lineHeight = 20.sp
+        )
+        Spacer(modifier = Modifier.height(28.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(Color(0xFFFC3C44))
+                .clickable {
+                    val intent = android.content.Intent(
+                        android.content.Intent.ACTION_VIEW,
+                        Uri.parse("https://t.me/byicmbot")
+                    )
+                    context.startActivity(intent)
+                }
+                .padding(vertical = 14.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "Upgrade via Telegram",
+                color = Color.White,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+@Composable
+private fun DownloadedTrackItem(
+    track: com.liquidmusicglass.data.local.db.DownloadedTrackEntity,
+    onClick: () -> Unit,
+    onDelete: () -> Unit
+) {
+    var showConfirm by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(56.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(Color.DarkGray)
+        ) {
+            if (!track.imageUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = track.imageUrl.replace("1000x1000", "300x300"),
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = track.title,
+                color = Color.White,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = track.artistName ?: "Unknown Artist",
+                color = Color.Gray,
+                fontSize = 13.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        // Delete button
+        IconButton(onClick = { showConfirm = true }) {
+            Icon(
+                imageVector = Icons.Default.Delete,
+                contentDescription = "Delete offline track",
+                tint = Color.Gray,
+                modifier = Modifier.size(22.dp)
+            )
+        }
+
+        if (track.durationMs > 0) {
+            Text(
+                text = formatDuration(track.durationMs),
+                color = Color.Gray,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(start = 4.dp)
+            )
+        }
+    }
+
+    if (showConfirm) {
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { showConfirm = false }
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(300.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(Color(0xFF1C1C1E))
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = null,
+                        tint = Color(0xFFFF5252),
+                        modifier = Modifier.size(48.dp)
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "Delete Download?",
+                        color = Color.White,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Remove this track from your offline downloads?",
+                        color = Color.Gray,
+                        fontSize = 14.sp,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color.White.copy(alpha = 0.1f))
+                                .clickable { showConfirm = false }
+                                .padding(vertical = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "Cancel",
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0xFFFF5252))
+                                .clickable {
+                                    showConfirm = false
+                                    onDelete()
+                                }
+                                .padding(vertical = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "Delete",
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+

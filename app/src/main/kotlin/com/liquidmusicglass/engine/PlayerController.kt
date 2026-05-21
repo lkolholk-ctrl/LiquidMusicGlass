@@ -51,8 +51,17 @@ object PlayerController {
     )
 
     // ── Stream URL cache ──
-    private val streamUrlCache = mutableMapOf<String, CachedStreamUrl>()
+    private val streamUrlCache = java.util.concurrent.ConcurrentHashMap<String, CachedStreamUrl>()
     private const val STREAM_CACHE_TTL_MS = 10 * 60 * 1000L
+
+    fun getValidCachedUri(trackId: String): Uri? {
+        val now = System.currentTimeMillis()
+        val cached = streamUrlCache[trackId]
+        if (cached != null && now < (cached.expiresAtMs - 15_000L)) { // 15-секундный запас
+            return cached.uri
+        }
+        return null
+    }
 
     // ── Playback logging state ──
     private var playbackStartTimeMs: Long = 0L
@@ -178,7 +187,7 @@ object PlayerController {
     }
 
     /**
-     * ИСПРАВЛЕНО: Теперь заменяет невалидные Uri-плейсхолдеры в очереди на реальные ссылки.
+     * Предзагружает (прогревает кэш) для следующих треков в очереди.
      */
     private fun prefetchAhead(context: Context, currentIndex: Int, depth: Int = 3) {
         if (queue.isEmpty()) return
@@ -187,42 +196,13 @@ object PlayerController {
         val indicesToPrefetch = (currentIndex + 1 until endIndex)
 
         ioScope.launch {
-            val resolved = indicesToPrefetch.map { idx ->
+            indicesToPrefetch.forEach { idx ->
                 val track = queue[idx]
-                val result = if (track.isOnlineTrack) {
+                if (track.isOnlineTrack) {
                     resolveStreamUrl(track.id)
-                } else {
-                    StreamResult.Success(track.uri)
-                }
-                idx to result
-            }
-
-            withContext(Dispatchers.Main) {
-                val player = getPlayer(context) ?: return@withContext
-                var updatedCount = 0
-
-                for ((idx, result) in resolved) {
-                    if (result is StreamResult.Success) {
-                        val track = queue[idx]
-                        val mediaItem = buildMediaItem(track, result.uri)
-                        
-                        // КРИТИЧЕСКИЙ ФИКС: Если индекс существует в ExoPlayer — заменяем его, а не аппендим в хвост!
-                        if (idx < player.mediaItemCount) {
-                            player.replaceMediaItem(idx, mediaItem)
-                        } else {
-                            player.addMediaItem(mediaItem)
-                        }
-                        updatedCount++
-                    }
-                }
-
-                if (updatedCount > 0) {
-                    android.util.Log.d(
-                        "PlayerController",
-                        "Pre-fetched and synchronized $updatedCount tracks in ExoPlayer queue."
-                    )
                 }
             }
+            android.util.Log.d("PlayerController", "Pre-warmed caches for indices $indicesToPrefetch")
         }
     }
 
@@ -326,15 +306,7 @@ object PlayerController {
                         prefetchIndices.forEach { idx ->
                             val t = tracks[idx]
                             if (t.isOnlineTrack) {
-                                val res = resolveStreamUrl(t.id)
-                                if (res is StreamResult.Success) {
-                                    withContext(Dispatchers.Main) {
-                                        val p = controller ?: appContext?.let { getPlayer(it) }
-                                        if (p != null && idx < p.mediaItemCount) {
-                                            p.replaceMediaItem(idx, buildMediaItem(t, res.uri))
-                                        }
-                                    }
-                                }
+                                resolveStreamUrl(t.id)
                             }
                         }
                     }
@@ -444,24 +416,6 @@ object PlayerController {
             
             // Предзагружаем следующие треки
             appContext?.let { prefetchAhead(it, index, depth = 5) }
-
-            // КРИТИЧЕСКИЙ ФИКС: Если текущий трек онлайн — резолвим URL и заменяем в плеере
-            // чтобы не играл с плейсхолдером
-            if (track.isOnlineTrack) {
-                ioScope.launch {
-                    val result = resolveStreamUrl(track.id)
-                    if (result is StreamResult.Success) {
-                        withContext(Dispatchers.Main) {
-                            val player = controller ?: appContext?.let { getPlayer(it) }
-                            if (player != null && index < player.mediaItemCount) {
-                                val newItem = buildMediaItem(track, result.uri)
-                                player.replaceMediaItem(index, newItem)
-                                // Не делаем seek — трек уже играет, просто заменили источник
-                            }
-                        }
-                    }
-                }
-            }
 
             ioScope.launch {
                 endlessEngine.checkAndRefillIfNeeded()

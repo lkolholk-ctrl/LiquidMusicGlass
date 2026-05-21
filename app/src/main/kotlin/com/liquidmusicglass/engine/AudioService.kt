@@ -214,6 +214,7 @@ class AudioService : MediaSessionService() {
             ))
 
         val dataSourceFactory = StreamingDataSource.create(
+            context = this,
             httpDataSource = httpFactory
         )
 

@@ -144,6 +144,9 @@ internal class EndlessPlaybackEngine(
         val tracks = mutableListOf<Track>()
         val excludeIds = buildExcludeSet()
         val seedTrackId = _refillContext.value?.seedTrackId
+            ?: withContext(Dispatchers.Main) {
+                PlayerController.getCurrentQueue().lastOrNull()?.id
+            }
 
         repeat(REFILL_BATCH_SIZE) {
             try {

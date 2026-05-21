@@ -38,4 +38,57 @@ class DurationNormalizationTest {
         val durationMs = if (isVk) duration * 1000L else duration
         assertEquals(500L, durationMs)
     }
+
+    @Test
+    fun `IcmPlaylistTrack duration normalization`() {
+        val trackSeconds = IcmPlaylistTrack(
+            id = "1",
+            title = "Track in Seconds",
+            artist = "Artist",
+            artistId = "artist_1",
+            cover = "",
+            collectionId = "col_1",
+            duration = 180L, // 3 minutes
+            isExplicit = false,
+            isCustom = false
+        )
+        assertEquals(180000L, trackSeconds.durationMs)
+
+        val trackMs = IcmPlaylistTrack(
+            id = "2",
+            title = "Track in Ms",
+            artist = "Artist",
+            artistId = "artist_1",
+            cover = "",
+            collectionId = "col_1",
+            duration = 180000L, // 3 minutes
+            isExplicit = false,
+            isCustom = false
+        )
+        assertEquals(180000L, trackMs.durationMs)
+    }
+
+    @Test
+    fun `IcmLibraryTrack duration normalization`() {
+        val trackSeconds = IcmLibraryTrack(
+            id = "1",
+            title = "Track in Seconds",
+            duration = 180L
+        )
+        assertEquals(180000L, trackSeconds.durationMs)
+
+        val trackMs = IcmLibraryTrack(
+            id = "2",
+            title = "Track in Ms",
+            duration = 180000L
+        )
+        assertEquals(180000L, trackMs.durationMs)
+
+        val trackNull = IcmLibraryTrack(
+            id = "3",
+            title = "Track Null",
+            duration = null
+        )
+        assertEquals(0L, trackNull.durationMs)
+    }
 }

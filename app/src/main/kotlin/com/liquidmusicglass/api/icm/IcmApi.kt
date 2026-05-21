@@ -630,7 +630,7 @@ suspend fun search(
      * Reset wave history, seed artists, and preferences.
      * Likes are preserved.
      */
-    suspend fun resetWave(): Result<IcmWaveFeedbackResponse> {
+    suspend fun resetWave(): Result<IcmWaveResetResponse> {
         return execute("/library/wave/reset", method = "POST")
     }
 
@@ -717,7 +717,7 @@ suspend fun search(
      * Update user preferences. Only non-null fields in [prefs] are sent.
      */
     suspend fun updateUserPreferences(prefs: IcmUserPreferences): Result<IcmUserPreferences> {
-        val body = json.encodeToString(prefs)
+        val body = json.encodeToString(IcmUpdatePreferencesRequest(prefs.qualityPreference))
         return execute("/me/preferences", method = "PUT", body = body)
     }
 

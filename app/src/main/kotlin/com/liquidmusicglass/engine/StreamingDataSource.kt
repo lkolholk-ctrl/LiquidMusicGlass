@@ -1,5 +1,6 @@
 package com.liquidmusicglass.engine
 
+import android.content.Context
 import android.net.Uri
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
@@ -7,22 +8,22 @@ import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.FileDataSource
 import androidx.media3.datasource.TransferListener
-import androidx.media3.datasource.cache.CacheDataSource
+import java.io.File
 import java.io.IOException
 
 /**
- * Кастомный DataSource для LiquidMusicGlass.
+ * Custom DataSource for LiquidMusicGlass.
  *
- * Поддерживает URI схемы:
- * - `liquid://track?id=TRACK_ID&url=REAL_URL` — онлайн трек с ID
- * - `file://...` — локальный файл
- * - `http://...` / `https://...` — прямой URL
+ * Supports URI schemes:
+ * - `liquid://track?id=TRACK_ID&url=REAL_URL` — online track with ID (automatically checks local premium offline cache)
+ * - `file://...` — local file
+ * - `http://...` / `https://...` — direct URL
  *
- * При отсутствии url в URI — лениво резолвит через PlayerController.
- * При наличии cacheFactory — использует CacheDataSource для кэширования.
+ * Automatically resolves offline downloads if the user has a valid Premium subscription.
  */
 @OptIn(UnstableApi::class)
 class StreamingDataSource private constructor(
+    private val context: Context,
     private val httpDataSource: DataSource,
     private val fileDataSource: DataSource,
     private val cacheDataSource: DataSource?
@@ -45,6 +46,7 @@ class StreamingDataSource private constructor(
         const val PARAM_URL = "url"
 
         fun create(
+            context: Context,
             httpDataSource: DefaultHttpDataSource.Factory,
             fileDataSource: FileDataSource = FileDataSource()
         ): DataSource.Factory {
@@ -52,7 +54,7 @@ class StreamingDataSource private constructor(
                 val http = httpDataSource.createDataSource()
                 val file = fileDataSource
                 val cache = MediaCacheManager.getCacheDataSourceFactory()?.createDataSource()
-                StreamingDataSource(http, file, cache)
+                StreamingDataSource(context.applicationContext, http, file, cache)
             }
         }
     }
@@ -86,25 +88,29 @@ class StreamingDataSource private constructor(
 
     override fun getUri(): Uri? = currentDataSource?.uri ?: currentUri
 
-    /**
-     * Резолвит liquid:// URI в реальный URL.
-     * Если url отсутствует — синхронно запрашивает через PlayerController.
-     */
     private fun resolveUri(uri: Uri): Uri {
         if (uri.scheme != SCHEME_LIQUID) return uri
 
         val trackId = uri.getQueryParameter(PARAM_TRACK_ID)
-        var url = uri.getQueryParameter(PARAM_URL)
+        if (trackId != null) {
+            // Aggregator rule: ONLY premium users can access downloaded offline files
+            if (com.liquidmusicglass.api.icm.IcmAuthRepository.isPremium.value) {
+                val offlineFile = File(context.filesDir, "downloads/$trackId.mp3")
+                if (offlineFile.exists() && offlineFile.length() > 0) {
+                    return Uri.fromFile(offlineFile)
+                }
+            }
 
-        if (url.isNullOrEmpty() && trackId != null) {
-            // Ленивый резолвинг URL без runBlocking
-            url = PlayerController.resolveStreamUrlSync(trackId)?.toString()
+            val cachedUri = PlayerController.getValidCachedUri(trackId)
+            if (cachedUri != null) return cachedUri
+
+            val resolvedUrl = PlayerController.resolveStreamUrlSync(trackId)
+            if (resolvedUrl != null) return resolvedUrl
         }
 
-        if (url.isNullOrEmpty()) {
-            throw IOException("Cannot resolve URL for track $trackId")
-        }
+        val url = uri.getQueryParameter(PARAM_URL)
+        if (!url.isNullOrEmpty()) return Uri.parse(url)
 
-        return Uri.parse(url)
+        throw IOException("Cannot resolve URL for track $trackId")
     }
 }

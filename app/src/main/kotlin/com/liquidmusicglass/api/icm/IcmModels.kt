@@ -6,6 +6,13 @@ import kotlinx.serialization.Serializable
 // ─── Health ───
 
 @Serializable
+data class IcmLinkedUser(
+    @SerialName("icm_user_id") val icmUserId: Long,
+    @SerialName("subscription_upgrade") val subscriptionUpgrade: Boolean,
+    @SerialName("effective_stream") val effectiveStream: IcmStreamConfig
+)
+
+@Serializable
 data class IcmHealthResponse(
     @SerialName("partner_id") val partnerId: String,
     val status: String,
@@ -13,7 +20,8 @@ data class IcmHealthResponse(
     @SerialName("rate_limits") val rateLimits: IcmRateLimits? = null,
     val stream: IcmStreamConfig? = null,
     val search: IcmSearchConfig? = null,
-    @SerialName("server_time") val serverTime: Long? = null
+    @SerialName("server_time") val serverTime: Long? = null,
+    @SerialName("linked_user") val linkedUser: IcmLinkedUser? = null
 )
 
 @Serializable
@@ -168,12 +176,10 @@ data class IcmAlbumTrack(
     val duration: Long? = null,
     val source: String? = null
 ) {
-    /** VK returns duration in seconds, Apple in milliseconds. Normalized to ms. */
     val durationMs: Long
         get() {
             val d = duration ?: return 0L
-            val isVk = id.startsWith("vk_") || source == "secondary" || source == "vk"
-            return if (isVk) d * 1000L else d
+            return if (d < 1000L) d * 1000L else d
         }
 }
 
@@ -306,7 +312,10 @@ data class IcmPlaylistTrack(
     val duration: Long,
     @SerialName("is_explicit") val isExplicit: Boolean = false,
     @SerialName("isCustom") val isCustom: Boolean = false
-)
+) {
+    val durationMs: Long
+        get() = if (duration < 1000L) duration * 1000L else duration
+}
 
 // ─── Cover Sign ───
 
@@ -335,7 +344,8 @@ data class IcmError(
     val message: String? = null,
     @SerialName("required_region") val requiredRegion: String? = null,
     @SerialName("retry_after") val retryAfter: Int? = null,
-    @SerialName("source") val source: String? = null
+    @SerialName("source") val source: String? = null,
+    @SerialName("attempts_left") val attemptsLeft: Int? = null
 )
 
 // ─── Batch Track Meta ───
@@ -474,8 +484,7 @@ fun IcmPlaylistTrack.toTrack(): com.liquidmusicglass.engine.Track {
         artist = artist,
         albumName = "",
         uri = android.net.Uri.parse("https://byicloud.online/track/$id"),
-        // VK/secondary return seconds, Apple ms — normalize uniformly.
-        durationMs = if (id.startsWith("vk_")) duration * 1000L else duration,
+        durationMs = durationMs,
         albumId = collectionId.hashCode().toLong(),
         coverUrl = cover.replace("1000x1000", "600x600"),
         artists = emptyList(),
@@ -550,6 +559,11 @@ data class IcmUserPreferences(
 )
 
 @Serializable
+data class IcmUpdatePreferencesRequest(
+    val quality: String?
+)
+
+@Serializable
 data class IcmUserProfile(
     @SerialName("partner_user_id") val partnerUserId: String? = null,
     val name: String? = null,
@@ -579,12 +593,10 @@ data class IcmWaveTrack(
     @SerialName("isCustom") val isCustom: Boolean = false,
     val source: String? = null
 ) {
-    /** VK returns duration in seconds, Apple in milliseconds. Normalized to ms. */
     val durationMs: Long
         get() {
             val d = duration ?: return 0L
-            val isVk = id.startsWith("vk_") || source == "secondary" || source == "vk"
-            return if (isVk) d * 1000L else d
+            return if (d < 1000L) d * 1000L else d
         }
 
     fun toTrack(): com.liquidmusicglass.engine.Track {
@@ -626,6 +638,7 @@ data class IcmLibrarySubscriptionsResponse(
 @Serializable
 data class IcmLibraryTrack(
     val id: String,
+    @SerialName("trackId") val trackId: String? = null,
     val title: String,
     val artist: String? = null,
     @SerialName("artistId") val artistId: String? = null,
@@ -634,14 +647,14 @@ data class IcmLibraryTrack(
     @SerialName("collectionId") val collectionId: String? = null,
     @SerialName("is_explicit") val isExplicit: Boolean = false,
     @SerialName("isCustom") val isCustom: Boolean = false,
-    val source: String? = null
+    val source: String? = null,
+    @SerialName("liked_at") val likedAt: Long? = null
 ) {
-    /** VK returns duration in seconds, Apple in milliseconds. Normalized to ms. */
+    /** VK/secondary return duration in seconds, Apple in milliseconds. Normalized to ms. */
     val durationMs: Long
         get() {
             val d = duration ?: return 0L
-            val isVk = id.startsWith("vk_") || source == "secondary" || source == "vk"
-            return if (isVk) d * 1000L else d
+            return if (d < 1000L) d * 1000L else d
         }
 }
 
@@ -652,7 +665,7 @@ data class IcmLibraryArtist(
     val cover: String? = null,
     val image: String? = null,
     @SerialName("isCustom") val isCustom: Boolean = false,
-    @SerialName("isPremium") val isPremium: Boolean = false,
+    @SerialName("isTidal") val isTidal: Boolean = false,
     val source: String? = null
 ) {
     val displayName: String
@@ -675,6 +688,14 @@ data class IcmWaveFeedbackRequest(
 data class IcmWaveFeedbackResponse(
     val ok: Boolean = false
 )
+
+@Serializable
+data class IcmWaveResetResponse(
+    val status: String,
+    val removed: Int
+) {
+    val isSuccess: Boolean get() = status == "ok"
+}
 
 @Serializable
 data class IcmWaveOnboardingResponse(

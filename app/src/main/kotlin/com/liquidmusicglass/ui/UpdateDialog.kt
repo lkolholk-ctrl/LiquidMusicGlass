@@ -4,6 +4,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -72,27 +73,14 @@ fun UpdateDialog(backdrop: LayerBackdrop) {
                 .clickable(remember { MutableInteractionSource() }, null) { },
             contentAlignment = Alignment.Center
         ) {
-            // Glass dialog card
+            // Premium solid dialog card
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 32.dp)
-                    .drawBackdrop(
-                        backdrop = backdrop,
-                        shape = { RoundedCornerShape(28.dp) },
-                        effects = {
-                            vibrancy()
-                            blur(4.dp.toPx())
-                            lens(20.dp.toPx(), 32.dp.toPx(), chromaticAberration = true)
-                        },
-                        highlight = { Highlight.Ambient },
-                        shadow = { Shadow(radius = 16.dp, color = Color.Black.copy(0.3f)) },
-                        innerShadow = { InnerShadow(radius = 6.dp, alpha = 0.3f) },
-                        onDrawSurface = {
-                            drawRect(Color.White.copy(alpha = 0.05f))
-                            drawRect(Color.White.copy(alpha = 0.20f), style = Stroke(1.dp.toPx()))
-                        }
-                    )
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(Color(0xFF1C1C1E))
+                    .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(28.dp))
                     .padding(28.dp)
             ) {
                 Column {
