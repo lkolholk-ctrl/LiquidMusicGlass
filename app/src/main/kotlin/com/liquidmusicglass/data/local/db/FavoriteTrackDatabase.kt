@@ -34,10 +34,21 @@ class FavoriteTrackDatabase private constructor(context: Context) : SQLiteOpenHe
 
     private val _downloadStatusFlows = mutableMapOf<String, MutableStateFlow<Boolean>>()
 
-    init {
-        // Initial load
-        reloadFavorites()
-        reloadDownloads()
+    @Volatile
+    private var isLoaded = false
+
+    /**
+     * Load data from SQLite asynchronously. Must be called from IO dispatcher.
+     * Safe to call multiple times — subsequent calls are no-ops.
+     */
+    fun loadAsync() {
+        if (isLoaded) return
+        synchronized(this) {
+            if (isLoaded) return
+            reloadFavorites()
+            reloadDownloads()
+            isLoaded = true
+        }
     }
 
     override fun onCreate(db: SQLiteDatabase) {

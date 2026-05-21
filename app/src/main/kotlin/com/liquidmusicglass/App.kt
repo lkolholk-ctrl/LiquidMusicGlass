@@ -12,11 +12,17 @@ import com.liquidmusicglass.engine.AppSettings
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.logging.CrashHandler
 import com.liquidmusicglass.ui.glass.CoverSigningInterceptor
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import java.io.File
 
 import com.liquidmusicglass.engine.PlaylistManager
 
 class App : Application(), ImageLoaderFactory {
+
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun newImageLoader(): ImageLoader {
         return ImageLoader.Builder(this)
@@ -32,28 +38,31 @@ class App : Application(), ImageLoaderFactory {
         val logDir = File(filesDir, "crash_logs").apply { mkdirs() }
         Fishnet.init(this, logDir.absolutePath) // Native/ANR крэши
 
-        // Initialize AppSettings (SharedPreferences) before any UI access
+        // Initialize AppSettings (SharedPreferences) — лёгкая, можно на main
         AppSettings.init(this)
 
-        // Initialize PlayerController
+        // Initialize PlayerController — просто сохраняет context
         PlayerController.init(this)
 
-        // Initialize PlaylistManager
-        PlaylistManager.init(this)
+        // Всё тяжёлое — в IO корутину
+        appScope.launch {
+            // Initialize PlaylistManager (JSON parse из SharedPreferences)
+            PlaylistManager.init(this@App)
 
-        // Initialize auth repositories
-        IcmAuthRepository.init(this)
-        LocalAuthManager.init(this)
+            // Initialize auth repositories
+            IcmAuthRepository.init(this@App)
+            LocalAuthManager.init(this@App)
 
-        // Initialize local database
-        LibraryRepository.getInstance(this)
+            // Initialize local database (SQLite + initial load)
+            LibraryRepository.getInstance(this@App)
 
-        // Initialize ICM Music API if key is saved
-        val prefs = getSharedPreferences("icm", MODE_PRIVATE)
-        val savedKey = prefs.getString("api_key", null)
-        if (!savedKey.isNullOrBlank() && savedKey.startsWith("pk_")) {
-            IcmRepository.init(savedKey, IcmAuthRepository.ensurePartnerUserId())
-            IcmAuthRepository.getSessionToken()?.let { IcmRepository.setSessionToken(it) }
+            // Initialize ICM Music API if key is saved
+            val prefs = getSharedPreferences("icm", MODE_PRIVATE)
+            val savedKey = prefs.getString("api_key", null)
+            if (!savedKey.isNullOrBlank() && savedKey.startsWith("pk_")) {
+                IcmRepository.init(savedKey, IcmAuthRepository.ensurePartnerUserId())
+                IcmAuthRepository.getSessionToken()?.let { IcmRepository.setSessionToken(it) }
+            }
         }
     }
 }

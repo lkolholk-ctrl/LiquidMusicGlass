@@ -48,8 +48,10 @@ class LibraryRepository private constructor(context: Context) {
     }
 
     init {
-        // Sync PlayerController's in-memory favorite IDs with DB on init
+        // Load DB data asynchronously on IO
         CoroutineScope(Dispatchers.IO).launch {
+            db.loadAsync()
+            // Sync PlayerController's in-memory favorite IDs after load
             val ids = db.getFavoriteTrackIds()
             PlayerController.setFavoriteIds(ids)
         }

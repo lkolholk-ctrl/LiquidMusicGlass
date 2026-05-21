@@ -85,10 +85,13 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // Security checks: Root & Emulator detection
-        if (com.liquidmusicglass.engine.SecurityUtils.isDeviceRooted() || com.liquidmusicglass.engine.SecurityUtils.isEmulator()) {
-            android.util.Log.e("Security", "Security risk detected: Root or Emulator")
-            // In production, you might want to show a warning dialog or finish the activity
+        // Security checks: Root & Emulator detection (lightweight, but run on IO to be safe)
+        authScope.launch {
+            val isRooted = com.liquidmusicglass.engine.SecurityUtils.isDeviceRooted()
+            val isEmulator = com.liquidmusicglass.engine.SecurityUtils.isEmulator()
+            if (isRooted || isEmulator) {
+                android.util.Log.e("Security", "Security risk detected: Root=$isRooted, Emulator=$isEmulator")
+            }
         }
 
         setContent {
