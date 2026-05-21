@@ -83,6 +83,10 @@ object LyricsParser {
         // Return cached lyrics instantly if available
         getCachedLyrics(trackId)?.let { return@withContext it }
 
+        if (trackId.startsWith("vk_") || trackId.startsWith("secondary_")) {
+            return@withContext Lyrics.EMPTY
+        }
+
         try {
             // Docs: "На холодных Apple-треках первый запрос может занять до 10 секунд"
             val response = kotlinx.coroutines.withTimeout(12_000) {

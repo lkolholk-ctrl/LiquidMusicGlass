@@ -104,8 +104,6 @@ fun AppRoot() {
     val currentPositionMs by PlayerController.currentPositionMs.collectAsState()
     val durationMs by PlayerController.durationMs.collectAsState()
     val volume by PlayerController.volume.collectAsState()
-    val autoMixEnabled by PlayerController.autoMixEnabled.collectAsState()
-    val isMixing by PlayerController.isMixing.collectAsState()
 
     val trackTitle = currentTrack?.title ?: "No track"
     val artistName = currentTrack?.artist ?: "—"
@@ -378,7 +376,6 @@ fun AppRoot() {
             currentPositionMs = currentPositionMs,
             durationMs = durationMs,
             volume = volume,
-            isMixing = isMixing,
             onClose = { animateCollapse() },
             onDrag = { dragAmountPx ->
                 if (screenHeightPx > 0f) {
@@ -417,8 +414,6 @@ fun AppRoot() {
             ) + fadeOut(animationSpec = tween(200))
         ) {
             SettingsScreen(
-                autoMixEnabled = autoMixEnabled,
-                onAutoMixChange = { PlayerController.setAutoMix(it) },
                 onBack = { settingsOpen = false },
                 onOpenEqualizer = { equalizerOpen = true; settingsOpen = false },
                 backdrop = rootBackdrop

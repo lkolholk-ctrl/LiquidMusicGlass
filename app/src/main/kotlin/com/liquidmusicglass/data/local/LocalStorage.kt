@@ -199,6 +199,5 @@ data class AppSettings(
     val streamQuality: String = "256K",
     val region: String = "us",
     val hideExplicit: Boolean = false,
-    val autoMixEnabled: Boolean = false,
     val themeMode: Int = 0 // 0=System, 1=Dark, 2=Light
 )

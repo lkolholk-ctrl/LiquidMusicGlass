@@ -114,9 +114,10 @@ class LibraryRepository private constructor(context: Context) {
             }
 
             // 3. Remove local likes that were removed on cloud
-            // (but not those that are pending delete locally — they need cloud sync first)
+            // (but not those that are pending insert locally — they need cloud sync first)
             for (localId in localActiveIds) {
-                if (localId !in cloudIds) {
+                val localEntity = localEntities.find { it.trackId == localId }
+                if (localId !in cloudIds && localEntity?.isSynced != false) {
                     db.deleteByTrackId(localId)
                 }
             }

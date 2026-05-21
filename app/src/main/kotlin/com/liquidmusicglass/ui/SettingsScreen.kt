@@ -28,6 +28,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,21 +43,23 @@ import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.liquidmusicglass.engine.AppSettings
 import com.liquidmusicglass.engine.PlayerController
+import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.ui.liquid.LiquidToggle
 import com.liquidmusicglass.ui.theme.LiquidTheme
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 
 private val AppleRed = Color(0xFFFC3C44)
 
 @Composable
 fun SettingsScreen(
-    autoMixEnabled: Boolean,
-    onAutoMixChange: (Boolean) -> Unit,
     onBack: () -> Unit,
     onOpenEqualizer: () -> Unit = {},
     backdrop: LayerBackdrop
 ) {
     val context = LocalContext.current
     val scroll = rememberScrollState()
+    val scope = rememberCoroutineScope()
 
     val gaplessEnabled by AppSettings.gaplessEnabled.collectAsState()
     val sleepTimerMinutes by AppSettings.sleepTimerMinutes.collectAsState()
@@ -117,13 +120,6 @@ fun SettingsScreen(
             val hideExplicit by AppSettings.hideExplicit.collectAsState()
 
             PlainCard {
-                SettingsToggleItem(
-                    title = "AutoMix",
-                    subtitle = "ML-powered DJ transitions",
-                    selected = autoMixEnabled,
-                    onSelect = onAutoMixChange
-                )
-                PlainDivider()
                 SettingsToggleItem(
                     title = "Gapless Playback",
                     subtitle = "No silence between tracks",
@@ -260,6 +256,35 @@ fun SettingsScreen(
                         }
                     }
                 }
+            }
+
+            Spacer(modifier = Modifier.height(28.dp))
+
+            // WAVE
+            SectionLabel("WAVE")
+
+            var isResettingWave by remember { mutableStateOf(false) }
+            var waveResetSuccess by remember { mutableStateOf(false) }
+
+            PlainCard {
+                SettingsActionItem(
+                    title = "Reset Wave Preferences",
+                    subtitle = if (waveResetSuccess) "Preferences reset successfully" else "Clear wave history and start fresh",
+                    icon = Icons.Rounded.ChevronRight,
+                    onClick = {
+                        if (isResettingWave) return@SettingsActionItem
+                        scope.launch {
+                            isResettingWave = true
+                            val success = IcmRepository.resetWave()
+                            isResettingWave = false
+                            if (success) {
+                                waveResetSuccess = true
+                                delay(3000)
+                                waveResetSuccess = false
+                            }
+                        }
+                    }
+                )
             }
 
             Spacer(modifier = Modifier.height(28.dp))

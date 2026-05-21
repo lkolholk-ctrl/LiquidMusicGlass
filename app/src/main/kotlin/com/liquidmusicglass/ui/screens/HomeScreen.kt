@@ -191,6 +191,8 @@ fun HomeScreen(
     var moodTracks by remember { mutableStateOf<Map<String, List<IcmWaveTrack>>>(emptyMap()) }
     var moodLoading by remember { mutableStateOf<Set<String>>(emptySet()) }
     var isPlayingMood by remember { mutableStateOf(false) }
+    var showWaveOnboarding by remember { mutableStateOf(false) }
+    var pendingMoodId by remember { mutableStateOf<String?>(null) }
 
     fun waveTrackToTrack(waveTrack: IcmWaveTrack): Track {
         return waveTrack.toTrack()
@@ -269,6 +271,7 @@ fun HomeScreen(
             )
 
             val waveTracks = mutableListOf<IcmWaveTrack>()
+            var waveStatus: String? = null
             repeat(5) {
                 val exclude = waveTracks.map { it.id }
                 val response = IcmRepository.getWaveNext(
@@ -276,8 +279,11 @@ fun HomeScreen(
                     exclude = exclude.takeIf { it.isNotEmpty() },
                     recentSkips = 0
                 )
-                if (response != null && response.status == "ok" && response.track != null) {
-                    waveTracks.add(response.track)
+                if (response != null) {
+                    waveStatus = response.status
+                    if (response.status == "ok" && response.track != null) {
+                        waveTracks.add(response.track)
+                    }
                 }
             }
             moodTracks = moodTracks + (moodId to waveTracks)
@@ -295,6 +301,13 @@ fun HomeScreen(
                 }
                 // Preload next batch
                 loadMoreMoodTracks(moodId, waveTracks)
+            } else if (waveStatus == "empty") {
+                // Wave is empty — show onboarding to let user pick artists
+                pendingMoodId = moodId
+                activeMoodId = null
+                isPlayingMood = false
+                PlayerController.clearAutoRefillContext()
+                showWaveOnboarding = true
             } else {
                 // Wave is empty or user is not linked — fall back to a plain
                 // search-driven mood playlist so the card still works.
@@ -595,6 +608,24 @@ fun HomeScreen(
 
             Spacer(modifier = Modifier.height(200.dp))
         }
+    }
+
+    // Wave Onboarding overlay
+    if (showWaveOnboarding) {
+        WaveOnboardingScreen(
+            onComplete = {
+                showWaveOnboarding = false
+                // Retry the pending mood after onboarding
+                pendingMoodId?.let { moodId ->
+                    pendingMoodId = null
+                    playMoodStation(moodId)
+                }
+            },
+            onDismiss = {
+                showWaveOnboarding = false
+                pendingMoodId = null
+            }
+        )
     }
 }
 

@@ -1,6 +1,8 @@
 package com.liquidmusicglass
 
 import android.app.Application
+import coil.ImageLoader
+import coil.ImageLoaderFactory
 import com.kyant.fishnet.Fishnet
 import com.liquidmusicglass.api.icm.IcmAuthRepository
 import com.liquidmusicglass.api.icm.IcmRepository
@@ -9,11 +11,20 @@ import com.liquidmusicglass.data.local.db.LibraryRepository
 import com.liquidmusicglass.engine.AppSettings
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.logging.CrashHandler
+import com.liquidmusicglass.ui.glass.CoverSigningInterceptor
 import java.io.File
 
 import com.liquidmusicglass.engine.PlaylistManager
 
-class App : Application() {
+class App : Application(), ImageLoaderFactory {
+
+    override fun newImageLoader(): ImageLoader {
+        return ImageLoader.Builder(this)
+            .components {
+                add(CoverSigningInterceptor())
+            }
+            .build()
+    }
 
     override fun onCreate() {
         super.onCreate()

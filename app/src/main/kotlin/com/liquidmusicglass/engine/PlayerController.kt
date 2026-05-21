@@ -3,6 +3,7 @@ package com.liquidmusicglass.engine
 import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
+import android.os.Build
 import android.os.SystemClock
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
@@ -107,18 +108,15 @@ object PlayerController {
     val volume: StateFlow<Float> = _volume
     fun setVolume(value: Float) { _volume.value = value.coerceIn(0f, 1f) }
 
-    private val _autoMixEnabled = MutableStateFlow(false)
-    val autoMixEnabled: StateFlow<Boolean> = _autoMixEnabled
-    fun setAutoMix(enabled: Boolean) { _autoMixEnabled.value = enabled }
+    private val _playbackSpeed = MutableStateFlow(1.0f)
+    val playbackSpeed: StateFlow<Float> = _playbackSpeed
 
-    private val _isMixing = MutableStateFlow(false)
-    val isMixing: StateFlow<Boolean> = _isMixing
-    fun setMixing(mixing: Boolean) { _isMixing.value = mixing }
+    @Volatile
+    var audioServiceRef: AudioService? = null
 
-    private var autoMixEngine: ServiceBackedAutoMixEngine? = null
-
-    fun setAutoMixEngine(engine: ServiceBackedAutoMixEngine?) {
-        autoMixEngine = engine
+    fun setPlaybackSpeed(speed: Float) {
+        _playbackSpeed.value = speed.coerceIn(0.5f, 2.0f)
+        audioServiceRef?.setPlaybackSpeed(_playbackSpeed.value)
     }
 
     fun init(context: Context) {
@@ -319,7 +317,27 @@ object PlayerController {
                         endlessEngine.checkAndRefillIfNeeded()
                     }
 
-                    prefetchAhead(context, startIndex, depth = 3)
+                    prefetchAhead(context, startIndex, depth = 10)
+
+                    // Дополнительно: предзагружаем первые треки с реальными URLs параллельно
+                    // чтобы при переключении не было паузы
+                    launch {
+                        val prefetchIndices = (startIndex + 1 until minOf(startIndex + 6, tracks.size))
+                        prefetchIndices.forEach { idx ->
+                            val t = tracks[idx]
+                            if (t.isOnlineTrack) {
+                                val res = resolveStreamUrl(t.id)
+                                if (res is StreamResult.Success) {
+                                    withContext(Dispatchers.Main) {
+                                        val p = controller ?: appContext?.let { getPlayer(it) }
+                                        if (p != null && idx < p.mediaItemCount) {
+                                            p.replaceMediaItem(idx, buildMediaItem(t, res.uri))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 is StreamResult.Error -> {
                     android.util.Log.e("PlayerController", "Stream error for ${startTrack.id}: ${streamResult.code}")
@@ -346,7 +364,6 @@ object PlayerController {
 
     fun skipNext(context: Context) {
         logPlayback(completed = false, skipped = true)
-        autoMixEngine?.onManualNavigation()
         if (queue.isEmpty()) return
         val nextIndex = if (currentIndex + 1 < queue.size) currentIndex + 1 else 0
         mainScope.launch {
@@ -368,7 +385,6 @@ object PlayerController {
                 return@launch
             }
             logPlayback(completed = false, skipped = true)
-            autoMixEngine?.onManualNavigation()
             if (queue.isEmpty()) return@launch
             val prevIndex = if (currentIndex > 0) currentIndex - 1 else queue.lastIndex
             if (player != null && prevIndex < currentIndex && prevIndex >= 0) {
@@ -400,6 +416,7 @@ object PlayerController {
         lastSyncTimeMs = SystemClock.elapsedRealtime()
 
         if (durationMs > 0L && _durationMs.value != durationMs) {
+            android.util.Log.d("PlayerController", "[UPDATE] duration updated: ${_durationMs.value} -> $durationMs, pos=$positionMs")
             _durationMs.value = durationMs
             _currentTrack.value?.let { track ->
                 if (track.durationMs != durationMs) {
@@ -421,11 +438,30 @@ object PlayerController {
             currentIndex = index
             val track = queue[index]
             _currentTrack.value = track
+            android.util.Log.d("PlayerController", "[TRACK_CHANGED] id=$mediaId track.durationMs=${track.durationMs}")
             _durationMs.value = track.durationMs
             _currentPositionMs.value = 0L
             
-            // ИСПРАВЛЕНО: Сдвигаем окно предзагрузки вперед, выпрямляя ссылки
-            appContext?.let { prefetchAhead(it, index, depth = 3) }
+            // Предзагружаем следующие треки
+            appContext?.let { prefetchAhead(it, index, depth = 5) }
+
+            // КРИТИЧЕСКИЙ ФИКС: Если текущий трек онлайн — резолвим URL и заменяем в плеере
+            // чтобы не играл с плейсхолдером
+            if (track.isOnlineTrack) {
+                ioScope.launch {
+                    val result = resolveStreamUrl(track.id)
+                    if (result is StreamResult.Success) {
+                        withContext(Dispatchers.Main) {
+                            val player = controller ?: appContext?.let { getPlayer(it) }
+                            if (player != null && index < player.mediaItemCount) {
+                                val newItem = buildMediaItem(track, result.uri)
+                                player.replaceMediaItem(index, newItem)
+                                // Не делаем seek — трек уже играет, просто заменили источник
+                            }
+                        }
+                    }
+                }
+            }
 
             ioScope.launch {
                 endlessEngine.checkAndRefillIfNeeded()
@@ -469,11 +505,26 @@ object PlayerController {
     fun addToQueue(track: Track) {
         queue = queue + track
         _queueFlow.value = queue
+        // Также добавляем в ExoPlayer чтобы индексы синхронизировались
+        mainScope.launch {
+            val player = controller ?: appContext?.let { getPlayer(it) }
+            player?.addMediaItem(buildMediaItem(track, track.uri))
+        }
     }
 
     fun setAutoRefillContext(type: String, id: String, name: String, seedTrackId: String? = null) {}
     fun clearAutoRefillContext() {}
-    fun playNext(track: Track, context: Context) { addToQueue(track) }
+    fun playNext(track: Track, context: Context) {
+        addToQueue(track)
+        // Переключаемся на добавленный трек если сейчас ничего не играет
+        mainScope.launch {
+            val player = controller ?: appContext?.let { getPlayer(it) }
+            if (player != null && !player.isPlaying && player.mediaItemCount > 0) {
+                val newIndex = queue.lastIndex
+                playTrack(context, newIndex)
+            }
+        }
+    }
 
     // ═══════════════════════════════════════════════════════════
     //  Stream URL Resolution & External Bridge Fixes
@@ -499,6 +550,64 @@ object PlayerController {
         val expiresAtMs: Long,
         val fileId: String?
     )
+
+    fun resolveStreamUrlSync(trackId: String): Uri? {
+        val now = System.currentTimeMillis()
+        val cached = streamUrlCache[trackId]
+
+        if (cached != null && now < cached.expiresAtMs) {
+            return cached.uri
+        }
+
+        return try {
+            val quality = getEffectiveQuality(trackId)
+            val trackInfo = IcmRepository.getTrackInfoSync(trackId, quality = quality)
+
+            if (trackInfo != null) {
+                val uri = Uri.parse(trackInfo.url)
+                val ttl = if (trackInfo.expiresAt > 0) {
+                    (trackInfo.expiresAt * 1000L - now - 60_000L).coerceAtLeast(60_000L)
+                } else {
+                    STREAM_CACHE_TTL_MS
+                }
+
+                streamUrlCache[trackId] = CachedStreamUrl(
+                    uri = uri,
+                    expiresAtMs = now + ttl,
+                    fileId = trackInfo.fileId
+                )
+                uri
+            } else {
+                val error = IcmRepository.lastError.value
+                val apiException = IcmRepository.lastApiException.value
+                val requiredRegion = apiException?.requiredRegion
+                if ((error?.contains("region_unavailable") == true || error?.contains("451") == true) && requiredRegion != null) {
+                    val retryTrackInfo = IcmRepository.getTrackInfoSync(trackId, quality = quality, region = requiredRegion)
+                    if (retryTrackInfo != null) {
+                        val uri = Uri.parse(retryTrackInfo.url)
+                        val ttl = if (retryTrackInfo.expiresAt > 0) {
+                            (retryTrackInfo.expiresAt * 1000L - now - 60_000L).coerceAtLeast(60_000L)
+                        } else {
+                            STREAM_CACHE_TTL_MS
+                        }
+                        streamUrlCache[trackId] = CachedStreamUrl(
+                            uri = uri,
+                            expiresAtMs = now + ttl,
+                            fileId = retryTrackInfo.fileId
+                        )
+                        uri
+                    } else {
+                        null
+                    }
+                } else {
+                    null
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("PlayerController", "URL resolve sync failed: ${e.message}")
+            null
+        }
+    }
 
     private suspend fun resolveStreamUrl(trackId: String): StreamResult {
         val now = System.currentTimeMillis()
@@ -580,10 +689,17 @@ object PlayerController {
                     val player = getPlayer(context) ?: return@withContext
                     val currentMediaItem = player.currentMediaItem
                     if (currentMediaItem?.mediaId == trackId) {
+                        // Защита: проверяем что currentIndex валиден
+                        if (currentIndex !in queue.indices) return@withContext
+                        val currentPosition = player.currentPosition
                         val newItem = buildMediaItem(queue[currentIndex], result.uri)
-                        player.replaceMediaItem(currentIndex, newItem)
-                        player.prepare()
-                        player.play()
+                        // Защита: заменяем только если индекс существует в плеере
+                        if (currentIndex < player.mediaItemCount) {
+                            player.replaceMediaItem(currentIndex, newItem)
+                            player.seekTo(currentIndex, currentPosition)
+                            player.prepare()
+                            player.play()
+                        }
                     }
                 }
             }
@@ -623,13 +739,10 @@ object PlayerController {
         val isCompleted = completed || (playedSec >= 0.85f * durationSec)
         val isSkipped = !isCompleted && (skipped || (playedSec < 0.15f * durationSec))
 
-        val isWaveTrack = track.id.startsWith("wave_") ||
-                (queue.isNotEmpty() && currentIndex >= 0 &&
-                        queue.getOrNull(currentIndex)?.let { it.id == track.id } != null &&
-                        autoMixEnabled.value)
-
-        if (!isWaveTrack) return
-
+        // Per ICM API docs: "logged=false for non-primary track IDs (secondary catalog
+        // tracks ignored). On client you can send uniformly for all tracks — it does not
+        // harm us."  We therefore log every track; the server silently ignores
+        // non-Apple / non-wave IDs if it chooses to.
         ioScope.launch {
             try {
                 IcmRepository.logWavePlayback(
@@ -644,9 +757,22 @@ object PlayerController {
     }
 
     private fun buildMediaItem(track: Track, uri: Uri = track.uri): MediaItem {
+        // Для онлайн треков — используем liquid:// URI с track ID
+        // DataSource лениво резолвит URL если нужно
+        val mediaUri = if (track.isOnlineTrack) {
+            Uri.Builder()
+                .scheme(StreamingDataSource.SCHEME_LIQUID)
+                .authority("track")
+                .appendQueryParameter(StreamingDataSource.PARAM_TRACK_ID, track.id)
+                .appendQueryParameter(StreamingDataSource.PARAM_URL, uri.toString())
+                .build()
+        } else {
+            uri
+        }
+
         return MediaItem.Builder()
             .setMediaId(track.id)
-            .setUri(uri)
+            .setUri(mediaUri)
             .setMediaMetadata(
                 MediaMetadata.Builder()
                     .setTitle(track.title)
@@ -661,6 +787,16 @@ object PlayerController {
     private suspend fun getPlayer(context: Context): MediaController? {
         controller?.let { return it }
         if (mediaControllerUnavailable) return null
+
+        // Запускаем AudioService если ещё не запущен
+        try {
+            val serviceIntent = android.content.Intent(context.applicationContext, AudioService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.applicationContext.startForegroundService(serviceIntent)
+            } else {
+                context.applicationContext.startService(serviceIntent)
+            }
+        } catch (_: Exception) {}
 
         while (isConnectingController) {
             delay(50)

@@ -2,16 +2,15 @@ package com.liquidmusicglass.engine
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.Context
-import android.content.Intent
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
-import androidx.core.app.NotificationCompat
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
-import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
@@ -26,7 +25,6 @@ import androidx.media3.session.SessionResult
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
-import com.liquidmusicglass.MainActivity
 import com.liquidmusicglass.R
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -39,16 +37,16 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 /**
- * AudioService — строго по Media3 спецификации.
+ * AudioService — один ExoPlayer, один Listener, один MediaSession.
+ * Нет deck swapping, нет crossfade, нет secondary player.
  */
 @OptIn(UnstableApi::class)
 class AudioService : MediaSessionService() {
 
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-    private var _player: ExoPlayer? = null
-    private var _session: MediaSession? = null
-    private var _notificationProvider: DefaultMediaNotificationProvider? = null
+    private lateinit var player: ExoPlayer
+    private var session: MediaSession? = null
 
     private val channelId = "liquid_music_playback"
 
@@ -58,105 +56,166 @@ class AudioService : MediaSessionService() {
     private val _isBuffering = MutableStateFlow(false)
     val isBuffering: StateFlow<Boolean> = _isBuffering.asStateFlow()
 
+    private val _playbackSpeed = MutableStateFlow(1.0f)
+    val playbackSpeed: StateFlow<Float> = _playbackSpeed.asStateFlow()
+
+    private val _isDucked = MutableStateFlow(false)
+    val isDucked: StateFlow<Boolean> = _isDucked.asStateFlow()
+
     private var positionJob: Job? = null
-    private var autoMixEngine: ServiceBackedAutoMixEngine? = null
+
+    private var focusRequest: AudioFocusRequest? = null
+    private var audioManager: AudioManager? = null
+
+    private val focusChangeListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
+        when (focusChange) {
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                setDucked(true)
+            }
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                player.pause()
+            }
+            AudioManager.AUDIOFOCUS_GAIN -> {
+                setDucked(false)
+                if (!player.isPlaying && player.playbackState == Player.STATE_READY) {
+                    player.play()
+                }
+            }
+            AudioManager.AUDIOFOCUS_LOSS -> {
+                setDucked(false)
+                player.pause()
+            }
+        }
+    }
+
+    private val playerListener = object : Player.Listener {
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            _playbackState.value = playbackState
+            _isBuffering.value = (playbackState == Player.STATE_BUFFERING)
+
+            if (playbackState == Player.STATE_ENDED) {
+                android.util.Log.d("AudioService", "STATE_ENDED → next track")
+                PlayerController.onTrackEnded()
+            }
+        }
+
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            PlayerController.setPlaying(isPlaying)
+        }
+
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            mediaItem?.let {
+                PlayerController.onTrackChanged(it.mediaId)
+            }
+        }
+
+        override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+            android.util.Log.e("AudioService", "Player error: ${error.errorCodeName} | ${error.message}")
+
+            val isExpiredUrl = error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS
+                && error.message?.contains("403") == true
+
+            if (isExpiredUrl) {
+                val currentTrackId = player.currentMediaItem?.mediaId
+                if (currentTrackId != null) {
+                    PlayerController.handleExpiredUrl(this@AudioService, currentTrackId)
+                    return
+                }
+            }
+
+            player.stop()
+            player.prepare()
+            PlayerController.setPlaying(false)
+            PlayerController.onPlaybackError(error.errorCodeName)
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
 
+        // Audio focus setup
+        audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        requestAudioFocus()
+
+        // Инициализация кэша (lazy, не блокирует старт)
         serviceScope.launch {
             MediaCacheManager.init(this@AudioService)
-            rebuildPlayerWithCache()
         }
 
-        val player = buildPlayer()
-        _player = player
-        currentPlayer = player
+        // ── Один плеер ──
+        player = buildPlayer()
+        player.addListener(playerListener)
 
-        _session = MediaSession.Builder(this, player)
+        PlayerController.audioServiceRef = this
+
+        // ── Одна сессия, созданная один раз ──
+        session = MediaSession.Builder(this, player)
             .setId("liquid_music_session")
             .setCallback(SessionCallback())
             .build()
 
+        // ── Нотификация ──
         val notificationProvider = DefaultMediaNotificationProvider.Builder(this)
             .setChannelId(channelId)
             .setChannelName(R.string.notification_channel_name)
             .setNotificationId(1001)
             .build()
-            .apply {
-                setSmallIcon(R.drawable.ic_notification_play)
-            }
-        _notificationProvider = notificationProvider
+            .apply { setSmallIcon(R.drawable.ic_notification_play) }
         setMediaNotificationProvider(notificationProvider)
 
-        player.addListener(PlayerEventForwarder())
-
-        autoMixEngine = ServiceBackedAutoMixEngine(
-            context = this,
-            scope = serviceScope,
-            isEnabled = { PlayerController.autoMixEnabled.value }
-        )
-        PlayerController.setAutoMixEngine(autoMixEngine)
-
-        startPositionPolling(player)
+        // ── Полинг позиции ──
+        startPositionPolling()
         ensureNotificationChannel()
     }
 
-    private fun rebuildPlayerWithCache() {
-        val oldPlayer = _player ?: return
-        val cacheFactory = MediaCacheManager.getCacheDataSourceFactory()
-        if (cacheFactory == null) {
-            android.util.Log.d("AudioService", "Cache not available, using HTTP-only player")
-            return
+    private fun requestAudioFocus() {
+        val am = audioManager ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                .setAudioAttributes(
+                    android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .build()
+                )
+                .setOnAudioFocusChangeListener(focusChangeListener)
+                .setWillPauseWhenDucked(false) // Мы сами управляем ducking'ом
+                .build()
+            focusRequest = request
+            am.requestAudioFocus(request)
+        } else {
+            @Suppress("DEPRECATION")
+            am.requestAudioFocus(
+                focusChangeListener,
+                AudioManager.STREAM_MUSIC,
+                AudioManager.AUDIOFOCUS_GAIN
+            )
         }
-
-        val wasPlaying = oldPlayer.isPlaying
-        val currentPosition = oldPlayer.currentPosition
-        val currentMediaItem = oldPlayer.currentMediaItem
-        val mediaItems = (0 until oldPlayer.mediaItemCount).map { oldPlayer.getMediaItemAt(it) }
-        val currentIndex = oldPlayer.currentMediaItemIndex
-
-        val newPlayer = buildPlayer(cacheFactory)
-        _player = newPlayer
-        currentPlayer = newPlayer
-
-        if (mediaItems.isNotEmpty()) {
-            newPlayer.setMediaItems(mediaItems, currentIndex, currentPosition)
-            newPlayer.prepare()
-            if (wasPlaying) newPlayer.play()
-        } else if (currentMediaItem != null) {
-            newPlayer.setMediaItem(currentMediaItem)
-            newPlayer.prepare()
-            if (wasPlaying) newPlayer.play()
-        }
-
-        oldPlayer.removeListener(PlayerEventForwarder())
-        newPlayer.addListener(PlayerEventForwarder())
-
-        _session?.let { session ->
-            session.release()
-            _session = null
-        }
-
-        _session = MediaSession.Builder(this, newPlayer)
-            .setId("liquid_music_session")
-            .setCallback(SessionCallback())
-            .build()
-
-        startPositionPolling(newPlayer)
-        android.util.Log.d("AudioService", "Player rebuilt with cache support")
     }
 
-    private fun buildPlayer(
-        cacheFactory: androidx.media3.datasource.cache.CacheDataSource.Factory? = null
-    ): ExoPlayer {
-        val dataSourceFactory = cacheFactory ?: DefaultHttpDataSource.Factory()
+    private fun abandonAudioFocus() {
+        val am = audioManager ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            focusRequest?.let { am.abandonAudioFocusRequest(it) }
+        } else {
+            @Suppress("DEPRECATION")
+            am.abandonAudioFocus(focusChangeListener)
+        }
+        focusRequest = null
+    }
+
+    private fun buildPlayer(): ExoPlayer {
+        val httpFactory = DefaultHttpDataSource.Factory()
             .setAllowCrossProtocolRedirects(true)
             .setConnectTimeoutMs(5_000)
             .setReadTimeoutMs(5_000)
             .setDefaultRequestProperties(mapOf(
                 "User-Agent" to "LiquidMusicGlass/1.0"
             ))
+
+        val dataSourceFactory = StreamingDataSource.create(
+            httpDataSource = httpFactory
+        )
 
         val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
 
@@ -181,122 +240,35 @@ class AudioService : MediaSessionService() {
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
-        return _session
+        return session
     }
 
     override fun onDestroy() {
         positionJob?.cancel()
-        autoMixEngine?.release()
-        autoMixEngine = null
+        abandonAudioFocus()
 
-        _player?.removeListener(PlayerEventForwarder())
-        _player?.release()
-        _player = null
-        currentPlayer = null
+        player.removeListener(playerListener)
+        player.release()
 
-        _session?.release()
-        _session = null
+        session?.release()
+        session = null
+
+        PlayerController.audioServiceRef = null
 
         MediaCacheManager.release()
         super.onDestroy()
     }
 
-    /**
-     * Deck Swapping: динамически меняет активный плеер в MediaSession.
-     * Используется AutoMix для бесшовного перехода между треками.
-     */
-    fun switchActivePlayer(newPrimary: ExoPlayer) {
-        _session?.let { session ->
-            if (session.player != newPrimary) {
-                // Переносим листенер со старого плеера
-                val oldPlayer = _player
-                oldPlayer?.removeListener(PlayerEventForwarder())
-                newPrimary.addListener(PlayerEventForwarder())
-
-                // Меняем плеер в сессии — система увидит новый активный плеер
-                session.player = newPrimary
-                _player = newPrimary
-                currentPlayer = newPrimary
-
-                // Перезапускаем полинг на новом плеере
-                startPositionPolling(newPrimary)
-
-                android.util.Log.d("AudioService", "MediaSession successfully swapped to new primary deck.")
-            }
-        }
-    }
-
-    private inner class PlayerEventForwarder : Player.Listener {
-
-        override fun onPlaybackStateChanged(playbackState: Int) {
-            _playbackState.value = playbackState
-            _isBuffering.value = (playbackState == Player.STATE_BUFFERING)
-
-            when (playbackState) {
-                Player.STATE_ENDED -> {
-                    android.util.Log.d("AudioService", "STATE_ENDED → next track")
-                    PlayerController.onTrackEnded()
-                }
-            }
-        }
-
-        override fun onIsPlayingChanged(isPlaying: Boolean) {
-            PlayerController.setPlaying(isPlaying)
-        }
-
-        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-            mediaItem?.let {
-                PlayerController.onTrackChanged(it.mediaId)
-                autoMixEngine?.onTrackChanged()
-            }
-        }
-
-        override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-            android.util.Log.e("AudioService", "Player error: ${error.errorCodeName} | ${error.message}")
-
-            val isExpiredUrl = error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS
-                && error.message?.contains("403") == true
-
-            if (isExpiredUrl) {
-                val currentTrackId = _player?.currentMediaItem?.mediaId
-                if (currentTrackId != null) {
-                    PlayerController.handleExpiredUrl(this@AudioService, currentTrackId)
-                    return
-                }
-            }
-
-            _player?.stop()
-            _player?.prepare()
-            PlayerController.setPlaying(false)
-            PlayerController.onPlaybackError(error.errorCodeName)
-        }
-    }
-
-    // Фикс: Полинг непрерывно шлет позицию и безопасный duration в PlayerController
-    private fun startPositionPolling(player: ExoPlayer) {
+    private fun startPositionPolling() {
         positionJob?.cancel()
         positionJob = serviceScope.launch {
             while (true) {
                 val position = player.currentPosition
                 val duration = player.duration
-                
-                val safeDuration = if (duration > 0 && duration != C.TIME_UNSET) duration else 0L
 
+                val safeDuration = if (duration > 0 && duration != C.TIME_UNSET) duration else 0L
                 PlayerController.updatePosition(position, safeDuration)
 
-                if (player.isPlaying) {
-                    val currentIndex = PlayerController.getCurrentIndex()
-                    val isPlaying = player.isPlaying
-                    val queueSize = PlayerController.getCurrentQueue().size
-
-                    autoMixEngine?.maybeStartAutoMix(
-                        currentPositionMs = position,
-                        durationMs = safeDuration,
-                        currentIndex = currentIndex,
-                        isPlaying = isPlaying,
-                        queueSize = queueSize
-                    )
-                }
                 delay(200L)
             }
         }
@@ -360,11 +332,18 @@ class AudioService : MediaSessionService() {
         }
     }
 
+    fun setPlaybackSpeed(speed: Float) {
+        val clamped = speed.coerceIn(0.5f, 2.0f)
+        player.setPlaybackParameters(PlaybackParameters(clamped))
+        _playbackSpeed.value = clamped
+    }
+
+    fun setDucked(ducked: Boolean) {
+        _isDucked.value = ducked
+        player.volume = if (ducked) 0.2f else 1f
+    }
+
     companion object {
         private const val COMMAND_TOGGLE_FAVORITE = "com.liquidmusicglass.TOGGLE_FAVORITE"
-
-        @Volatile
-        var currentPlayer: ExoPlayer? = null
-            private set
     }
 }

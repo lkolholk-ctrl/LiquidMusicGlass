@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.AudioManager
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
@@ -53,6 +54,8 @@ import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.ThumbUp
+import androidx.compose.material.icons.rounded.ThumbDown
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
@@ -97,6 +100,7 @@ import com.kyant.backdrop.shadow.InnerShadow
 import com.kyant.backdrop.shadow.Shadow
 import com.kyant.shapes.Capsule
 import com.liquidmusicglass.engine.PlayerController
+import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.ui.glass.AlbumArtImage
 import com.liquidmusicglass.ui.glass.pressScale
 import com.liquidmusicglass.ui.glass.rememberAlbumColors
@@ -119,7 +123,6 @@ fun FullPlayer(
     currentPositionMs: Long,
     durationMs: Long,
     volume: Float,
-    isMixing: Boolean,
     onClose: () -> Unit,
     onDrag: (Float) -> Unit,
     onDragEnd: () -> Unit,
@@ -146,6 +149,8 @@ fun FullPlayer(
     val artistSheetState = rememberModalBottomSheetState(
         skipPartiallyExpanded = true
     )
+    // Wave feedback state: null = none, true = liked, false = disliked
+    var waveFeedback by remember { mutableStateOf<Boolean?>(null) }
     // Видимость контролов плеера. Когда открыта лирика — скрываются (как в Apple Music).
     // Тап по области лирики временно показывает их снова.
     var controlsVisible by remember { mutableStateOf(true) }
@@ -210,6 +215,11 @@ fun FullPlayer(
             kotlinx.coroutines.delay(3000L)
             controlsVisible = false
         }
+    }
+
+    // Reset wave feedback state when track changes
+    LaunchedEffect(trackId) {
+        waveFeedback = null
     }
 
     val controlsAlpha = ((expandProgress - 0.4f) / 0.6f).coerceIn(0f, 1f)
@@ -527,6 +537,80 @@ fun FullPlayer(
                             modifier = Modifier.size(26.dp)
                         )
                     }
+                    // ThumbUp — wave feedback (more track/artist)
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .pressScale {
+                                currentTrackObj?.let { track ->
+                                    scope.launch {
+                                        // Optimistic: immediately show as selected
+                                        val previousFeedback = waveFeedback
+                                        waveFeedback = true
+                                        val feedbackType = if (track.artists.firstOrNull()?.id != null) {
+                                            "more_artist"
+                                        } else "more_track"
+                                        val value = track.artists.firstOrNull()?.id ?: track.id
+                                        val success = IcmRepository.sendWaveFeedback(feedbackType, value)
+                                        if (!success) {
+                                            // Rollback on failure
+                                            waveFeedback = previousFeedback
+                                        }
+                                    }
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        val thumbUpTint by animateColorAsState(
+                            targetValue = if (waveFeedback == true) Color(0xFF4CAF50)
+                            else Color.White.copy(alpha = 0.70f),
+                            animationSpec = tween(200),
+                            label = "thumbUp"
+                        )
+                        Icon(
+                            imageVector = Icons.Rounded.ThumbUp,
+                            contentDescription = null,
+                            tint = thumbUpTint,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                    // ThumbDown — wave feedback (less track/artist)
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .pressScale {
+                                currentTrackObj?.let { track ->
+                                    scope.launch {
+                                        // Optimistic: immediately show as selected
+                                        val previousFeedback = waveFeedback
+                                        waveFeedback = false
+                                        val feedbackType = if (track.artists.firstOrNull()?.id != null) {
+                                            "less_artist"
+                                        } else "less_track"
+                                        val value = track.artists.firstOrNull()?.id ?: track.id
+                                        val success = IcmRepository.sendWaveFeedback(feedbackType, value)
+                                        if (!success) {
+                                            // Rollback on failure
+                                            waveFeedback = previousFeedback
+                                        }
+                                    }
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        val thumbDownTint by animateColorAsState(
+                            targetValue = if (waveFeedback == false) Color(0xFFFF5252)
+                            else Color.White.copy(alpha = 0.70f),
+                            animationSpec = tween(200),
+                            label = "thumbDown"
+                        )
+                        Icon(
+                            imageVector = Icons.Rounded.ThumbDown,
+                            contentDescription = null,
+                            tint = thumbDownTint,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
                     Box(
                         modifier = Modifier
                             .size(44.dp)
@@ -573,18 +657,6 @@ fun FullPlayer(
                         color = Color.White.copy(alpha = 0.50f),
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Medium
-                    )
-                    val mAlpha by animateFloatAsState(
-                        if (isMixing) 1f else 0f,
-                        tween(if (isMixing) 600 else 400, easing = FastOutSlowInEasing),
-                        label = "mix"
-                    )
-                    Text(
-                        "Mixing",
-                        color = Color.White.copy(alpha = 0.65f * mAlpha),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.graphicsLayer { alpha = mAlpha }
                     )
                     val remaining = (durationMs - currentPositionMs).coerceAtLeast(0)
                     Text(
@@ -712,22 +784,49 @@ fun FullPlayer(
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 56.dp)
+                        .padding(horizontal = 40.dp)
                         .graphicsLayer { alpha = bottomAlpha },
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     BottomIcon(Icons.Rounded.ChatBubbleOutline) {
                         if (showLyrics) {
-                            // Лирика открыта и контролы видны (раз кнопку нажали) — закрываем лирику
                             showLyrics = false
                             controlsVisible = true
                         } else {
-                            // Открываем лирику и прячем контролы
                             showLyrics = true
                             controlsVisible = false
                         }
                     }
                     BottomIcon(Icons.Rounded.Cast) { showAirPlay = true }
+
+                    // Playback Speed Button
+                    val playbackSpeed by PlayerController.playbackSpeed.collectAsState()
+                    Box(
+                        Modifier
+                            .size(48.dp)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) {
+                                val speeds = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f)
+                                val currentIndex = speeds.indexOf(playbackSpeed)
+                                val nextSpeed = speeds.getOrElse(currentIndex + 1) { speeds.first() }
+                                PlayerController.setPlaybackSpeed(nextSpeed)
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = when (playbackSpeed) {
+                                1.0f -> "1×"
+                                else -> "${playbackSpeed.toString().removeSuffix(".0")}×"
+                            },
+                            color = Color.White.copy(alpha = 0.70f),
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+
                     BottomIcon(Icons.AutoMirrored.Rounded.QueueMusic) { showQueue = true }
                 }
             }

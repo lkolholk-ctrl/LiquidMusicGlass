@@ -40,6 +40,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -95,38 +99,76 @@ fun ArtistDetailScreen(
 
     var artistTracks by remember { mutableStateOf<List<com.liquidmusicglass.engine.Track>>(emptyList()) }
     var trackDurations by remember { mutableStateOf<Map<String, Long>>(emptyMap()) }
+    var isLoadingTracks by remember { mutableStateOf(false) }
 
-    // Fetch batch track meta for durations
+    // Загружаем ВСЕ треки артиста: топ + все альбомы + синглы + featuring
     LaunchedEffect(artist) {
-        val songs = artist?.topSongs ?: emptyList()
-        val topTracks = songs.map { it.toTrack() }
-        val singleTracks = artist?.singles?.map { single ->
-            com.liquidmusicglass.engine.Track(
-                id = single.id,
-                title = single.title,
-                artist = single.artist,
-                albumName = single.title,
-                uri = android.net.Uri.parse("https://byicloud.online/track/${single.id}"),
-                durationMs = 0L,
-                albumId = single.id.hashCode().toLong(),
-                coverUrl = single.cover.replace("1000x1000", "600x600")
-            )
-        } ?: emptyList()
-        val tracks = topTracks + singleTracks
-        artistTracks = tracks
-        if (tracks.isNotEmpty() && IcmRepository.isInitialized.value) {
-            try {
-                val batch = IcmRepository.getBatchTrackMeta(tracks.map { it.id })
-                val durMap = mutableMapOf<String, Long>()
-                batch?.items?.forEach { item ->
-                    if (item.duration != null && item.duration > 0) {
-                        // Use normalized durationMs (handles secondary_/vk_ seconds -> ms)
-                        durMap[item.id] = item.durationMs
+        val art = artist ?: return@LaunchedEffect
+        isLoadingTracks = true
+
+        // Стартуем с topSongs
+        val allTracks = mutableListOf<com.liquidmusicglass.engine.Track>()
+        art.topSongs.mapTo(allTracks) { it.toTrack() }
+
+        // Собираем все album IDs: albums + singles + featuring + appearsOn + latestRelease
+        val albumIds = mutableListOf<String>()
+        art.albums.mapTo(albumIds) { it.id }
+        art.singles.mapTo(albumIds) { it.id }
+        art.featuring.mapTo(albumIds) { it.id }
+        art.appearsOn.mapTo(albumIds) { it.id }
+        art.latestRelease?.let { albumIds.add(it.id) }
+
+        // Загружаем каждый альбом параллельно и собираем треки
+        if (albumIds.isNotEmpty() && IcmRepository.isInitialized.value) {
+            kotlinx.coroutines.coroutineScope {
+                val albumResults = albumIds.map { albumId ->
+                    async(Dispatchers.IO) {
+                        try {
+                            IcmRepository.getAlbum(albumId)
+                        } catch (_: Exception) { null }
                     }
+                }.awaitAll()
+
+                for (album in albumResults.filterNotNull()) {
+                    album.tracks.mapTo(allTracks) { track ->
+                        com.liquidmusicglass.engine.Track(
+                            id = track.id,
+                            title = track.title,
+                            artist = track.artist,
+                            albumName = album.album.title,
+                            uri = android.net.Uri.parse("https://byicloud.online/track/${track.id}"),
+                            durationMs = track.durationMs,
+                            albumId = album.album.id.hashCode().toLong(),
+                            coverUrl = album.album.cover.replace("1000x1000", "600x600")
+                        )
+                    }
+                }
+            }
+        }
+
+        // Убираем дубликаты по ID
+        val uniqueTracks = allTracks.distinctBy { it.id }
+        artistTracks = uniqueTracks
+
+        // Batch meta для длительностей (chunks по 50)
+        if (uniqueTracks.isNotEmpty() && IcmRepository.isInitialized.value) {
+            try {
+                val durMap = mutableMapOf<String, Long>()
+                uniqueTracks.map { it.id }.chunked(50).forEach { chunk ->
+                    try {
+                        val batch = IcmRepository.getBatchTrackMeta(chunk)
+                        batch?.items?.forEach { item ->
+                            if (item.duration != null && item.duration > 0) {
+                                durMap[item.id] = item.durationMs
+                            }
+                        }
+                    } catch (_: Exception) {}
                 }
                 trackDurations = durMap
             } catch (_: Exception) {}
         }
+
+        isLoadingTracks = false
     }
 
     val albums = remember(artist) {
@@ -525,6 +567,23 @@ fun ArtistDetailScreen(
                     }
 
                     // Track list
+                    if (isLoadingTracks) {
+                        item {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 20.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(
+                                    color = AppleRed,
+                                    modifier = Modifier.size(24.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            }
+                        }
+                    }
+
                     items(artistTracks, key = { it.id }) { track ->
                         Row(
                             modifier = Modifier

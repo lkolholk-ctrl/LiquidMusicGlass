@@ -355,6 +355,18 @@ object IcmRepository {
         return result.getOrNull()
     }
 
+    fun getTrackInfoSync(trackId: String, region: String? = null, quality: String? = null): IcmTrackResponse? {
+        val result = api.getTrackSync(trackId, region, quality)
+        result.exceptionOrNull()?.let {
+            _lastException = it as? Exception
+            _lastError.value = it.message
+            if (it is IcmApiException) {
+                _lastApiException.value = it
+            }
+        }
+        return result.getOrNull()
+    }
+
     /**
      * Album tracks as Track list.
      */
@@ -438,6 +450,18 @@ object IcmRepository {
             _lastError.value = it.message
         }
         return result.getOrNull()
+    }
+
+    /**
+     * Sign cover URL for custom covers.
+     */
+    suspend fun signCover(fileId: String): String? {
+        val result = api.signCover(fileId)
+        result.exceptionOrNull()?.let {
+            _lastException = it as? Exception
+            _lastError.value = it.message
+        }
+        return result.getOrNull()?.url
     }
 
     /**

@@ -169,6 +169,50 @@ class IcmApi private constructor() {
         }
     }
 
+    private inline fun <reified T> executeSync(
+        endpoint: String,
+        method: String = "GET",
+        body: String? = null,
+        async: Boolean = false
+    ): Result<T> {
+        try {
+            val url = if (async) "$BASE_URL$endpoint?async=1" else "$BASE_URL$endpoint"
+            val request = buildRequest(url, method, body)
+            val response = client.newCall(request).execute()
+
+            extractRequestId(response)?.let { onRequestId?.invoke(it) }
+
+            return when {
+                response.isSuccessful -> {
+                    Result.success(parseResponse<T>(response.body))
+                }
+                response.code == 202 -> {
+                    val pending = parseResponse<IcmAsyncTrackPending>(response.body)
+                    Result.failure(IcmAsyncPendingException(pending))
+                }
+                else -> {
+                    val errorText = response.body?.string() ?: "HTTP ${response.code}"
+                    val error = try {
+                        json.decodeFromString<IcmError>(errorText)
+                    } catch (_: Exception) {
+                        null
+                    }
+                    val retryAfterHeader = response.header("Retry-After")?.toIntOrNull()
+                    Result.failure(IcmApiException(
+                        response.code,
+                        errorText,
+                        error?.error,
+                        error?.requiredRegion,
+                        retryAfterHeader ?: error?.retryAfter,
+                        error?.source
+                    ))
+                }
+            }
+        } catch (e: Exception) {
+            return Result.failure(e)
+        }
+    }
+
     // ═══════════════════════════════════════════════════════════
     //  Public API
     // ═══════════════════════════════════════════════════════════
@@ -270,6 +314,21 @@ suspend fun search(
             )
         )
         return execute("/track", method = "POST", body = body)
+    }
+
+    fun getTrackSync(
+        trackId: String,
+        region: String? = null,
+        quality: String? = streamQuality
+    ): Result<IcmTrackResponse> {
+        val body = json.encodeToString(
+            IcmTrackRequest(
+                trackId = trackId,
+                region = region ?: defaultRegion,
+                quality = quality
+            )
+        )
+        return executeSync("/track", method = "POST", body = body)
     }
 
     /**

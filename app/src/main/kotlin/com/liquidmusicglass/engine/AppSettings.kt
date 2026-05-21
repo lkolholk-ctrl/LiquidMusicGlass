@@ -25,9 +25,6 @@ object AppSettings {
     private val scope = CoroutineScope(Dispatchers.Main + Job())
 
     // ── Playback Settings ──
-    private val _autoMixEnabled = MutableStateFlow(false)
-    val autoMixEnabled: StateFlow<Boolean> = _autoMixEnabled
-
     private val _gaplessEnabled = MutableStateFlow(true)
     val gaplessEnabled: StateFlow<Boolean> = _gaplessEnabled
 
@@ -98,11 +95,6 @@ object AppSettings {
     // ═══════════════════════════════════════════
     //  Setters (save immediately)
     // ═══════════════════════════════════════════
-
-    fun setAutoMix(enabled: Boolean) {
-        _autoMixEnabled.value = enabled
-        safePrefs()?.edit()?.putBoolean("automix", enabled)?.apply()
-    }
 
     fun setGapless(enabled: Boolean) {
         _gaplessEnabled.value = enabled
@@ -275,7 +267,6 @@ object AppSettings {
 
     private fun loadAll() {
         val p = safePrefs() ?: return
-        _autoMixEnabled.value = p.getBoolean("automix", false)
         _gaplessEnabled.value = p.getBoolean("gapless", true)
         _sleepTimerMinutes.value = p.getInt("sleep_timer", 0)
         _ignoreShortEnabled.value = p.getBoolean("ignore_short", false)
