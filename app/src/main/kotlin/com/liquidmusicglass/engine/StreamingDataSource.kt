@@ -97,8 +97,8 @@ class StreamingDataSource private constructor(
         val trackId = uri.getQueryParameter(PARAM_TRACK_ID)
         if (trackId != null) {
             // Check downloaded offline files first (regardless of premium status)
-            val offlineMp3 = File(context.filesDir, "downloads/.mp3")
-            val offlineM4a = File(context.filesDir, "downloads/.m4a")
+            val offlineMp3 = File(context.filesDir, "downloads/$trackId.mp3")
+            val offlineM4a = File(context.filesDir, "downloads/$trackId.m4a")
             when {
                 offlineMp3.exists() && offlineMp3.length() > 0 -> return Uri.fromFile(offlineMp3)
                 offlineM4a.exists() && offlineM4a.length() > 0 -> return Uri.fromFile(offlineM4a)

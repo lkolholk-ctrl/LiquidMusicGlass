@@ -35,6 +35,7 @@ object PlayerController {
     private val mainScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     private var appContext: Context? = null
+    val context: Context? get() = appContext
     private var controller: MediaController? = null
     private var isConnectingController = false
     private var mediaControllerUnavailable = false
@@ -137,10 +138,11 @@ object PlayerController {
     // ═══════════════════════════════════════════════════════════
 
     fun playTrack(context: Context, index: Int) {
-        if (index !in queue.indices) return
+        val currentQueue = queue
+        if (index !in currentQueue.indices) return
 
         ioScope.launch {
-            val track = queue.getOrNull(index) ?: return@launch
+            val track = currentQueue.getOrNull(index) ?: return@launch
 
             withContext(Dispatchers.Main) {
                 currentIndex = index
@@ -190,14 +192,15 @@ object PlayerController {
      * Предзагружает (прогревает кэш) для следующих треков в очереди.
      */
     private fun prefetchAhead(context: Context, currentIndex: Int, depth: Int = 3) {
-        if (queue.isEmpty()) return
+        val currentQueue = queue.toList()
+        if (currentQueue.isEmpty()) return
 
-        val endIndex = (currentIndex + 1 + depth).coerceAtMost(queue.size)
+        val endIndex = (currentIndex + 1 + depth).coerceAtMost(currentQueue.size)
         val indicesToPrefetch = (currentIndex + 1 until endIndex)
 
         ioScope.launch {
             indicesToPrefetch.forEach { idx ->
-                val track = queue.getOrNull(idx) ?: return@forEach
+                val track = currentQueue.getOrNull(idx) ?: return@forEach
                 if (track.isOnlineTrack) {
                     resolveStreamUrl(track.id)
                 }
@@ -277,8 +280,9 @@ object PlayerController {
                     }
 
                     withContext(Dispatchers.Main) {
-                        queue = tracks
-                        _queueFlow.value = tracks
+                        val immutableTracks = tracks.toList()
+                        queue = immutableTracks
+                        _queueFlow.value = immutableTracks
                         currentIndex = startIndex
                         _currentTrack.value = startTrack
                         _durationMs.value = startTrack.durationMs
@@ -339,8 +343,9 @@ object PlayerController {
 
     fun skipNext(context: Context) {
         logPlayback(completed = false, skipped = true)
-        if (queue.isEmpty()) return
-        val nextIndex = if (currentIndex + 1 < queue.size) currentIndex + 1 else 0
+        val currentQueue = queue
+        if (currentQueue.isEmpty()) return
+        val nextIndex = if (currentIndex + 1 < currentQueue.size) currentIndex + 1 else 0
         mainScope.launch {
             val player = getPlayer(context)
             if (player != null && nextIndex > currentIndex && player.mediaItemCount > nextIndex) {
@@ -360,8 +365,9 @@ object PlayerController {
                 return@launch
             }
             logPlayback(completed = false, skipped = true)
-            if (queue.isEmpty()) return@launch
-            val prevIndex = if (currentIndex > 0) currentIndex - 1 else queue.lastIndex
+            val currentQueue = queue
+            if (currentQueue.isEmpty()) return@launch
+            val prevIndex = if (currentIndex > 0) currentIndex - 1 else currentQueue.lastIndex
             if (player != null && prevIndex < currentIndex && prevIndex >= 0) {
                 player.seekToPreviousMediaItem()
             } else {
@@ -408,8 +414,9 @@ object PlayerController {
     }
 
     fun onTrackChanged(mediaId: String) {
-        val index = queue.indexOfFirst { it.id == mediaId }
-        val track = queue.getOrNull(index) ?: return
+        val currentQueue = queue
+        val index = currentQueue.indexOfFirst { it.id == mediaId }
+        val track = currentQueue.getOrNull(index) ?: return
         currentIndex = index
         _currentTrack.value = track
         android.util.Log.d("PlayerController", "[TRACK_CHANGED] id=$mediaId track.durationMs=${track.durationMs}")
@@ -426,8 +433,9 @@ object PlayerController {
 
     fun onTrackEnded() {
         logPlayback(completed = true, skipped = false)
+        val currentQueue = queue
         val nextIndex = currentIndex + 1
-        if (nextIndex < queue.size) {
+        if (nextIndex < currentQueue.size) {
             appContext?.let { ctx ->
                 mainScope.launch {
                     val player = getPlayer(ctx)
@@ -449,8 +457,9 @@ object PlayerController {
     }
 
     fun setQueue(tracks: List<Track>, startIndex: Int = 0) {
-        queue = tracks
-        _queueFlow.value = tracks
+        val immutableTracks = tracks.toList()
+        queue = immutableTracks
+        _queueFlow.value = immutableTracks
         currentIndex = startIndex
     }
 
@@ -645,7 +654,8 @@ object PlayerController {
                     val currentMediaItem = player.currentMediaItem
                     if (currentMediaItem?.mediaId == trackId) {
                         // Защита: проверяем что currentIndex валиден
-                        val track = queue.getOrNull(currentIndex) ?: return@withContext
+                        val currentQueue = queue
+                        val track = currentQueue.getOrNull(currentIndex) ?: return@withContext
                         val currentPosition = player.currentPosition
                         val newItem = buildMediaItem(track, result.uri)
                         // Защита: заменяем только если индекс существует в плеере
@@ -662,18 +672,7 @@ object PlayerController {
     }
 
     private fun getEffectiveQuality(trackId: String): String? {
-        val allowed = com.liquidmusicglass.api.icm.IcmAuthRepository.allowedQualities.value
-        val desired = com.liquidmusicglass.api.icm.IcmApi.getInstance().streamQuality ?: "256K"
-
-        if (allowed.isNotEmpty() && !allowed.contains(desired)) {
-            return if (allowed.contains("256K")) "256K" else allowed.firstOrNull() ?: "128K"
-        }
-
-        val hasPremium = com.liquidmusicglass.api.icm.IcmAuthRepository.isPremium.value
-        if (!hasPremium && trackId.startsWith("secondary_")) {
-            if (desired == "ALAC" || desired == "320K") return "256K"
-        }
-        return desired
+        return com.liquidmusicglass.api.icm.IcmAuthRepository.getEffectiveQuality(trackId)
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -822,6 +821,19 @@ object PlayerController {
         current.removeAll { it.id == track.id }
         current.add(0, track)
         _recentlyPlayed.value = current.take(50)
+
+        appContext?.let { ctx ->
+            com.liquidmusicglass.data.local.LocalStorage.addToHistory(
+                ctx,
+                com.liquidmusicglass.data.local.HistoryEntry(
+                    trackId = track.id,
+                    title = track.title,
+                    artist = track.artist,
+                    coverUrl = track.coverUrl,
+                    durationMs = track.durationMs
+                )
+            )
+        }
     }
 
     fun toggleShuffle() {

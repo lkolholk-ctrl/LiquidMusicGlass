@@ -358,17 +358,35 @@ object IcmRepository {
         // ─── Recommendations: wave tracks (if linked) ───
         if (api.partnerUserId != null) {
             val waveItems = mutableListOf<IcmHomeItem>()
-            repeat(5) {
+            val excludeIds = mutableListOf<String>()
+
+            // Gather seed candidates from recentlyPlayed, LocalStorage, and Favorites
+            val seedCandidates = mutableListOf<String>()
+            seedCandidates.addAll(com.liquidmusicglass.engine.PlayerController.recentlyPlayed.value.map { it.id })
+
+            val context = com.liquidmusicglass.engine.PlayerController.context
+            if (context != null) {
+                seedCandidates.addAll(com.liquidmusicglass.data.local.LocalStorage.getHistory(context).map { it.trackId })
+                try {
+                    val favs = com.liquidmusicglass.data.local.db.LibraryRepository.getInstance(context).getAllFavoritesAsTracks()
+                    seedCandidates.addAll(favs.map { it.id })
+                } catch (_: Exception) {}
+            }
+            val cleanSeeds = seedCandidates.distinct().filter { it.isNotBlank() }
+
+            repeat(5) { i ->
+                val seedTrackId = cleanSeeds.getOrNull(i % cleanSeeds.size)
                 val response = getWaveNext(
-                    seedTrackId = waveItems.firstOrNull()?.id,
-                    exclude = waveItems.map { it.id }.takeIf { it.isNotEmpty() },
+                    seedTrackId = seedTrackId,
+                    exclude = excludeIds.takeIf { it.isNotEmpty() },
                     recentSkips = 0
                 )
                 if (response != null && response.status == "ok" && response.track != null) {
-                    // Already added to global waveExcludeIds inside getWaveNext()
+                    val trackId = response.track.id
+                    excludeIds.add(trackId)
                     waveItems.add(
                         IcmHomeItem(
-                            id = response.track.id,
+                            id = trackId,
                             title = response.track.title,
                             artist = response.track.artist ?: "Unknown Artist",
                             cover = response.track.cover,
@@ -393,11 +411,9 @@ object IcmRepository {
         return IcmHomeResponse(blocks = blocks)
     }
 
-    /**
-     * Get signed stream URL.
-     */
     suspend fun getStreamUrl(trackId: String, region: String? = null): String? {
-        val result = api.getTrack(trackId, region)
+        val quality = IcmAuthRepository.getEffectiveQuality(trackId)
+        val result = api.getTrack(trackId, region, quality)
         result.exceptionOrNull()?.let {
             _lastException = it as? Exception
             _lastError.value = it.message
@@ -797,7 +813,7 @@ object IcmRepository {
     suspend fun getStreamUrlAsync(
         trackId: String,
         region: String? = null,
-        quality: String? = null,
+        quality: String? = IcmAuthRepository.getEffectiveQuality(trackId),
         maxPollAttempts: Int = 30,
         pollIntervalMs: Long = 2000
     ): String? {
@@ -822,7 +838,7 @@ object IcmRepository {
     suspend fun getTrackInfoAsync(
         trackId: String,
         region: String? = null,
-        quality: String? = null,
+        quality: String? = IcmAuthRepository.getEffectiveQuality(trackId),
         maxPollAttempts: Int = 30,
         pollIntervalMs: Long = 2000
     ): IcmTrackResponse? {

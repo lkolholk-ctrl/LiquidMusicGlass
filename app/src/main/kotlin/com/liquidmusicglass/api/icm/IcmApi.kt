@@ -283,8 +283,8 @@ suspend fun search(
         append("&region=$r")
         // Normalize legacy source names to ICM API values
         val normalizedSource = when (source) {
-            "apple", "primary" -> "primary"
-            "vk", "secondary" -> "secondary"
+            "apple", "primary" -> "apple"
+            "vk", "secondary" -> "vk"
             "all" -> "all"
             else -> null
         }
@@ -306,11 +306,15 @@ suspend fun search(
         region: String? = null,
         quality: String? = streamQuality
     ): Result<IcmTrackResponse> {
+        // VK tracks: let API choose quality (docs show no quality in request)
+        val isVk = trackId.startsWith("vk_") || trackId.startsWith("secondary_")
+        val effectiveQuality = if (isVk) null else quality
+        
         val body = json.encodeToString(
             IcmTrackRequest(
                 trackId = trackId,
                 region = region ?: defaultRegion,
-                quality = quality
+                quality = effectiveQuality
             )
         )
         return execute("/track", method = "POST", body = body)
@@ -321,11 +325,15 @@ suspend fun search(
         region: String? = null,
         quality: String? = streamQuality
     ): Result<IcmTrackResponse> {
+        // VK tracks: let API choose quality (docs show no quality in request)
+        val isVk = trackId.startsWith("vk_") || trackId.startsWith("secondary_")
+        val effectiveQuality = if (isVk) null else quality
+        
         val body = json.encodeToString(
             IcmTrackRequest(
                 trackId = trackId,
                 region = region ?: defaultRegion,
-                quality = quality
+                quality = effectiveQuality
             )
         )
         return executeSync("/track", method = "POST", body = body)
