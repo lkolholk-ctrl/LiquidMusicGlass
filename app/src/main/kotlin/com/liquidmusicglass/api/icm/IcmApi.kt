@@ -146,6 +146,7 @@ class IcmApi private constructor() {
                     }
                     else -> {
                         val errorText = response.body?.string() ?: "HTTP ${response.code}"
+                        android.util.Log.e("IcmApi", "API error: ${response.code} on $endpoint, body: $errorText")
                         val error = try {
                             json.decodeFromString<IcmError>(errorText)
                         } catch (_: Exception) {
@@ -192,6 +193,7 @@ class IcmApi private constructor() {
                 }
                 else -> {
                     val errorText = response.body?.string() ?: "HTTP ${response.code}"
+                    android.util.Log.e("IcmApi", "API error (sync): ${response.code} on $endpoint, body: $errorText")
                     val error = try {
                         json.decodeFromString<IcmError>(errorText)
                     } catch (_: Exception) {

@@ -3,6 +3,7 @@ package com.liquidmusicglass.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.liquidmusicglass.api.icm.IcmAuthRepository
+import com.liquidmusicglass.api.icm.IcmChart
 import com.liquidmusicglass.api.icm.IcmHomeBlock
 import com.liquidmusicglass.api.icm.IcmHomeResponse
 import com.liquidmusicglass.api.icm.IcmRepository
@@ -23,8 +24,14 @@ class HomeViewModel : ViewModel() {
     private val _homeContent = MutableStateFlow<IcmHomeResponse?>(null)
     val homeContent: StateFlow<IcmHomeResponse?> = _homeContent
 
+    private val _charts = MutableStateFlow<List<IcmChart>>(emptyList())
+    val charts: StateFlow<List<IcmChart>> = _charts
+
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading
+
+    private val _isLoadingCharts = MutableStateFlow(false)
+    val isLoadingCharts: StateFlow<Boolean> = _isLoadingCharts
 
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error
@@ -46,6 +53,28 @@ class HomeViewModel : ViewModel() {
                 _error.value = e.message ?: "Failed to load home content"
             } finally {
                 _isLoading.value = false
+            }
+        }
+
+        // Load charts in parallel
+        loadCharts()
+    }
+
+    /**
+     * Load charts (top charts from Apple Music).
+     */
+    fun loadCharts() {
+        if (_isLoadingCharts.value) return
+        _isLoadingCharts.value = true
+
+        viewModelScope.launch {
+            try {
+                val charts = IcmRepository.loadCharts()
+                _charts.value = charts
+            } catch (_: Exception) {
+                // Silently fail — charts are decorative
+            } finally {
+                _isLoadingCharts.value = false
             }
         }
     }

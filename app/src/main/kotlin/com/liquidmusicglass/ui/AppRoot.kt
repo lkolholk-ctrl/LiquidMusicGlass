@@ -302,17 +302,23 @@ fun AppRoot() {
             }
         }
 
-    val barsVisible = detailAlbumId == null && detailArtistId == null && 
+    val barsVisible = detailAlbumId == null && detailArtistId == null &&
                         !equalizerOpen && !playlistsOpen && playlistDetailId == null &&
-                        !settingsOpen && !authOpen && !profileOpen &&
-                        expandProgress.value < 0.95f
+                        !settingsOpen && !authOpen && !profileOpen
 
     if (barsVisible) {
+            val density = androidx.compose.ui.platform.LocalDensity.current
+            val bottomBarTranslateY = expandProgress.value * density.run { 160.dp.toPx() }
+            val bottomBarAlpha = if (expandProgress.value >= 0.99f) 0f else 1f
+
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .align(Alignment.BottomCenter)
-                    .graphicsLayer { alpha = miniAlpha }
+                    .graphicsLayer {
+                        translationY = bottomBarTranslateY
+                        alpha = bottomBarAlpha
+                    }
                     .pointerInput(Unit) {
                         detectVerticalDragGestures(
                             onVerticalDrag = { change, dragAmount ->
@@ -338,17 +344,26 @@ fun AppRoot() {
                     modifier = Modifier.fillMaxWidth(),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    MiniPlayer(
-                        trackTitle = trackTitle,
-                        artistName = artistName,
-                        isPlaying = isPlaying,
-                        albumArtUri = currentTrack?.displayArtUri,
-                        coverUrl = currentTrack?.coverUrl,
-                        backdrop = rootBackdrop,
-                        onExpand = { animateExpand() },
-                        onPlayPause = { PlayerController.togglePlayPause(context) },
-                        onSkipNext = { PlayerController.skipNext(context) }
-                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .graphicsLayer { alpha = miniAlpha },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        MiniPlayer(
+                            trackTitle = trackTitle,
+                            artistName = artistName,
+                            isPlaying = isPlaying,
+                            albumArtUri = currentTrack?.displayArtUri,
+                            coverUrl = currentTrack?.coverUrl,
+                            backdrop = rootBackdrop,
+                            onExpand = { animateExpand() },
+                            onPlayPause = { PlayerController.togglePlayPause(context) },
+                            onSkipNext = { PlayerController.skipNext(context) }
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
 
                     BottomBar(
                         selectedIndex = selectedIndex,
@@ -356,6 +371,8 @@ fun AppRoot() {
                         backdrop = rootBackdrop
                     )
                 }
+
+                Spacer(modifier = Modifier.height(8.dp))
 
                 Spacer(
                     modifier = Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)

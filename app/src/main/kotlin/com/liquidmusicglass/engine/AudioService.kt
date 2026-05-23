@@ -34,6 +34,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -169,6 +170,18 @@ class AudioService : MediaSessionService() {
         // ── Полинг позиции ──
         startPositionPolling()
         ensureNotificationChannel()
+
+        // Observe current track and favorites to update notification button dynamically
+        serviceScope.launch {
+            PlayerController.favoriteIds.collect {
+                updateNotificationLayout()
+            }
+        }
+        serviceScope.launch {
+            PlayerController.currentTrack.collect {
+                updateNotificationLayout()
+            }
+        }
     }
 
     private fun requestAudioFocus() {
@@ -266,14 +279,15 @@ class AudioService : MediaSessionService() {
     private fun startPositionPolling() {
         positionJob?.cancel()
         positionJob = serviceScope.launch {
-            while (true) {
-                val position = player.currentPosition
-                val duration = player.duration
-
-                val safeDuration = if (duration > 0 && duration != C.TIME_UNSET) duration else 0L
-                PlayerController.updatePosition(position, safeDuration)
-
-                delay(200L)
+            while (isActive) {
+                // Полинг только когда играет — экономим батарею
+                if (player.isPlaying) {
+                    val position = player.currentPosition
+                    val duration = player.duration
+                    val safeDuration = if (duration > 0 && duration != C.TIME_UNSET) duration else 0L
+                    PlayerController.updatePosition(position, safeDuration)
+                }
+                delay(500L) // 2 раза в секунду — достаточно для UI
             }
         }
     }
@@ -287,6 +301,10 @@ class AudioService : MediaSessionService() {
                 .add(SessionCommand(COMMAND_TOGGLE_FAVORITE, Bundle.EMPTY))
                 .build()
 
+            val currentTrack = PlayerController.currentTrack.value
+            val isFav = currentTrack?.let { PlayerController.isFavorite(it.id) } == true
+            val iconResId = if (isFav) R.drawable.ic_notification_favorite else R.drawable.ic_notification_favorite_border
+
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(sessionCommands)
                 .setAvailablePlayerCommands(MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS)
@@ -294,7 +312,7 @@ class AudioService : MediaSessionService() {
                     ImmutableList.of(
                         androidx.media3.session.CommandButton.Builder()
                             .setDisplayName("Favorite")
-                            .setIconResId(R.drawable.ic_notification_favorite)
+                            .setIconResId(iconResId)
                             .setSessionCommand(SessionCommand(COMMAND_TOGGLE_FAVORITE, Bundle.EMPTY))
                             .build()
                     )
@@ -345,6 +363,21 @@ class AudioService : MediaSessionService() {
     fun setDucked(ducked: Boolean) {
         _isDucked.value = ducked
         player.volume = if (ducked) 0.2f else 1f
+    }
+
+    private fun updateNotificationLayout() {
+        val session = session ?: return
+        val currentTrack = PlayerController.currentTrack.value
+        val isFav = currentTrack?.let { PlayerController.isFavorite(it.id) } == true
+        val iconResId = if (isFav) R.drawable.ic_notification_favorite else R.drawable.ic_notification_favorite_border
+
+        val commandButton = androidx.media3.session.CommandButton.Builder()
+            .setDisplayName("Favorite")
+            .setIconResId(iconResId)
+            .setSessionCommand(SessionCommand(COMMAND_TOGGLE_FAVORITE, Bundle.EMPTY))
+            .build()
+
+        session.setCustomLayout(ImmutableList.of(commandButton))
     }
 
     companion object {

@@ -25,6 +25,8 @@ import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.MusicNote
+import com.liquidmusicglass.engine.PlayerController
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -38,10 +40,15 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.collectAsState
+import androidx.compose.foundation.shape.CircleShape
+import coil.compose.AsyncImage
+import com.liquidmusicglass.api.icm.IcmAuthRepository
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
@@ -99,6 +106,8 @@ fun BottomBar(
     onItemSelected: (Int) -> Unit,
     backdrop: LayerBackdrop
 ) {
+    val avatarUrl by IcmAuthRepository.avatarUrl.collectAsState()
+
     val items = listOf(
         BottomNavItem(Icons.Rounded.Home, "Home"),
         BottomNavItem(Icons.Rounded.Search, "Search"),
@@ -112,12 +121,15 @@ fun BottomBar(
         backdrop = backdrop,
         tabsCount = items.size,
         modifier = Modifier
-            .fillMaxWidth(0.94f)
-            .padding(bottom = 8.dp)
+            .fillMaxWidth(0.92f)
     ) {
         items.forEachIndexed { index, item ->
             LiquidBottomTab {
-                NavItemContent(item = item, isSelected = index == selectedIndex)
+                NavItemContent(
+                    item = item,
+                    isSelected = index == selectedIndex,
+                    avatarUrl = avatarUrl
+                )
             }
         }
     }
@@ -271,7 +283,7 @@ private fun NavigationCapsule(
                     }
                 )
                 .then(interactiveHighlight.modifier)
-                .height(48f.dp)
+                .height(52f.dp)
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -309,9 +321,9 @@ private fun NavigationCapsule(
                         onDrawSurface = { drawRect(containerColor) }
                     )
                     .then(interactiveHighlight.modifier)
-                    .height(56f.dp)
-                    .fillMaxWidth()
-                    .padding(horizontal = 4f.dp),
+                .height(52f.dp)
+                .fillMaxWidth()
+                .padding(horizontal = 4f.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 content = content
             )
@@ -320,7 +332,7 @@ private fun NavigationCapsule(
         // ── Tap detection layer (поверх слоёв 1-2, но ПОД капсулой) ──
         Box(
             Modifier
-                .height(64f.dp)
+                .height(52f.dp)
                 .fillMaxWidth()
                 .pointerInput(tabsCount) {
                     detectTapGestures { offset ->
@@ -395,7 +407,11 @@ private fun NavigationCapsule(
 // ═════════════════════════════════════════════════════════════════
 
 @Composable
-private fun NavItemContent(item: BottomNavItem, isSelected: Boolean = false) {
+private fun NavItemContent(
+    item: BottomNavItem,
+    isSelected: Boolean = false,
+    avatarUrl: String? = null
+) {
     val appleRed = Color(0xFFFC3C44)
     val defaultColor = LiquidTheme.colors.iconDefault
     val contentColor by animateColorAsState(
@@ -408,12 +424,22 @@ private fun NavItemContent(item: BottomNavItem, isSelected: Boolean = false) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Icon(
-            imageVector = item.icon,
-            contentDescription = null,
-            modifier = Modifier.size(20.dp),
-            tint = contentColor
-        )
+        if (item.label == "Profile" && !avatarUrl.isNullOrBlank()) {
+            AsyncImage(
+                model = avatarUrl,
+                contentDescription = null,
+                modifier = Modifier
+                    .size(20.dp)
+                    .clip(CircleShape)
+            )
+        } else {
+            Icon(
+                imageVector = item.icon,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = contentColor
+            )
+        }
         Spacer(modifier = Modifier.height(1.dp))
         Text(
             text = item.label,

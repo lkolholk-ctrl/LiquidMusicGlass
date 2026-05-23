@@ -31,6 +31,8 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DragHandle
 import androidx.compose.material.icons.rounded.FastForward
 import androidx.compose.material.icons.rounded.FastRewind
+import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -40,9 +42,13 @@ import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -57,6 +63,8 @@ import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.Track
 import com.liquidmusicglass.ui.glass.AlbumArtImage
 import com.liquidmusicglass.ui.glass.AlbumColors
+import com.liquidmusicglass.ui.glass.pressScale
+import kotlinx.coroutines.launch
 
 private val AppleRed = Color(0xFFFC3C44)
 
@@ -78,17 +86,16 @@ fun QueueSheet(
     albumId: Long = -1L,
     albumColors: AlbumColors? = null,
     currentTrack: Track? = null,
-    isPlaying: Boolean = false,
-    onPlayPause: () -> Unit = {},
-    onSkipNext: () -> Unit = {},
-    onSkipPrevious: () -> Unit = {},
-    onSeek: (Long) -> Unit = {},
-    currentPositionMs: Long = 0L,
-    durationMs: Long = 0L
+    onRequestControls: () -> Unit = {}
 ) {
     val context = LocalContext.current
-    val shuffleEnabled by PlayerController.shuffleEnabled.collectAsState()
-    val repeatMode by PlayerController.repeatMode.collectAsState()
+    val libraryRepo = remember { com.liquidmusicglass.data.local.db.LibraryRepository.getInstance(context) }
+    val isFavorite by if (currentTrack != null) {
+        libraryRepo.isFavoriteFlow(currentTrack.id).collectAsState(initial = false)
+    } else {
+        remember { mutableStateOf(false) }
+    }
+    val scope = rememberCoroutineScope()
 
     AnimatedVisibility(
         visible = visible,
@@ -161,70 +168,95 @@ fun QueueSheet(
                     }
                 }
 
-                val queue = PlayerController.getCurrentQueue()
-                val currentIndex = PlayerController.getCurrentIndex()
-
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(0.dp)
-                ) {
-                    // Now Playing section
-                    if (currentTrack != null) {
-                        item(key = "now_playing") {
-                            Column(
+                // Now Playing section (Pinned at the top, does not scroll!)
+                if (currentTrack != null) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp)
+                            .padding(bottom = 12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
                                 modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 20.dp)
+                                    .size(60.dp)
+                                    .clip(RoundedCornerShape(8.dp))
                             ) {
-                                // Current track row
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(60.dp)
-                                            .clip(RoundedCornerShape(8.dp))
-                                    ) {
-                                        AlbumArtImage(
-                                            uri = currentTrack.albumArtUri,
-                                            coverUrl = currentTrack.coverUrl,
-                                            audioFileUri = currentTrack.uri,
-                                            albumId = currentTrack.albumId,
-                                            modifier = Modifier.fillMaxSize(),
-                                            contentScale = ContentScale.Crop
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.width(14.dp))
-                                    Column(
-                                        modifier = Modifier.weight(1f)
-                                    ) {
-                                        Text(
-                                            text = currentTrack.title,
-                                            color = Color.White,
-                                            fontSize = 16.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                        Spacer(modifier = Modifier.height(2.dp))
-                                        Text(
-                                            text = currentTrack.artist,
-                                            color = Color.White.copy(alpha = 0.60f),
-                                            fontSize = 14.sp,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
-                                }
-
-                                Spacer(modifier = Modifier.height(20.dp))
+                                AlbumArtImage(
+                                    uri = currentTrack.albumArtUri,
+                                    coverUrl = currentTrack.coverUrl,
+                                    audioFileUri = currentTrack.uri,
+                                    albumId = currentTrack.albumId,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(14.dp))
+                            Column(
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(
+                                    text = currentTrack.title,
+                                    color = Color.White,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = currentTrack.artist,
+                                    color = Color.White.copy(alpha = 0.60f),
+                                    fontSize = 14.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            // Heart (Favorite) button
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .pressScale {
+                                        scope.launch {
+                                            libraryRepo.toggleFavorite(currentTrack)
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = if (isFavorite) Icons.Rounded.Favorite
+                                    else Icons.Rounded.FavoriteBorder,
+                                    contentDescription = null,
+                                    tint = if (isFavorite) Color(0xFFFC3C44)
+                                    else Color.White.copy(alpha = 0.70f),
+                                    modifier = Modifier.size(24.dp)
+                                )
                             }
                         }
                     }
+                }
 
+                val queue = PlayerController.getCurrentQueue()
+                val currentIndex = PlayerController.getCurrentIndex()
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = onRequestControls
+                        )
+                ) {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(0.dp)
+                ) {
                     // Up Next section
                     val upNext = if (currentIndex >= 0 && currentIndex < queue.lastIndex) {
                         queue.subList(currentIndex + 1, queue.size)
@@ -287,127 +319,8 @@ fun QueueSheet(
 
                     item { Spacer(modifier = Modifier.height(16.dp)) }
                 }
+                } // Box (clickable queue area)
 
-                // Bottom controls — same as FullPlayer
-                if (currentTrack != null && durationMs > 0) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 24.dp)
-                            .padding(bottom = 16.dp)
-                    ) {
-                        // Progress bar
-                        QueueProgressBar(
-                            positionMs = currentPositionMs,
-                            durationMs = durationMs,
-                            onSeek = onSeek
-                        )
-
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        // Transport controls — FullPlayer style
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceEvenly,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            // Shuffle
-                            Box(
-                                modifier = Modifier
-                                    .size(48.dp)
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null
-                                    ) { PlayerController.toggleShuffle() },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Shuffle,
-                                    contentDescription = null,
-                                    tint = if (shuffleEnabled) AppleRed
-                                    else Color.White.copy(alpha = 0.40f),
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            }
-
-                            // Previous
-                            Box(
-                                modifier = Modifier
-                                    .size(56.dp)
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null,
-                                        onClick = onSkipPrevious
-                                    ),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.FastRewind,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(36.dp)
-                                )
-                            }
-
-                            // Play/Pause
-                            Box(
-                                modifier = Modifier
-                                    .size(72.dp)
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null,
-                                        onClick = onPlayPause
-                                    ),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(48.dp)
-                                )
-                            }
-
-                            // Next
-                            Box(
-                                modifier = Modifier
-                                    .size(56.dp)
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null,
-                                        onClick = onSkipNext
-                                    ),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.FastForward,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(36.dp)
-                                )
-                            }
-
-                            // Repeat
-                            Box(
-                                modifier = Modifier
-                                    .size(48.dp)
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null
-                                    ) { PlayerController.cycleRepeatMode() },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = if (repeatMode == 2) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat,
-                                    contentDescription = null,
-                                    tint = if (repeatMode > 0) AppleRed
-                                    else Color.White.copy(alpha = 0.40f),
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            }
-                        }
-                    }
-                }
             }
         }
     }
@@ -488,56 +401,3 @@ private fun QueueTrackRow(
     }
 }
 
-@Composable
-private fun QueueProgressBar(
-    positionMs: Long,
-    durationMs: Long,
-    onSeek: (Long) -> Unit
-) {
-    val progress = if (durationMs > 0) positionMs.toFloat() / durationMs.toFloat() else 0f
-
-    Column {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(4.dp)
-                .clip(RoundedCornerShape(2.dp))
-                .background(Color.White.copy(alpha = 0.15f))
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null
-                ) { /* TODO: implement seek on click */ }
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(progress.coerceIn(0f, 1f))
-                    .height(4.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(Color.White)
-            )
-        }
-
-        Spacer(modifier = Modifier.height(6.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            val curMin = (positionMs / 1000 / 60).toInt()
-            val curSec = ((positionMs / 1000) % 60).toInt()
-            val durMin = (durationMs / 1000 / 60).toInt()
-            val durSec = ((durationMs / 1000) % 60).toInt()
-
-            Text(
-                text = "$curMin:${curSec.toString().padStart(2, '0')}",
-                color = Color.White.copy(alpha = 0.40f),
-                fontSize = 11.sp
-            )
-            Text(
-                text = "$durMin:${durSec.toString().padStart(2, '0')}",
-                color = Color.White.copy(alpha = 0.40f),
-                fontSize = 11.sp
-            )
-        }
-    }
-}

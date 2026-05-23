@@ -15,6 +15,8 @@ import androidx.compose.ui.unit.dp
 import com.liquidmusicglass.ui.glass.AlbumArtImage
 import com.liquidmusicglass.ui.glass.AlbumColors
 
+import androidx.compose.ui.graphics.toArgb
+
 /**
  * Apple Music стиль — статичный градиентный фон из обложки.
  *
@@ -34,6 +36,11 @@ fun AnimatedPlayerBackground(
     albumColors: AlbumColors,
     modifier: Modifier = Modifier
 ) {
+    val boostedVibrant = rememberSaturationBoost(albumColors.vibrant)
+    val boostedDominant = rememberSaturationBoost(albumColors.dominant)
+    val boostedMuted = rememberSaturationBoost(albumColors.muted)
+    val boostedLightVibrant = rememberSaturationBoost(albumColors.lightVibrant)
+
     Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
 
         // ── Layer 1: базовый слой, заполняет всё ──
@@ -49,7 +56,7 @@ fun AnimatedPlayerBackground(
                 .graphicsLayer {
                     scaleX = 2.2f
                     scaleY = 2.2f
-                    alpha = 0.5f
+                    alpha = 0.70f
                 }
                 .blur(60.dp)
         )
@@ -67,7 +74,7 @@ fun AnimatedPlayerBackground(
                 .graphicsLayer {
                     scaleX = 1.5f
                     scaleY = 1.5f
-                    alpha = 0.45f
+                    alpha = 0.60f
                 }
                 .blur(50.dp)
         )
@@ -85,7 +92,7 @@ fun AnimatedPlayerBackground(
                 .graphicsLayer {
                     scaleX = 1.1f
                     scaleY = 1.1f
-                    alpha = 0.35f
+                    alpha = 0.50f
                 }
                 .blur(40.dp)
         )
@@ -97,10 +104,10 @@ fun AnimatedPlayerBackground(
                 .background(
                     Brush.verticalGradient(
                         colorStops = arrayOf(
-                            0.00f to albumColors.vibrant.copy(alpha = 0.25f),
-                            0.35f to albumColors.dominant.copy(alpha = 0.20f),
-                            0.65f to albumColors.muted.copy(alpha = 0.25f),
-                            1.00f to albumColors.vibrant.copy(alpha = 0.20f)
+                            0.00f to boostedVibrant.copy(alpha = 0.45f),
+                            0.35f to boostedDominant.copy(alpha = 0.35f),
+                            0.65f to boostedMuted.copy(alpha = 0.45f),
+                            1.00f to boostedVibrant.copy(alpha = 0.35f)
                         )
                     )
                 )
@@ -113,9 +120,9 @@ fun AnimatedPlayerBackground(
                 .background(
                     Brush.horizontalGradient(
                         colorStops = arrayOf(
-                            0.00f to albumColors.lightVibrant.copy(alpha = 0.15f),
+                            0.00f to boostedLightVibrant.copy(alpha = 0.25f),
                             0.50f to Color.Transparent,
-                            1.00f to albumColors.vibrant.copy(alpha = 0.12f)
+                            1.00f to boostedVibrant.copy(alpha = 0.20f)
                         )
                     )
                 )
@@ -128,13 +135,24 @@ fun AnimatedPlayerBackground(
                 .background(
                     Brush.verticalGradient(
                         colorStops = arrayOf(
-                            0.00f to Color.Black.copy(alpha = 0.15f),
-                            0.40f to Color.Black.copy(alpha = 0.05f),
-                            0.60f to Color.Black.copy(alpha = 0.15f),
-                            1.00f to Color.Black.copy(alpha = 0.45f)
+                            0.00f to Color.Black.copy(alpha = 0.08f),
+                            0.40f to Color.Black.copy(alpha = 0.02f),
+                            0.60f to Color.Black.copy(alpha = 0.08f),
+                            1.00f to Color.Black.copy(alpha = 0.35f)
                         )
                     )
                 )
         )
     }
 }
+
+@Composable
+private fun rememberSaturationBoost(color: Color, boost: Float = 2.5f): Color {
+    return androidx.compose.runtime.remember(color) {
+        val hsv = FloatArray(3)
+        android.graphics.Color.colorToHSV(color.toArgb(), hsv)
+        hsv[1] = (hsv[1] * boost).coerceIn(0f, 1f)
+        androidx.compose.ui.graphics.Color(android.graphics.Color.HSVToColor(hsv))
+    }
+}
+

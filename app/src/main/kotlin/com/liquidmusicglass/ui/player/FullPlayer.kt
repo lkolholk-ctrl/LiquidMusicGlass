@@ -56,8 +56,8 @@ import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material.icons.rounded.ChevronRight
-import androidx.compose.material.icons.rounded.ThumbUp
-import androidx.compose.material.icons.rounded.ThumbDown
+// import androidx.compose.material.icons.rounded.ThumbUp  // DISABLED
+// import androidx.compose.material.icons.rounded.ThumbDown // DISABLED
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Delete
@@ -229,9 +229,9 @@ fun FullPlayer(
         userDragFraction = null
     }
 
-    // Авто-скрытие контролов поверх лирики: через 3 сек после показа прячем обратно
-    LaunchedEffect(controlsVisible, showLyrics) {
-        if (showLyrics && controlsVisible) {
+    // Авто-скрытие контролов поверх лирики/очереди: через 3 сек после показа прячем обратно
+    LaunchedEffect(controlsVisible, showLyrics, showQueue) {
+        if ((showLyrics || showQueue) && controlsVisible) {
             kotlinx.coroutines.delay(3000L)
             controlsVisible = false
         }
@@ -420,18 +420,31 @@ fun FullPlayer(
             )
         }
 
+        // ═══ Queue ═══
+        QueueSheet(
+            visible = showQueue,
+            onDismiss = { showQueue = false },
+            albumArtUri = albumArtUri,
+            coverUrl = coverUrl,
+            audioFileUri = audioFileUri,
+            albumId = albumId,
+            albumColors = albumColors,
+            currentTrack = currentTrackObj,
+            onRequestControls = { controlsVisible = true }
+        )
+
         // ═══ Controls ═══
-        // Видны всегда, когда лирика закрыта. Когда лирика открыта — только
+        // Видны всегда, когда лирика и очередь закрыты. Когда открыты — только
         // если controlsVisible (по тапу), и автоматически прячутся через 3 сек.
         AnimatedVisibility(
-            visible = !showLyrics || controlsVisible,
+            visible = (!showLyrics && !showQueue) || controlsVisible,
             enter = fadeIn(tween(250)),
             exit = fadeOut(tween(250))
         ) {
         Box(modifier = Modifier.fillMaxSize()) {
-        // Подложка под контролами — только когда открыта лирика.
+        // Подложка под контролами — только когда открыта лирика или очередь.
         // Цвет — из палитры обложки (не чёрный), чтобы совпадал с фоном.
-        if (showLyrics) {
+        if (showLyrics || showQueue) {
             // Цвет обложки — светлее (меньше чёрного), непрозрачный книзу
             val scrimColor = lerp(albumColors.dominant, Color.Black, 0.3f)
             Box(
@@ -487,8 +500,8 @@ fun FullPlayer(
                     .padding(bottom = 36.dp)
                     .graphicsLayer { translationY = controlsOffsetY }
             ) {
-                // Track Info — скрыта в режиме лирики (название уже в шапке лирики)
-                AnimatedVisibility(visible = !showLyrics) {
+                // Track Info — скрыта в режиме лирики и очереди
+                AnimatedVisibility(visible = !showLyrics && !showQueue) {
                 Column {
                 Row(
                     modifier = Modifier
@@ -580,14 +593,14 @@ fun FullPlayer(
                             }
                         }
                     }
-                    // ThumbUp — wave feedback (more track/artist)
+                    // ThumbUp — DISABLED (wave feedback not connected yet)
+                    /*
                     Box(
                         modifier = Modifier
                             .size(44.dp)
                             .pressScale {
                                 currentTrackObj?.let { track ->
                                     scope.launch {
-                                        // Optimistic: immediately show as selected
                                         val previousFeedback = waveFeedback
                                         waveFeedback = true
                                         val feedbackType = if (track.artists.firstOrNull()?.id != null) {
@@ -596,7 +609,6 @@ fun FullPlayer(
                                         val value = track.artists.firstOrNull()?.id ?: track.id
                                         val success = IcmRepository.sendWaveFeedback(feedbackType, value)
                                         if (!success) {
-                                            // Rollback on failure
                                             waveFeedback = previousFeedback
                                         }
                                     }
@@ -617,14 +629,15 @@ fun FullPlayer(
                             modifier = Modifier.size(24.dp)
                         )
                     }
-                    // ThumbDown — wave feedback (less track/artist)
+                    */
+                    // ThumbDown — DISABLED (wave feedback not connected yet)
+                    /*
                     Box(
                         modifier = Modifier
                             .size(44.dp)
                             .pressScale {
                                 currentTrackObj?.let { track ->
                                     scope.launch {
-                                        // Optimistic: immediately show as selected
                                         val previousFeedback = waveFeedback
                                         waveFeedback = false
                                         val feedbackType = if (track.artists.firstOrNull()?.id != null) {
@@ -633,7 +646,6 @@ fun FullPlayer(
                                         val value = track.artists.firstOrNull()?.id ?: track.id
                                         val success = IcmRepository.sendWaveFeedback(feedbackType, value)
                                         if (!success) {
-                                            // Rollback on failure
                                             waveFeedback = previousFeedback
                                         }
                                     }
@@ -654,6 +666,7 @@ fun FullPlayer(
                             modifier = Modifier.size(24.dp)
                         )
                     }
+                    */
                     Box(
                         modifier = Modifier
                             .size(44.dp)
@@ -769,8 +782,8 @@ fun FullPlayer(
                     }
                 }
 
-                // Volume — скрыта в режиме лирики
-                AnimatedVisibility(visible = !showLyrics) {
+                // Volume — скрыта в режиме лирики и очереди
+                AnimatedVisibility(visible = !showLyrics && !showQueue) {
                 Column {
                 Spacer(modifier = Modifier.height(22.dp))
 
@@ -839,6 +852,7 @@ fun FullPlayer(
                         } else {
                             showLyrics = true
                             controlsVisible = false
+                            showQueue = false // Close queue if open
                         }
                     }
                     BottomIcon(Icons.Rounded.Cast) { showAirPlay = true }
@@ -870,7 +884,16 @@ fun FullPlayer(
                         )
                     }
 
-                    BottomIcon(Icons.AutoMirrored.Rounded.QueueMusic) { showQueue = true }
+                    BottomIcon(Icons.AutoMirrored.Rounded.QueueMusic) {
+                        if (showQueue) {
+                            showQueue = false
+                            controlsVisible = true
+                        } else {
+                            showQueue = true
+                            controlsVisible = false
+                            showLyrics = false // Close lyrics if open
+                        }
+                    }
                 }
             }
         }
@@ -887,24 +910,6 @@ fun FullPlayer(
             onDismiss = { showAirPlay = false }
         )
 
-        // ═══ Queue ═══
-        QueueSheet(
-            visible = showQueue,
-            onDismiss = { showQueue = false },
-            albumArtUri = albumArtUri,
-            coverUrl = coverUrl,
-            audioFileUri = audioFileUri,
-            albumId = albumId,
-            albumColors = albumColors,
-            currentTrack = currentTrackObj,
-            isPlaying = isPlaying,
-            onPlayPause = onPlayPause,
-            onSkipNext = onSkipNext,
-            onSkipPrevious = onSkipPrevious,
-            onSeek = onSeek,
-            currentPositionMs = currentPositionMs,
-            durationMs = durationMs
-        )
 
         // ═══ Artist Selection BottomSheet (for multi-artist tracks) ═══
         if (showArtistSheet) {

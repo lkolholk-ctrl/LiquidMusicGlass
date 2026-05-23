@@ -179,7 +179,7 @@ object PlayerController {
                     addToRecent(track)
                 }
                 is StreamResult.Error -> {
-                    android.util.Log.e("PlayerController", "Stream error for ${track.id}: ${streamResult.code}")
+                    android.util.Log.e("PlayerController", "Stream error for ${track.id}: ${streamResult.code} | ${streamResult.message}")
                     withContext(Dispatchers.Main) {
                         _isBuffering.value = false
                         val msg = when (streamResult.code) {
@@ -188,7 +188,16 @@ object PlayerController {
                             "region_unavailable" -> "Track not available in your region"
                             "early_access" -> "This feature requires early access"
                             "network_error" -> "Network error. Please check your connection"
-                            else -> "Failed to load track (${streamResult.code})"
+                            else -> {
+                                val rawMsg = streamResult.message ?: ""
+                                when {
+                                    rawMsg.contains("track_cache_missing_after_download") ->
+                                        "VK Music is temporarily unavailable. Please try again later or use Apple Music"
+                                    rawMsg.contains("cache_missing") ->
+                                        "VK Music is temporarily unavailable. Please try again later"
+                                    else -> "Failed to load track: ${streamResult.message ?: streamResult.code}"
+                                }
+                            }
                         }
                         android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
                     }
@@ -328,7 +337,7 @@ object PlayerController {
                     }
                 }
                 is StreamResult.Error -> {
-                    android.util.Log.e("PlayerController", "Stream error for ${startTrack.id}: ${streamResult.code}")
+                    android.util.Log.e("PlayerController", "Stream error for ${startTrack.id}: ${streamResult.code} | ${streamResult.message}")
                     withContext(Dispatchers.Main) {
                         _isBuffering.value = false
                         val msg = when (streamResult.code) {
@@ -337,7 +346,16 @@ object PlayerController {
                             "region_unavailable" -> "Track not available in your region"
                             "early_access" -> "This feature requires early access"
                             "network_error" -> "Network error. Please check your connection"
-                            else -> "Failed to load track (${streamResult.code})"
+                            else -> {
+                                val rawMsg = streamResult.message ?: ""
+                                when {
+                                    rawMsg.contains("track_cache_missing_after_download") ->
+                                        "VK Music is temporarily unavailable. Please try again later or use Apple Music"
+                                    rawMsg.contains("cache_missing") ->
+                                        "VK Music is temporarily unavailable. Please try again later"
+                                    else -> "Failed to load track: ${streamResult.message ?: streamResult.code}"
+                                }
+                            }
                         }
                         android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
                     }

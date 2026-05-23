@@ -811,24 +811,37 @@ private fun SearchResultRow(
 private fun SourceChip(
     text: String,
     selected: Boolean,
+    enabled: Boolean = true,
     onClick: () -> Unit
 ) {
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(20.dp))
             .background(
-                if (selected) AppleRed else Color(0xFF1A1A1A)
+                when {
+                    !enabled -> Color(0xFF1A1A1A)
+                    selected -> AppleRed
+                    else -> Color(0xFF1A1A1A)
+                }
             )
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onClick
+            .then(
+                if (enabled) {
+                    Modifier.clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = onClick
+                    )
+                } else Modifier
             )
             .padding(horizontal = 14.dp, vertical = 6.dp)
     ) {
         Text(
-            text = text,
-            color = if (selected) Color.White else LiquidTheme.colors.textSecondary,
+            text = if (enabled) text else "$text (soon)",
+            color = when {
+                !enabled -> LiquidTheme.colors.textSecondary.copy(alpha = 0.4f)
+                selected -> Color.White
+                else -> LiquidTheme.colors.textSecondary
+            },
             fontSize = 13.sp,
             fontWeight = FontWeight.Medium
         )

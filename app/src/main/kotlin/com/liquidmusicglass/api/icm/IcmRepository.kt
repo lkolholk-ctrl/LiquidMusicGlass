@@ -411,6 +411,40 @@ object IcmRepository {
         return IcmHomeResponse(blocks = blocks)
     }
 
+    /**
+     * Load charts (top charts from Apple Music).
+     */
+    suspend fun loadCharts(): List<IcmChart> {
+        val chartDefinitions = listOf(
+            Triple("top100", "Top 100 USA", "top 100 usa"),
+            Triple("viral", "Viral Hits", "viral hits"),
+            Triple("global", "Global Top 50", "global top 50"),
+            Triple("trending", "Trending Now", "trending now"),
+            Triple("hot", "Hot Tracks", "hot tracks"),
+            Triple("new", "New Music", "new music friday")
+        )
+
+        val charts = mutableListOf<IcmChart>()
+        for ((id, name, query) in chartDefinitions) {
+            try {
+                val result = searchAll(query, limit = 5, source = IcmSearchSource.APPLE)
+                val tracks = result?.items?.filter { it.isTrack }?.take(5) ?: emptyList()
+                if (tracks.isNotEmpty()) {
+                    charts.add(
+                        IcmChart(
+                            id = id,
+                            name = name,
+                            query = query,
+                            cover = tracks.firstOrNull()?.cover,
+                            tracks = tracks
+                        )
+                    )
+                }
+            } catch (_: Exception) {}
+        }
+        return charts
+    }
+
     suspend fun getStreamUrl(trackId: String, region: String? = null): String? {
         val quality = IcmAuthRepository.getEffectiveQuality(trackId)
         val result = api.getTrack(trackId, region, quality)

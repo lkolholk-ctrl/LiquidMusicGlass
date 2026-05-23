@@ -365,7 +365,7 @@ private fun PlainCard(content: @Composable ColumnScope.() -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color(0xFF1C1C1E), RoundedCornerShape(12.dp))
+            .background(Color(0xFF1C1C1E), RoundedCornerShape(28.dp))
             .padding(vertical = 4.dp),
         content = content
     )

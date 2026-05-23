@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Shuffle
@@ -79,16 +80,12 @@ fun ArtistDetailScreen(
         isLoading = true
         error = null
         try {
-            if (!IcmRepository.isInitialized.value) {
-                error = "API not initialized. Check API key in Settings."
+            val result = IcmRepository.getArtist(artistId)
+            if (result == null) {
+                val lastErr = IcmRepository.lastError.value
+                error = lastErr ?: "Artist not found (ID: $artistId)"
             } else {
-                val result = IcmRepository.getArtist(artistId)
-                if (result == null) {
-                    val lastErr = IcmRepository.lastError.value
-                    error = lastErr ?: "Artist not found (ID: $artistId)"
-                } else {
-                    artist = result
-                }
+                artist = result
             }
         } catch (e: Exception) {
             error = e.message
@@ -175,6 +172,10 @@ fun ArtistDetailScreen(
         (artist?.albums ?: emptyList()).distinctBy { it.id }
     }
 
+    val playlists = remember(artist) {
+        (artist?.playlists ?: emptyList()).distinctBy { it.id }
+    }
+
     val similarArtistsList = remember(artist) {
         (artist?.similarArtists ?: emptyList()).distinctBy { it.id }
     }
@@ -251,7 +252,7 @@ fun ArtistDetailScreen(
                         Spacer(modifier = Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
                         Spacer(modifier = Modifier.height(12.dp))
 
-                        // Back + Share
+                        // Back + Share + Apple Music
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -277,35 +278,64 @@ fun ArtistDetailScreen(
                                     modifier = Modifier.size(22.dp)
                                 )
                             }
-                            Box(
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFF1A1A1A))
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null,
-                                        onClick = {
-                                            artist?.let { a ->
-                                                val shareText = "${a.name} on Liquid Music Glass\n\nhttps://music.apple.com/artist/${a.id}"
-                                                val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                                                    type = "text/plain"
-                                                    putExtra(android.content.Intent.EXTRA_TEXT, shareText)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                // Open in Apple Music
+                                Box(
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFF1A1A1A))
+                                        .clickable(
+                                            interactionSource = remember { MutableInteractionSource() },
+                                            indication = null,
+                                            onClick = {
+                                                artist?.url?.let { url ->
+                                                    val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                                                    intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                    context.startActivity(intent)
                                                 }
-                                                val chooser = android.content.Intent.createChooser(intent, "Share Artist")
-                                                chooser.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                                context.startActivity(chooser)
                                             }
-                                        }
-                                    ),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Share,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(22.dp)
-                                )
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.OpenInNew,
+                                        contentDescription = "Open in Apple Music",
+                                        tint = AppleRed,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                                // Share
+                                Box(
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFF1A1A1A))
+                                        .clickable(
+                                            interactionSource = remember { MutableInteractionSource() },
+                                            indication = null,
+                                            onClick = {
+                                                artist?.let { a ->
+                                                    val shareText = "${a.name} on Liquid Music Glass\n\nhttps://music.apple.com/artist/${a.id}"
+                                                    val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                                        type = "text/plain"
+                                                        putExtra(android.content.Intent.EXTRA_TEXT, shareText)
+                                                    }
+                                                    val chooser = android.content.Intent.createChooser(intent, "Share Artist")
+                                                    chooser.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                    context.startActivity(chooser)
+                                                }
+                                            }
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Share,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
                             }
                         }
 
@@ -353,19 +383,28 @@ fun ArtistDetailScreen(
                                 .padding(horizontal = 20.dp)
                         )
 
-                        // Genre
+                        // Genre badge
                         val genre = artist?.genre
                         if (!genre.isNullOrBlank()) {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = genre,
-                                color = Color.White.copy(alpha = 0.50f),
-                                fontSize = 13.sp,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 24.dp)
-                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(50))
+                                        .background(Color(0xFF1A1A1A))
+                                        .padding(horizontal = 16.dp, vertical = 6.dp)
+                                ) {
+                                    Text(
+                                        text = genre,
+                                        color = Color.White.copy(alpha = 0.70f),
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
                         }
 
                         Spacer(modifier = Modifier.height(20.dp))
@@ -542,6 +581,59 @@ fun ArtistDetailScreen(
                                         Spacer(modifier = Modifier.height(6.dp))
                                         Text(
                                             text = album.title,
+                                            color = Color.White,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(28.dp))
+                        }
+
+                        // Playlists section
+                        if (playlists.isNotEmpty()) {
+                            Text(
+                                text = "Playlists",
+                                color = Color.White,
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(horizontal = 20.dp)
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = 20.dp),
+                                horizontalArrangement = Arrangement.spacedBy(14.dp)
+                            ) {
+                                items(playlists, key = { it.id }) { playlist ->
+                                    Column(
+                                        modifier = Modifier
+                                            .width(130.dp)
+                                            .clickable(
+                                                interactionSource = remember { MutableInteractionSource() },
+                                                indication = null,
+                                                onClick = { onNavigateToAlbum(playlist.id) }
+                                            )
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(130.dp)
+                                                .clip(RoundedCornerShape(12.dp))
+                                        ) {
+                                            AlbumArtImage(
+                                                uri = null,
+                                                coverUrl = playlist.cover?.replace("1000x1000", "600x600"),
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentScale = ContentScale.Crop
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Text(
+                                            text = playlist.title,
                                             color = Color.White,
                                             fontSize = 13.sp,
                                             fontWeight = FontWeight.Medium,

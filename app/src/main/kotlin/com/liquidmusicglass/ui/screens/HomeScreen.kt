@@ -38,6 +38,7 @@ import com.liquidmusicglass.api.icm.IcmHomeBlock
 import com.liquidmusicglass.api.icm.IcmHomeItem
 import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.api.icm.IcmWaveTrack
+import com.liquidmusicglass.api.icm.toTrack
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.Track
 import com.liquidmusicglass.ui.glass.AlbumArtImage
@@ -170,6 +171,8 @@ fun HomeScreen(
     val homeContent by viewModel.homeContent.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val error by viewModel.error.collectAsState()
+    val charts by viewModel.charts.collectAsState()
+    val isLoadingCharts by viewModel.isLoadingCharts.collectAsState()
 
     val allTracks by PlayerController.queueFlow.collectAsState()
     val recentlyPlayed by PlayerController.recentlyPlayed.collectAsState()
@@ -479,39 +482,48 @@ fun HomeScreen(
                 }
             }
 
-            // ─── Charts (Top Tracks) ───
-            chartsBlock?.let { block ->
-                if (block.items.isNotEmpty()) {
-                    SectionHeader(title = block.title)
-                    Spacer(modifier = Modifier.height(12.dp))
-                    // Charts displayed as a horizontal carousel with 3 tracks per column
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = 20.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        val chunked = block.items.chunked(3)
-                        items(chunked, key = { "chart_col_${it.first().id}" }) { chunk ->
-                            Column(
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier.width(280.dp)
-                            ) {
-                                chunk.forEach { item ->
-                                    ChartTrackRow(
-                                        item = item,
-                                        onClick = {
-                                            val track = item.toTrack()
-                                            scope.launch {
-                                                val resolved = resolveWaveTrackUrl(track)
-                                                PlayerController.playNext(resolved ?: track, context)
-                                            }
-                                        }
+            // ─── Charts (Top Charts from Apple Music) ───
+            if (charts.isNotEmpty()) {
+                SectionHeader(title = "Charts")
+                Spacer(modifier = Modifier.height(12.dp))
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    items(charts, key = { "chart_${it.id}" }) { chart ->
+                        ChartCard(
+                            chart = chart,
+                            onClick = {
+                                val chartTracks = chart.tracks.map { it.toTrack() }
+                                if (chartTracks.isNotEmpty()) {
+                                    PlayerController.playFromList(
+                                        context = context,
+                                        tracks = chartTracks,
+                                        startIndex = 0,
+                                        autoRefillType = "chart",
+                                        autoRefillId = chart.id,
+                                        autoRefillName = chart.name
                                     )
                                 }
                             }
-                        }
+                        )
                     }
-                    Spacer(modifier = Modifier.height(32.dp))
                 }
+                Spacer(modifier = Modifier.height(32.dp))
+            } else if (isLoadingCharts) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 20.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(
+                        color = AppleRed,
+                        modifier = Modifier.size(24.dp),
+                        strokeWidth = 2.dp
+                    )
+                }
+                Spacer(modifier = Modifier.height(32.dp))
             }
 
             // ─── Recommendations (Made For You) ───
@@ -836,6 +848,68 @@ private fun ChartTrackRow(
                 overflow = TextOverflow.Ellipsis
             )
         }
+    }
+}
+
+@Composable
+private fun ChartCard(
+    chart: com.liquidmusicglass.api.icm.IcmChart,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .width(160.dp)
+            .clickable(onClick = onClick)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(160.dp)
+                .clip(RoundedCornerShape(8.dp))
+        ) {
+            AsyncImage(
+                model = ImageRequest.Builder(LocalContext.current)
+                    .data(chart.cover)
+                    .crossfade(true)
+                    .build(),
+                contentDescription = chart.name,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+            // Gradient overlay at bottom
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                Color.Black.copy(alpha = 0.7f)
+                            ),
+                            startY = 80f
+                        )
+                    )
+            )
+            // Chart name at bottom
+            Text(
+                text = chart.name,
+                color = Color.White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(12.dp)
+            )
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = "${chart.tracks.size} tracks",
+            color = LiquidTheme.colors.textSecondary,
+            fontSize = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 

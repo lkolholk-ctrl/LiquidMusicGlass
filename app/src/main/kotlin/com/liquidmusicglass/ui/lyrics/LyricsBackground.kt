@@ -52,7 +52,7 @@ fun LyricsBackground(
                 .graphicsLayer {
                     scaleX = 1.8f
                     scaleY = 1.8f
-                    alpha = 0.55f
+                    alpha = 0.75f
                 }
                 .blur(LyricsTimeProcessor.BACKGROUND_BLUR_DP.dp)
         )
@@ -64,10 +64,10 @@ fun LyricsBackground(
                 .background(
                     Brush.verticalGradient(
                         colorStops = arrayOf(
-                            0.00f to boostedVibrant.copy(alpha = 0.35f),
-                            0.35f to boostedDominant.copy(alpha = 0.30f),
-                            0.65f to boostedMuted.copy(alpha = 0.35f),
-                            1.00f to boostedVibrant.copy(alpha = 0.30f)
+                            0.00f to boostedVibrant.copy(alpha = 0.45f),
+                            0.35f to boostedDominant.copy(alpha = 0.40f),
+                            0.65f to boostedMuted.copy(alpha = 0.45f),
+                            1.00f to boostedVibrant.copy(alpha = 0.40f)
                         )
                     )
                 )
@@ -80,9 +80,9 @@ fun LyricsBackground(
                 .background(
                     Brush.horizontalGradient(
                         colorStops = arrayOf(
-                            0.00f to boostedVibrant.copy(alpha = 0.20f),
+                            0.00f to boostedVibrant.copy(alpha = 0.30f),
                             0.50f to Color.Transparent,
-                            1.00f to boostedMuted.copy(alpha = 0.18f)
+                            1.00f to boostedMuted.copy(alpha = 0.25f)
                         )
                     )
                 )
@@ -92,14 +92,14 @@ fun LyricsBackground(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = LyricsTimeProcessor.BLACK_SCRIM_ALPHA))
+                .background(Color.Black.copy(alpha = LyricsTimeProcessor.BLACK_SCRIM_ALPHA * 0.5f))
         )
 
         // ── Scrim 2: белая маска (глянцевое свечение) ──
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.White.copy(alpha = LyricsTimeProcessor.WHITE_SCRIM_ALPHA))
+                .background(Color.White.copy(alpha = LyricsTimeProcessor.WHITE_SCRIM_ALPHA * 1.5f))
         )
 
         // ── Bottom gradient для читаемости текста ──
@@ -109,10 +109,10 @@ fun LyricsBackground(
                 .background(
                     Brush.verticalGradient(
                         colorStops = arrayOf(
-                            0.00f to Color.Black.copy(alpha = 0.10f),
+                            0.00f to Color.Black.copy(alpha = 0.05f),
                             0.40f to Color.Transparent,
-                            0.60f to Color.Black.copy(alpha = 0.15f),
-                            1.00f to Color.Black.copy(alpha = 0.50f)
+                            0.60f to Color.Black.copy(alpha = 0.08f),
+                            1.00f to Color.Black.copy(alpha = 0.35f)
                         )
                     )
                 )

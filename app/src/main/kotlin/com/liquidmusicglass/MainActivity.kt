@@ -12,6 +12,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import com.liquidmusicglass.api.icm.IcmAuthRepository
+import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.engine.IcmKeyProvider
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.logging.CrashHandler
@@ -66,6 +67,14 @@ class MainActivity : ComponentActivity() {
             .build()
         connectivityManager?.registerNetworkCallback(networkRequest, networkCallback)
         isNetworkCallbackRegistered = true
+
+        // Initialize ICM API with native key (or BuildConfig fallback)
+        val apiKey = try {
+            IcmKeyProvider.getApiKey(this)
+        } catch (_: Throwable) { "" }.ifBlank { BuildConfig.ICM_API_KEY }
+        if (apiKey.isNotBlank()) {
+            IcmRepository.init(apiKey)
+        }
 
         // Handle Telegram auth redirect
         handleTelegramAuth(intent)

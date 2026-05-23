@@ -48,46 +48,40 @@ fun WaveformVisualizer(
         FloatArray(barCount)
     }
     
+    // Объединяем обе корутины в одну — останавливаем на паузе
     LaunchedEffect(isPlaying) {
+        if (!isPlaying) {
+            // Сброс к минимуму при паузе
+            for (i in 0 until barCount) {
+                targets[i] = minBarHeight
+                amplitudes[i] = minBarHeight
+            }
+            return@LaunchedEffect
+        }
         while (isActive) {
-            if (isPlaying) {
-                // Генерируем новые целевые амплитуды
-                val time = System.currentTimeMillis() / 1000f
-                for (i in 0 until barCount) {
-                    val seed = seeds[i]
-                    // Комбинация нескольких синусоид для органичного вида
-                    val wave1 = sin(time * 3f + seed * 10f)
-                    val wave2 = sin(time * 5f + seed * 20f + 1.5f) * 0.5f
-                    val wave3 = sin(time * 2f + seed * 5f + 3f) * 0.3f
-                    val combined = (wave1 + wave2 + wave3) / 1.8f
-                    
-                    // Центральные столбцы выше (как в VK X — горбатая форма)
-                    val centerBias = 1f - abs(i - barCount / 2f) / (barCount / 2f)
-                    val heightFactor = (combined * 0.5f + 0.5f) * (0.4f + centerBias * 0.6f)
-                    
-                    targets[i] = minBarHeight + (maxBarHeight - minBarHeight) * heightFactor
-                }
-            } else {
-                // Когда пауза — все столбцы к минимуму
-                for (i in 0 until barCount) {
-                    targets[i] = minBarHeight
-                }
+            // Генерируем новые целевые амплитуды
+            val time = System.currentTimeMillis() / 1000f
+            for (i in 0 until barCount) {
+                val seed = seeds[i]
+                val wave1 = sin(time * 3f + seed * 10f)
+                val wave2 = sin(time * 5f + seed * 20f + 1.5f) * 0.5f
+                val wave3 = sin(time * 2f + seed * 5f + 3f) * 0.3f
+                val combined = (wave1 + wave2 + wave3) / 1.8f
+                
+                val centerBias = 1f - abs(i - barCount / 2f) / (barCount / 2f)
+                val heightFactor = (combined * 0.5f + 0.5f) * (0.4f + centerBias * 0.6f)
+                
+                targets[i] = minBarHeight + (maxBarHeight - minBarHeight) * heightFactor
             }
             
-            delay(50) // 20fps обновление
-        }
-    }
-    
-    // Интерполяция амплитуд
-    LaunchedEffect(Unit) {
-        while (isActive) {
+            // Интерполяция амплитуд (быстрый lerp)
             for (i in 0 until barCount) {
                 val current = amplitudes[i]
                 val target = targets[i]
-                // Smooth lerp
-                amplitudes[i] = current + (target - current) * 0.15f
+                amplitudes[i] = current + (target - current) * 0.2f
             }
-            delay(16) // ~60fps
+            
+            delay(50) // 20fps — достаточно для визуала
         }
     }
     

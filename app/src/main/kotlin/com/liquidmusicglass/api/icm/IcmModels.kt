@@ -281,6 +281,17 @@ data class IcmArtistPlaylist(
     val cover: String? = null
 )
 
+// ─── Chart ───
+
+@Serializable
+data class IcmChart(
+    val id: String,
+    val name: String,
+    val query: String,
+    val cover: String? = null,
+    val tracks: List<IcmSearchItem> = emptyList()
+)
+
 // ─── Track Meta ───
 
 @Serializable

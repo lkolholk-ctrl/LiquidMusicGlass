@@ -3,6 +3,8 @@ package com.liquidmusicglass
 import android.app.Application
 import coil.ImageLoader
 import coil.ImageLoaderFactory
+import coil.disk.DiskCache
+import coil.memory.MemoryCache
 import com.kyant.fishnet.Fishnet
 import com.liquidmusicglass.api.icm.IcmAuthRepository
 import com.liquidmusicglass.api.icm.IcmRepository
@@ -28,6 +30,17 @@ class App : Application(), ImageLoaderFactory {
         return ImageLoader.Builder(this)
             .components {
                 add(CoverSigningInterceptor())
+            }
+            .memoryCache {
+                MemoryCache.Builder(this)
+                    .maxSizePercent(0.25) // 25% доступной памяти
+                    .build()
+            }
+            .diskCache {
+                DiskCache.Builder()
+                    .directory(cacheDir.resolve("coil_cache"))
+                    .maxSizeBytes(256L * 1024 * 1024) // 256 MB
+                    .build()
             }
             .build()
     }
