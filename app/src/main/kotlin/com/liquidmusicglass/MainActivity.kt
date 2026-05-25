@@ -73,7 +73,11 @@ class MainActivity : ComponentActivity() {
             IcmKeyProvider.getApiKey(this)
         } catch (_: Throwable) { "" }.ifBlank { BuildConfig.ICM_API_KEY }
         if (apiKey.isNotBlank()) {
-            IcmRepository.init(apiKey)
+            IcmRepository.init(apiKey, IcmAuthRepository.partnerUserId.value)
+            // Restore session token if we have one (survives app updates)
+            IcmAuthRepository.getSessionToken()?.let { token ->
+                IcmRepository.setSessionToken(token)
+            }
         }
 
         // Handle Telegram auth redirect

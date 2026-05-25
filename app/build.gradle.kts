@@ -50,7 +50,11 @@ android {
             isDebuggable = false
             isJniDebuggable = false
             vcsInfo.include = false
-            signingConfig = signingConfigs.getByName("release")
+            signingConfig = if (file(System.getenv("KEYSTORE_PATH") ?: "release-key.jks").exists()) {
+                signingConfigs.getByName("release")
+            } else {
+                null
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -171,6 +175,9 @@ dependencies {
     val roomVersion = "2.6.1"
     implementation("androidx.room:room-runtime:$roomVersion")
     implementation("androidx.room:room-ktx:$roomVersion")
+
+    // Requery SQLite (custom native SQLite3) — через JitPack
+    implementation("com.github.requery:sqlite-android:3.45.0")
 
     // Testing
     testImplementation("junit:junit:4.13.2")

@@ -36,6 +36,11 @@ object IcmAuthRepository {
     private const val KEY_TELEGRAM_ID = "telegram_id"
     private const val KEY_AUTH_METHOD = "auth_method" // "email" or "telegram"
 
+    private const val KEY_PROFILE_NAME = "profile_name"
+    private const val KEY_AVATAR_URL = "avatar_url"
+    private const val KEY_MAX_QUALITY = "max_quality"
+    private const val KEY_ALLOWED_QUALITIES = "allowed_qualities"
+
     private val _isLoggedIn = MutableStateFlow(false)
     val isLoggedIn: StateFlow<Boolean> = _isLoggedIn
 
@@ -61,6 +66,10 @@ object IcmAuthRepository {
     private val _avatarUrl = MutableStateFlow<String?>(null)
     val avatarUrl: StateFlow<String?> = _avatarUrl
 
+    // ─── Subscription data from /me/subscription ───
+    private val _subscription = MutableStateFlow<IcmSubscriptionResponse?>(null)
+    val subscription: StateFlow<IcmSubscriptionResponse?> = _subscription
+
     // ─── Preferences from /me/preferences ───
     private val _maxQuality = MutableStateFlow<String?>(null)
     val maxQuality: StateFlow<String?> = _maxQuality
@@ -71,13 +80,36 @@ object IcmAuthRepository {
     private var prefs: SharedPreferences? = null
 
     private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
-        .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
-        .certificatePinner(
-            okhttp3.CertificatePinner.Builder()
-                .add("byicloud.online", "sha256/2i/FBT2COdMdWfsx9OzKJt/iyOR4QNSfLavhUxAR2Jc=")
-                .build()
-        )
+        .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+        .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+        .addInterceptor { chain ->
+            val request = chain.request()
+            var response: okhttp3.Response? = null
+            var exception: java.io.IOException? = null
+            var tryCount = 0
+            val maxRetries = 3
+            while (tryCount < maxRetries) {
+                try {
+                    response = chain.proceed(request)
+                    if (response.isSuccessful || response.code < 500) {
+                        return@addInterceptor response
+                    }
+                    // Server error (5xx) — retry
+                    tryCount++
+                    if (tryCount >= maxRetries) {
+                        return@addInterceptor response
+                    }
+                    response.close()
+                } catch (e: java.io.IOException) {
+                    exception = e
+                    tryCount++
+                    if (tryCount >= maxRetries) throw e
+                    try { Thread.sleep(500L * tryCount) } catch (_: Exception) {}
+                }
+            }
+            response ?: throw exception ?: java.io.IOException("Network error")
+        }
         .build()
 
     /**
@@ -101,6 +133,13 @@ object IcmAuthRepository {
         _partnerUserId.value = p.getString(KEY_USER_ID, null)
         _isPremium.value = p.getBoolean(KEY_IS_PREMIUM, false)
         _premiumExpiresAt.value = p.getLong(KEY_PREMIUM_EXPIRES, 0)
+        _profileName.value = p.getString(KEY_PROFILE_NAME, null)
+        _avatarUrl.value = p.getString(KEY_AVATAR_URL, null)
+        _maxQuality.value = p.getString(KEY_MAX_QUALITY, null)
+        _allowedQualities.value = p.getString(KEY_ALLOWED_QUALITIES, null)
+            ?.split(",")
+            ?.filter { it.isNotBlank() }
+            ?: emptyList()
         val hasUser = _partnerUserId.value != null
         val isTelegram = p.getString(KEY_AUTH_METHOD, null) == "telegram"
         // Telegram link does not always issue a partner_session_token; presence
@@ -399,6 +438,7 @@ object IcmAuthRepository {
         _avatarUrl.value = null
         _maxQuality.value = null
         _allowedQualities.value = emptyList()
+        _subscription.value = null
         syncToIcmApi()
     }
 
@@ -427,6 +467,12 @@ object IcmAuthRepository {
         result?.let { profile ->
             _profileName.value = profile.name
             _avatarUrl.value = profile.avatarUrl
+            // Persist to SharedPreferences
+            prefs?.edit()?.apply {
+                putString(KEY_PROFILE_NAME, profile.name)
+                putString(KEY_AVATAR_URL, profile.avatarUrl)
+                apply()
+            }
         }
         result?.let { Result.success(it) }
             ?: Result.failure(IOException("Failed to fetch profile"))
@@ -440,14 +486,24 @@ object IcmAuthRepository {
      */
     suspend fun fetchPreferences(): Result<IcmUserPreferences> = withContext(Dispatchers.IO) {
         val result = IcmRepository.getUserPreferences()
-        result?.let { prefs ->
-            _maxQuality.value = prefs.maxQuality
-            _allowedQualities.value = prefs.allowedQualities
+        result?.let { prefsData ->
+            _maxQuality.value = prefsData.maxQuality
+            _allowedQualities.value = prefsData.allowedQualities
             // Infer premium status from allowed qualities
-            val hasPremium = prefs.allowedQualities.contains("ALAC") ||
-                    prefs.allowedQualities.contains("320K")
+            val hasPremium = prefsData.allowedQualities.contains("ALAC") ||
+                    prefsData.allowedQualities.contains("320K")
             if (hasPremium != _isPremium.value) {
                 _isPremium.value = hasPremium
+                prefs?.edit()?.apply {
+                    putBoolean(KEY_IS_PREMIUM, hasPremium)
+                    apply()
+                }
+            }
+            // Persist preferences
+            prefs?.edit()?.apply {
+                putString(KEY_MAX_QUALITY, prefsData.maxQuality)
+                putString(KEY_ALLOWED_QUALITIES, prefsData.allowedQualities.joinToString(","))
+                apply()
             }
         }
         result?.let { Result.success(it) }
@@ -455,12 +511,36 @@ object IcmAuthRepository {
     }
 
     /**
-     * Fetch both profile and preferences after successful auth.
+     * Fetch user's ICM subscription information from /me/subscription.
+     * Updates isPremium, premiumExpiresAt, and subscription StateFlows.
+     */
+    suspend fun fetchSubscription(): Result<IcmSubscriptionResponse> = withContext(Dispatchers.IO) {
+        val result = IcmRepository.getUserSubscription()
+        result?.let { sub ->
+            _subscription.value = sub
+            _isPremium.value = sub.active
+            _premiumExpiresAt.value = sub.expiresAt ?: 0L
+            // Persist to SharedPreferences
+            prefs?.edit()?.apply {
+                putBoolean(KEY_IS_PREMIUM, sub.active)
+                putLong(KEY_PREMIUM_EXPIRES, sub.expiresAt ?: 0L)
+                apply()
+            }
+        }
+        result?.let { Result.success(it) }
+            ?: Result.failure(IOException("Failed to fetch subscription"))
+    }
+
+    /**
+     * Fetch profile, preferences, and subscription after successful auth.
      * Call this after Telegram redirect or email login completes.
      */
     suspend fun fetchUserData(): Result<Pair<IcmUserProfile?, IcmUserPreferences?>> = withContext(Dispatchers.IO) {
         val profileResult = fetchProfile()
         val prefsResult = fetchPreferences()
+        
+        // Fetch subscription in parallel/sequence
+        fetchSubscription()
 
         val profile = profileResult.getOrNull()
         val preferences = prefsResult.getOrNull()

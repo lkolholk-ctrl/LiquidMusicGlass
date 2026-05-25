@@ -13,6 +13,7 @@ import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.MoreExecutors
 import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.api.icm.IcmTrackResponse
+import com.liquidmusicglass.data.local.WaveRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -741,6 +742,22 @@ object PlayerController {
 
         val isCompleted = completed || (playedSec >= 0.85f * durationSec)
         val isSkipped = !isCompleted && (skipped || (playedSec < 0.15f * durationSec))
+
+        // Логируем в локальную базу для аналитики "Моей волны"
+        appContext?.let { ctx ->
+            ioScope.launch {
+                try {
+                    val repo = WaveRepository(ctx)
+                    repo.logListening(
+                        track = track,
+                        durationPlayedMs = totalPlayedMs,
+                        source = track.source ?: "WAVE"
+                    )
+                } catch (e: Exception) {
+                    android.util.Log.e("PlayerController", "Wave logging failed", e)
+                }
+            }
+        }
 
         // Per ICM API docs: "logged=false for non-primary track IDs (secondary catalog
         // tracks ignored). On client you can send uniformly for all tracks — it does not

@@ -51,11 +51,28 @@ class IcmApi private constructor() {
         .writeTimeout(10, TimeUnit.SECONDS)
         .connectionPool(okhttp3.ConnectionPool(5, 30, TimeUnit.SECONDS))
         .protocols(listOf(okhttp3.Protocol.HTTP_2, okhttp3.Protocol.HTTP_1_1))
-        .certificatePinner(
-            CertificatePinner.Builder()
-                .add("byicloud.online", "sha256/2i/FBT2COdMdWfsx9OzKJt/iyOR4QNSfLavhUxAR2Jc=")
-                .build()
-        )
+        .addInterceptor { chain ->
+            val request = chain.request()
+            var response: okhttp3.Response? = null
+            var exception: java.io.IOException? = null
+            var tryCount = 0
+            val maxRetries = 3
+            while (tryCount < maxRetries) {
+                try {
+                    response = chain.proceed(request)
+                    if (response.isSuccessful || response.code < 500) {
+                        return@addInterceptor response
+                    }
+                    tryCount++
+                } catch (e: java.io.IOException) {
+                    exception = e
+                    tryCount++
+                    if (tryCount >= maxRetries) throw e
+                    try { Thread.sleep(250L * tryCount) } catch (_: Exception) {}
+                }
+            }
+            response ?: throw exception ?: java.io.IOException("Network error")
+        }
         .build()
 
     private val mediaTypeJson = "application/json; charset=utf-8".toMediaType()
@@ -136,13 +153,20 @@ class IcmApi private constructor() {
                 extractRequestId(response)?.let { onRequestId?.invoke(it) }
 
                 when {
-                    response.isSuccessful -> {
-                        Result.success(parseResponse<T>(response.body))
-                    }
-                    response.code == 202 -> {
+                    response.code == 202 && endpoint.contains("/track") -> {
                         // Async pending — parse as pending response
                         val pending = parseResponse<IcmAsyncTrackPending>(response.body)
                         Result.failure(IcmAsyncPendingException(pending))
+                    }
+                    response.isSuccessful -> {
+                        val bodyText = response.body?.string() ?: ""
+                        android.util.Log.d("IcmApi", "Success ${response.code} on $endpoint, body: ${bodyText.take(200)}")
+                        try {
+                            Result.success(json.decodeFromString(bodyText))
+                        } catch (e: Exception) {
+                            android.util.Log.e("IcmApi", "Parse error on $endpoint: ${e.message}, body: $bodyText")
+                            Result.failure(e)
+                        }
                     }
                     else -> {
                         val errorText = response.body?.string() ?: "HTTP ${response.code}"
@@ -184,12 +208,12 @@ class IcmApi private constructor() {
             extractRequestId(response)?.let { onRequestId?.invoke(it) }
 
             return when {
-                response.isSuccessful -> {
-                    Result.success(parseResponse<T>(response.body))
-                }
-                response.code == 202 -> {
+                response.code == 202 && endpoint.contains("/track") -> {
                     val pending = parseResponse<IcmAsyncTrackPending>(response.body)
                     Result.failure(IcmAsyncPendingException(pending))
+                }
+                response.isSuccessful -> {
+                    Result.success(parseResponse<T>(response.body))
                 }
                 else -> {
                     val errorText = response.body?.string() ?: "HTTP ${response.code}"
@@ -283,10 +307,12 @@ suspend fun search(
     val params = buildString {
         append("?q=$encQuery")
         append("&region=$r")
-        // Normalize legacy source names to ICM API values
+        // Normalize source names to ICM API values
+        // Internal: PRIMARY="primary", VK="secondary", ALL="all"
+        // API expects: "apple", "vk", "all"
         val normalizedSource = when (source) {
-            "apple", "primary" -> "apple"
-            "vk", "secondary" -> "vk"
+            "primary", "apple" -> "apple"
+            "secondary", "vk" -> "vk"
             "all" -> "all"
             else -> null
         }
@@ -728,6 +754,81 @@ suspend fun search(
      */
     suspend fun getUserProfile(): Result<IcmUserProfile> {
         return execute("/me/profile")
+    }
+
+    /**
+     * Get user's ICM subscription information.
+     * Scope: user_subscription. Linked user required.
+     */
+    suspend fun getUserSubscription(): Result<IcmSubscriptionResponse> {
+        return execute("/me/subscription")
+    }
+
+    /**
+     * Get user's current and available regions.
+     * Scope: user_region. Linked user required.
+     */
+    suspend fun getUserRegion(): Result<IcmRegionResponse> {
+        return execute("/me/region")
+    }
+
+    /**
+     * Update user's region.
+     * Scope: user_region. Linked user required.
+     */
+    suspend fun updateUserRegion(region: String): Result<IcmUpdateRegionResponse> {
+        val body = json.encodeToString(IcmUpdateRegionRequest(region = region))
+        return execute("/me/region", method = "PUT", body = body)
+    }
+
+    /**
+     * Start playlist import from Yandex or Apple.
+     * Scope: playlists_import. Linked user required.
+     */
+    suspend fun importPlaylist(source: String, url: String, name: String? = null): Result<IcmPlaylistImportResponse> {
+        val body = json.encodeToString(IcmPlaylistImportRequest(source = source, url = url, name = name))
+        return execute("/me/playlists/import", method = "POST", body = body)
+    }
+
+    /**
+     * Preview playlist without importing it.
+     * Scope: playlists_import. Linked user required.
+     */
+    suspend fun previewPlaylist(source: String, url: String): Result<IcmPlaylistPreviewResponse> {
+        val body = json.encodeToString(IcmPlaylistPreviewRequest(source = source, url = url))
+        return execute("/me/playlists/preview", method = "POST", body = body)
+    }
+
+    /**
+     * Get the status of an asynchronous playlist import job.
+     * Scope: playlists_import. Linked user required.
+     */
+    suspend fun getImportJobStatus(jobId: String): Result<IcmPlaylistImportJobResponse> {
+        return execute("/me/playlists/import/$jobId")
+    }
+
+    /**
+     * Get a list of the user's imported playlists.
+     * Scope: playlists_import. Linked user required.
+     */
+    suspend fun getUserPlaylists(limit: Int = 50, offset: Int = 0): Result<IcmUserPlaylistsResponse> {
+        return execute("/me/playlists?limit=$limit&offset=$offset")
+    }
+
+    /**
+     * Get tracks from an imported playlist.
+     * Scope: playlists_import. Linked user required.
+     */
+    suspend fun getUserPlaylistTracks(playlistId: Long, limit: Int = 200, offset: Int = 0): Result<IcmUserPlaylistTracksResponse> {
+        return execute("/me/playlists/$playlistId?limit=$limit&offset=$offset")
+    }
+
+    /**
+     * Delete an imported playlist.
+     * Scope: playlists_import. Linked user required.
+     */
+    suspend fun deleteUserPlaylist(playlistId: Long): Result<IcmDeletePlaylistResponse> {
+        return execute("/me/playlists/$playlistId", method = "DELETE")
     }
 }
 

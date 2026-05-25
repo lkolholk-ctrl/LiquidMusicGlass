@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.windowInsetsBottomHeight
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.activity.compose.BackHandler
@@ -41,9 +42,17 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.drawscope.Stroke
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.lens
+import com.kyant.backdrop.effects.vibrancy
+import com.kyant.backdrop.highlight.Highlight
+import com.kyant.backdrop.shadow.InnerShadow
+import com.kyant.backdrop.shadow.Shadow
 import com.liquidmusicglass.engine.AppSettings
 import com.liquidmusicglass.engine.AppUpdater
 import com.liquidmusicglass.engine.PlayerController
@@ -57,7 +66,6 @@ import com.liquidmusicglass.ui.screens.AlbumDetailScreen
 import com.liquidmusicglass.ui.screens.ArtistDetailScreen
 import com.liquidmusicglass.ui.screens.EqualizerScreen
 import com.liquidmusicglass.ui.screens.PlaylistDetailScreen
-import com.liquidmusicglass.ui.screens.PlaylistsScreen
 import com.liquidmusicglass.ui.screens.SettingsScreen
 import com.liquidmusicglass.ui.screens.AuthScreen
 import com.liquidmusicglass.ui.screens.ProfileScreen
@@ -94,7 +102,6 @@ fun AppRoot() {
     var detailAlbumId by remember { mutableStateOf<String?>(null) }
     var detailArtistId by remember { mutableStateOf<String?>(null) }
     var equalizerOpen by remember { mutableStateOf(false) }
-    var playlistsOpen by remember { mutableStateOf(false) }
     var playlistDetailId by remember { mutableStateOf<String?>(null) }
     var authOpen by remember { mutableStateOf(false) }
     var profileOpen by remember { mutableStateOf(false) }
@@ -139,13 +146,12 @@ fun AppRoot() {
     val rootBackdrop: LayerBackdrop = rememberLayerBackdrop()
 
     // Back handler: close detail screens first, then player, then app
-    BackHandler(enabled = detailAlbumId != null || detailArtistId != null || equalizerOpen || playlistsOpen || playlistDetailId != null || settingsOpen || authOpen || profileOpen || expandProgress.value > 0.5f) {
+    BackHandler(enabled = detailAlbumId != null || detailArtistId != null || equalizerOpen || playlistDetailId != null || settingsOpen || authOpen || profileOpen || expandProgress.value > 0.5f) {
         when {
             settingsOpen -> settingsOpen = false
             authOpen -> authOpen = false
             profileOpen -> profileOpen = false
             equalizerOpen -> equalizerOpen = false
-            playlistsOpen -> playlistsOpen = false
             playlistDetailId != null -> playlistDetailId = null
             detailAlbumId != null -> detailAlbumId = null
             detailArtistId != null -> detailArtistId = null
@@ -172,6 +178,16 @@ fun AppRoot() {
                 }
                 .layerBackdrop(rootBackdrop)
         ) {
+            val isHomeActive = selectedIndex == 0 &&
+                    detailAlbumId == null &&
+                    detailArtistId == null &&
+                    playlistDetailId == null &&
+                    !equalizerOpen &&
+                    !settingsOpen &&
+                    !authOpen &&
+                    !profileOpen &&
+                    expandProgress.value < 0.05f
+
             // ── Main screens ──
             when (selectedIndex) {
                 0 -> HomeScreen(
@@ -185,7 +201,8 @@ fun AppRoot() {
                 )
                 2 -> LibraryScreen(
                     onNavigateToAlbum = { detailAlbumId = it },
-                    onNavigateToArtist = { detailArtistId = it }
+                    onNavigateToArtist = { detailArtistId = it },
+                    onOpenPlaylist = { playlistDetailId = it }
                 )
                 3 -> ProfileScreen(
                     onOpenSettings = { settingsOpen = true },
@@ -261,25 +278,7 @@ fun AppRoot() {
                 EqualizerScreen(onBack = { equalizerOpen = false })
             }
 
-            // ── Playlists ──
-            AnimatedVisibility(
-                visible = playlistsOpen,
-                enter = slideInHorizontally(
-                    initialOffsetX = { it },
-                    animationSpec = spring(dampingRatio = 0.9f, stiffness = 300f)
-                ) + fadeIn(tween(200)),
-                exit = slideOutHorizontally(
-                    targetOffsetX = { it },
-                    animationSpec = spring(dampingRatio = 0.9f, stiffness = 350f)
-                ) + fadeOut(tween(150))
-            ) {
-                PlaylistsScreen(
-                    onBack = { playlistsOpen = false },
-                    onOpenPlaylist = { id ->
-                        playlistDetailId = id
-                    }
-                )
-            }
+
 
             // ── Playlist Detail ──
             AnimatedVisibility(
@@ -302,8 +301,8 @@ fun AppRoot() {
             }
         }
 
-    val barsVisible = detailAlbumId == null && detailArtistId == null &&
-                        !equalizerOpen && !playlistsOpen && playlistDetailId == null &&
+     val barsVisible = detailAlbumId == null && detailArtistId == null &&
+                        !equalizerOpen && playlistDetailId == null &&
                         !settingsOpen && !authOpen && !profileOpen
 
     if (barsVisible) {
@@ -340,36 +339,88 @@ fun AppRoot() {
                         )
                     }
             ) {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .graphicsLayer { alpha = miniAlpha },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        MiniPlayer(
-                            trackTitle = trackTitle,
-                            artistName = artistName,
-                            isPlaying = isPlaying,
-                            albumArtUri = currentTrack?.displayArtUri,
-                            coverUrl = currentTrack?.coverUrl,
+                val mergedShape = RoundedCornerShape(22.dp)
+                val lc = LiquidTheme.colors
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.92f)
+                        .align(Alignment.CenterHorizontally)
+                        .drawBackdrop(
                             backdrop = rootBackdrop,
-                            onExpand = { animateExpand() },
-                            onPlayPause = { PlayerController.togglePlayPause(context) },
-                            onSkipNext = { PlayerController.skipNext(context) }
+                            shape = { mergedShape },
+                            effects = {
+                                vibrancy()
+                                blur(6.dp.toPx())
+                                lens(
+                                    refractionHeight = 24.dp.toPx(),
+                                    refractionAmount = 40.dp.toPx(),
+                                    chromaticAberration = true
+                                )
+                            },
+                            highlight = {
+                                Highlight.Ambient
+                            },
+                            shadow = {
+                                Shadow(
+                                    radius = 12.dp,
+                                    color = Color.Black.copy(alpha = 0.25f)
+                                )
+                            },
+                            innerShadow = {
+                                InnerShadow(
+                                    radius = 8.dp,
+                                    alpha = 0.35f
+                                )
+                            },
+                            onDrawSurface = {
+                                drawRect(lc.bottomBarTint)
+                                drawRect(
+                                    color = Color.White.copy(alpha = 0.15f),
+                                    style = Stroke(width = 0.8.dp.toPx())
+                                )
+                            }
+                        )
+                        .padding(vertical = 4.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .graphicsLayer { alpha = miniAlpha },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            MiniPlayer(
+                                trackTitle = trackTitle,
+                                artistName = artistName,
+                                isPlaying = isPlaying,
+                                albumArtUri = currentTrack?.displayArtUri,
+                                coverUrl = currentTrack?.coverUrl,
+                                backdrop = rootBackdrop,
+                                drawBackground = false,
+                                onExpand = { animateExpand() },
+                                onPlayPause = { PlayerController.togglePlayPause(context) },
+                                onSkipNext = { PlayerController.skipNext(context) }
+                            )
+                        }
+
+                        Spacer(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(0.5.dp)
+                                .background(Color.White.copy(alpha = 0.12f))
+                        )
+
+                        BottomBar(
+                            selectedIndex = selectedIndex,
+                            onItemSelected = { selectedIndex = it; AppSettings.setLastScreen(it) },
+                            backdrop = rootBackdrop,
+                            drawBackground = false
                         )
                     }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    BottomBar(
-                        selectedIndex = selectedIndex,
-                        onItemSelected = { selectedIndex = it; AppSettings.setLastScreen(it) },
-                        backdrop = rootBackdrop
-                    )
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))

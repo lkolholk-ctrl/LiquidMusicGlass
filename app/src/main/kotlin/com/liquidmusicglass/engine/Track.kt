@@ -22,7 +22,9 @@ data class Track(
     val isExplicit: Boolean = false,
     val isCustom: Boolean = false,
     /** Music source: "apple", "vk", "wave", etc. Used for stream quality selection. */
-    val source: String? = null
+    val source: String? = null,
+    /** Жанр трека для аналитики "Моей волны". */
+    val genre: String? = null
 ) {
     /** Uri обложки альбома из MediaStore (для локальных треков). */
     val albumArtUri: Uri

@@ -8,6 +8,7 @@ import coil.memory.MemoryCache
 import com.kyant.fishnet.Fishnet
 import com.liquidmusicglass.api.icm.IcmAuthRepository
 import com.liquidmusicglass.api.icm.IcmRepository
+import com.liquidmusicglass.data.local.HomeCacheManager
 import com.liquidmusicglass.data.local.LocalAuthManager
 import com.liquidmusicglass.data.local.db.LibraryRepository
 import com.liquidmusicglass.engine.AppSettings
@@ -33,15 +34,16 @@ class App : Application(), ImageLoaderFactory {
             }
             .memoryCache {
                 MemoryCache.Builder(this)
-                    .maxSizePercent(0.25) // 25% доступной памяти
+                    .maxSizePercent(0.30) // 30% available memory
                     .build()
             }
             .diskCache {
                 DiskCache.Builder()
                     .directory(cacheDir.resolve("coil_cache"))
-                    .maxSizeBytes(256L * 1024 * 1024) // 256 MB
+                    .maxSizeBytes(512L * 1024 * 1024) // 512 MB for album art
                     .build()
             }
+            .respectCacheHeaders(false) // Ignore server cache headers, manage ourselves
             .build()
     }
 
@@ -68,6 +70,9 @@ class App : Application(), ImageLoaderFactory {
 
             // Initialize local database (SQLite + initial load)
             LibraryRepository.getInstance(this@App)
+
+            // Initialize home content cache
+            HomeCacheManager.init(this@App)
 
             // Initialize ICM Music API if key is saved
             val prefs = getSharedPreferences("icm", MODE_PRIVATE)

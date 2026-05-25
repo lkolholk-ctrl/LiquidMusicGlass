@@ -51,6 +51,7 @@ fun MiniPlayer(
     albumArtUri: Uri?,
     coverUrl: String? = null,
     backdrop: LayerBackdrop,
+    drawBackground: Boolean = true,
     onExpand: () -> Unit,
     onPlayPause: () -> Unit,
     onSkipNext: () -> Unit = {}
@@ -60,8 +61,8 @@ fun MiniPlayer(
 
     val lc = LiquidTheme.colors
 
-    Row(
-        modifier = Modifier
+    val playerModifier = if (drawBackground) {
+        Modifier
             .fillMaxWidth(0.92f)
             .height(52.dp)
             .drawBackdrop(
@@ -103,7 +104,20 @@ fun MiniPlayer(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null
             ) { onExpand() }
-            .padding(horizontal = 10.dp),
+            .padding(horizontal = 10.dp)
+    } else {
+        Modifier
+            .fillMaxWidth()
+            .height(52.dp)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) { onExpand() }
+            .padding(horizontal = 14.dp)
+    }
+
+    Row(
+        modifier = playerModifier,
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(

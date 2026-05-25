@@ -104,14 +104,15 @@ private data class BottomNavItem(
 fun BottomBar(
     selectedIndex: Int,
     onItemSelected: (Int) -> Unit,
-    backdrop: LayerBackdrop
+    backdrop: LayerBackdrop,
+    drawBackground: Boolean = true
 ) {
     val avatarUrl by IcmAuthRepository.avatarUrl.collectAsState()
 
     val items = listOf(
         BottomNavItem(Icons.Rounded.Home, "Home"),
         BottomNavItem(Icons.Rounded.Search, "Search"),
-        BottomNavItem(Icons.AutoMirrored.Rounded.PlaylistPlay, "Library"),
+        BottomNavItem(Icons.AutoMirrored.Rounded.PlaylistPlay, "Playlists"),
         BottomNavItem(Icons.Rounded.Person, "Profile")
     )
 
@@ -120,8 +121,8 @@ fun BottomBar(
         onTabSelected = onItemSelected,
         backdrop = backdrop,
         tabsCount = items.size,
-        modifier = Modifier
-            .fillMaxWidth(0.92f)
+        drawBackground = drawBackground,
+        modifier = if (drawBackground) Modifier.fillMaxWidth(0.92f) else Modifier.fillMaxWidth()
     ) {
         items.forEachIndexed { index, item ->
             LiquidBottomTab {
@@ -145,6 +146,7 @@ private fun NavigationCapsule(
     onTabSelected: (Int) -> Unit,
     backdrop: LayerBackdrop,
     tabsCount: Int,
+    drawBackground: Boolean = true,
     modifier: Modifier = Modifier,
     content: @Composable RowScope.() -> Unit
 ) {
@@ -242,7 +244,7 @@ private fun NavigationCapsule(
         }
 
         // ── СЛОЙ 1: Видимый glass-фон (64dp) + иконки ──
-        Row(
+        val layer1Modifier = if (drawBackground) {
             Modifier
                 .graphicsLayer { translationX = panelOffset }
                 .drawBackdrop(
@@ -285,7 +287,18 @@ private fun NavigationCapsule(
                 .then(interactiveHighlight.modifier)
                 .height(52f.dp)
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 4.dp),
+                .padding(horizontal = 12.dp, vertical = 4.dp)
+        } else {
+            Modifier
+                .graphicsLayer { translationX = panelOffset }
+                .then(interactiveHighlight.modifier)
+                .height(52f.dp)
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 4.dp)
+        }
+
+        Row(
+            modifier = layer1Modifier,
             verticalAlignment = Alignment.CenterVertically,
             content = content
         )

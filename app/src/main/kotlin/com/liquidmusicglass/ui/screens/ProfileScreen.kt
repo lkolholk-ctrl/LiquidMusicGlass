@@ -30,6 +30,7 @@ import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -70,6 +71,13 @@ fun ProfileScreen(
     val premiumExpiresAt by IcmAuthRepository.premiumExpiresAt.collectAsState()
     val profileName by IcmAuthRepository.profileName.collectAsState()
     val avatarUrl by IcmAuthRepository.avatarUrl.collectAsState()
+    val subscription by IcmAuthRepository.subscription.collectAsState()
+
+    LaunchedEffect(isLoggedIn) {
+        if (isLoggedIn) {
+            IcmAuthRepository.fetchUserData()
+        }
+    }
 
     val displayName = when {
         !profileName.isNullOrBlank() -> profileName!!
@@ -324,13 +332,21 @@ fun ProfileScreen(
                 )
                 Spacer(modifier = Modifier.height(12.dp))
 
-                SubscriptionCard(
-                    name = "Premium",
-                    validUntil = if (premiumExpiresAt > 0) {
-                        SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
-                            .format(Date(premiumExpiresAt))
-                    } else "Lifetime"
-                )
+                val sub = subscription
+                if (sub != null) {
+                    SubscriptionCard(
+                        subscription = sub,
+                        premiumExpiresAt = premiumExpiresAt
+                    )
+                } else {
+                    SubscriptionCard(
+                        name = "Premium",
+                        validUntil = if (premiumExpiresAt > 0) {
+                            SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
+                                .format(Date(premiumExpiresAt))
+                        } else "Lifetime"
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.weight(1f))
@@ -441,6 +457,114 @@ private fun SubscriptionCard(
                     color = Color.White.copy(alpha = 0.5f),
                     fontSize = 13.sp
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SubscriptionCard(
+    subscription: com.liquidmusicglass.api.icm.IcmSubscriptionResponse,
+    premiumExpiresAt: Long
+) {
+    val planLabel = when (subscription.planType) {
+        "family" -> if (subscription.isFamilyOwner) "Premium (Family Owner)" else "Premium (Family Member)"
+        "personal" -> "Premium (Personal)"
+        else -> "Premium"
+    }
+
+    val expiryText = when {
+        !subscription.expiresAtIso.isNullOrBlank() -> {
+            val dateStr = subscription.expiresAtIso.substringBefore("T")
+            try {
+                val parts = dateStr.split("-")
+                "${parts[2]}.${parts[1]}.${parts[0]}"
+            } catch (_: Exception) {
+                dateStr
+            }
+        }
+        premiumExpiresAt > 0 -> {
+            SimpleDateFormat("dd.MM.yyyy", Locale.getDefault()).format(Date(premiumExpiresAt))
+        }
+        else -> "Lifetime"
+    }
+
+    val daysLeftText = if (subscription.daysLeft > 0) " (${subscription.daysLeft} days left)" else ""
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(22.dp))
+            .background(Color(0xFF1A1A1A))
+            .padding(16.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(PremiumPurple.copy(alpha = 0.2f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Rounded.Star,
+                    null,
+                    tint = PremiumPurple,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(14.dp))
+            Column {
+                Text(
+                    text = planLabel,
+                    color = Color.White,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium
+                )
+                Text(
+                    text = "Valid until $expiryText$daysLeftText",
+                    color = Color.White.copy(alpha = 0.5f),
+                    fontSize = 13.sp
+                )
+            }
+        }
+
+        if (subscription.regions.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(14.dp))
+            Text(
+                text = "Active Storefronts:",
+                color = Color.White.copy(alpha = 0.4f),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                subscription.regions.forEach { region ->
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xFF2A2A2A))
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF22C55E))
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "${region.name} (${region.code.uppercase()})",
+                                color = Color.White.copy(alpha = 0.8f),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
             }
         }
     }

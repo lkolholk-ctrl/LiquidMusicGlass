@@ -39,6 +39,7 @@ import com.liquidmusicglass.api.icm.IcmHomeItem
 import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.api.icm.IcmWaveTrack
 import com.liquidmusicglass.api.icm.toTrack
+import com.liquidmusicglass.data.local.WaveRepository
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.Track
 import com.liquidmusicglass.ui.glass.AlbumArtImage
@@ -270,69 +271,86 @@ fun HomeScreen(
         isPlayingMood = true
         moodLoading = moodLoading + moodId
         scope.launch {
-            // For "my_wave" use personal wave without seed — pure recommendation
-            val seed = if (moodId == "my_wave") null else moodSeeds.getOrPut(moodId) { resolveMoodSeedTrackId(mood) }
-            // Refresh refill context with the resolved seed so auto-refill stays on-genre.
-            PlayerController.setAutoRefillContext(
-                type = "wave",
-                id = moodId,
-                name = mood.title,
-                seedTrackId = seed
-            )
+            if (moodId == "my_wave") {
+                // === МОЯ ВОЛНА через WaveRepository с фильтрацией по жанрам ===
+                val waveRepo = WaveRepository.getInstance(context)
+                val queue = waveRepo.buildWaveQueue()
+                moodLoading = moodLoading - moodId
 
-            val waveTracks = mutableListOf<IcmWaveTrack>()
-            var waveStatus: String? = null
-            repeat(5) {
-                val exclude = waveTracks.map { it.id }
-                val response = IcmRepository.getWaveNext(
-                    seedTrackId = seed,
-                    exclude = exclude.takeIf { it.isNotEmpty() },
-                    recentSkips = 0
-                )
-                if (response != null) {
-                    waveStatus = response.status
-                    if (response.status == "ok" && response.track != null) {
-                        waveTracks.add(response.track)
-                    }
-                }
-            }
-            moodTracks = moodTracks + (moodId to waveTracks)
-            moodLoading = moodLoading - moodId
-
-            if (waveTracks.isNotEmpty()) {
-                val tracks = waveTracks.map { waveTrackToTrack(it) }
-                // Resolve first track URL immediately for fast start
-                val firstResolved = resolveWaveTrackUrl(tracks.firstOrNull())
-                if (firstResolved != null) {
-                    val resolvedTracks = tracks.toMutableList()
-                    resolvedTracks[0] = firstResolved
-                    PlayerController.setQueue(resolvedTracks)
+                if (queue.isNotEmpty()) {
+                    // Резолвим URL первого трека
+                    val firstResolved = resolveWaveTrackUrl(queue.firstOrNull())
+                    val resolvedQueue = queue.toMutableList()
+                    if (firstResolved != null) resolvedQueue[0] = firstResolved
+                    PlayerController.setQueue(resolvedQueue)
                     PlayerController.playTrack(context, 0)
-                }
-                // Preload next batch
-                loadMoreMoodTracks(moodId, waveTracks)
-            } else if (waveStatus == "empty" && moodId == "my_wave") {
-                // Personal wave is empty — show onboarding to let user pick artists
-                pendingMoodId = moodId
-                activeMoodId = null
-                isPlayingMood = false
-                PlayerController.clearAutoRefillContext()
-                showWaveOnboarding = true
-            } else {
-                // Wave is empty or user is not linked — fall back to a plain
-                // search-driven mood playlist so the card still works.
-                val fallback = loadMoodFallbackTracks(mood, count = 12)
-                if (fallback.isNotEmpty()) {
-                    val firstResolved = resolveWaveTrackUrl(fallback.firstOrNull())
-                    val resolvedTracks = fallback.toMutableList()
-                    if (firstResolved != null) resolvedTracks[0] = firstResolved
-                    PlayerController.clearAutoRefillContext()
-                    PlayerController.setQueue(resolvedTracks)
-                    PlayerController.playTrack(context, 0)
+                    // Добавляем следующие треки в очередь
+                    queue.drop(1).forEach { PlayerController.addToQueue(it) }
                 } else {
+                    // Очередь пуста — показываем onboarding
+                    pendingMoodId = moodId
                     activeMoodId = null
                     isPlayingMood = false
                     PlayerController.clearAutoRefillContext()
+                    showWaveOnboarding = true
+                }
+            } else {
+                // === Остальные настроения через seed-based wave ===
+                val seed = moodSeeds.getOrPut(moodId) { resolveMoodSeedTrackId(mood) }
+                // Refresh refill context with the resolved seed so auto-refill stays on-genre.
+                PlayerController.setAutoRefillContext(
+                    type = "wave",
+                    id = moodId,
+                    name = mood.title,
+                    seedTrackId = seed
+                )
+
+                val waveTracks = mutableListOf<IcmWaveTrack>()
+                var waveStatus: String? = null
+                repeat(5) {
+                    val exclude = waveTracks.map { it.id }
+                    val response = IcmRepository.getWaveNext(
+                        seedTrackId = seed,
+                        exclude = exclude.takeIf { it.isNotEmpty() },
+                        recentSkips = 0
+                    )
+                    if (response != null) {
+                        waveStatus = response.status
+                        if (response.status == "ok" && response.track != null) {
+                            waveTracks.add(response.track)
+                        }
+                    }
+                }
+                moodTracks = moodTracks + (moodId to waveTracks)
+                moodLoading = moodLoading - moodId
+
+                if (waveTracks.isNotEmpty()) {
+                    val tracks = waveTracks.map { waveTrackToTrack(it) }
+                    // Resolve first track URL immediately for fast start
+                    val firstResolved = resolveWaveTrackUrl(tracks.firstOrNull())
+                    if (firstResolved != null) {
+                        val resolvedTracks = tracks.toMutableList()
+                        resolvedTracks[0] = firstResolved
+                        PlayerController.setQueue(resolvedTracks)
+                        PlayerController.playTrack(context, 0)
+                    }
+                    // Preload next batch
+                    loadMoreMoodTracks(moodId, waveTracks)
+                } else {
+                    // Wave is empty — fall back to search-driven playlist
+                    val fallback = loadMoodFallbackTracks(mood, count = 12)
+                    if (fallback.isNotEmpty()) {
+                        val firstResolved = resolveWaveTrackUrl(fallback.firstOrNull())
+                        val resolvedTracks = fallback.toMutableList()
+                        if (firstResolved != null) resolvedTracks[0] = firstResolved
+                        PlayerController.clearAutoRefillContext()
+                        PlayerController.setQueue(resolvedTracks)
+                        PlayerController.playTrack(context, 0)
+                    } else {
+                        activeMoodId = null
+                        isPlayingMood = false
+                        PlayerController.clearAutoRefillContext()
+                    }
                 }
             }
         }

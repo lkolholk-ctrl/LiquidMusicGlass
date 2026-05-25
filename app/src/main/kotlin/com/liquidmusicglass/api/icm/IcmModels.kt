@@ -876,3 +876,217 @@ data class IcmHomeResponse(
     val blocks: List<IcmHomeBlock> = emptyList(),
     @SerialName("updated_at") val updatedAt: Long? = null
 )
+
+// ─── Subscription ───
+
+@Serializable
+data class IcmSubscriptionResponse(
+    val active: Boolean,
+    @SerialName("expires_at") val expiresAt: Long? = null,
+    @SerialName("expires_at_iso") val expiresAtIso: String? = null,
+    @SerialName("days_left") val daysLeft: Int = 0,
+    @SerialName("plan_type") val planType: String? = null,
+    @SerialName("is_family_owner") val isFamilyOwner: Boolean = false,
+    @SerialName("is_family_member") val isFamilyMember: Boolean = false,
+    val regions: List<IcmSubscriptionRegion> = emptyList()
+)
+
+@Serializable
+data class IcmSubscriptionRegion(
+    val code: String,
+    val name: String,
+    @SerialName("expires_at") val expiresAt: Long? = null
+)
+
+// ─── Region ───
+
+@Serializable
+data class IcmRegionResponse(
+    val current: String,
+    val available: List<IcmAvailableRegion> = emptyList(),
+    @SerialName("allowed_by_partner") val allowedByPartner: List<String> = emptyList(),
+    @SerialName("requires_subscription") val requiresSubscription: List<String> = emptyList()
+)
+
+@Serializable
+data class IcmAvailableRegion(
+    val code: String,
+    val name: String,
+    val free: Boolean = false,
+    @SerialName("expires_at") val expiresAt: Long? = null
+)
+
+@Serializable
+data class IcmUpdateRegionRequest(
+    val region: String
+)
+
+@Serializable
+data class IcmUpdateRegionResponse(
+    val region: String
+)
+
+// ─── Playlist Import ───
+
+@Serializable
+data class IcmPlaylistImportRequest(
+    val source: String,
+    val url: String,
+    val name: String? = null
+)
+
+@Serializable
+data class IcmPlaylistImportTrack(
+    @SerialName("trackId") val trackId: String? = null,
+    val title: String? = null,
+    val artist: String? = null,
+    val cover: String? = null,
+    @SerialName("collectionId") val collectionId: String? = null,
+    val duration: Long? = null,
+    @SerialName("match_score") val matchScore: Double? = null
+)
+
+@Serializable
+data class IcmPlaylistImportResponse(
+    @SerialName("playlist_id") val playlistId: Long? = null,
+    val name: String? = null,
+    val source: String? = null,
+    @SerialName("source_url") val sourceUrl: String? = null,
+    val total: Int? = null,
+    val matched: Int? = null,
+    val failed: Int? = null,
+    val tracks: List<IcmPlaylistImportTrack>? = null,
+    @SerialName("failed_tracks") val failedTracks: List<IcmFailedTrack>? = null,
+    
+    // Async fields (Yandex)
+    @SerialName("job_id") val jobId: String? = null,
+    val status: String? = null,
+    @SerialName("poll_url") val pollUrl: String? = null,
+    @SerialName("poll_after") val pollAfter: Int? = null
+)
+
+@Serializable
+data class IcmFailedTrack(
+    @SerialName("yandex_title") val yandexTitle: String? = null,
+    @SerialName("yandex_artists") val yandexArtists: List<String> = emptyList(),
+    val reason: String? = null
+)
+
+// ─── Playlist Preview ───
+
+@Serializable
+data class IcmPlaylistPreviewRequest(
+    val source: String,
+    val url: String
+)
+
+@Serializable
+data class IcmPlaylistPreviewResponse(
+    val source: String? = null,
+    val name: String? = null,
+    val total: Int? = null,
+    val tracks: List<IcmPreviewTrack> = emptyList()
+)
+
+@Serializable
+data class IcmPreviewTrack(
+    val id: String? = null,
+    val title: String? = null,
+    val artist: String? = null,
+    val artists: List<String> = emptyList(),
+    val album: String? = null,
+    val albumName: String? = null,
+    @SerialName("collectionId") val collectionId: String? = null,
+    val cover: String? = null,
+    val duration: Long? = null,
+    @SerialName("release_date") val releaseDate: String? = null,
+    val version: String? = null,
+    @SerialName("duration_ms") val durationMs: Long? = null
+)
+
+// ─── Playlist Job ───
+
+@Serializable
+data class IcmPlaylistImportJobResponse(
+    // 202 async response
+    @SerialName("job_id") val jobId: String? = null,
+    @SerialName("poll_url") val pollUrl: String? = null,
+    @SerialName("poll_after") val pollAfter: Int? = null,
+    
+    // Poll response — pending
+    val status: String? = null,
+    val progress: IcmImportJobProgress? = null,
+    
+    // When ready
+    @SerialName("playlist_id") val playlistId: Long? = null,
+    val name: String? = null,
+    val source: String? = null,
+    val total: Int? = null,
+    val matched: Int? = null,
+    val failed: Int? = null,
+    val tracks: List<IcmPlaylistImportTrack>? = null,
+    @SerialName("failed_tracks") val failedTracks: List<IcmFailedTrack>? = null,
+    
+    // When failed
+    val error: String? = null,
+    val message: String? = null
+)
+
+@Serializable
+data class IcmImportJobProgress(
+    val total: Int? = null,
+    val matched: Int? = null,
+    val failed: Int? = null
+)
+
+// ─── Playlist Management ───
+
+@Serializable
+data class IcmUserPlaylistsResponse(
+    val count: Int? = null,
+    val total: Int? = null,
+    val offset: Int? = null,
+    val limit: Int? = null,
+    val items: List<IcmUserPlaylist> = emptyList()
+)
+
+@Serializable
+data class IcmUserPlaylist(
+    val id: Long? = null,
+    val name: String? = null,
+    val source: String? = null,
+    @SerialName("track_count") val trackCount: Int? = null,
+    val cover: String? = null,
+    @SerialName("created_at") val createdAt: Long? = null,
+    @SerialName("updated_at") val updatedAt: Long? = null
+)
+
+@Serializable
+data class IcmUserPlaylistTracksResponse(
+    val playlist: IcmUserPlaylistInfo? = null,
+    val tracks: List<IcmUserPlaylistTrack> = emptyList()
+)
+
+@Serializable
+data class IcmUserPlaylistInfo(
+    val id: Long? = null,
+    val name: String? = null,
+    val source: String? = null,
+    @SerialName("track_count") val trackCount: Int? = null
+)
+
+@Serializable
+data class IcmUserPlaylistTrack(
+    @SerialName("trackId") val trackId: String? = null,
+    val title: String? = null,
+    val artist: String? = null,
+    val cover: String? = null,
+    val duration: Long? = null,
+    @SerialName("collectionId") val collectionId: String? = null,
+    val position: Int? = null
+)
+
+@Serializable
+data class IcmDeletePlaylistResponse(
+    val deleted: Boolean = true
+)

@@ -1,6 +1,9 @@
 package com.liquidmusicglass.api.icm
 
 import com.liquidmusicglass.engine.Track
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -189,68 +192,117 @@ object IcmRepository {
 
     /**
      * Load home screen content blocks.
-     * Rotates search queries on each call so content stays fresh.
+     * Parallel async requests + JSON caching for offline-first experience.
      */
-    suspend fun loadHomeContent(): IcmHomeResponse {
+    suspend fun loadHomeContent(): IcmHomeResponse = coroutineScope {
+        // ─── Parallel search for all content blocks ───
+        
+        // Popular tracks
+        val popularDeferred = async {
+            val queries = listOf(
+                listOf("top hits 2025", "viral hits", "trending now"),
+                listOf("popular songs", "hot tracks", "chart toppers"),
+                listOf("best songs", "top tracks", "hit parade"),
+                listOf("viral songs", "trending hits", "top music")
+            ).random()
+            searchToHomeItems(queries, 10, filterTracks = true)
+        }
+        
+        // Banners / Featured
+        val bannerDeferred = async {
+            val queries = listOf(
+                listOf("top hits", "popular", "trending"),
+                listOf("viral", "hot", "featured"),
+                listOf("best new", "rising", "buzzing")
+            ).random()
+            searchToHomeItems(queries, 6, filterTracks = true, genreTag = true)
+        }
+        
+        // New Releases (albums)
+        val newReleasesDeferred = async {
+            val queries = listOf(
+                listOf("new releases", "new music", "latest"),
+                listOf("fresh drops", "new albums", "just released"),
+                listOf("this week", "new singles", "debut")
+            ).random()
+            searchToHomeItems(queries, 10, filterAlbums = true)
+        }
+        
+        // Charts
+        val chartsDeferred = async {
+            val queries = listOf(
+                listOf("top 100", "chart", "hot", "viral"),
+                listOf("billboard", "ranking", "top 50", "trending"),
+                listOf("most played", "global hits", "top chart", "ranked")
+            ).random()
+            var rank = 1
+            searchToHomeItems(queries, 15, filterTracks = true) { item ->
+                item.copy(rank = rank++)
+            }
+        }
+        
+        // Await all in parallel
+        val (popular, banners, newReleases, charts) = awaitAll(
+            popularDeferred, bannerDeferred, newReleasesDeferred, chartsDeferred
+        )
+        
         val blocks = mutableListOf<IcmHomeBlock>()
-
-        // ─── Popular Tracks (always first, always fresh) ───
-        val popularQueries = listOf(
-            listOf("top hits 2025", "viral hits", "trending now"),
-            listOf("popular songs", "hot tracks", "chart toppers"),
-            listOf("best songs", "top tracks", "hit parade"),
-            listOf("viral songs", "trending hits", "top music")
-        )
-        val popularQuerySet = popularQueries.random()
-        val popularItems = mutableListOf<IcmHomeItem>()
-        for (query in popularQuerySet) {
-            if (popularItems.size >= 10) break
-            val result = searchAll(query, limit = 5, source = IcmSearchSource.ALL)
-            result?.items
-                ?.filter { it.isTrack }
-                ?.take(10 - popularItems.size)
-                ?.forEach { item ->
-                    popularItems.add(
-                        IcmHomeItem(
-                            id = item.id,
-                            title = item.title,
-                            artist = item.displayArtist,
-                            artistId = item.artistId,
-                            cover = item.cover,
-                            duration = item.duration,
-                            source = item.source
-                        )
-                    )
-                }
+        
+        if (popular.isNotEmpty()) {
+            blocks.add(IcmHomeBlock(id = "popular", title = "Popular", type = "popular", items = popular))
         }
-        if (popularItems.isNotEmpty()) {
-            blocks.add(
-                IcmHomeBlock(
-                    id = "popular",
-                    title = "Popular",
-                    type = "popular",
-                    items = popularItems
-                )
-            )
+        if (banners.isNotEmpty()) {
+            blocks.add(IcmHomeBlock(id = "banners", title = "Featured", type = "banner", items = banners))
         }
-
-        // ─── Banners: featured tracks (rotated queries) ───
-        val bannerQuerySets = listOf(
-            listOf("top hits", "popular", "trending"),
-            listOf("viral", "hot", "featured"),
-            listOf("best new", "rising", "buzzing")
-        )
-        val bannerQueries = bannerQuerySets.random()
-        val bannerItems = mutableListOf<IcmHomeItem>()
-        for (query in bannerQueries) {
-            if (bannerItems.size >= 6) break
-            val result = searchAll(query, limit = 5, source = IcmSearchSource.ALL)
-            result?.items
-                ?.filter { it.isTrack }
-                ?.take(6 - bannerItems.size)
-                ?.forEach { item ->
-                    bannerItems.add(
-                        IcmHomeItem(
+        if (newReleases.isNotEmpty()) {
+            blocks.add(IcmHomeBlock(id = "new_releases", title = "New Releases", type = "new_releases", items = newReleases))
+        }
+        if (charts.isNotEmpty()) {
+            blocks.add(IcmHomeBlock(id = "charts", title = "Top Charts", type = "charts", items = charts))
+        }
+        
+        // Wave recommendations (sequential, needs exclude tracking)
+        if (api.partnerUserId != null) {
+            val waveItems = loadWaveRecommendations()
+            if (waveItems.isNotEmpty()) {
+                blocks.add(IcmHomeBlock(
+                    id = "recommendations",
+                    title = "Made For You",
+                    type = "recommendations",
+                    items = waveItems
+                ))
+            }
+        }
+        
+        IcmHomeResponse(blocks = blocks)
+    }
+    
+    /**
+     * Helper: search queries and convert to HomeItems.
+     */
+    private suspend fun searchToHomeItems(
+        queries: List<String>,
+        maxItems: Int,
+        filterTracks: Boolean = false,
+        filterAlbums: Boolean = false,
+        genreTag: Boolean = false,
+        transform: ((IcmHomeItem) -> IcmHomeItem)? = null
+    ): List<IcmHomeItem> {
+        val items = mutableListOf<IcmHomeItem>()
+        for (query in queries) {
+            if (items.size >= maxItems) break
+            try {
+                val result = searchAll(query, limit = maxItems, source = IcmSearchSource.ALL)
+                result?.items?.forEach { item ->
+                    if (items.size >= maxItems) return@forEach
+                    val shouldInclude = when {
+                        filterTracks && filterAlbums -> true
+                        filterTracks -> item.isTrack
+                        filterAlbums -> item.isAlbum || item.collectionId != null
+                        else -> true
+                    }
+                    if (shouldInclude) {
+                        var homeItem = IcmHomeItem(
                             id = item.id,
                             title = item.title,
                             artist = item.displayArtist,
@@ -258,124 +310,44 @@ object IcmRepository {
                             cover = item.cover,
                             duration = item.duration,
                             source = item.source,
-                            genre = query
-                        )
-                    )
-                }
-        }
-        if (bannerItems.isNotEmpty()) {
-            blocks.add(
-                IcmHomeBlock(
-                    id = "banners",
-                    title = "Featured",
-                    type = "banner",
-                    items = bannerItems
-                )
-            )
-        }
-
-        // ─── New Releases: albums (rotated queries) ───
-        val newReleaseQuerySets = listOf(
-            listOf("new releases", "new music", "latest"),
-            listOf("fresh drops", "new albums", "just released"),
-            listOf("this week", "new singles", "debut")
-        )
-        val newReleaseQueries = newReleaseQuerySets.random()
-        val newReleaseItems = mutableListOf<IcmHomeItem>()
-        for (query in newReleaseQueries) {
-            if (newReleaseItems.size >= 10) break
-            val result = searchAll(query, limit = 10, source = IcmSearchSource.ALL)
-            result?.items
-                ?.filter { it.isAlbum || it.collectionId != null }
-                ?.take(10 - newReleaseItems.size)
-                ?.forEach { item ->
-                    newReleaseItems.add(
-                        IcmHomeItem(
-                            id = item.id,
-                            title = item.title,
-                            artist = item.displayArtist,
-                            artistId = item.artistId,
-                            cover = item.cover,
                             collectionId = item.collectionId,
                             album = item.album,
-                            source = item.source
+                            genre = if (genreTag) query else null
                         )
-                    )
+                        transform?.let { homeItem = it(homeItem) }
+                        items.add(homeItem)
+                    }
                 }
-        }
-        if (newReleaseItems.isNotEmpty()) {
-            blocks.add(
-                IcmHomeBlock(
-                    id = "new_releases",
-                    title = "New Releases",
-                    type = "new_releases",
-                    items = newReleaseItems
-                )
-            )
-        }
-
-        // ─── Charts: trending tracks with rank (rotated queries) ───
-        val chartQuerySets = listOf(
-            listOf("top 100", "chart", "hot", "viral"),
-            listOf("billboard", "ranking", "top 50", "trending"),
-            listOf("most played", "global hits", "top chart", "ranked")
-        )
-        val chartQueries = chartQuerySets.random()
-        val chartItems = mutableListOf<IcmHomeItem>()
-        var rank = 1
-        for (query in chartQueries) {
-            if (chartItems.size >= 15) break
-            val result = searchAll(query, limit = 10, source = IcmSearchSource.ALL)
-            result?.items
-                ?.filter { it.isTrack }
-                ?.take(15 - chartItems.size)
-                ?.forEach { item ->
-                    chartItems.add(
-                        IcmHomeItem(
-                            id = item.id,
-                            title = item.title,
-                            artist = item.displayArtist,
-                            artistId = item.artistId,
-                            cover = item.cover,
-                            duration = item.duration,
-                            source = item.source,
-                            rank = rank++
-                        )
-                    )
-                }
-        }
-        if (chartItems.isNotEmpty()) {
-            blocks.add(
-                IcmHomeBlock(
-                    id = "charts",
-                    title = "Top Charts",
-                    type = "charts",
-                    items = chartItems
-                )
-            )
-        }
-
-        // ─── Recommendations: wave tracks (if linked) ───
-        if (api.partnerUserId != null) {
-            val waveItems = mutableListOf<IcmHomeItem>()
-            val excludeIds = mutableListOf<String>()
-
-            // Gather seed candidates from recentlyPlayed, LocalStorage, and Favorites
-            val seedCandidates = mutableListOf<String>()
-            seedCandidates.addAll(com.liquidmusicglass.engine.PlayerController.recentlyPlayed.value.map { it.id })
-
-            val context = com.liquidmusicglass.engine.PlayerController.context
-            if (context != null) {
-                seedCandidates.addAll(com.liquidmusicglass.data.local.LocalStorage.getHistory(context).map { it.trackId })
-                try {
-                    val favs = com.liquidmusicglass.data.local.db.LibraryRepository.getInstance(context).getAllFavoritesAsTracks()
-                    seedCandidates.addAll(favs.map { it.id })
-                } catch (_: Exception) {}
+            } catch (_: Exception) {
+                // Skip failed query, continue with next
             }
-            val cleanSeeds = seedCandidates.distinct().filter { it.isNotBlank() }
-
-            repeat(5) { i ->
-                val seedTrackId = cleanSeeds.getOrNull(i % cleanSeeds.size)
+        }
+        return items
+    }
+    
+    /**
+     * Load wave recommendations sequentially (needs exclude tracking).
+     */
+    private suspend fun loadWaveRecommendations(): List<IcmHomeItem> {
+        val waveItems = mutableListOf<IcmHomeItem>()
+        val excludeIds = mutableListOf<String>()
+        
+        val seedCandidates = mutableListOf<String>()
+        seedCandidates.addAll(com.liquidmusicglass.engine.PlayerController.recentlyPlayed.value.map { it.id })
+        
+        val context = com.liquidmusicglass.engine.PlayerController.context
+        if (context != null) {
+            seedCandidates.addAll(com.liquidmusicglass.data.local.LocalStorage.getHistory(context).map { it.trackId })
+            try {
+                val favs = com.liquidmusicglass.data.local.db.LibraryRepository.getInstance(context).getAllFavoritesAsTracks()
+                seedCandidates.addAll(favs.map { it.id })
+            } catch (_: Exception) {}
+        }
+        val cleanSeeds = seedCandidates.distinct().filter { it.isNotBlank() }
+        
+        repeat(5) { i ->
+            val seedTrackId = cleanSeeds.getOrNull(i % cleanSeeds.size.coerceAtLeast(1))
+            try {
                 val response = getWaveNext(
                     seedTrackId = seedTrackId,
                     exclude = excludeIds.takeIf { it.isNotEmpty() },
@@ -384,31 +356,20 @@ object IcmRepository {
                 if (response != null && response.status == "ok" && response.track != null) {
                     val trackId = response.track.id
                     excludeIds.add(trackId)
-                    waveItems.add(
-                        IcmHomeItem(
-                            id = trackId,
-                            title = response.track.title,
-                            artist = response.track.artist ?: "Unknown Artist",
-                            cover = response.track.cover,
-                            duration = response.track.durationMs,
-                            source = "wave"
-                        )
-                    )
+                    waveItems.add(IcmHomeItem(
+                        id = trackId,
+                        title = response.track.title,
+                        artist = response.track.artist ?: "Unknown Artist",
+                        cover = response.track.cover,
+                        duration = response.track.durationMs,
+                        source = "wave"
+                    ))
                 }
-            }
-            if (waveItems.isNotEmpty()) {
-                blocks.add(
-                    IcmHomeBlock(
-                        id = "recommendations",
-                        title = "Made For You",
-                        type = "recommendations",
-                        items = waveItems
-                    )
-                )
+            } catch (_: Exception) {
+                // Skip failed wave request
             }
         }
-
-        return IcmHomeResponse(blocks = blocks)
+        return waveItems
     }
 
     /**
@@ -820,6 +781,121 @@ object IcmRepository {
         return result.getOrNull()
     }
 
+    /**
+     * Get user's ICM subscription information.
+     */
+    suspend fun getUserSubscription(): IcmSubscriptionResponse? {
+        val result = api.getUserSubscription()
+        result.exceptionOrNull()?.let {
+            _lastException = it as? Exception
+            _lastError.value = it.message
+        }
+        return result.getOrNull()
+    }
+
+    /**
+     * Get user's current and available regions.
+     */
+    suspend fun getUserRegion(): IcmRegionResponse? {
+        val result = api.getUserRegion()
+        result.exceptionOrNull()?.let {
+            _lastException = it as? Exception
+            _lastError.value = it.message
+        }
+        return result.getOrNull()
+    }
+
+    /**
+     * Update user's region.
+     */
+    suspend fun updateUserRegion(region: String): IcmUpdateRegionResponse? {
+        val result = api.updateUserRegion(region)
+        result.exceptionOrNull()?.let {
+            _lastException = it as? Exception
+            _lastError.value = it.message
+        }
+        return result.getOrNull()
+    }
+
+    /**
+     * Start playlist import from Yandex or Apple.
+     */
+    suspend fun importPlaylist(source: String, url: String, name: String? = null): IcmPlaylistImportResponse? {
+        val result = api.importPlaylist(source, url, name)
+        result.exceptionOrNull()?.let {
+            _lastException = it as? Exception
+            _lastError.value = it.message
+            android.util.Log.e("IcmRepository", "importPlaylist error: ${it.javaClass.simpleName}: ${it.message}")
+            if (it is IcmApiException) {
+                android.util.Log.e("IcmRepository", "API error: code=${it.code}, errorCode=${it.errorCode}, body=${it.message}")
+            }
+        }
+        result.getOrNull()?.let {
+            android.util.Log.d("IcmRepository", "importPlaylist success: playlistId=${it.playlistId}, jobId=${it.jobId}, status=${it.status}")
+        }
+        return result.getOrNull()
+    }
+
+    /**
+     * Preview playlist without importing it.
+     */
+    suspend fun previewPlaylist(source: String, url: String): IcmPlaylistPreviewResponse? {
+        val result = api.previewPlaylist(source, url)
+        result.exceptionOrNull()?.let {
+            _lastException = it as? Exception
+            _lastError.value = it.message
+        }
+        return result.getOrNull()
+    }
+
+    /**
+     * Get the status of an asynchronous playlist import job.
+     */
+    suspend fun getImportJobStatus(jobId: String): IcmPlaylistImportJobResponse? {
+        val result = api.getImportJobStatus(jobId)
+        result.exceptionOrNull()?.let {
+            _lastException = it as? Exception
+            _lastError.value = it.message
+        }
+        return result.getOrNull()
+    }
+
+    /**
+     * Get a list of the user's imported playlists.
+     */
+    suspend fun getUserPlaylists(limit: Int = 50, offset: Int = 0): IcmUserPlaylistsResponse? {
+        val result = api.getUserPlaylists(limit, offset)
+        result.exceptionOrNull()?.let {
+            _lastException = it as? Exception
+            _lastError.value = it.message
+        }
+        return result.getOrNull()
+    }
+
+    /**
+     * Get tracks from an imported playlist.
+     */
+    suspend fun getUserPlaylistTracks(playlistId: Long, limit: Int = 200, offset: Int = 0): IcmUserPlaylistTracksResponse? {
+        val result = api.getUserPlaylistTracks(playlistId, limit, offset)
+        result.exceptionOrNull()?.let {
+            _lastException = it as? Exception
+            _lastError.value = it.message
+        }
+        return result.getOrNull()
+    }
+
+    /**
+     * Delete an imported playlist.
+     */
+    suspend fun deleteUserPlaylist(playlistId: Long): IcmDeletePlaylistResponse? {
+        val result = api.deleteUserPlaylist(playlistId)
+        result.exceptionOrNull()?.let {
+            _lastException = it as? Exception
+            _lastError.value = it.message
+        }
+        return result.getOrNull()
+    }
+
     // ═══════════════════════════════════════════════════════════
     //  Batch & Async
     // ═══════════════════════════════════════════════════════════
@@ -1121,5 +1197,33 @@ object IcmRepository {
     fun clearError() {
         _lastException = null
         _lastError.value = null
+    }
+
+    /**
+     * Поиск треков по жанру для "Моей волны".
+     * Используется когда нужно дополнить очередь треками конкретного жанра.
+     */
+    suspend fun searchTracksByGenre(genre: String, limit: Int = 10): List<Track> {
+        return try {
+            // Используем существующий searchAll с фильтрацией по жанру
+            val results = searchAll(genre, limit = limit * 2)
+            results?.items?.map { item ->
+                Track(
+                    id = item.id,
+                    title = item.title,
+                    artist = item.displayArtist,
+                    albumName = item.album ?: "",
+                    uri = android.net.Uri.parse("https://byicloud.online/track/${item.id}"),
+                    durationMs = item.durationMs,
+                    albumId = item.collectionId?.hashCode()?.toLong() ?: -1L,
+                    coverUrl = item.cover,
+                    genre = genre // присваиваем жанр из запроса
+                )
+            }?.take(limit) ?: emptyList()
+        } catch (e: Exception) {
+            _lastException = e
+            _lastError.value = e.message
+            emptyList()
+        }
     }
 }

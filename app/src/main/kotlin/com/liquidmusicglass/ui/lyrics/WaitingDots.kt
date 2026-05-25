@@ -25,8 +25,8 @@ import androidx.compose.ui.unit.dp
 fun WaitingDots(
     modifier: Modifier = Modifier,
     dotColor: Color = Color.White,
-    dotSize: androidx.compose.ui.unit.Dp = 6.dp,
-    spacing: androidx.compose.ui.unit.Dp = 8.dp,
+    dotSize: androidx.compose.ui.unit.Dp = 12.dp,
+    spacing: androidx.compose.ui.unit.Dp = 12.dp,
     animationDuration: Int = 1200
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "waitingDots")

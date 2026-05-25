@@ -226,10 +226,10 @@ fun LyricsSheet(
                         Text(
                             text = line.text,
                             color = textColor,
-                            fontSize = if (isCurrent) 28.sp else 26.sp,
+                            fontSize = if (isCurrent) 32.sp else 30.sp,
                             fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.SemiBold,
                             textAlign = TextAlign.Center,
-                            lineHeight = 38.sp,
+                            lineHeight = 44.sp,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 32.dp, vertical = 10.dp)

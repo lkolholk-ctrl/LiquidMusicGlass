@@ -273,7 +273,7 @@ fun LyricsScreen(
                                         .padding(vertical = 40.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    WaitingDots(dotColor = boostedVibrant)
+                                    WaitingDots(dotColor = Color.White)
                                 }
                             }
                         }
@@ -347,10 +347,10 @@ fun LyricsScreen(
                                     text = cleanText,
                                     color = textColor,
                                     style = TextStyle(
-                                        fontSize = if (isCurrentLine) 28.sp else 26.sp,
+                                        fontSize = if (isCurrentLine) 32.sp else 30.sp,
                                         fontWeight = if (isCurrentLine) FontWeight.Bold else FontWeight.SemiBold,
                                         textAlign = TextAlign.Start,
-                                        lineHeight = 38.sp,
+                                        lineHeight = 44.sp,
                                         platformStyle = PlatformTextStyle(includeFontPadding = false)
                                     ),
                                     modifier = Modifier.fillMaxWidth(),
