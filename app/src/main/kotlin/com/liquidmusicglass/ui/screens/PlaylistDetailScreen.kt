@@ -54,17 +54,17 @@ fun PlaylistDetailScreen(
 
     // Load cloud playlist info & tracks
     LaunchedEffect(playlistId) {
-        playlistId.toLongOrNull()?.let { idLong ->
+        if (playlistId.isNotBlank()) {
             isLoading = true
             errorMsg = null
             scope.launch {
-                val response = IcmRepository.getUserPlaylistTracks(idLong)
+                val response = IcmRepository.getUserPlaylistTracks(playlistId)
                 if (response != null) {
                     playlistInfo = response.playlist
-                    tracks = response.tracks.map { tr ->
+                    tracks = response.tracks.mapNotNull { tr ->
+                        val trackIdStr = tr.trackId?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
                         val durationSec = tr.duration ?: 0L
                         val dMs = if (durationSec < 1000L) durationSec * 1000L else durationSec
-                        val trackIdStr = tr.trackId.orEmpty()
                         Track(
                             id = trackIdStr,
                             title = tr.title.orEmpty(),
@@ -81,7 +81,7 @@ fun PlaylistDetailScreen(
                 }
                 isLoading = false
             }
-        } ?: run {
+        } else {
             errorMsg = "Invalid playlist ID."
         }
     }

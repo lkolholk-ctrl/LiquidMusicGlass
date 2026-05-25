@@ -819,7 +819,7 @@ suspend fun search(
      * Get tracks from an imported playlist.
      * Scope: playlists_import. Linked user required.
      */
-    suspend fun getUserPlaylistTracks(playlistId: Long, limit: Int = 200, offset: Int = 0): Result<IcmUserPlaylistTracksResponse> {
+    suspend fun getUserPlaylistTracks(playlistId: String, limit: Int = 200, offset: Int = 0): Result<IcmUserPlaylistTracksResponse> {
         return execute("/me/playlists/$playlistId?limit=$limit&offset=$offset")
     }
 
@@ -827,7 +827,7 @@ suspend fun search(
      * Delete an imported playlist.
      * Scope: playlists_import. Linked user required.
      */
-    suspend fun deleteUserPlaylist(playlistId: Long): Result<IcmDeletePlaylistResponse> {
+    suspend fun deleteUserPlaylist(playlistId: String): Result<IcmDeletePlaylistResponse> {
         return execute("/me/playlists/$playlistId", method = "DELETE")
     }
 }

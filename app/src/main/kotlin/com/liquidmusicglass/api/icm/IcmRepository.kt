@@ -875,7 +875,7 @@ object IcmRepository {
     /**
      * Get tracks from an imported playlist.
      */
-    suspend fun getUserPlaylistTracks(playlistId: Long, limit: Int = 200, offset: Int = 0): IcmUserPlaylistTracksResponse? {
+    suspend fun getUserPlaylistTracks(playlistId: String, limit: Int = 200, offset: Int = 0): IcmUserPlaylistTracksResponse? {
         val result = api.getUserPlaylistTracks(playlistId, limit, offset)
         result.exceptionOrNull()?.let {
             _lastException = it as? Exception
@@ -887,7 +887,7 @@ object IcmRepository {
     /**
      * Delete an imported playlist.
      */
-    suspend fun deleteUserPlaylist(playlistId: Long): IcmDeletePlaylistResponse? {
+    suspend fun deleteUserPlaylist(playlistId: String): IcmDeletePlaylistResponse? {
         val result = api.deleteUserPlaylist(playlistId)
         result.exceptionOrNull()?.let {
             _lastException = it as? Exception

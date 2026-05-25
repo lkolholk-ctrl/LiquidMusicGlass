@@ -4,6 +4,9 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.longOrNull
 
 // ─── Health ───
 
@@ -948,7 +951,8 @@ data class IcmPlaylistImportTrack(
 
 @Serializable
 data class IcmPlaylistImportResponse(
-    @SerialName("playlist_id") val playlistId: Long? = null,
+    // API returns Int for Apple sync import, String for async job — accept both via JsonElement
+    @SerialName("playlist_id") val playlistIdRaw: JsonElement? = null,
     val name: String? = null,
     val source: String? = null,
     @SerialName("source_url") val sourceUrl: String? = null,
@@ -957,13 +961,23 @@ data class IcmPlaylistImportResponse(
     val failed: Int? = null,
     val tracks: List<IcmPlaylistImportTrack>? = null,
     @SerialName("failed_tracks") val failedTracks: List<IcmFailedTrack>? = null,
-    
+
     // Async fields (Yandex)
     @SerialName("job_id") val jobId: String? = null,
     val status: String? = null,
     @SerialName("poll_url") val pollUrl: String? = null,
     @SerialName("poll_after") val pollAfter: Int? = null
-)
+) {
+    /** Normalized playlist id as String (handles both Int and String from API) */
+    val playlistId: String?
+        get() = playlistIdRaw?.let {
+            when {
+                it is JsonPrimitive && it.isString -> it.content
+                it is JsonPrimitive && !it.isString -> it.longOrNull?.toString()
+                else -> null
+            }
+        }
+}
 
 @Serializable
 data class IcmFailedTrack(
@@ -1012,13 +1026,13 @@ data class IcmPlaylistImportJobResponse(
     @SerialName("job_id") val jobId: String? = null,
     @SerialName("poll_url") val pollUrl: String? = null,
     @SerialName("poll_after") val pollAfter: Int? = null,
-    
+
     // Poll response — pending
     val status: String? = null,
     val progress: IcmImportJobProgress? = null,
-    
-    // When ready
-    @SerialName("playlist_id") val playlistId: Long? = null,
+
+    // When ready — API returns Int for playlist_id
+    @SerialName("playlist_id") val playlistIdRaw: JsonElement? = null,
     val name: String? = null,
     val source: String? = null,
     val total: Int? = null,
@@ -1026,11 +1040,21 @@ data class IcmPlaylistImportJobResponse(
     val failed: Int? = null,
     val tracks: List<IcmPlaylistImportTrack>? = null,
     @SerialName("failed_tracks") val failedTracks: List<IcmFailedTrack>? = null,
-    
+
     // When failed
     val error: String? = null,
     val message: String? = null
-)
+) {
+    /** Normalized playlist id as String (handles both Int and String from API) */
+    val playlistId: String?
+        get() = playlistIdRaw?.let {
+            when {
+                it is JsonPrimitive && it.isString -> it.content
+                it is JsonPrimitive && !it.isString -> it.longOrNull?.toString()
+                else -> null
+            }
+        }
+}
 
 @Serializable
 data class IcmImportJobProgress(
@@ -1052,14 +1076,25 @@ data class IcmUserPlaylistsResponse(
 
 @Serializable
 data class IcmUserPlaylist(
-    val id: Long? = null,
+    // API returns Int for playlist id — accept both Int and String
+    @SerialName("id") val idRaw: JsonElement? = null,
     val name: String? = null,
     val source: String? = null,
     @SerialName("track_count") val trackCount: Int? = null,
     val cover: String? = null,
     @SerialName("created_at") val createdAt: Long? = null,
     @SerialName("updated_at") val updatedAt: Long? = null
-)
+) {
+    /** Normalized playlist id as String (handles both Int and String from API) */
+    val id: String?
+        get() = idRaw?.let {
+            when {
+                it is JsonPrimitive && it.isString -> it.content
+                it is JsonPrimitive && !it.isString -> it.longOrNull?.toString()
+                else -> null
+            }
+        }
+}
 
 @Serializable
 data class IcmUserPlaylistTracksResponse(
@@ -1069,11 +1104,22 @@ data class IcmUserPlaylistTracksResponse(
 
 @Serializable
 data class IcmUserPlaylistInfo(
-    val id: Long? = null,
+    // API returns Int for playlist id — accept both Int and String
+    @SerialName("id") val idRaw: JsonElement? = null,
     val name: String? = null,
     val source: String? = null,
     @SerialName("track_count") val trackCount: Int? = null
-)
+) {
+    /** Normalized playlist id as String (handles both Int and String from API) */
+    val id: String?
+        get() = idRaw?.let {
+            when {
+                it is JsonPrimitive && it.isString -> it.content
+                it is JsonPrimitive && !it.isString -> it.longOrNull?.toString()
+                else -> null
+            }
+        }
+}
 
 @Serializable
 data class IcmUserPlaylistTrack(

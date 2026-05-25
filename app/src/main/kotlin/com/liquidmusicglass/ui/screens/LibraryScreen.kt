@@ -352,13 +352,13 @@ fun LibraryScreen(
                                         PlaceholderCard("No Yandex playlists imported yet.")
                                     }
                                 } else {
-                                    items(yandexPlaylists, key = { it.id ?: 0L }) { playlist ->
+                                    items(yandexPlaylists, key = { it.id ?: "" }) { playlist ->
                                         ImportedPlaylistRow(
                                             playlist = playlist,
-                                            onClick = { onOpenPlaylist((playlist.id ?: 0L).toString()) },
+                                            onClick = { onOpenPlaylist(playlist.id ?: "") },
                                             onDelete = {
                                                 scope.launch {
-                                                    IcmRepository.deleteUserPlaylist(playlist.id ?: 0L)
+                                                    IcmRepository.deleteUserPlaylist(playlist.id ?: "")
                                                     loadImportedPlaylists()
                                                 }
                                             }
@@ -378,13 +378,13 @@ fun LibraryScreen(
                                         PlaceholderCard("No Apple playlists imported yet.")
                                     }
                                 } else {
-                                    items(applePlaylists, key = { it.id ?: 0L }) { playlist ->
+                                    items(applePlaylists, key = { it.id ?: "" }) { playlist ->
                                         ImportedPlaylistRow(
                                             playlist = playlist,
-                                            onClick = { onOpenPlaylist((playlist.id ?: 0L).toString()) },
+                                            onClick = { onOpenPlaylist(playlist.id ?: "") },
                                             onDelete = {
                                                 scope.launch {
-                                                    IcmRepository.deleteUserPlaylist(playlist.id ?: 0L)
+                                                    IcmRepository.deleteUserPlaylist(playlist.id ?: "")
                                                     loadImportedPlaylists()
                                                 }
                                             }
@@ -404,6 +404,9 @@ fun LibraryScreen(
             ImportPlaylistDialog(
                 onDismiss = {
                     showImportDialog = false
+                    loadImportedPlaylists()
+                },
+                onImportSuccess = {
                     loadImportedPlaylists()
                 }
             )
@@ -633,7 +636,8 @@ private fun ImportedPlaylistRow(
 
 @Composable
 private fun ImportPlaylistDialog(
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onImportSuccess: () -> Unit = {}
 ) {
     val scope = rememberCoroutineScope()
     var source by remember { mutableStateOf("yandex") } // "yandex" or "apple"
@@ -663,13 +667,30 @@ private fun ImportPlaylistDialog(
         }
     }
 
-    // Polling logic for async Yandex import
+    // Polling logic for async Yandex import — with retry on transient errors
     LaunchedEffect(importJobId) {
         importJobId?.let { jobId ->
+            var consecutiveErrors = 0
+            val maxConsecutiveErrors = 3
             while (!importCompleted && importError == null) {
                 delay(importPollAfter * 1000L)
-                val statusResponse = IcmRepository.getImportJobStatus(jobId)
+                var statusResponse: com.liquidmusicglass.api.icm.IcmPlaylistImportJobResponse? = null
+                var lastPollError: String? = null
+                // Retry loop for single poll request (up to 3 attempts)
+                repeat(3) { attempt ->
+                    if (attempt > 0) delay(2000L) // wait 2s between retries
+                    val result = IcmRepository.getImportJobStatus(jobId)
+                    if (result != null) {
+                        statusResponse = result
+                        return@repeat
+                    } else {
+                        val errCode = IcmRepository.getLastErrorCode()
+                        lastPollError = errCode
+                        android.util.Log.w("ImportPlaylistDialog", "Poll attempt ${attempt + 1} failed: $errCode")
+                    }
+                }
                 if (statusResponse != null) {
+                    consecutiveErrors = 0 // reset on success
                     when (statusResponse.status) {
                         "pending" -> {
                             importProgress = statusResponse.progress
@@ -683,21 +704,32 @@ private fun ImportPlaylistDialog(
                             importFailedTracks = statusResponse.failedTracks ?: emptyList()
                             importCompleted = true
                             isImporting = false
+                            onImportSuccess() // refresh playlist list
                         }
                         "failed" -> {
                             importError = statusResponse.message ?: "Matching process failed on ICM servers."
                             isImporting = false
                         }
+                        else -> {
+                            // Unknown status — treat as error after max retries
+                            consecutiveErrors++
+                            if (consecutiveErrors >= maxConsecutiveErrors) {
+                                importError = "Unknown job status: ${statusResponse.status}"
+                                isImporting = false
+                            }
+                        }
                     }
                 } else {
-                    // Check specific error codes from repository
-                    val errCode = IcmRepository.getLastErrorCode()
-                    importError = when (errCode) {
-                        "job_not_found_or_expired" -> "Import session expired. Please try importing again."
-                        "job_belongs_to_another_partner" -> "Import session mismatch. Please try again."
-                        else -> "Failed to poll matching status."
+                    consecutiveErrors++
+                    if (consecutiveErrors >= maxConsecutiveErrors) {
+                        importError = when (lastPollError) {
+                            "job_not_found_or_expired" -> "Import session expired. Please try importing again."
+                            "job_belongs_to_another_partner" -> "Import session mismatch. Please try again."
+                            else -> "Failed to poll matching status after retries."
+                        }
+                        isImporting = false
                     }
-                    isImporting = false
+                    // else: keep polling, maybe transient error
                 }
             }
         }
@@ -1013,6 +1045,12 @@ private fun ImportPlaylistDialog(
                                                             // Apple Music — synchronous import
                                                             importCompleted = true
                                                             isImporting = false
+                                                            onImportSuccess() // refresh playlist list
+                                                            // Auto-dismiss after short delay so user sees success
+                                                            scope.launch {
+                                                                delay(1500)
+                                                                onDismiss()
+                                                            }
                                                         }
                                                     } else {
                                                         importError = "Server denied import."
