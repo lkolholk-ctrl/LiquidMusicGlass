@@ -435,7 +435,6 @@ fun LibraryScreen(
                     loadImportedPlaylists()
                 },
                 onImportSuccess = {
-                    IcmApiFileLogger.log("D", "LibraryScreen", "onImportSuccess called, refreshing playlists")
                     loadImportedPlaylists()
                 }
             )
@@ -731,7 +730,6 @@ private fun ImportPlaylistDialog(
                         val errCode = IcmRepository.getLastErrorCode()
                         lastPollError = errCode
                         lastPollHttpCode = IcmRepository.getLastHttpCode()
-                        android.util.Log.w("ImportPlaylistDialog", "Poll attempt ${attempt + 1} failed: http=$lastPollHttpCode, code=$errCode")
                     }
                 }
                 if (statusResponse != null) {
@@ -1124,7 +1122,6 @@ private fun ImportPlaylistDialog(
                                                     name = playlistName.trim().takeIf { it.isNotBlank() }
                                                 )
                                                     if (res != null) {
-                                                        IcmApiFileLogger.log("D", "ImportPlaylist", "importPlaylist result: jobId=${res.jobId}, playlistId=${res.playlistId}, status=${res.status}, total=${res.total}, matched=${res.matched}, failed=${res.failed}, tracks=${res.tracks?.size}, failedTracks=${res.failedTracks?.size}")
                                                         if (res.jobId != null || res.playlistId != null) {
                                                             if (source == "yandex") {
                                                                 importJobId = res.jobId

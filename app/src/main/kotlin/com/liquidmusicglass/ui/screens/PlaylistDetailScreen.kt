@@ -33,7 +33,6 @@ import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.Track
 import com.liquidmusicglass.ui.glass.AlbumArtImage
 import com.liquidmusicglass.ui.theme.LiquidTheme
-import com.liquidmusicglass.api.icm.IcmApiFileLogger
 import com.liquidmusicglass.api.icm.IcmRepository
 import kotlinx.coroutines.launch
 
@@ -59,7 +58,6 @@ fun PlaylistDetailScreen(
             isLoading = true
             errorMsg = null
             scope.launch {
-                IcmApiFileLogger.log("D", "PlaylistDetail", "Loading tracks for playlist: $playlistId")
                 val allTracks = mutableListOf<Track>()
                 var offset = 0
                 val limit = 200
@@ -68,12 +66,10 @@ fun PlaylistDetailScreen(
                 
                 while (true) {
                     page++
-                    IcmApiFileLogger.log("D", "PlaylistDetail", "Fetching page $page: offset=$offset, limit=$limit")
                     val response = IcmRepository.getUserPlaylistTracks(playlistId, limit = limit, offset = offset)
                     if (response == null) {
                         if (page == 1) {
                             errorMsg = "Failed to load cloud playlist."
-                            IcmApiFileLogger.log("E", "PlaylistDetail", "Failed to load playlist tracks")
                         }
                         break
                     }
@@ -81,14 +77,10 @@ fun PlaylistDetailScreen(
                     if (page == 1) {
                         playlistInfo = response.playlist
                         totalExpected = response.playlist?.trackCount
-                        IcmApiFileLogger.log("D", "PlaylistDetail", "Got response: playlist=${response.playlist?.name}, trackCount=${response.playlist?.trackCount}, pageTracks=${response.tracks.size}")
                     }
                     
                     val pageTracks = response.tracks.mapNotNull { tr ->
-                        val trackIdStr = tr.trackId?.takeIf { it.isNotBlank() } ?: run {
-                            IcmApiFileLogger.log("W", "PlaylistDetail", "Skipping track with no trackId: title=${tr.title}")
-                            return@mapNotNull null
-                        }
+                        val trackIdStr = tr.trackId?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
                         val durationSec = tr.duration ?: 0L
                         val dMs = if (durationSec < 10000L) durationSec * 1000L else durationSec
                         Track(
@@ -104,15 +96,12 @@ fun PlaylistDetailScreen(
                     }
                     
                     allTracks.addAll(pageTracks)
-                    IcmApiFileLogger.log("D", "PlaylistDetail", "Page $page: loaded ${pageTracks.size} tracks, total so far: ${allTracks.size}")
                     
                     // Stop if we got less than limit (last page) or reached total
                     if (response.tracks.size < limit) {
-                        IcmApiFileLogger.log("D", "PlaylistDetail", "Last page reached (got ${response.tracks.size} < $limit)")
                         break
                     }
                     if (totalExpected != null && allTracks.size >= totalExpected) {
-                        IcmApiFileLogger.log("D", "PlaylistDetail", "Reached expected total: $totalExpected")
                         break
                     }
                     
@@ -120,7 +109,6 @@ fun PlaylistDetailScreen(
                 }
                 
                 tracks = allTracks
-                IcmApiFileLogger.log("D", "PlaylistDetail", "Total loaded: ${allTracks.size} tracks")
                 isLoading = false
             }
         } else {

@@ -145,8 +145,8 @@ class HomeViewModel : ViewModel() {
                 val repo = WaveRepository(context)
                 val genres = repo.getTopGenres(limit = 5)
                 _topGenres.value = genres
-            } catch (e: Exception) {
-                android.util.Log.e("HomeViewModel", "Failed to load top genres", e)
+            } catch (_: Exception) {
+                // Silently fail — genres are optional
             }
         }
     }
@@ -173,9 +173,8 @@ class HomeViewModel : ViewModel() {
                         autoRefillType = "WAVE"
                     )
                 }
-            } catch (e: Exception) {
-                android.util.Log.e("HomeViewModel", "Failed to build wave", e)
-                _error.value = e.message
+            } catch (_: Exception) {
+                _error.value = "Failed to build wave"
             } finally {
                 _isBuildingWave.value = false
             }
