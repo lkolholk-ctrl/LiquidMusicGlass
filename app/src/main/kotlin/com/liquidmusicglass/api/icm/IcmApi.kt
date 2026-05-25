@@ -1,5 +1,6 @@
 package com.liquidmusicglass.api.icm
 
+import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -10,7 +11,53 @@ import okhttp3.CertificatePinner
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.concurrent.TimeUnit
+
+/**
+ * Internal file logger for IcmApi — writes to app cache dir so logs survive
+ * even when system logcat is encrypted (Honor, etc.).
+ */
+object IcmApiFileLogger {
+    private var logFile: File? = null
+    private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
+
+    fun init(context: Context) {
+        val dir = File(context.getExternalFilesDir(null), "icm_logs")
+        dir.mkdirs()
+        logFile = File(dir, "icm_api.log")
+    }
+
+    fun log(level: String, tag: String, message: String) {
+        val timestamp = dateFormat.format(Date())
+        val line = "[$timestamp] $level/$tag: $message\n"
+        try {
+            logFile?.appendText(line)
+        } catch (_: Exception) {}
+        // Also echo to system log
+        when (level) {
+            "D" -> android.util.Log.d(tag, message)
+            "E" -> android.util.Log.e(tag, message)
+            "W" -> android.util.Log.w(tag, message)
+            "I" -> android.util.Log.i(tag, message)
+        }
+    }
+
+    fun getLogPath(): String? = logFile?.absolutePath
+
+    fun getRecentLogs(maxLines: Int = 200): String {
+        return try {
+            logFile?.readLines()?.takeLast(maxLines)?.joinToString("\n") ?: "No logs"
+        } catch (_: Exception) { "No logs" }
+    }
+
+    fun clear() {
+        try { logFile?.writeText("") } catch (_: Exception) {}
+    }
+}
 
 /**
  * ICM Music Partner API client.
@@ -154,27 +201,31 @@ class IcmApi private constructor() {
 
                 when {
                     response.code == 202 && endpoint.contains("/track") -> {
-                        // Async pending — parse as pending response
+                        // Async track pending — parse as pending response
                         val pending = parseResponse<IcmAsyncTrackPending>(response.body)
                         Result.failure(IcmAsyncPendingException(pending))
                     }
                     response.isSuccessful -> {
                         val bodyText = response.body?.string() ?: ""
-                        android.util.Log.d("IcmApi", "Success ${response.code} on $endpoint, body: ${bodyText.take(200)}")
+                        IcmApiFileLogger.log("D", "IcmApi", "Success ${response.code} on $endpoint, body: ${bodyText.take(500)}")
                         try {
                             Result.success(json.decodeFromString(bodyText))
                         } catch (e: Exception) {
-                            android.util.Log.e("IcmApi", "Parse error on $endpoint: ${e.message}, body: $bodyText")
+                            IcmApiFileLogger.log("E", "IcmApi", "Parse error on $endpoint: ${e.message}, body: $bodyText")
                             Result.failure(e)
                         }
                     }
                     else -> {
                         val errorText = response.body?.string() ?: "HTTP ${response.code}"
-                        android.util.Log.e("IcmApi", "API error: ${response.code} on $endpoint, body: $errorText")
+                        IcmApiFileLogger.log("E", "IcmApi", "API error: ${response.code} on $endpoint, body: $errorText")
                         val error = try {
-                            json.decodeFromString<IcmError>(errorText)
+                            json.decodeFromString<IcmErrorWrapper>(errorText).detail
                         } catch (_: Exception) {
-                            null
+                            try {
+                                json.decodeFromString<IcmError>(errorText)
+                            } catch (_: Exception) {
+                                null
+                            }
                         }
                         // Prefer the canonical HTTP Retry-After header, fall back to body field.
                         val retryAfterHeader = response.header("Retry-After")?.toIntOrNull()
@@ -217,11 +268,15 @@ class IcmApi private constructor() {
                 }
                 else -> {
                     val errorText = response.body?.string() ?: "HTTP ${response.code}"
-                    android.util.Log.e("IcmApi", "API error (sync): ${response.code} on $endpoint, body: $errorText")
+                    IcmApiFileLogger.log("E", "IcmApi", "API error (sync): ${response.code} on $endpoint, body: $errorText")
                     val error = try {
-                        json.decodeFromString<IcmError>(errorText)
+                        json.decodeFromString<IcmErrorWrapper>(errorText).detail
                     } catch (_: Exception) {
-                        null
+                        try {
+                            json.decodeFromString<IcmError>(errorText)
+                        } catch (_: Exception) {
+                            null
+                        }
                     }
                     val retryAfterHeader = response.header("Retry-After")?.toIntOrNull()
                     Result.failure(IcmApiException(

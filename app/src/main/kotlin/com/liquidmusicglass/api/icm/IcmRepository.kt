@@ -821,17 +821,18 @@ object IcmRepository {
      * Start playlist import from Yandex or Apple.
      */
     suspend fun importPlaylist(source: String, url: String, name: String? = null): IcmPlaylistImportResponse? {
+        IcmApiFileLogger.log("D", "IcmRepository", "importPlaylist START: source=$source, url=$url, name=$name")
         val result = api.importPlaylist(source, url, name)
         result.exceptionOrNull()?.let {
             _lastException = it as? Exception
             _lastError.value = it.message
-            android.util.Log.e("IcmRepository", "importPlaylist error: ${it.javaClass.simpleName}: ${it.message}")
+            IcmApiFileLogger.log("E", "IcmRepository", "importPlaylist error: ${it.javaClass.simpleName}: ${it.message}")
             if (it is IcmApiException) {
-                android.util.Log.e("IcmRepository", "API error: code=${it.code}, errorCode=${it.errorCode}, body=${it.message}")
+                IcmApiFileLogger.log("E", "IcmRepository", "API error: code=${it.code}, errorCode=${it.errorCode}, body=${it.message}")
             }
         }
         result.getOrNull()?.let {
-            android.util.Log.d("IcmRepository", "importPlaylist success: playlistId=${it.playlistId}, jobId=${it.jobId}, status=${it.status}")
+            IcmApiFileLogger.log("D", "IcmRepository", "importPlaylist success: playlistId=${it.playlistId}, jobId=${it.jobId}, status=${it.status}, pollAfter=${it.pollAfter}")
         }
         return result.getOrNull()
     }
@@ -852,10 +853,18 @@ object IcmRepository {
      * Get the status of an asynchronous playlist import job.
      */
     suspend fun getImportJobStatus(jobId: String): IcmPlaylistImportJobResponse? {
+        IcmApiFileLogger.log("D", "IcmRepository", "getImportJobStatus START: jobId=$jobId")
         val result = api.getImportJobStatus(jobId)
         result.exceptionOrNull()?.let {
             _lastException = it as? Exception
             _lastError.value = it.message
+            IcmApiFileLogger.log("E", "IcmRepository", "getImportJobStatus error: ${it.javaClass.simpleName}: ${it.message}")
+            if (it is IcmApiException) {
+                IcmApiFileLogger.log("E", "IcmRepository", "API error: code=${it.code}, errorCode=${it.errorCode}")
+            }
+        }
+        result.getOrNull()?.let {
+            IcmApiFileLogger.log("D", "IcmRepository", "getImportJobStatus success: status=${it.status}, progress=${it.progress}, playlistId=${it.playlistId}, error=${it.error}, message=${it.message}")
         }
         return result.getOrNull()
     }

@@ -30,6 +30,7 @@ import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.*
+import com.liquidmusicglass.api.icm.IcmApiFileLogger
 import com.liquidmusicglass.api.icm.IcmAuthRepository
 import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.data.local.db.FavoriteTrackDatabase
@@ -44,6 +45,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -335,6 +338,10 @@ fun LibraryScreen(
                     } else {
                         val yandexPlaylists = importedPlaylists.filter { it.source?.lowercase()?.contains("yandex") == true }
                         val applePlaylists = importedPlaylists.filter { it.source?.lowercase()?.contains("apple") == true }
+                        val otherPlaylists = importedPlaylists.filter { 
+                            val s = it.source?.lowercase() 
+                            s != null && !s.contains("yandex") && !s.contains("apple")
+                        } + importedPlaylists.filter { it.source == null }
 
                         if (importedPlaylists.isEmpty()) {
                             EmptyState("No imported playlists yet.\nTap + to import one!", Icons.AutoMirrored.Rounded.PlaylistPlay)
@@ -392,6 +399,27 @@ fun LibraryScreen(
                                         Spacer(Modifier.height(8.dp))
                                     }
                                 }
+
+                                // ── Other Section ──
+                                if (otherPlaylists.isNotEmpty()) {
+                                    item { Spacer(Modifier.height(24.dp)) }
+                                    item {
+                                        SectionHeader("Other", otherPlaylists.size)
+                                    }
+                                    items(otherPlaylists, key = { it.id ?: "" }) { playlist ->
+                                        ImportedPlaylistRow(
+                                            playlist = playlist,
+                                            onClick = { onOpenPlaylist(playlist.id ?: "") },
+                                            onDelete = {
+                                                scope.launch {
+                                                    IcmRepository.deleteUserPlaylist(playlist.id ?: "")
+                                                    loadImportedPlaylists()
+                                                }
+                                            }
+                                        )
+                                        Spacer(Modifier.height(8.dp))
+                                    }
+                                }
                             }
                         }
                     }
@@ -407,6 +435,7 @@ fun LibraryScreen(
                     loadImportedPlaylists()
                 },
                 onImportSuccess = {
+                    IcmApiFileLogger.log("D", "LibraryScreen", "onImportSuccess called, refreshing playlists")
                     loadImportedPlaylists()
                 }
             )
@@ -657,13 +686,25 @@ private fun ImportPlaylistDialog(
     var importCompleted by remember { mutableStateOf(false) }
     var importFailedTracks by remember { mutableStateOf<List<com.liquidmusicglass.api.icm.IcmFailedTrack>>(emptyList()) }
 
-    // Auto-detect source based on URL domain
+    // URL validation state
+    var urlValidationError by remember { mutableStateOf<String?>(null) }
+
+    // Auto-detect source based on URL domain + validate
     LaunchedEffect(url) {
         val lower = url.lowercase()
         if (lower.contains("yandex.ru") || lower.contains("music.yandex")) {
             source = "yandex"
+            // Check for unsupported lk. playlist format
+            urlValidationError = if (lower.contains("/playlists/lk.")) {
+                "Yandex changed playlist links. 'lk.' links are not supported yet. Try sharing from Yandex Music app and use the old-style link (music.yandex.ru/users/.../playlists/...) if available."
+            } else {
+                null
+            }
         } else if (lower.contains("apple.com") || lower.contains("music.apple")) {
             source = "apple"
+            urlValidationError = null
+        } else {
+            urlValidationError = null
         }
     }
 
@@ -671,11 +712,14 @@ private fun ImportPlaylistDialog(
     LaunchedEffect(importJobId) {
         importJobId?.let { jobId ->
             var consecutiveErrors = 0
-            val maxConsecutiveErrors = 3
+            val maxConsecutiveErrors = 8  // increased from 3 for transient 404s
+            var pollDelaySec = importPollAfter.coerceAtLeast(3)
             while (!importCompleted && importError == null) {
-                delay(importPollAfter * 1000L)
+                delay(pollDelaySec * 1000L)
+                pollDelaySec = (pollDelaySec + 2).coerceAtMost(10) // exponential backoff up to 10s
                 var statusResponse: com.liquidmusicglass.api.icm.IcmPlaylistImportJobResponse? = null
                 var lastPollError: String? = null
+                var lastPollHttpCode: Int? = null
                 // Retry loop for single poll request (up to 3 attempts)
                 repeat(3) { attempt ->
                     if (attempt > 0) delay(2000L) // wait 2s between retries
@@ -686,11 +730,13 @@ private fun ImportPlaylistDialog(
                     } else {
                         val errCode = IcmRepository.getLastErrorCode()
                         lastPollError = errCode
-                        android.util.Log.w("ImportPlaylistDialog", "Poll attempt ${attempt + 1} failed: $errCode")
+                        lastPollHttpCode = IcmRepository.getLastHttpCode()
+                        android.util.Log.w("ImportPlaylistDialog", "Poll attempt ${attempt + 1} failed: http=$lastPollHttpCode, code=$errCode")
                     }
                 }
                 if (statusResponse != null) {
                     consecutiveErrors = 0 // reset on success
+                    pollDelaySec = importPollAfter.coerceAtLeast(3) // reset delay
                     when (statusResponse.status) {
                         "pending" -> {
                             importProgress = statusResponse.progress
@@ -721,15 +767,25 @@ private fun ImportPlaylistDialog(
                     }
                 } else {
                     consecutiveErrors++
-                    if (consecutiveErrors >= maxConsecutiveErrors) {
+                    // Treat 404 playlist_not_found as transient for the first few attempts
+                    // ICM may need more time to create the job
+                    val isTransient404 = lastPollHttpCode == 404 && 
+                        (lastPollError == "playlist_not_found" || lastPollError == "job_not_found_or_expired")
+                    if (consecutiveErrors >= maxConsecutiveErrors && !isTransient404) {
                         importError = when (lastPollError) {
                             "job_not_found_or_expired" -> "Import session expired. Please try importing again."
                             "job_belongs_to_another_partner" -> "Import session mismatch. Please try again."
+                            "playlist_not_found" -> "Playlist not found on source platform. Check the URL and try again."
                             else -> "Failed to poll matching status after retries."
                         }
                         isImporting = false
+                    } else if (consecutiveErrors >= maxConsecutiveErrors) {
+                        // Even transient errors eventually time out
+                        importError = "Import is taking too long. The playlist may have been created — check your library."
+                        isImporting = false
+                        onImportSuccess() // refresh anyway, maybe playlist was created
                     }
-                    // else: keep polling, maybe transient error
+                    // else: keep polling
                 }
             }
         }
@@ -867,6 +923,23 @@ private fun ImportPlaylistDialog(
                                 Spacer(Modifier.height(4.dp))
                                 Text(details, color = Color.Gray, fontSize = 11.sp)
                             }
+                            Spacer(Modifier.height(8.dp))
+                            // Copy logs button
+                            val clipboard = LocalClipboardManager.current
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(36.dp)
+                                    .background(Color(0xFF3A3A3C), RoundedCornerShape(50))
+                                    .clip(RoundedCornerShape(50))
+                                    .clickable {
+                                        val logs = com.liquidmusicglass.api.icm.IcmApiFileLogger.getRecentLogs(100)
+                                        clipboard.setText(androidx.compose.ui.text.AnnotatedString(logs))
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("Copy ICM logs", color = Color(0xFF0A84FF), fontSize = 13.sp)
+                            }
                             Spacer(Modifier.height(16.dp))
                             Box(
                                 modifier = Modifier
@@ -917,6 +990,17 @@ private fun ImportPlaylistDialog(
                                 }
                             }
                         )
+
+                        // URL validation warning
+                        urlValidationError?.let { err ->
+                            Text(
+                                text = err,
+                                color = Color(0xFFFFA500),
+                                fontSize = 12.sp,
+                                lineHeight = 16.sp,
+                                modifier = Modifier.padding(horizontal = 4.dp)
+                            )
+                        }
 
                         // 3. Name override (optional)
                         BasicTextField(
@@ -998,7 +1082,9 @@ private fun ImportPlaylistDialog(
                                                 isPreviewing = true
                                                 previewError = null
                                                 previewResult = null
-                                                val res = IcmRepository.previewPlaylist(source, url.trim())
+                                                // Strip query params from URL before sending
+                                                val cleanUrl = url.trim().substringBefore("?")
+                                                val res = IcmRepository.previewPlaylist(source, cleanUrl)
                                                 if (res != null) {
                                                     previewResult = res
                                                 } else {
@@ -1030,34 +1116,37 @@ private fun ImportPlaylistDialog(
                                                 importPollAfter = 3 // reset to default
                                                 importCompleted = false
                                                 importFailedTracks = emptyList()
+                                                // Strip query params from URL before sending
+                                                val cleanUrl = url.trim().substringBefore("?")
                                                 val res = IcmRepository.importPlaylist(
                                                     source = source,
-                                                    url = url.trim(),
+                                                    url = cleanUrl,
                                                     name = playlistName.trim().takeIf { it.isNotBlank() }
                                                 )
-                                                if (res != null) {
-                                                    if (res.jobId != null || res.playlistId != null) {
-                                                        if (source == "yandex") {
-                                                            importJobId = res.jobId
-                                                            res.pollAfter?.let { importPollAfter = it }
-                                                            // isImporting stays true while polling
-                                                        } else {
-                                                            // Apple Music — synchronous import
-                                                            importCompleted = true
-                                                            isImporting = false
-                                                            onImportSuccess() // refresh playlist list
-                                                            // Auto-dismiss after short delay so user sees success
-                                                            scope.launch {
-                                                                delay(1500)
-                                                                onDismiss()
+                                                    if (res != null) {
+                                                        IcmApiFileLogger.log("D", "ImportPlaylist", "importPlaylist result: jobId=${res.jobId}, playlistId=${res.playlistId}, status=${res.status}, total=${res.total}, matched=${res.matched}, failed=${res.failed}, tracks=${res.tracks?.size}, failedTracks=${res.failedTracks?.size}")
+                                                        if (res.jobId != null || res.playlistId != null) {
+                                                            if (source == "yandex") {
+                                                                importJobId = res.jobId
+                                                                res.pollAfter?.let { importPollAfter = it }
+                                                                // isImporting stays true while polling
+                                                            } else {
+                                                                // Apple Music — synchronous import
+                                                                importCompleted = true
+                                                                isImporting = false
+                                                                onImportSuccess() // refresh playlist list
+                                                                // Auto-dismiss after short delay so user sees success
+                                                                scope.launch {
+                                                                    delay(1500)
+                                                                    onDismiss()
+                                                                }
                                                             }
+                                                        } else {
+                                                            importError = "Server denied import."
+                                                            importErrorDetails = "Response: playlistId=null, jobId=null"
+                                                            isImporting = false
                                                         }
                                                     } else {
-                                                        importError = "Server denied import."
-                                                        importErrorDetails = "Response: playlistId=null, jobId=null"
-                                                        isImporting = false
-                                                    }
-                                                } else {
                                                     val lastErr = IcmRepository.lastError.value
                                                     val httpCode = IcmRepository.getLastHttpCode()
                                                     val errCode = IcmRepository.getLastErrorCode()

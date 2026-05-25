@@ -56,3 +56,7 @@
     @kotlinx.serialization.SerialName <fields>;
     @kotlinx.serialization.Serializable <methods>;
 }
+
+# Keep all API models and network structures from obfuscation/shrinking
+-keep class com.liquidmusicglass.api.icm.** { *; }
+-keepclassmembers class com.liquidmusicglass.api.icm.** { *; }

@@ -6,6 +6,7 @@ import coil.ImageLoaderFactory
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import com.kyant.fishnet.Fishnet
+import com.liquidmusicglass.api.icm.IcmApiFileLogger
 import com.liquidmusicglass.api.icm.IcmAuthRepository
 import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.data.local.HomeCacheManager
@@ -52,6 +53,10 @@ class App : Application(), ImageLoaderFactory {
         CrashHandler.install(this) // Java крэши
         val logDir = File(filesDir, "crash_logs").apply { mkdirs() }
         Fishnet.init(this, logDir.absolutePath) // Native/ANR крэши
+
+        // Initialize file logger for IcmApi (works even when system logcat is encrypted)
+        IcmApiFileLogger.init(this)
+        IcmApiFileLogger.log("I", "App", "App started, IcmApiFileLogger initialized at ${IcmApiFileLogger.getLogPath()}")
 
         // Initialize AppSettings (SharedPreferences) — лёгкая, можно на main
         AppSettings.init(this)

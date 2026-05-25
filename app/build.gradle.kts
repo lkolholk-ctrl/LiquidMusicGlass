@@ -45,8 +45,8 @@ android {
             // Debug uses auto-generated debug signing
         }
         release {
-            isMinifyEnabled = true
-            isShrinkResources = true
+            isMinifyEnabled = false
+            isShrinkResources = false
             isDebuggable = false
             isJniDebuggable = false
             vcsInfo.include = false
