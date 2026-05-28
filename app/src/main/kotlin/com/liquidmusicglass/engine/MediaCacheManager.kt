@@ -90,8 +90,8 @@ object MediaCacheManager {
 
                 val httpFactory = DefaultHttpDataSource.Factory()
                     .setAllowCrossProtocolRedirects(true)
-                    .setConnectTimeoutMs(5_000)
-                    .setReadTimeoutMs(5_000)
+                    .setConnectTimeoutMs(30_000)
+                    .setReadTimeoutMs(30_000)
                     .setDefaultRequestProperties(mapOf(
                         "User-Agent" to "LiquidMusicGlass/1.0"
                     ))
@@ -218,8 +218,8 @@ object MediaCacheManager {
     fun getDataSourceFactory(): androidx.media3.datasource.DataSource.Factory {
         return cacheDataSourceFactory ?: DefaultHttpDataSource.Factory()
             .setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(5_000)
-            .setReadTimeoutMs(5_000)
+            .setConnectTimeoutMs(30_000)
+            .setReadTimeoutMs(30_000)
             .setDefaultRequestProperties(mapOf(
                 "User-Agent" to "LiquidMusicGlass/1.0"
             ))

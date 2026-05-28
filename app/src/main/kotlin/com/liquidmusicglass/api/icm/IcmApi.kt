@@ -93,9 +93,10 @@ class IcmApi private constructor() {
     }
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
-        .writeTimeout(10, TimeUnit.SECONDS)
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
         .connectionPool(okhttp3.ConnectionPool(5, 30, TimeUnit.SECONDS))
         .protocols(listOf(okhttp3.Protocol.HTTP_2, okhttp3.Protocol.HTTP_1_1))
         .addInterceptor { chain ->
@@ -657,21 +658,24 @@ suspend fun search(
     }
 
     /**
-     * Get next track from user's personal wave (radio).
-     * Requires partnerUserId to be set and user to be linked.
-     * Call repeatedly to get continuous stream of personalized tracks.
+     * Get next wave track.
      *
      * @param seedTrackId Optional track ID to create a "station based on track"
      * @param exclude Comma-separated track IDs to exclude (current queue)
      * @param recentSkips Number of consecutive skipped tracks (skip-streak fallback)
      * @param region Region override
+     * @param source Source override
+     * @param mood Mood filter (e.g., "energetic", "chill", "focus")
+     * @param genre Genre filter (e.g., "electronic", "rock", "jazz")
      */
     suspend fun getWaveNext(
         seedTrackId: String? = null,
         exclude: List<String>? = null,
         recentSkips: Int? = null,
         region: String? = null,
-        source: String? = null
+        source: String? = null,
+        mood: String? = null,
+        genre: String? = null
     ): Result<IcmWaveResponse> {
         if (partnerUserId.isNullOrBlank()) {
             return Result.failure(
@@ -691,6 +695,8 @@ suspend fun search(
             if (recentSkips != null) query.add("recent_skips=$recentSkips")
             if (region != null) query.add("region=$region")
             if (source != null) query.add("source=$source")
+            if (!mood.isNullOrBlank()) query.add("mood=${java.net.URLEncoder.encode(mood, "UTF-8")}")
+            if (!genre.isNullOrBlank()) query.add("genre=${java.net.URLEncoder.encode(genre, "UTF-8")}")
             if (query.isNotEmpty()) append("?${query.joinToString("&")}")
         }
         return execute(params)

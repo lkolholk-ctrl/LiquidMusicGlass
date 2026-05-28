@@ -1,7 +1,9 @@
 plugins {
     id("com.android.application")
+    id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     kotlin("plugin.serialization") version "2.3.10"
+    id("com.google.devtools.ksp")
 }
 
 android {
@@ -14,8 +16,8 @@ android {
         applicationId = "com.liquidmusicglass"
         minSdk = 29
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 20260530
+        versionName = "2026.05.30 pre-release1 gsm"
 
         // Read ICM API key from local.properties (GitHub Secret in CI)
         // Fallback to native .so (JNI) at runtime for maximum protection
@@ -154,9 +156,20 @@ dependencies {
     implementation("com.google.ai.edge.litert:litert:1.0.1")
 
     implementation("com.github.wendykierp:JTransforms:3.2")
+    implementation("com.mpatric:mp3agic:0.9.1")
 
     // Kotlinx Serialization (ICM Partner API + Internal API)
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.0")
+
+    // Retrofit (Playlist Import)
+    implementation("com.squareup.retrofit2:retrofit:2.11.0")
+    implementation("com.jakewharton.retrofit:retrofit2-kotlinx-serialization-converter:1.0.0")
+
+    // Jsoup (HTML parsing for ICM search fallback)
+    implementation("org.jsoup:jsoup:1.17.2")
+
+    // WorkManager (background playlist import)
+    implementation("androidx.work:work-runtime-ktx:2.9.0")
 
     // OkHttp (ICM Partner API)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
@@ -170,11 +183,16 @@ dependencies {
     implementation("io.ktor:ktor-client-okhttp:3.0.0")
     implementation("io.ktor:ktor-client-content-negotiation:3.0.0")
     implementation("io.ktor:ktor-serialization-kotlinx-json:3.0.0")
+    implementation("io.ktor:ktor-client-encoding:3.0.0")
+
+    // DataStore (camp preferences)
+    implementation("androidx.datastore:datastore-preferences:1.1.1")
 
     // Room (local database)
-    val roomVersion = "2.6.1"
+    val roomVersion = "2.7.0"
     implementation("androidx.room:room-runtime:$roomVersion")
     implementation("androidx.room:room-ktx:$roomVersion")
+    ksp("androidx.room:room-compiler:$roomVersion")
 
     // Requery SQLite (custom native SQLite3) — через JitPack
     implementation("com.github.requery:sqlite-android:3.45.0")

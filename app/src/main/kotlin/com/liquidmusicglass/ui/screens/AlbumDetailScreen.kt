@@ -47,6 +47,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.liquidmusicglass.ui.glass.GlassKit
+import com.liquidmusicglass.ui.theme.LiquidTheme
 import com.liquidmusicglass.api.icm.IcmAlbumResponse
 import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.api.icm.toTrack
@@ -92,7 +93,7 @@ fun AlbumDetailScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(LiquidTheme.colors.settingsBackground)
     ) {
         // Backdrop source removed — pure black background
         
@@ -123,7 +124,7 @@ fun AlbumDetailScreen(
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             error ?: "Unknown error",
-                            color = Color.White.copy(alpha = 0.5f),
+                            color = LiquidTheme.colors.textSecondary,
                             fontSize = 14.sp
                         )
                     }
@@ -146,7 +147,7 @@ fun AlbumDetailScreen(
                                 modifier = Modifier
                                     .size(40.dp)
                                     .clip(CircleShape)
-                                    .background(Color(0xFF1A1A1A))
+                                    .background(if (LiquidTheme.colors.isDark) Color(0xFF1A1A1A) else Color(0xFFF2F2F7))
                                     .clickable(
                                         interactionSource = remember { MutableInteractionSource() },
                                         indication = null,
@@ -157,7 +158,7 @@ fun AlbumDetailScreen(
                                 Icon(
                                     imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
                                     contentDescription = null,
-                                    tint = Color.White,
+                                    tint = LiquidTheme.colors.iconDefault,
                                     modifier = Modifier.size(22.dp)
                                 )
                             }
@@ -165,7 +166,7 @@ fun AlbumDetailScreen(
                                 modifier = Modifier
                                     .size(40.dp)
                                     .clip(CircleShape)
-                                    .background(Color(0xFF1A1A1A))
+                                    .background(if (LiquidTheme.colors.isDark) Color(0xFF1A1A1A) else Color(0xFFF2F2F7))
                                     .clickable(
                                         interactionSource = remember { MutableInteractionSource() },
                                         indication = null,
@@ -187,7 +188,7 @@ fun AlbumDetailScreen(
                                 Icon(
                                     imageVector = Icons.Rounded.Share,
                                     contentDescription = null,
-                                    tint = Color.White,
+                                    tint = LiquidTheme.colors.iconDefault,
                                     modifier = Modifier.size(22.dp)
                                 )
                             }
@@ -219,7 +220,7 @@ fun AlbumDetailScreen(
                         // Album info
                         Text(
                             text = albumName,
-                            color = Color.White,
+                            color = LiquidTheme.colors.textPrimary,
                             fontSize = 22.sp,
                             fontWeight = FontWeight.Bold,
                             textAlign = TextAlign.Center,
@@ -236,7 +237,7 @@ fun AlbumDetailScreen(
                         }
                         Text(
                             text = subtitle,
-                            color = Color.White.copy(alpha = 0.50f),
+                            color = LiquidTheme.colors.textSecondary,
                             fontSize = 14.sp,
                             textAlign = TextAlign.Center,
                             modifier = Modifier
@@ -295,7 +296,7 @@ fun AlbumDetailScreen(
                                     .weight(1f)
                                     .height(44.dp)
                                     .clip(RoundedCornerShape(50))
-                                    .background(Color(0xFF1A1A1A))
+                                    .background(if (LiquidTheme.colors.isDark) Color(0xFF1A1A1A) else Color(0xFFF2F2F7))
                                     .clickable(
                                         interactionSource = remember { MutableInteractionSource() },
                                         indication = null,
@@ -325,7 +326,7 @@ fun AlbumDetailScreen(
                                         modifier = Modifier.size(20.dp)
                                     )
                                     Spacer(Modifier.width(6.dp))
-                                    Text("Shuffle", color = Color.White, fontWeight = FontWeight.SemiBold)
+                                    Text("Shuffle", color = LiquidTheme.colors.textPrimary, fontWeight = FontWeight.SemiBold)
                                 }
                             }
                         }
@@ -360,7 +361,7 @@ fun AlbumDetailScreen(
                         ) {
                             Text(
                                 text = "${index + 1}",
-                                color = Color.White.copy(alpha = 0.30f),
+                                color = LiquidTheme.colors.textTertiary,
                                 fontSize = 14.sp,
                                 modifier = Modifier.width(28.dp)
                             )
@@ -368,7 +369,7 @@ fun AlbumDetailScreen(
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
                                         text = track.title,
-                                        color = Color.White,
+                                        color = LiquidTheme.colors.textPrimary,
                                         fontSize = 15.sp,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
@@ -386,7 +387,7 @@ fun AlbumDetailScreen(
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
                                     text = track.artist,
-                                    color = Color.White.copy(alpha = 0.45f),
+                                    color = LiquidTheme.colors.textSecondary,
                                     fontSize = 12.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
@@ -396,7 +397,7 @@ fun AlbumDetailScreen(
                             val sec = ((track.durationMs / 1000) % 60).toInt()
                             Text(
                                 text = "$min:${sec.toString().padStart(2, '0')}",
-                                color = Color.White.copy(alpha = 0.30f),
+                                color = LiquidTheme.colors.textTertiary,
                                 fontSize = 12.sp
                             )
                         }

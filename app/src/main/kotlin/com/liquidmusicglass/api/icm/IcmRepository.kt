@@ -27,9 +27,6 @@ object IcmRepository {
 
     private var _lastException: Exception? = null
 
-    /** Global exclude set for wave tracks — shared across all callers */
-    private val waveExcludeIds = mutableSetOf<String>()
-
     /** Default region */
     var region: String
         get() = api.defaultRegion
@@ -92,14 +89,6 @@ object IcmRepository {
         _isInitialized.value = false
         _lastError.value = null
         _lastException = null
-        waveExcludeIds.clear()
-    }
-
-    /**
-     * Clear global wave exclude set (e.g. after pull-to-refresh).
-     */
-    fun clearWaveExclude() {
-        waveExcludeIds.clear()
     }
 
     /**
@@ -195,16 +184,33 @@ object IcmRepository {
      * Parallel async requests + JSON caching for offline-first experience.
      */
     suspend fun loadHomeContent(): IcmHomeResponse = coroutineScope {
-        // ─── Parallel search for all content blocks ───
-        
-        // Popular tracks
+        // ─── Parallel search for all content blocks (Personalized via local Room DB) ───
+        val context = com.liquidmusicglass.engine.PlayerController.context
+        var topArtists = emptyList<String>()
+        var topGenres = emptyList<String>()
+        if (context != null) {
+            try {
+                val db = com.liquidmusicglass.data.local.db.AppDatabase.getInstance(context)
+                val dao = db.playbackHistoryDao()
+                topArtists = dao.getTopArtists(5)
+                topGenres = dao.getTopGenres(3)
+            } catch (e: Exception) {
+                android.util.Log.e("IcmRepository", "Failed to query personalization data from Room", e)
+            }
+        }
+
+        // Popular tracks (Personalized if topArtists is available)
         val popularDeferred = async {
-            val queries = listOf(
-                listOf("top hits 2025", "viral hits", "trending now"),
-                listOf("popular songs", "hot tracks", "chart toppers"),
-                listOf("best songs", "top tracks", "hit parade"),
-                listOf("viral songs", "trending hits", "top music")
-            ).random()
+            val queries = if (topArtists.isNotEmpty()) {
+                topArtists.take(3)
+            } else {
+                listOf(
+                    listOf("top hits 2025", "viral hits", "trending now"),
+                    listOf("popular songs", "hot tracks", "chart toppers"),
+                    listOf("best songs", "top tracks", "hit parade"),
+                    listOf("viral songs", "trending hits", "top music")
+                ).random()
+            }
             searchToHomeItems(queries, 10, filterTracks = true)
         }
         
@@ -218,13 +224,17 @@ object IcmRepository {
             searchToHomeItems(queries, 6, filterTracks = true, genreTag = true)
         }
         
-        // New Releases (albums)
+        // New Releases (Personalized by genre if topGenres is available)
         val newReleasesDeferred = async {
-            val queries = listOf(
-                listOf("new releases", "new music", "latest"),
-                listOf("fresh drops", "new albums", "just released"),
-                listOf("this week", "new singles", "debut")
-            ).random()
+            val queries = if (topGenres.isNotEmpty()) {
+                topGenres.take(3)
+            } else {
+                listOf(
+                    listOf("new releases", "new music", "latest"),
+                    listOf("fresh drops", "new albums", "just released"),
+                    listOf("this week", "new singles", "debut")
+                ).random()
+            }
             searchToHomeItems(queries, 10, filterAlbums = true)
         }
         
@@ -249,13 +259,15 @@ object IcmRepository {
         val blocks = mutableListOf<IcmHomeBlock>()
         
         if (popular.isNotEmpty()) {
-            blocks.add(IcmHomeBlock(id = "popular", title = "Popular", type = "popular", items = popular))
+            val title = if (topArtists.isNotEmpty()) "More from your favorite artists" else "Popular"
+            blocks.add(IcmHomeBlock(id = "popular", title = title, type = "popular", items = popular))
         }
         if (banners.isNotEmpty()) {
             blocks.add(IcmHomeBlock(id = "banners", title = "Featured", type = "banner", items = banners))
         }
         if (newReleases.isNotEmpty()) {
-            blocks.add(IcmHomeBlock(id = "new_releases", title = "New Releases", type = "new_releases", items = newReleases))
+            val title = if (topGenres.isNotEmpty()) "Based on your heavy rotation" else "New Releases"
+            blocks.add(IcmHomeBlock(id = "new_releases", title = title, type = "new_releases", items = newReleases))
         }
         if (charts.isNotEmpty()) {
             blocks.add(IcmHomeBlock(id = "charts", title = "Top Charts", type = "charts", items = charts))
@@ -406,8 +418,8 @@ object IcmRepository {
         return charts
     }
 
-    suspend fun getStreamUrl(trackId: String, region: String? = null): String? {
-        val quality = IcmAuthRepository.getEffectiveQuality(trackId)
+    suspend fun getStreamUrl(trackId: String, region: String? = null, source: String? = null): String? {
+        val quality = IcmAuthRepository.getEffectiveQuality(trackId, source)
         val result = api.getTrack(trackId, region, quality)
         result.exceptionOrNull()?.let {
             _lastException = it as? Exception
@@ -589,25 +601,46 @@ object IcmRepository {
      * Preload 3-5 tracks ahead for seamless playback.
      *
      * @param seedTrackId Optional track ID to create a "station based on track"
-     * @param exclude Track IDs to exclude (current queue)
+     * @param exclude Track IDs to exclude (current queue) — merged with Room history
      * @param recentSkips Number of consecutive skips (skip-streak fallback)
      * @param region Region override
+     * @param source Source override
+     * @param mood Mood filter (e.g., "energetic", "chill", "focus")
+     * @param genre Genre filter (e.g., "electronic", "rock", "jazz")
+     * @param historyLimit How many recent track IDs to fetch from Room for exclusion (default 200)
      */
     suspend fun getWaveNext(
         seedTrackId: String? = null,
         exclude: List<String>? = null,
         recentSkips: Int? = null,
         region: String? = null,
-        source: String? = null
+        source: String? = null,
+        mood: String? = null,
+        genre: String? = null,
+        historyLimit: Int = 200
     ): IcmWaveResponse? {
-        // Merge caller-provided exclude with global wave exclude set
-        val mergedExclude = (exclude ?: emptyList()) + waveExcludeIds
-        val result = api.getWaveNext(seedTrackId, mergedExclude.takeIf { it.isNotEmpty() }, recentSkips, region, source)
-        result.getOrNull()?.track?.id?.let { waveExcludeIds.add(it) }
-        // Trim global set if it grows too large
-        if (waveExcludeIds.size > 500) {
-            waveExcludeIds.take(400).toMutableSet().also { waveExcludeIds.clear(); waveExcludeIds.addAll(it) }
+        // Build exclude list from: (1) caller-provided IDs, (2) Room playback history
+        val roomExclude = try {
+            val ctx = com.liquidmusicglass.engine.PlayerController.context
+            if (ctx != null) {
+                val db = com.liquidmusicglass.data.local.db.AppDatabase.getInstance(ctx)
+                db.playbackHistoryDao().getRecentTrackIds(historyLimit)
+            } else emptyList()
+        } catch (e: Exception) {
+            android.util.Log.w("IcmRepository", "Failed to read Room exclude list: ${e.message}")
+            emptyList()
         }
+        val mergedExclude = ((exclude ?: emptyList()) + roomExclude).distinct()
+
+        val result = api.getWaveNext(
+            seedTrackId,
+            mergedExclude.takeIf { it.isNotEmpty() },
+            recentSkips,
+            region,
+            source,
+            mood,
+            genre
+        )
         result.exceptionOrNull()?.let {
             _lastException = it as? Exception
             _lastError.value = it.message

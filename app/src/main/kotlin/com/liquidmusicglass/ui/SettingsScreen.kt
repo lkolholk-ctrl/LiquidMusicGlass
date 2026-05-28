@@ -70,7 +70,7 @@ fun SettingsScreen(
 
     val lc = LiquidTheme.colors
 
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+    Box(modifier = Modifier.fillMaxSize().background(lc.settingsBackground)) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -89,7 +89,7 @@ fun SettingsScreen(
                     modifier = Modifier
                         .size(40.dp)
                         .clip(CircleShape)
-                        .background(Color(0xFF1C1C1E))
+                        .background(if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null
@@ -308,12 +308,16 @@ fun SettingsScreen(
                 ) {
                     themeLabels.forEachIndexed { index, label ->
                         val isSelected = themeMode == index
+                        val isDark = lc.isDark
+                        val itemBg = if (isSelected) AppleRed else (if (isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
+                        val unselectedTextColor = if (isDark) Color.White.copy(alpha = 0.45f) else Color.Black.copy(alpha = 0.45f)
+
                         Box(
                             modifier = Modifier
                                 .weight(1f)
                                 .height(36.dp)
                                 .background(
-                                    if (isSelected) AppleRed else Color(0xFF1C1C1E),
+                                    itemBg,
                                     RoundedCornerShape(50)
                                 )
                                 .clip(RoundedCornerShape(50))
@@ -326,7 +330,7 @@ fun SettingsScreen(
                         ) {
                             val textColor by animateColorAsState(
                                 targetValue = if (isSelected) Color.White
-                                else Color.White.copy(alpha = 0.45f),
+                                else unselectedTextColor,
                                 animationSpec = tween(200),
                                 label = "themeText"
                             )
@@ -362,10 +366,12 @@ private fun SectionLabel(text: String) {
 
 @Composable
 private fun PlainCard(content: @Composable ColumnScope.() -> Unit) {
+    val isDark = LiquidTheme.colors.isDark
+    val cardBg = if (isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7)
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color(0xFF1C1C1E), RoundedCornerShape(28.dp))
+            .background(cardBg, RoundedCornerShape(28.dp))
             .padding(vertical = 4.dp),
         content = content
     )
@@ -373,12 +379,14 @@ private fun PlainCard(content: @Composable ColumnScope.() -> Unit) {
 
 @Composable
 private fun PlainDivider() {
+    val isDark = LiquidTheme.colors.isDark
+    val dividerColor = if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.06f)
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .padding(start = 16.dp)
             .height(1.dp)
-            .background(Color.White.copy(alpha = 0.08f))
+            .background(dividerColor)
     )
 }
 
@@ -470,12 +478,16 @@ private fun SleepTimerSelector(
     ) {
         options.forEach { minutes ->
             val isSelected = selectedMinutes == minutes
+            val isDark = LiquidTheme.colors.isDark
+            val itemBg = if (isSelected) AppleRed else (if (isDark) Color(0xFF1C1C1E) else Color(0xFFE5E5EA))
+            val unselectedTextColor = if (isDark) Color.White.copy(alpha = 0.45f) else Color.Black.copy(alpha = 0.45f)
+
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .height(36.dp)
                     .background(
-                        if (isSelected) AppleRed else Color(0xFF1C1C1E),
+                        itemBg,
                         RoundedCornerShape(50)
                     )
                     .clip(RoundedCornerShape(50))
@@ -488,7 +500,7 @@ private fun SleepTimerSelector(
             ) {
                 val textColor by animateColorAsState(
                     targetValue = if (isSelected) Color.White
-                    else Color.White.copy(alpha = 0.45f),
+                    else unselectedTextColor,
                     animationSpec = tween(200),
                     label = "sleepText"
                 )

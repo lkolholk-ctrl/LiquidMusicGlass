@@ -34,7 +34,18 @@ data class Track(
     val isOnlineTrack: Boolean
         get() = uri.toString().startsWith("https://byicloud.online") || uri.toString().startsWith("http://byicloud.online")
 
-    /** URI для отображения обложки (coverUrl имеет приоритет). */
+    /** Является ли треком из YouTube Music. */
+    val isYouTubeTrack: Boolean
+        get() = source == "youtube" || uri.toString().contains("googlevideo.com") || uri.toString().contains("youtube.com")
+
+    /** URI для отображения обложки (coverUrl имеет приоритет).
+     *  Автоматически оборачивает локальные пути в file:// URI. */
     val displayArtUri: Uri
-        get() = coverUrl?.let { Uri.parse(it) } ?: albumArtUri
+        get() = coverUrl?.let {
+            if (it.startsWith("/")) {
+                Uri.fromFile(java.io.File(it))
+            } else {
+                Uri.parse(it)
+            }
+        } ?: albumArtUri
 }

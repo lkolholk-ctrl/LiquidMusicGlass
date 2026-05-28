@@ -44,27 +44,20 @@ private val DarkLiquidColors = LiquidColors(
     isDark = true,
     screenBackground = Brush.verticalGradient(
         colors = listOf(
-            Color(0xFF1A1A2E),
-            Color(0xFF0F0F1A),
-            Color(0xFF0A0A12),
-            Color(0xFF080A0F)
+            Color.Black,
+            Color.Black,
+            Color.Black,
+            Color.Black
         )
     ),
-    settingsBackground = Brush.verticalGradient(
-        colors = listOf(
-            Color(0xFF22222E),
-            Color(0xFF1A1A24),
-            Color(0xFF14141C),
-            Color(0xFF101018)
-        )
-    ).let { Color(0xFF101018) }, // fallback solid for settings
+    settingsBackground = Color.Black,
     textPrimary = Color.White,
     textSecondary = Color.White.copy(alpha = 0.55f),
     textTertiary = Color.White.copy(alpha = 0.30f),
     glassTint = Color.White.copy(alpha = 0.04f),
     glassBorder = Color.White.copy(alpha = 0.20f),
     divider = Color.White.copy(alpha = 0.06f),
-    cardSurface = Color.White.copy(alpha = 0.04f),
+    cardSurface = Color.Transparent,
     accentRed = Color(0xFFFC3C44),
     accentGreen = Color(0xFF34C759),
     iconDefault = Color.White,
@@ -73,7 +66,7 @@ private val DarkLiquidColors = LiquidColors(
     searchFieldBg = Color.White.copy(alpha = 0.08f),
     chipBg = Color.White.copy(alpha = 0.04f),
     chipBorder = Color.White.copy(alpha = 0.08f),
-    bottomBarTint = Color.White.copy(alpha = 0.01f),
+    bottomBarTint = Color(0xFF121212),
     miniPlayerTint = Color.White.copy(alpha = 0.01f),
     miniPlayerBorder = Color.White.copy(alpha = 0.22f)
 )
@@ -82,29 +75,29 @@ private val LightLiquidColors = LiquidColors(
     isDark = false,
     screenBackground = Brush.verticalGradient(
         colors = listOf(
-            Color(0xFFF0F0F5),
-            Color(0xFFE8E8F0),
-            Color(0xFFE2E2EA),
-            Color(0xFFDDDDE5)
+            Color.White,
+            Color.White,
+            Color.White,
+            Color.White
         )
     ),
-    settingsBackground = Color(0xFFF2F2F7),
-    textPrimary = Color(0xFF1C1C1E),
-    textSecondary = Color(0xFF1C1C1E).copy(alpha = 0.55f),
-    textTertiary = Color(0xFF1C1C1E).copy(alpha = 0.30f),
+    settingsBackground = Color.White,
+    textPrimary = Color.Black,
+    textSecondary = Color.Black.copy(alpha = 0.55f),
+    textTertiary = Color.Black.copy(alpha = 0.30f),
     glassTint = Color.Black.copy(alpha = 0.03f),
     glassBorder = Color.Black.copy(alpha = 0.08f),
     divider = Color.Black.copy(alpha = 0.06f),
-    cardSurface = Color.White.copy(alpha = 0.60f),
+    cardSurface = Color.Transparent,
     accentRed = Color(0xFFFC3C44),
     accentGreen = Color(0xFF34C759),
-    iconDefault = Color(0xFF1C1C1E),
-    iconMuted = Color(0xFF1C1C1E).copy(alpha = 0.40f),
-    sectionLabel = Color(0xFF1C1C1E).copy(alpha = 0.45f),
+    iconDefault = Color.Black,
+    iconMuted = Color.Black.copy(alpha = 0.40f),
+    sectionLabel = Color.Black.copy(alpha = 0.45f),
     searchFieldBg = Color.Black.copy(alpha = 0.05f),
     chipBg = Color.Black.copy(alpha = 0.04f),
     chipBorder = Color.Black.copy(alpha = 0.06f),
-    bottomBarTint = Color(0xFFFAFAFA).copy(alpha = 0.04f),
+    bottomBarTint = Color(0xFFF2F2F7),
     miniPlayerTint = Color.Black.copy(alpha = 0.03f),
     miniPlayerBorder = Color.Black.copy(alpha = 0.08f)
 )

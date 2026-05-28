@@ -15,14 +15,17 @@ import io.requery.android.database.sqlite.RequerySQLiteOpenHelperFactory
 @Database(
     entities = [
         CachedTrack::class,
-        ListeningHistory::class
+        ListeningHistory::class,
+        TrackStatsEntity::class,
+        PlaybackHistoryEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun waveDao(): WaveDao
+    abstract fun playbackHistoryDao(): PlaybackHistoryDao
 
     companion object {
         @Volatile
@@ -42,10 +45,9 @@ abstract class AppDatabase : RoomDatabase() {
                 AppDatabase::class.java,
                 DB_NAME
             )
-                // Принудительно используем Requery SQLite вместо системного
                 .openHelperFactory(RequerySQLiteOpenHelperFactory())
-                // WAL режим — чтение и запись не блокируют друг друга
                 .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
+                .fallbackToDestructiveMigration()
                 .build()
         }
 

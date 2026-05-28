@@ -14,6 +14,7 @@ data class DownloadedTrackEntity(
     val durationMs: Long = 0,
     val imageUrl: String? = null,
     val localPath: String,
+    val localCoverPath: String? = null,
     val quality: String? = null,
     val downloadedAt: Long = System.currentTimeMillis()
 )

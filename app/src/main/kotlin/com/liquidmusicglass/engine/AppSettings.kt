@@ -77,6 +77,16 @@ object AppSettings {
     private val _hideExplicit = MutableStateFlow(false)
     val hideExplicit: StateFlow<Boolean> = _hideExplicit
 
+    // ── Onboarding State ──
+    private val _isOnboardingCompleted = MutableStateFlow(false)
+    val isOnboardingCompleted: StateFlow<Boolean> = _isOnboardingCompleted
+
+    private val _onboardingGenres = MutableStateFlow<List<String>>(emptyList())
+    val onboardingGenres: StateFlow<List<String>> = _onboardingGenres
+
+    private val _onboardingArtists = MutableStateFlow<List<String>>(emptyList())
+    val onboardingArtists: StateFlow<List<String>> = _onboardingArtists
+
     // ── Sleep Timer ──
     private var sleepTimerJob: Job? = null
 
@@ -166,6 +176,20 @@ object AppSettings {
     fun setHideExplicit(enabled: Boolean) {
         _hideExplicit.value = enabled
         safePrefs()?.edit()?.putBoolean("hide_explicit", enabled)?.apply()
+    }
+
+    fun setOnboardingCompleted(completed: Boolean) {
+        _isOnboardingCompleted.value = completed
+        safePrefs()?.edit()?.putBoolean("onboarding_completed", completed)?.apply()
+    }
+
+    fun setOnboardingData(genres: List<String>, artists: List<String>) {
+        _onboardingGenres.value = genres
+        _onboardingArtists.value = artists
+        safePrefs()?.edit()?.apply {
+            putString("onboarding_genres", genres.joinToString(","))
+            putString("onboarding_artists", artists.joinToString(","))
+        }?.apply()
     }
 
     // ── Scan Folders ──
@@ -297,5 +321,9 @@ object AppSettings {
                 _scanFolders.value = foldersStr.split("|").filter { it.isNotBlank() }
             }
         } catch (_: Exception) {}
+
+        _isOnboardingCompleted.value = p.getBoolean("onboarding_completed", false)
+        _onboardingGenres.value = p.getString("onboarding_genres", "")?.split(",")?.filter { it.isNotBlank() } ?: emptyList()
+        _onboardingArtists.value = p.getString("onboarding_artists", "")?.split(",")?.filter { it.isNotBlank() } ?: emptyList()
     }
 }

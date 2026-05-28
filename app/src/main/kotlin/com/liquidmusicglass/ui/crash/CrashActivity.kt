@@ -40,7 +40,7 @@ class CrashActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val crashText = CrashHandler.readAndClearAll(this) ?: "Лог не найден."
+        val crashText = CrashHandler.readAndClearAll(this) ?: "Log not found."
 
         setContent {
             LiquidMusicGlassTheme {
@@ -64,7 +64,7 @@ class CrashActivity : ComponentActivity() {
             putExtra(Intent.EXTRA_SUBJECT, "LiquidMusicGlass crash log")
             putExtra(Intent.EXTRA_TEXT, text)
         }
-        context.startActivity(Intent.createChooser(intent, "Отправить лог через…"))
+        context.startActivity(Intent.createChooser(intent, "Send log via..."))
     }
 
     companion object {
@@ -101,13 +101,13 @@ private fun CrashScreen(
                 .padding(20.dp)
         ) {
             Text(
-                text = "Приложение вылетело",
+                text = "The app crashed",
                 style = MaterialTheme.typography.headlineSmall,
                 color = Color.White
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "Скопируй или отправь лог через мессенджер.",
+                text = "Copy or send the crash log.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = Color.White.copy(alpha = 0.72f)
             )
@@ -117,12 +117,12 @@ private fun CrashScreen(
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 ActionButton(
-                    text = "📋 Скопировать",
+                    text = "Copy",
                     onClick = onCopy,
                     modifier = Modifier.weight(1f)
                 )
                 ActionButton(
-                    text = "📤 Поделиться",
+                    text = "Share",
                     onClick = onShare,
                     modifier = Modifier.weight(1f)
                 )

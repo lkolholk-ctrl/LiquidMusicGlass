@@ -34,9 +34,9 @@ object AppLogger {
     fun read(context: Context): String {
         return try {
             val file = File(context.filesDir, LOG_FILE_NAME)
-            if (file.exists()) file.readText() else "Лог пуст."
+            if (file.exists()) file.readText() else "Log is empty."
         } catch (t: Throwable) {
-            "Не удалось прочитать лог: ${t.message}"
+            "Failed to read log: ${t.message}"
         }
     }
 

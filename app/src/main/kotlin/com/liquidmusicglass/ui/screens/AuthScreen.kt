@@ -24,6 +24,7 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Send
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import com.liquidmusicglass.ui.theme.LiquidTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -47,6 +48,7 @@ fun AuthScreen(
     onAuthSuccess: () -> Unit = {},
     onBack: () -> Unit = {}
 ) {
+    val lc = LiquidTheme.colors
     val context = LocalContext.current
 
     // ICM auth completes in MainActivity (deep link). When the login state
@@ -59,7 +61,7 @@ fun AuthScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(lc.settingsBackground)
     ) {
         Column(
             modifier = Modifier
@@ -79,7 +81,7 @@ fun AuthScreen(
                     modifier = Modifier
                         .size(40.dp)
                         .clip(CircleShape)
-                        .background(Color(0xFF1C1C1E))
+                        .background(if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null
@@ -89,7 +91,7 @@ fun AuthScreen(
                     Icon(
                         imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
                         contentDescription = null,
-                        tint = Color.White,
+                        tint = lc.iconDefault,
                         modifier = Modifier.size(22.dp)
                     )
                 }
@@ -100,7 +102,7 @@ fun AuthScreen(
             // Logo
             Text(
                 text = "Liquid Music",
-                color = Color.White,
+                color = lc.textPrimary,
                 fontSize = 32.sp,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center
@@ -117,7 +119,7 @@ fun AuthScreen(
 
             Text(
                 text = "Welcome",
-                color = Color.White.copy(alpha = 0.5f),
+                color = lc.textSecondary,
                 fontSize = 15.sp,
                 textAlign = TextAlign.Center
             )
@@ -126,7 +128,7 @@ fun AuthScreen(
 
             Text(
                 text = "powered by ICM Music",
-                color = Color.White.copy(alpha = 0.3f),
+                color = lc.textTertiary,
                 fontSize = 12.sp,
                 textAlign = TextAlign.Center
             )
@@ -206,7 +208,7 @@ fun AuthScreen(
 
             Text(
                 text = "By continuing, you agree to our Terms of Service",
-                color = Color.White.copy(alpha = 0.3f),
+                color = lc.textSecondary,
                 fontSize = 12.sp,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth()

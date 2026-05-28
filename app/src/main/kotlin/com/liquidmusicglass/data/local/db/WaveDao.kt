@@ -16,33 +16,36 @@ interface WaveDao {
     // ─── Cached Tracks ───
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertTrack(track: CachedTrack)
+    fun insertTrack(track: CachedTrack): Long
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertTracks(tracks: List<CachedTrack>)
+    fun insertTracks(tracks: List<CachedTrack>): List<Long>
 
     @Query("SELECT * FROM cached_tracks WHERE id = :trackId LIMIT 1")
-    suspend fun getTrackById(trackId: String): CachedTrack?
+    fun getTrackById(trackId: String): CachedTrack?
 
     @Query("SELECT * FROM cached_tracks WHERE genre IN (:genres) ORDER BY cachedAt DESC LIMIT :limit")
-    suspend fun getTracksByGenres(genres: List<String>, limit: Int = 50): List<CachedTrack>
+    fun getTracksByGenres(genres: List<String>, limit: Int = 50): List<CachedTrack>
 
     @Query("SELECT * FROM cached_tracks WHERE isFavorite = 1 ORDER BY cachedAt DESC")
     fun getFavoriteTracksFlow(): Flow<List<CachedTrack>>
+
+    @Query("SELECT id FROM cached_tracks WHERE isFavorite = 1 OR source = 'FAVORITES' ORDER BY RANDOM() LIMIT 1")
+    fun getRandomFavoriteTrackId(): String?
 
     @Query("SELECT * FROM cached_tracks WHERE isDownloaded = 1 ORDER BY cachedAt DESC")
     fun getDownloadedTracksFlow(): Flow<List<CachedTrack>>
 
     @Query("DELETE FROM cached_tracks WHERE id = :trackId")
-    suspend fun deleteTrack(trackId: String)
+    fun deleteTrack(trackId: String): Int
 
     @Query("DELETE FROM cached_tracks WHERE cachedAt < :olderThanMs")
-    suspend fun deleteOldTracks(olderThanMs: Long)
+    fun deleteOldTracks(olderThanMs: Long): Int
 
     // ─── Listening History ───
 
     @Insert
-    suspend fun insertListeningRecord(record: ListeningHistory): Long
+    fun insertListeningRecord(record: ListeningHistory): Long
 
     @Query("""
         SELECT genre, COUNT(*) as count 
@@ -54,7 +57,7 @@ interface WaveDao {
         ORDER BY count DESC 
         LIMIT :limit
     """)
-    suspend fun getTopGenres(sinceMs: Long, limit: Int = 10): List<GenreCount>
+    fun getTopGenres(sinceMs: Long, limit: Int = 10): List<GenreCount>
 
     @Query("""
         SELECT genre, COUNT(*) as count 
@@ -65,22 +68,22 @@ interface WaveDao {
         ORDER BY count DESC 
         LIMIT :limit
     """)
-    suspend fun getTopGenresAllTime(limit: Int = 10): List<GenreCount>
+    fun getTopGenresAllTime(limit: Int = 10): List<GenreCount>
 
     @Query("SELECT * FROM listening_history WHERE trackId = :trackId ORDER BY timestamp DESC LIMIT 1")
-    suspend fun getLastListen(trackId: String): ListeningHistory?
+    fun getLastListen(trackId: String): ListeningHistory?
 
     @Query("SELECT COUNT(*) FROM listening_history WHERE timestamp > :sinceMs")
-    suspend fun getRecentListenCount(sinceMs: Long): Int
+    fun getRecentListenCount(sinceMs: Long): Int
 
     @Query("DELETE FROM listening_history WHERE timestamp < :olderThanMs")
-    suspend fun deleteOldHistory(olderThanMs: Long)
+    fun deleteOldHistory(olderThanMs: Long): Int
 
     // ─── Analytics ───
 
     @Query("SELECT COUNT(DISTINCT trackId) FROM listening_history WHERE timestamp > :sinceMs")
-    suspend fun getUniqueTracksCount(sinceMs: Long): Int
+    fun getUniqueTracksCount(sinceMs: Long): Int
 
     @Query("SELECT SUM(durationPlayedMs) FROM listening_history WHERE timestamp > :sinceMs")
-    suspend fun getTotalListenTimeMs(sinceMs: Long): Long?
+    fun getTotalListenTimeMs(sinceMs: Long): Long?
 }

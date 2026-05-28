@@ -80,10 +80,13 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // Handle Telegram auth redirect
-        handleTelegramAuth(intent)
+    // Handle Telegram auth redirect
+    handleTelegramAuth(intent)
 
-        // Refresh profile on app start if user is logged in
+    // Handle notification tap (open large player)
+    handleNotificationTap(intent)
+
+    // Refresh profile on app start if user is logged in
         if (IcmAuthRepository.isLoggedIn.value) {
             authScope.launch {
                 val apiKey = try {
@@ -130,6 +133,16 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleTelegramAuth(intent)
+        handleNotificationTap(intent)
+    }
+
+    private fun handleNotificationTap(intent: Intent?) {
+        if (intent?.getStringExtra("NAVIGATE_TO") == "LARGE_PLAYER") {
+            com.liquidmusicglass.engine.PlayerController.audioServiceRef?.let {
+                // Trigger player expansion via shared state
+                com.liquidmusicglass.engine.NotificationRouter.emitOpenLargePlayer()
+            }
+        }
     }
 
     private fun handleTelegramAuth(intent: Intent?) {

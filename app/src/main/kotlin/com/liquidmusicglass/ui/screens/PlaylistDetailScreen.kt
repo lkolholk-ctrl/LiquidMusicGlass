@@ -4,16 +4,31 @@ import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsTopHeight
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
+import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Shuffle
+import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -31,6 +46,7 @@ import androidx.compose.ui.unit.sp
 import com.liquidmusicglass.ui.glass.GlassKit
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.Track
+import com.liquidmusicglass.engine.PlaylistDownloadService
 import com.liquidmusicglass.ui.glass.AlbumArtImage
 import com.liquidmusicglass.ui.theme.LiquidTheme
 import com.liquidmusicglass.api.icm.IcmRepository
@@ -52,11 +68,43 @@ fun PlaylistDetailScreen(
     var isLoading by remember { mutableStateOf(false) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
 
-    // Load cloud playlist info & tracks with pagination
+    // Check if this is a local playlist (PlaylistManager ID starts with "pl_")
+    val isLocalPlaylist = playlistId.startsWith("pl_")
+
     LaunchedEffect(playlistId) {
-        if (playlistId.isNotBlank()) {
-            isLoading = true
-            errorMsg = null
+        if (playlistId.isBlank()) {
+            errorMsg = "Invalid playlist ID."
+            return@LaunchedEffect
+        }
+
+        isLoading = true
+        errorMsg = null
+
+        if (isLocalPlaylist) {
+            // Load from local PlaylistManager
+            val localPlaylist = com.liquidmusicglass.engine.PlaylistManager.getById(playlistId)
+            if (localPlaylist == null) {
+                errorMsg = "Playlist not found."
+                isLoading = false
+                return@LaunchedEffect
+            }
+
+            // Convert PlaylistTrack to Track using stored metadata
+            tracks = localPlaylist.tracks.map { pt ->
+                Track(
+                    id = pt.id,
+                    title = pt.title,
+                    artist = pt.artist,
+                    albumName = "",
+                    uri = Uri.parse("https://byicloud.online/track/${pt.id}"),
+                    durationMs = pt.durationMs,
+                    albumId = pt.id.hashCode().toLong(),
+                    coverUrl = pt.coverUrl
+                )
+            }
+            isLoading = false
+        } else {
+            // Load cloud playlist info & tracks with pagination
             scope.launch {
                 val allTracks = mutableListOf<Track>()
                 var offset = 0
@@ -111,15 +159,13 @@ fun PlaylistDetailScreen(
                 tracks = allTracks
                 isLoading = false
             }
-        } else {
-            errorMsg = "Invalid playlist ID."
         }
     }
 
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(LiquidTheme.colors.settingsBackground)
             .padding(horizontal = 20.dp),
         contentPadding = PaddingValues(bottom = 120.dp)
     ) {
@@ -127,11 +173,15 @@ fun PlaylistDetailScreen(
         item {
             Spacer(Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
             Spacer(Modifier.height(12.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth()
+            ) {
                 Box(
                     modifier = Modifier
                         .size(40.dp)
-                        .background(Color(0xFF1C1C1E), CircleShape)
+                        .background(if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7), CircleShape)
                         .clip(CircleShape)
                         .clickable(remember { MutableInteractionSource() }, null) { onBack() },
                     contentAlignment = Alignment.Center
@@ -142,6 +192,33 @@ fun PlaylistDetailScreen(
                         tint = lc.iconDefault,
                         modifier = Modifier.size(22.dp)
                     )
+                }
+
+                // Download button — only show if playlist has tracks
+                if (tracks.isNotEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .background(if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7), CircleShape)
+                            .clip(CircleShape)
+                            .clickable(remember { MutableInteractionSource() }, null) {
+                                val trackIds = tracks.map { it.id }
+                                val playlistName = if (isLocalPlaylist) {
+                                    com.liquidmusicglass.engine.PlaylistManager.getById(playlistId)?.name ?: "Playlist"
+                                } else {
+                                    playlistInfo?.name ?: "Playlist"
+                                }
+                                PlaylistDownloadService.start(context, tracks, playlistName)
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Rounded.Download,
+                            contentDescription = "Download playlist",
+                            tint = AppleRed,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
                 }
             }
             Spacer(Modifier.height(20.dp))
@@ -175,7 +252,11 @@ fun PlaylistDetailScreen(
                 }
             }
         } else {
-            val name = playlistInfo?.name ?: "Playlist"
+            val name = if (isLocalPlaylist) {
+                com.liquidmusicglass.engine.PlaylistManager.getById(playlistId)?.name ?: "Playlist"
+            } else {
+                playlistInfo?.name ?: "Playlist"
+            }
             // Playlist icon + name
             item {
                 Column(
@@ -185,15 +266,14 @@ fun PlaylistDetailScreen(
                     Box(
                         modifier = Modifier
                             .size(120.dp)
-                            .background(Color(0xFF1C1C1E), RoundedCornerShape(28.dp))
                             .clip(RoundedCornerShape(28.dp)),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            Icons.AutoMirrored.Rounded.PlaylistPlay,
-                            null,
-                            tint = AppleRed,
-                            modifier = Modifier.size(56.dp)
+                            imageVector = Icons.AutoMirrored.Filled.PlaylistPlay,
+                            contentDescription = null,
+                            tint = AppleRed.copy(alpha = 0.9f),
+                            modifier = Modifier.size(72.dp)
                         )
                     }
 
@@ -258,8 +338,8 @@ fun PlaylistDetailScreen(
                             modifier = Modifier
                                 .weight(1f)
                                 .height(48.dp)
-                                .background(Color(0xFF1C1C1E), RoundedCornerShape(50))
                                 .clip(RoundedCornerShape(50))
+                                .background(if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
                                 .clickable(remember { MutableInteractionSource() }, null) {
                                     PlayerController.playFromList(
                                         context = context,
@@ -297,7 +377,6 @@ fun PlaylistDetailScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(Color(0xFF1C1C1E), RoundedCornerShape(14.dp))
                         .clip(RoundedCornerShape(14.dp))
                         .clickable(remember { MutableInteractionSource() }, null) {
                             PlayerController.playFromList(

@@ -55,6 +55,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.liquidmusicglass.ui.glass.GlassKit
+import com.liquidmusicglass.ui.theme.LiquidTheme
 import com.liquidmusicglass.api.icm.IcmArtistResponse
 import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.api.icm.toTrack
@@ -186,7 +187,7 @@ fun ArtistDetailScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(LiquidTheme.colors.settingsBackground)
     ) {
         when {
             isLoading -> {
@@ -215,13 +216,13 @@ fun ArtistDetailScreen(
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             error ?: "Unknown error",
-                            color = Color.White.copy(alpha = 0.5f),
+                            color = LiquidTheme.colors.textSecondary,
                             fontSize = 14.sp
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             "Artist ID: $artistId",
-                            color = Color.White.copy(alpha = 0.3f),
+                            color = LiquidTheme.colors.textTertiary,
                             fontSize = 12.sp
                         )
                         Spacer(modifier = Modifier.height(16.dp))
@@ -263,7 +264,7 @@ fun ArtistDetailScreen(
                                 modifier = Modifier
                                     .size(40.dp)
                                     .clip(CircleShape)
-                                    .background(Color(0xFF1A1A1A))
+                                    .background(if (LiquidTheme.colors.isDark) Color(0xFF1A1A1A) else Color(0xFFF2F2F7))
                                     .clickable(
                                         interactionSource = remember { MutableInteractionSource() },
                                         indication = null,
@@ -274,7 +275,7 @@ fun ArtistDetailScreen(
                                 Icon(
                                     imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
                                     contentDescription = null,
-                                    tint = Color.White,
+                                    tint = LiquidTheme.colors.iconDefault,
                                     modifier = Modifier.size(22.dp)
                                 )
                             }
@@ -284,7 +285,7 @@ fun ArtistDetailScreen(
                                     modifier = Modifier
                                         .size(40.dp)
                                         .clip(CircleShape)
-                                        .background(Color(0xFF1A1A1A))
+                                        .background(if (LiquidTheme.colors.isDark) Color(0xFF1A1A1A) else Color(0xFFF2F2F7))
                                         .clickable(
                                             interactionSource = remember { MutableInteractionSource() },
                                             indication = null,
@@ -310,7 +311,7 @@ fun ArtistDetailScreen(
                                     modifier = Modifier
                                         .size(40.dp)
                                         .clip(CircleShape)
-                                        .background(Color(0xFF1A1A1A))
+                                        .background(if (LiquidTheme.colors.isDark) Color(0xFF1A1A1A) else Color(0xFFF2F2F7))
                                         .clickable(
                                             interactionSource = remember { MutableInteractionSource() },
                                             indication = null,
@@ -332,7 +333,7 @@ fun ArtistDetailScreen(
                                     Icon(
                                         imageVector = Icons.Rounded.Share,
                                         contentDescription = null,
-                                        tint = Color.White,
+                                        tint = LiquidTheme.colors.iconDefault,
                                         modifier = Modifier.size(22.dp)
                                     )
                                 }
@@ -364,7 +365,7 @@ fun ArtistDetailScreen(
 
                         Text(
                             text = artistName,
-                            color = Color.White,
+                            color = LiquidTheme.colors.textPrimary,
                             fontSize = 26.sp,
                             fontWeight = FontWeight.Bold,
                             textAlign = TextAlign.Center,
@@ -375,7 +376,7 @@ fun ArtistDetailScreen(
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             text = "${artistTracks.size} tracks · ${albums.size} albums",
-                            color = Color.White.copy(alpha = 0.50f),
+                            color = LiquidTheme.colors.textSecondary,
                             fontSize = 14.sp,
                             textAlign = TextAlign.Center,
                             modifier = Modifier
@@ -394,12 +395,12 @@ fun ArtistDetailScreen(
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(50))
-                                        .background(Color(0xFF1A1A1A))
+                                        .background(if (LiquidTheme.colors.isDark) Color(0xFF1A1A1A) else Color(0xFFF2F2F7))
                                         .padding(horizontal = 16.dp, vertical = 6.dp)
                                 ) {
                                     Text(
                                         text = genre,
-                                        color = Color.White.copy(alpha = 0.70f),
+                                        color = LiquidTheme.colors.textSecondary,
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.Medium
                                     )
@@ -451,7 +452,7 @@ fun ArtistDetailScreen(
                                     .weight(1f)
                                     .height(44.dp)
                                     .clip(RoundedCornerShape(50))
-                                    .background(Color(0xFF1A1A1A))
+                                    .background(if (LiquidTheme.colors.isDark) Color(0xFF1A1A1A) else Color(0xFFF2F2F7))
                                     .clickable(
                                         interactionSource = remember { MutableInteractionSource() },
                                         indication = null,
@@ -477,7 +478,7 @@ fun ArtistDetailScreen(
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.Rounded.Shuffle, null, tint = AppleRed, modifier = Modifier.size(20.dp))
                                     Spacer(Modifier.width(6.dp))
-                                    Text("Shuffle", color = Color.White, fontWeight = FontWeight.SemiBold)
+                                    Text("Shuffle", color = LiquidTheme.colors.textPrimary, fontWeight = FontWeight.SemiBold)
                                 }
                             }
                         }
@@ -489,7 +490,7 @@ fun ArtistDetailScreen(
                         if (similar.isNotEmpty()) {
                             Text(
                                 text = "Similar Artists",
-                                color = Color.White,
+                                color = LiquidTheme.colors.textPrimary,
                                 fontSize = 20.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 modifier = Modifier.padding(horizontal = 20.dp)
@@ -526,7 +527,7 @@ fun ArtistDetailScreen(
                                         Spacer(modifier = Modifier.height(6.dp))
                                         Text(
                                             text = sim.displayName,
-                                            color = Color.White,
+                                            color = LiquidTheme.colors.textPrimary,
                                             fontSize = 12.sp,
                                             fontWeight = FontWeight.Medium,
                                             maxLines = 1,
@@ -545,7 +546,7 @@ fun ArtistDetailScreen(
                         if (albums.isNotEmpty()) {
                             Text(
                                 text = "Albums",
-                                color = Color.White,
+                                color = LiquidTheme.colors.textPrimary,
                                 fontSize = 20.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 modifier = Modifier.padding(horizontal = 20.dp)
@@ -581,7 +582,7 @@ fun ArtistDetailScreen(
                                         Spacer(modifier = Modifier.height(6.dp))
                                         Text(
                                             text = album.title,
-                                            color = Color.White,
+                                            color = LiquidTheme.colors.textPrimary,
                                             fontSize = 13.sp,
                                             fontWeight = FontWeight.Medium,
                                             maxLines = 1,
@@ -598,7 +599,7 @@ fun ArtistDetailScreen(
                         if (playlists.isNotEmpty()) {
                             Text(
                                 text = "Playlists",
-                                color = Color.White,
+                                color = LiquidTheme.colors.textPrimary,
                                 fontSize = 20.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 modifier = Modifier.padding(horizontal = 20.dp)
@@ -634,7 +635,7 @@ fun ArtistDetailScreen(
                                         Spacer(modifier = Modifier.height(6.dp))
                                         Text(
                                             text = playlist.title,
-                                            color = Color.White,
+                                            color = LiquidTheme.colors.textPrimary,
                                             fontSize = 13.sp,
                                             fontWeight = FontWeight.Medium,
                                             maxLines = 1,
@@ -683,7 +684,6 @@ fun ArtistDetailScreen(
                                 .padding(horizontal = 16.dp)
                                 .height(58.dp)
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(Color(0xFF1A1A1A))
                                 .clickable(
                                     interactionSource = remember { MutableInteractionSource() },
                                     indication = null,
@@ -722,7 +722,7 @@ fun ArtistDetailScreen(
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
                                         text = track.title,
-                                        color = Color.White,
+                                        color = LiquidTheme.colors.textPrimary,
                                         fontSize = 15.sp,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
@@ -740,7 +740,7 @@ fun ArtistDetailScreen(
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
                                     text = track.artist,
-                                    color = Color.White.copy(alpha = 0.45f),
+                                    color = LiquidTheme.colors.textSecondary,
                                     fontSize = 12.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
@@ -752,7 +752,7 @@ fun ArtistDetailScreen(
                             if (dur > 0) {
                                 Text(
                                     text = "$min:${sec.toString().padStart(2, '0')}",
-                                    color = Color.White.copy(alpha = 0.30f),
+                                    color = LiquidTheme.colors.textTertiary,
                                     fontSize = 12.sp
                                 )
                             }

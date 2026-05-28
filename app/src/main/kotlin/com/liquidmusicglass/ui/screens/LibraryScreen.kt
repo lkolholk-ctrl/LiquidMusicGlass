@@ -3,9 +3,12 @@ package com.liquidmusicglass.ui.screens
 import android.content.Context
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -24,22 +27,17 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.*
-import com.liquidmusicglass.api.icm.IcmApiFileLogger
-import com.liquidmusicglass.api.icm.IcmAuthRepository
-import com.liquidmusicglass.api.icm.IcmRepository
-import com.liquidmusicglass.data.local.db.FavoriteTrackDatabase
-import com.kyant.backdrop.backdrops.LayerBackdrop
-import com.liquidmusicglass.ui.glass.GlassKit
-import com.liquidmusicglass.engine.AudioDownloadManager
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -53,17 +51,28 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.liquidmusicglass.api.icm.IcmApiFileLogger
+import com.liquidmusicglass.api.icm.IcmAuthRepository
+import com.liquidmusicglass.api.icm.IcmRepository
+import com.liquidmusicglass.data.local.db.FavoriteTrackDatabase
 import com.liquidmusicglass.data.local.db.FavoriteTrackEntity
 import com.liquidmusicglass.data.local.db.LibraryRepository
+import com.liquidmusicglass.engine.AudioDownloadManager
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.Track
+import com.liquidmusicglass.ui.glass.GlassDialog
+import com.liquidmusicglass.ui.glass.GlassDialogButton
+import com.liquidmusicglass.ui.glass.GlassKit
+import com.liquidmusicglass.ui.theme.LiquidTheme
 import com.liquidmusicglass.ui.viewmodel.LibraryViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
 
 private val AppleRed = Color(0xFFFC3C44)
 
-private enum class LibraryView { MAIN, FAVORITES, DOWNLOADS, IMPORTED }
+private enum class LibraryView { MAIN, FAVORITES, DOWNLOADS, LOCAL_PLAYLISTS, IMPORTED }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -73,6 +82,7 @@ fun LibraryScreen(
     onOpenPlaylist: (String) -> Unit = {},
     backdrop: LayerBackdrop? = null
 ) {
+    val lc = LiquidTheme.colors
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val viewModel = remember { LibraryViewModel(context) }
@@ -117,7 +127,7 @@ fun LibraryScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(Color.Transparent)
     ) {
         when (currentView) {
             LibraryView.MAIN -> {
@@ -132,7 +142,7 @@ fun LibraryScreen(
                             text = "Playlists",
                             fontSize = 34.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            color = lc.textPrimary
                         )
                     }
 
@@ -161,7 +171,17 @@ fun LibraryScreen(
                             onClick = { currentView = LibraryView.DOWNLOADS }
                         )
 
-                        // 3. Imported Card
+                        // 3. Local Playlists Card (from PlaylistManager)
+                        val localPlaylists by com.liquidmusicglass.engine.PlaylistManager.playlists.collectAsState()
+                        MenuCard(
+                            title = "My Playlists",
+                            subtitle = "${localPlaylists.size} playlists",
+                            icon = Icons.AutoMirrored.Rounded.PlaylistPlay,
+                            tint = Color(0xFF30D158),
+                            onClick = { currentView = LibraryView.LOCAL_PLAYLISTS }
+                        )
+
+                        // 4. Imported Card (ICM cloud)
                         MenuCard(
                             title = "Imported",
                             subtitle = if (isLoggedIn) "${importedPlaylists.size} playlists" else "Sign in to sync",
@@ -188,7 +208,7 @@ fun LibraryScreen(
                             )
                         } else {
                             IconButton(onClick = { viewModel.syncWithCloud() }) {
-                                Icon(Icons.Filled.Refresh, null, tint = Color.Gray, modifier = Modifier.size(20.dp))
+                                Icon(Icons.Filled.Refresh, null, tint = lc.iconMuted, modifier = Modifier.size(20.dp))
                             }
                         }
                     }
@@ -211,7 +231,7 @@ fun LibraryScreen(
                         EmptyState("No favorites yet", Icons.Default.Favorite)
                     } else {
                         LazyColumn(
-                            modifier = Modifier.fillMaxSize(),
+                            modifier = Modifier.weight(1f),
                             contentPadding = PaddingValues(bottom = 120.dp)
                         ) {
                             items(favorites, key = { it.trackId }) { track ->
@@ -243,8 +263,32 @@ fun LibraryScreen(
             }
 
             LibraryView.DOWNLOADS -> {
-                Column(modifier = Modifier.fillMaxSize()) {
-                    SubHeader("Downloads", onBack = { currentView = LibraryView.MAIN })
+                var showClearAllDialog by remember { mutableStateOf(false) }
+                var trackToDelete by remember { mutableStateOf<com.liquidmusicglass.data.local.db.DownloadedTrackEntity?>(null) }
+                val isDialogActive = trackToDelete != null || showClearAllDialog
+
+                // ── Screen content (blurred when dialog is active) ──
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .then(if (isDialogActive) Modifier.blur(16.dp) else Modifier)
+                ) {
+                    SubHeader(
+                        title = "Downloads",
+                        onBack = { currentView = LibraryView.MAIN },
+                        actions = {
+                            if (downloadedTracks.isNotEmpty()) {
+                                IconButton(onClick = { showClearAllDialog = true }) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Close,
+                                        contentDescription = "Clear all downloads",
+                                        tint = AppleRed,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                            }
+                        }
+                    )
 
                     if (!isPremium && downloadedTracks.isEmpty()) {
                         PremiumDownloadsPromo(backdrop = backdrop)
@@ -252,7 +296,7 @@ fun LibraryScreen(
                         EmptyState("No downloaded tracks yet", Icons.Default.Download)
                     } else {
                         LazyColumn(
-                            modifier = Modifier.fillMaxSize(),
+                            modifier = Modifier.weight(1f),
                             contentPadding = PaddingValues(bottom = 120.dp)
                         ) {
                             items(downloadedTracks, key = { it.trackId }) { trackEntity ->
@@ -269,7 +313,7 @@ fun LibraryScreen(
                                                     uri = Uri.fromFile(java.io.File(entity.localPath)),
                                                     durationMs = entity.durationMs,
                                                     albumId = entity.albumTitle?.hashCode()?.toLong() ?: -1L,
-                                                    coverUrl = entity.imageUrl
+                                                    coverUrl = entity.localCoverPath ?: entity.imageUrl
                                                 )
                                             }
                                             val startIndex = tracks.indexOfFirst { it.id == trackEntity.trackId }
@@ -285,23 +329,146 @@ fun LibraryScreen(
                                             }
                                         }
                                     },
-                                    onDelete = {
-                                        AudioDownloadManager.deleteDownloadedTrack(context, trackEntity.trackId)
-                                    }
+                                    onDelete = { trackToDelete = trackEntity }
                                 )
                             }
                         }
                     }
                 }
+
+                // ── Dialogs OUTSIDE the blurred content ──
+                if (showClearAllDialog) {
+                    GlassDialog(
+                        visible = showClearAllDialog,
+                        onDismiss = { showClearAllDialog = false },
+                        title = "Clear All Downloads",
+                        message = "This will permanently delete all ${downloadedTracks.size} downloaded tracks from your device and the database. This action cannot be undone.",
+                        icon = Icons.Default.Download,
+                        iconTint = AppleRed,
+                        primaryButton = GlassDialogButton(
+                            text = "Clear All",
+                            onClick = {
+                                showClearAllDialog = false
+                                scope.launch {
+                                    AudioDownloadManager.clearAllDownloads(context)
+                                }
+                            },
+                            backgroundColor = AppleRed,
+                            textColor = Color.White
+                        ),
+                        secondaryButton = GlassDialogButton(
+                            text = "Cancel",
+                            onClick = { showClearAllDialog = false },
+                            backgroundColor = lc.textPrimary.copy(alpha = 0.08f),
+                            textColor = lc.textSecondary
+                        )
+                    )
+                }
+
+                trackToDelete?.let { track ->
+                    GlassDialog(
+                        visible = true,
+                        onDismiss = { trackToDelete = null },
+                        title = "Delete Offline Track",
+                        message = "Remove '${track.title}' from your device storage?",
+                        icon = Icons.Rounded.Close,
+                        iconTint = Color(0xFFFF5252),
+                        primaryButton = GlassDialogButton(
+                            text = "Remove",
+                            onClick = {
+                                AudioDownloadManager.deleteDownloadedTrack(context, track.trackId)
+                                trackToDelete = null
+                            },
+                            backgroundColor = Color(0xFFFF5252),
+                            textColor = Color.White
+                        ),
+                        secondaryButton = GlassDialogButton(
+                            text = "Cancel",
+                            onClick = { trackToDelete = null },
+                            backgroundColor = lc.textPrimary.copy(alpha = 0.08f),
+                            textColor = lc.textSecondary
+                        )
+                    )
+                }
+            }
+
+            LibraryView.LOCAL_PLAYLISTS -> {
+                val localPlaylists by com.liquidmusicglass.engine.PlaylistManager.playlists.collectAsState()
+                var playlistToDelete by remember { mutableStateOf<com.liquidmusicglass.engine.PlaylistManager.Playlist?>(null) }
+                val isDialogActive = playlistToDelete != null
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .then(if (isDialogActive) Modifier.blur(16.dp) else Modifier)
+                ) {
+                    SubHeader("My Playlists", onBack = { currentView = LibraryView.MAIN }) {
+                        IconButton(onClick = { showImportDialog = true }) {
+                            Icon(Icons.Rounded.Add, null, tint = Color(0xFF30D158), modifier = Modifier.size(24.dp))
+                        }
+                    }
+
+                    if (localPlaylists.isEmpty()) {
+                        EmptyState("No playlists yet.\nImport one to get started!", Icons.AutoMirrored.Rounded.PlaylistPlay)
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 120.dp)
+                        ) {
+                            items(localPlaylists, key = { it.id }) { playlist ->
+                                LocalPlaylistRow(
+                                    playlist = playlist,
+                                    onClick = { onOpenPlaylist(playlist.id) },
+                                    onDelete = { playlistToDelete = playlist }
+                                )
+                                Spacer(Modifier.height(8.dp))
+                            }
+                        }
+                    }
+                }
+
+                // ── Screen-level modal dialog for local playlist deletion ──
+                playlistToDelete?.let { playlist ->
+                    GlassDialog(
+                        visible = true,
+                        onDismiss = { playlistToDelete = null },
+                        title = "Delete Playlist",
+                        message = "Are you sure you want to delete '${playlist.name}'?",
+                        icon = Icons.Rounded.Close,
+                        iconTint = Color(0xFFFF5252),
+                        primaryButton = GlassDialogButton(
+                            text = "Delete",
+                            onClick = {
+                                com.liquidmusicglass.engine.PlaylistManager.delete(playlist.id)
+                                playlistToDelete = null
+                            },
+                            backgroundColor = Color(0xFFFF5252),
+                            textColor = Color.White
+                        ),
+                        secondaryButton = GlassDialogButton(
+                            text = "Cancel",
+                            onClick = { playlistToDelete = null },
+                            backgroundColor = lc.textPrimary.copy(alpha = 0.08f),
+                            textColor = lc.textSecondary
+                        )
+                    )
+                }
             }
 
             LibraryView.IMPORTED -> {
-                Column(modifier = Modifier.fillMaxSize()) {
+                var importedPlaylistToDelete by remember { mutableStateOf<com.liquidmusicglass.api.icm.IcmUserPlaylist?>(null) }
+                val isDialogActive = importedPlaylistToDelete != null
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .then(if (isDialogActive) Modifier.blur(16.dp) else Modifier)
+                ) {
                     SubHeader("Imported Playlists", onBack = { currentView = LibraryView.MAIN }) {
                         if (isLoggedIn) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 IconButton(onClick = { loadImportedPlaylists() }) {
-                                    Icon(Icons.Filled.Refresh, null, tint = Color.Gray, modifier = Modifier.size(20.dp))
+                                    Icon(Icons.Filled.Refresh, null, tint = lc.iconMuted, modifier = Modifier.size(20.dp))
                                 }
                                 IconButton(onClick = { showImportDialog = true }) {
                                     Icon(Icons.Rounded.Add, null, tint = AppleRed, modifier = Modifier.size(24.dp))
@@ -318,13 +485,13 @@ fun LibraryScreen(
                             contentAlignment = Alignment.Center
                         ) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(Icons.AutoMirrored.Rounded.PlaylistPlay, null, tint = Color.Gray, modifier = Modifier.size(64.dp))
+                                Icon(Icons.AutoMirrored.Rounded.PlaylistPlay, null, tint = lc.iconMuted, modifier = Modifier.size(64.dp))
                                 Spacer(Modifier.height(16.dp))
-                                Text("Sync Playlists", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                                Text("Sync Playlists", color = lc.textPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                                 Spacer(Modifier.height(8.dp))
                                 Text(
                                     "Sign in to your ICM account in the Profile tab to import, view and sync your Yandex Music and Apple Music playlists.",
-                                    color = Color.Gray,
+                                    color = lc.textSecondary,
                                     fontSize = 14.sp,
                                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                                     lineHeight = 20.sp
@@ -347,54 +514,37 @@ fun LibraryScreen(
                             EmptyState("No imported playlists yet.\nTap + to import one!", Icons.AutoMirrored.Rounded.PlaylistPlay)
                         } else {
                             LazyColumn(
-                                modifier = Modifier.fillMaxSize(),
+                                modifier = Modifier.weight(1f),
                                 contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 120.dp)
                             ) {
                                 // ── Yandex Music Section ──
-                                item {
-                                    SectionHeader("Yandex Music", yandexPlaylists.size)
-                                }
-                                if (yandexPlaylists.isEmpty()) {
+                                if (yandexPlaylists.isNotEmpty()) {
                                     item {
-                                        PlaceholderCard("No Yandex playlists imported yet.")
+                                        SectionHeader("Yandex Music", yandexPlaylists.size)
                                     }
-                                } else {
                                     items(yandexPlaylists, key = { it.id ?: "" }) { playlist ->
                                         ImportedPlaylistRow(
                                             playlist = playlist,
                                             onClick = { onOpenPlaylist(playlist.id ?: "") },
-                                            onDelete = {
-                                                scope.launch {
-                                                    IcmRepository.deleteUserPlaylist(playlist.id ?: "")
-                                                    loadImportedPlaylists()
-                                                }
-                                            }
+                                            onDelete = { importedPlaylistToDelete = playlist }
                                         )
                                         Spacer(Modifier.height(8.dp))
                                     }
                                 }
 
-                                item { Spacer(Modifier.height(24.dp)) }
-
                                 // ── Apple Music Section ──
-                                item {
-                                    SectionHeader("Apple Music", applePlaylists.size)
-                                }
-                                if (applePlaylists.isEmpty()) {
-                                    item {
-                                        PlaceholderCard("No Apple playlists imported yet.")
+                                if (applePlaylists.isNotEmpty()) {
+                                    if (yandexPlaylists.isNotEmpty()) {
+                                        item { Spacer(Modifier.height(24.dp)) }
                                     }
-                                } else {
+                                    item {
+                                        SectionHeader("Apple Music", applePlaylists.size)
+                                    }
                                     items(applePlaylists, key = { it.id ?: "" }) { playlist ->
                                         ImportedPlaylistRow(
                                             playlist = playlist,
                                             onClick = { onOpenPlaylist(playlist.id ?: "") },
-                                            onDelete = {
-                                                scope.launch {
-                                                    IcmRepository.deleteUserPlaylist(playlist.id ?: "")
-                                                    loadImportedPlaylists()
-                                                }
-                                            }
+                                            onDelete = { importedPlaylistToDelete = playlist }
                                         )
                                         Spacer(Modifier.height(8.dp))
                                     }
@@ -402,7 +552,9 @@ fun LibraryScreen(
 
                                 // ── Other Section ──
                                 if (otherPlaylists.isNotEmpty()) {
-                                    item { Spacer(Modifier.height(24.dp)) }
+                                    if (yandexPlaylists.isNotEmpty() || applePlaylists.isNotEmpty()) {
+                                        item { Spacer(Modifier.height(24.dp)) }
+                                    }
                                     item {
                                         SectionHeader("Other", otherPlaylists.size)
                                     }
@@ -410,12 +562,7 @@ fun LibraryScreen(
                                         ImportedPlaylistRow(
                                             playlist = playlist,
                                             onClick = { onOpenPlaylist(playlist.id ?: "") },
-                                            onDelete = {
-                                                scope.launch {
-                                                    IcmRepository.deleteUserPlaylist(playlist.id ?: "")
-                                                    loadImportedPlaylists()
-                                                }
-                                            }
+                                            onDelete = { importedPlaylistToDelete = playlist }
                                         )
                                         Spacer(Modifier.height(8.dp))
                                     }
@@ -424,18 +571,51 @@ fun LibraryScreen(
                         }
                     }
                 }
+
+                // ── Screen-level modal dialog for imported playlist deletion ──
+                importedPlaylistToDelete?.let { playlist ->
+                    GlassDialog(
+                        visible = true,
+                        onDismiss = { importedPlaylistToDelete = null },
+                        title = "Delete Playlist",
+                        message = "Are you sure you want to delete '${playlist.name}' from your ICM library?",
+                        icon = Icons.Rounded.Close,
+                        iconTint = Color(0xFFFF5252),
+                        primaryButton = GlassDialogButton(
+                            text = "Delete",
+                            onClick = {
+                                scope.launch {
+                                    IcmRepository.deleteUserPlaylist(playlist.id ?: "")
+                                    loadImportedPlaylists()
+                                }
+                                importedPlaylistToDelete = null
+                            },
+                            backgroundColor = Color(0xFFFF5252),
+                            textColor = Color.White
+                        ),
+                        secondaryButton = GlassDialogButton(
+                            text = "Cancel",
+                            onClick = { importedPlaylistToDelete = null },
+                            backgroundColor = lc.textPrimary.copy(alpha = 0.08f),
+                            textColor = lc.textSecondary
+                        )
+                    )
+                }
             }
         }
 
-        // Import Dialog Overlay
+        // ── Background Import System ──
+        // Uses global singleton manager — survives tab switches.
+        // The progress overlay is shown at the root level (AppRoot).
+
+        // URL Input Dialog
         if (showImportDialog) {
-            ImportPlaylistDialog(
-                onDismiss = {
+            ImportUrlBottomSheet(
+                onDismiss = { showImportDialog = false },
+                onImport = { url ->
                     showImportDialog = false
-                    loadImportedPlaylists()
-                },
-                onImportSuccess = {
-                    loadImportedPlaylists()
+                    com.liquidmusicglass.data.playlistimport.PlaylistImportManager
+                        .importPlaylist(url, context)
                 }
             )
         }
@@ -462,12 +642,13 @@ private fun MenuCard(
     tint: Color,
     onClick: () -> Unit
 ) {
+    val lc = LiquidTheme.colors
     val shape = RoundedCornerShape(16.dp)
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .height(72.dp)
-            .background(Color(0xFF1C1C1E), shape)
+            .background(Color.Transparent, shape)
             .clip(shape)
             .clickable(remember { MutableInteractionSource() }, null, onClick = onClick)
             .padding(horizontal = 16.dp),
@@ -486,11 +667,11 @@ private fun MenuCard(
         Spacer(Modifier.width(14.dp))
 
         Column(modifier = Modifier.weight(1f)) {
-            Text(title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            Text(subtitle, color = Color.Gray, fontSize = 13.sp)
+            Text(title, color = lc.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text(subtitle, color = lc.textSecondary, fontSize = 13.sp)
         }
 
-        Icon(Icons.Rounded.ChevronRight, null, tint = Color.DarkGray, modifier = Modifier.size(24.dp))
+        Icon(Icons.Rounded.ChevronRight, null, tint = lc.textTertiary, modifier = Modifier.size(24.dp))
     }
 }
 
@@ -500,6 +681,7 @@ private fun SubHeader(
     onBack: () -> Unit,
     actions: @Composable RowScope.() -> Unit = {}
 ) {
+    val lc = LiquidTheme.colors
     Spacer(Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
     Row(
         modifier = Modifier
@@ -510,12 +692,12 @@ private fun SubHeader(
         Box(
             modifier = Modifier
                 .size(40.dp)
-                .background(Color(0xFF1C1C1E), CircleShape)
+                .background(lc.glassTint, CircleShape)
                 .clip(CircleShape)
                 .clickable(remember { MutableInteractionSource() }, null, onClick = onBack),
             contentAlignment = Alignment.Center
         ) {
-            Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, tint = Color.White, modifier = Modifier.size(20.dp))
+            Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, tint = lc.textPrimary, modifier = Modifier.size(20.dp))
         }
 
         Spacer(Modifier.width(16.dp))
@@ -524,7 +706,7 @@ private fun SubHeader(
             text = title,
             fontSize = 24.sp,
             fontWeight = FontWeight.Bold,
-            color = Color.White,
+            color = lc.textPrimary,
             modifier = Modifier.weight(1f)
         )
 
@@ -535,34 +717,36 @@ private fun SubHeader(
 
 @Composable
 private fun SectionHeader(title: String, count: Int) {
+    val lc = LiquidTheme.colors
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Text(title, color = lc.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.width(8.dp))
         Box(
             modifier = Modifier
-                .background(Color(0xFF1C1C1E), RoundedCornerShape(10.dp))
+                .background(lc.glassTint, RoundedCornerShape(10.dp))
                 .padding(horizontal = 8.dp, vertical = 2.dp)
         ) {
-            Text("$count", color = Color.Gray, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            Text("$count", color = lc.textSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         }
     }
 }
 
 @Composable
 private fun PlaceholderCard(text: String) {
+    val lc = LiquidTheme.colors
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color(0xFF0F0F10), RoundedCornerShape(12.dp))
+            .background(Color.Transparent, RoundedCornerShape(12.dp))
             .padding(vertical = 20.dp, horizontal = 16.dp),
         contentAlignment = Alignment.Center
     ) {
-        Text(text, color = Color.DarkGray, fontSize = 14.sp)
+        Text(text, color = lc.textTertiary, fontSize = 14.sp)
     }
 }
 
@@ -572,13 +756,12 @@ private fun ImportedPlaylistRow(
     onClick: () -> Unit,
     onDelete: () -> Unit
 ) {
+    val lc = LiquidTheme.colors
     val shape = RoundedCornerShape(12.dp)
-    var showDeleteConfirm by remember { mutableStateOf(false) }
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color(0xFF1C1C1E), shape)
             .clip(shape)
             .clickable(remember { MutableInteractionSource() }, null, onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 12.dp),
@@ -589,7 +772,6 @@ private fun ImportedPlaylistRow(
             modifier = Modifier
                 .size(48.dp)
                 .clip(RoundedCornerShape(8.dp))
-                .background(Color.DarkGray)
         ) {
             if (!playlist.cover.isNullOrBlank()) {
                 AsyncImage(
@@ -599,14 +781,19 @@ private fun ImportedPlaylistRow(
                     contentScale = ContentScale.Crop
                 )
             } else {
-                Icon(
-                    Icons.AutoMirrored.Rounded.PlaylistPlay,
-                    null,
-                    tint = AppleRed,
+                Box(
                     modifier = Modifier
-                        .size(24.dp)
-                        .align(Alignment.Center)
-                )
+                        .fillMaxSize()
+                        .background(lc.glassTint),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Rounded.PlaylistPlay,
+                        null,
+                        tint = lc.iconMuted,
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
             }
         }
 
@@ -615,7 +802,7 @@ private fun ImportedPlaylistRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 playlist.name.orEmpty(),
-                color = Color.White,
+                color = lc.textPrimary,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
@@ -623,38 +810,93 @@ private fun ImportedPlaylistRow(
             )
             Text(
                 "${playlist.trackCount} tracks",
-                color = Color.Gray,
+                color = lc.textSecondary,
                 fontSize = 13.sp
             )
         }
 
-        IconButton(onClick = { showDeleteConfirm = true }) {
-            Icon(Icons.Filled.Delete, null, tint = Color.DarkGray, modifier = Modifier.size(20.dp))
+        IconButton(onClick = onDelete) {
+            Icon(Icons.Rounded.Close, null, tint = lc.textTertiary, modifier = Modifier.size(22.dp))
         }
     }
+}
 
-    if (showDeleteConfirm) {
-        AlertDialog(
-            onDismissRequest = { showDeleteConfirm = false },
-            title = { Text("Delete Playlist", color = Color.White, fontWeight = FontWeight.Bold) },
-            text = { Text("Are you sure you want to delete '${playlist.name}' from your ICM library?", color = Color.Gray) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showDeleteConfirm = false
-                        onDelete()
-                    }
+/**
+ * Row component for local playlists from PlaylistManager.
+ */
+@Composable
+private fun LocalPlaylistRow(
+    playlist: com.liquidmusicglass.engine.PlaylistManager.Playlist,
+    onClick: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val lc = LiquidTheme.colors
+    val shape = RoundedCornerShape(12.dp)
+
+    // Get cover from first track if available
+    val firstTrackWithCover = playlist.tracks.firstOrNull { !it.coverUrl.isNullOrBlank() }
+    val coverUrl = firstTrackWithCover?.coverUrl
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .clickable(remember { MutableInteractionSource() }, null, onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Cover / Icon
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .clip(RoundedCornerShape(8.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            if (!coverUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = coverUrl.replace("1000x1000", "200x200"),
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(lc.glassTint),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Text("Delete", color = AppleRed, fontWeight = FontWeight.Bold)
+                    Icon(
+                        Icons.AutoMirrored.Rounded.PlaylistPlay,
+                        null,
+                        tint = lc.iconMuted,
+                        modifier = Modifier.size(28.dp)
+                    )
                 }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteConfirm = false }) {
-                    Text("Cancel", color = Color.Gray)
-                }
-            },
-            containerColor = Color(0xFF1C1C1E)
-        )
+            }
+        }
+
+        Spacer(Modifier.width(12.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                playlist.name,
+                color = lc.textPrimary,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                "${playlist.tracks.size} tracks",
+                color = lc.textSecondary,
+                fontSize = 13.sp
+            )
+        }
+
+        IconButton(onClick = onDelete) {
+            Icon(Icons.Rounded.Close, null, tint = lc.textTertiary, modifier = Modifier.size(22.dp))
+        }
     }
 }
 
@@ -667,6 +909,7 @@ private fun ImportPlaylistDialog(
     onDismiss: () -> Unit,
     onImportSuccess: () -> Unit = {}
 ) {
+    val lc = LiquidTheme.colors
     val scope = rememberCoroutineScope()
     var source by remember { mutableStateOf("yandex") } // "yandex" or "apple"
     var url by remember { mutableStateOf("") }
@@ -792,7 +1035,7 @@ private fun ImportPlaylistDialog(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.85f))
+            .background(lc.glassTint.copy(alpha = 0.85f))
             .clickable(remember { MutableInteractionSource() }, null) {
                 if (!isImporting) onDismiss()
             },
@@ -801,7 +1044,7 @@ private fun ImportPlaylistDialog(
         Box(
             modifier = Modifier
                 .fillMaxWidth(0.9f)
-                .background(Color(0xFF1C1C1E), RoundedCornerShape(24.dp))
+                .background(lc.cardSurface, RoundedCornerShape(24.dp))
                 .clip(RoundedCornerShape(24.dp))
                 .clickable(remember { MutableInteractionSource() }, null) {} // prevent dismissing click inside
                 .padding(24.dp)
@@ -812,10 +1055,10 @@ private fun ImportPlaylistDialog(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Import Playlist", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    Text("Import Playlist", color = lc.textPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                     if (!isImporting) {
                         IconButton(onClick = onDismiss) {
-                            Icon(Icons.Rounded.Close, null, tint = Color.Gray)
+                            Icon(Icons.Rounded.Close, null, tint = lc.iconMuted)
                         }
                     }
                 }
@@ -833,7 +1076,7 @@ private fun ImportPlaylistDialog(
                                 modifier = Modifier.size(48.dp)
                             )
                             Spacer(Modifier.height(16.dp))
-                            Text("Matching & Syncing...", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            Text("Matching & Syncing...", color = lc.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                             Spacer(Modifier.height(8.dp))
 
                             val prog = importProgress
@@ -849,16 +1092,16 @@ private fun ImportPlaylistDialog(
                                         .height(6.dp)
                                         .clip(RoundedCornerShape(50)),
                                     color = AppleRed,
-                                    trackColor = Color.DarkGray
+                                    trackColor = lc.textPrimary.copy(alpha = 0.15f)
                                 )
                                 Spacer(Modifier.height(8.dp))
                                 Text(
                                     "Tracks: ${matchedVal + failedVal} / $totalVal (Matched: $matchedVal, Failed: $failedVal)",
-                                    color = Color.Gray,
+                                    color = lc.textSecondary,
                                     fontSize = 13.sp
                                 )
                             } else {
-                                Text("Queueing job on server...", color = Color.Gray, fontSize = 13.sp)
+                                Text("Queueing job on server...", color = lc.textSecondary, fontSize = 13.sp)
                             }
                         }
 
@@ -884,7 +1127,7 @@ private fun ImportPlaylistDialog(
                                     importFailedTracks.take(5).forEach { failed ->
                                         Text(
                                             "• ${failed.yandexTitle ?: "Unknown"} — ${failed.reason ?: "not found"}",
-                                            color = Color.Gray,
+                                            color = lc.textSecondary,
                                             fontSize = 11.sp,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
@@ -893,7 +1136,7 @@ private fun ImportPlaylistDialog(
                                     if (importFailedTracks.size > 5) {
                                         Text(
                                             "... and ${importFailedTracks.size - 5} more",
-                                            color = Color.Gray,
+                                            color = lc.textTertiary,
                                             fontSize = 11.sp
                                         )
                                     }
@@ -919,7 +1162,7 @@ private fun ImportPlaylistDialog(
                             Text(err, color = Color.Red, fontSize = 14.sp)
                             importErrorDetails?.let { details ->
                                 Spacer(Modifier.height(4.dp))
-                                Text(details, color = Color.Gray, fontSize = 11.sp)
+                                Text(details, color = lc.textSecondary, fontSize = 11.sp)
                             }
                             Spacer(Modifier.height(8.dp))
                             // Copy logs button
@@ -928,7 +1171,7 @@ private fun ImportPlaylistDialog(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(36.dp)
-                                    .background(Color(0xFF3A3A3C), RoundedCornerShape(50))
+                                    .background(lc.glassTint, RoundedCornerShape(50))
                                     .clip(RoundedCornerShape(50))
                                     .clickable {
                                         val logs = com.liquidmusicglass.api.icm.IcmApiFileLogger.getRecentLogs(100)
@@ -943,12 +1186,12 @@ private fun ImportPlaylistDialog(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(44.dp)
-                                    .background(Color.DarkGray, RoundedCornerShape(50))
+                                    .background(lc.textPrimary.copy(alpha = 0.15f), RoundedCornerShape(50))
                                     .clip(RoundedCornerShape(50))
                                     .clickable { onDismiss() },
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text("Close", color = Color.White)
+                                Text("Close", color = lc.textPrimary)
                             }
                         }
                     }
@@ -959,7 +1202,7 @@ private fun ImportPlaylistDialog(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(Color(0xFF2C2C2E), RoundedCornerShape(50))
+                                .background(lc.glassTint, RoundedCornerShape(50))
                                 .padding(4.dp),
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
@@ -971,18 +1214,18 @@ private fun ImportPlaylistDialog(
                         BasicTextField(
                             value = url,
                             onValueChange = { url = it },
-                            textStyle = TextStyle(color = Color.White, fontSize = 15.sp),
+                            textStyle = TextStyle(color = lc.textPrimary, fontSize = 15.sp),
                             cursorBrush = SolidColor(AppleRed),
                             singleLine = true,
                             decorationBox = { inner ->
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .background(Color(0xFF2C2C2E), RoundedCornerShape(12.dp))
+                                        .background(lc.glassTint, RoundedCornerShape(12.dp))
                                         .padding(horizontal = 16.dp, vertical = 14.dp)
                                 ) {
                                     if (url.isEmpty()) {
-                                        Text("Paste playlist link here...", color = Color.DarkGray, fontSize = 15.sp)
+                                        Text("Paste playlist link here...", color = lc.textTertiary, fontSize = 15.sp)
                                     }
                                     inner()
                                 }
@@ -1004,18 +1247,18 @@ private fun ImportPlaylistDialog(
                         BasicTextField(
                             value = playlistName,
                             onValueChange = { playlistName = it },
-                            textStyle = TextStyle(color = Color.White, fontSize = 15.sp),
+                            textStyle = TextStyle(color = lc.textPrimary, fontSize = 15.sp),
                             cursorBrush = SolidColor(AppleRed),
                             singleLine = true,
                             decorationBox = { inner ->
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .background(Color(0xFF2C2C2E), RoundedCornerShape(12.dp))
+                                        .background(lc.glassTint, RoundedCornerShape(12.dp))
                                         .padding(horizontal = 16.dp, vertical = 14.dp)
                                 ) {
                                     if (playlistName.isEmpty()) {
-                                        Text("Optional custom name...", color = Color.DarkGray, fontSize = 15.sp)
+                                        Text("Optional custom name...", color = lc.textTertiary, fontSize = 15.sp)
                                     }
                                     inner()
                                 }
@@ -1037,11 +1280,11 @@ private fun ImportPlaylistDialog(
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .background(Color(0xFF0F0F10), RoundedCornerShape(12.dp))
+                                    .background(Color.Transparent, RoundedCornerShape(12.dp))
                                     .padding(12.dp)
                             ) {
-                                Text("Preview: ${res.name}", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                                Text("${res.tracks.size} tracks found", color = Color.Gray, fontSize = 12.sp)
+                                Text("Preview: ${res.name}", color = lc.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                Text("${res.tracks.size} tracks found", color = lc.textSecondary, fontSize = 12.sp)
 
                                 Spacer(Modifier.height(8.dp))
                                 Box(modifier = Modifier.heightIn(max = 120.dp)) {
@@ -1049,7 +1292,7 @@ private fun ImportPlaylistDialog(
                                         items(res.tracks.take(5)) { tr ->
                                             Text(
                                                 "${tr.title} - ${tr.artist}",
-                                                color = Color.Gray,
+                                                color = lc.textSecondary,
                                                 fontSize = 12.sp,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis
@@ -1057,7 +1300,7 @@ private fun ImportPlaylistDialog(
                                         }
                                         if (res.tracks.size > 5) {
                                             item {
-                                                Text("... and ${res.tracks.size - 5} more", color = Color.DarkGray, fontSize = 11.sp)
+                                                Text("... and ${res.tracks.size - 5} more", color = lc.textTertiary, fontSize = 11.sp)
                                             }
                                         }
                                     }
@@ -1072,7 +1315,7 @@ private fun ImportPlaylistDialog(
                                 modifier = Modifier
                                     .weight(1f)
                                     .height(44.dp)
-                                    .background(Color(0xFF2C2C2E), RoundedCornerShape(50))
+                                    .background(lc.glassTint, RoundedCornerShape(50))
                                     .clip(RoundedCornerShape(50))
                                     .clickable {
                                         if (url.isNotBlank()) {
@@ -1094,7 +1337,7 @@ private fun ImportPlaylistDialog(
                                     },
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text("Preview", color = Color.White, fontWeight = FontWeight.SemiBold)
+                                Text("Preview", color = lc.textPrimary, fontWeight = FontWeight.SemiBold)
                             }
 
                             // Import button
@@ -1183,6 +1426,7 @@ private fun TabChoice(
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
+    val lc = LiquidTheme.colors
     Box(
         modifier = modifier
             .height(36.dp)
@@ -1193,7 +1437,7 @@ private fun TabChoice(
     ) {
         Text(
             text,
-            color = if (active) Color.White else Color.Gray,
+            color = if (active) Color.White else lc.textSecondary,
             fontSize = 13.sp,
             fontWeight = if (active) FontWeight.Bold else FontWeight.Normal
         )
@@ -1211,10 +1455,11 @@ private fun ActionButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val lc = LiquidTheme.colors
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
-            .background(Color(0xFF1C1C1E))
+            .background(lc.glassTint)
             .clickable(onClick = onClick)
             .padding(vertical = 12.dp),
         contentAlignment = Alignment.Center
@@ -1231,7 +1476,7 @@ private fun ActionButton(
             )
             Text(
                 text = text,
-                color = Color.White,
+                color = lc.textPrimary,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.SemiBold
             )
@@ -1246,6 +1491,7 @@ private fun FavoriteTrackItem(
     onClick: () -> Unit,
     onToggleLike: () -> Unit
 ) {
+    val lc = LiquidTheme.colors
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1257,7 +1503,7 @@ private fun FavoriteTrackItem(
             modifier = Modifier
                 .size(56.dp)
                 .clip(RoundedCornerShape(6.dp))
-                .background(Color.DarkGray)
+                .background(lc.glassTint)
         ) {
             if (!track.imageUrl.isNullOrBlank()) {
                 AsyncImage(
@@ -1274,7 +1520,7 @@ private fun FavoriteTrackItem(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = track.title,
-                color = Color.White,
+                color = lc.textPrimary,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
@@ -1282,7 +1528,7 @@ private fun FavoriteTrackItem(
             )
             Text(
                 text = track.artistName ?: "Unknown Artist",
-                color = Color.Gray,
+                color = lc.textSecondary,
                 fontSize = 13.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -1293,7 +1539,7 @@ private fun FavoriteTrackItem(
             Icon(
                 imageVector = if (isLiked) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
                 contentDescription = null,
-                tint = if (isLiked) AppleRed else Color.Gray,
+                tint = if (isLiked) AppleRed else lc.textTertiary,
                 modifier = Modifier.size(22.dp)
             )
         }
@@ -1301,7 +1547,7 @@ private fun FavoriteTrackItem(
         if (track.durationMs > 0) {
             Text(
                 text = formatDuration(track.durationMs),
-                color = Color.Gray,
+                color = lc.textSecondary,
                 fontSize = 12.sp,
                 modifier = Modifier.padding(start = 4.dp)
             )
@@ -1315,8 +1561,7 @@ private fun DownloadedTrackItem(
     onClick: () -> Unit,
     onDelete: () -> Unit
 ) {
-    var showConfirm by remember { mutableStateOf(false) }
-
+    val lc = LiquidTheme.colors
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1328,11 +1573,13 @@ private fun DownloadedTrackItem(
             modifier = Modifier
                 .size(56.dp)
                 .clip(RoundedCornerShape(6.dp))
-                .background(Color.DarkGray)
+                .background(lc.glassTint)
         ) {
-            if (!track.imageUrl.isNullOrBlank()) {
+            // Prefer local cover path, fallback to remote imageUrl
+            val coverToLoad = track.localCoverPath ?: track.imageUrl
+            if (!coverToLoad.isNullOrBlank()) {
                 AsyncImage(
-                    model = track.imageUrl.replace("1000x1000", "300x300"),
+                    model = coverToLoad,
                     contentDescription = null,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop
@@ -1345,7 +1592,7 @@ private fun DownloadedTrackItem(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = track.title,
-                color = Color.White,
+                color = lc.textPrimary,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
@@ -1353,18 +1600,18 @@ private fun DownloadedTrackItem(
             )
             Text(
                 text = track.artistName ?: "Unknown Artist",
-                color = Color.Gray,
+                color = lc.textSecondary,
                 fontSize = 13.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
         }
 
-        IconButton(onClick = { showConfirm = true }) {
+        IconButton(onClick = onDelete) {
             Icon(
-                imageVector = Icons.Filled.Delete,
+                imageVector = Icons.Rounded.Close,
                 contentDescription = null,
-                tint = Color.Gray,
+                tint = lc.textTertiary,
                 modifier = Modifier.size(22.dp)
             )
         }
@@ -1372,40 +1619,17 @@ private fun DownloadedTrackItem(
         if (track.durationMs > 0) {
             Text(
                 text = formatDuration(track.durationMs),
-                color = Color.Gray,
+                color = lc.textSecondary,
                 fontSize = 12.sp,
                 modifier = Modifier.padding(start = 4.dp)
             )
         }
     }
-
-    if (showConfirm) {
-        AlertDialog(
-            onDismissRequest = { showConfirm = false },
-            title = { Text("Delete Offline Track", color = Color.White, fontWeight = FontWeight.Bold) },
-            text = { Text("Remove '${track.title}' from your device storage?", color = Color.Gray) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showConfirm = false
-                        onDelete()
-                    }
-                ) {
-                    Text("Remove", color = AppleRed, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showConfirm = false }) {
-                    Text("Cancel", color = Color.Gray)
-                }
-            },
-            containerColor = Color(0xFF1C1C1E)
-        )
-    }
 }
 
 @Composable
 private fun EmptyState(message: String, icon: androidx.compose.ui.graphics.vector.ImageVector) {
+    val lc = LiquidTheme.colors
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
@@ -1414,13 +1638,13 @@ private fun EmptyState(message: String, icon: androidx.compose.ui.graphics.vecto
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = Color.DarkGray,
+                tint = lc.textTertiary,
                 modifier = Modifier.size(48.dp)
             )
             Spacer(modifier = Modifier.height(12.dp))
             Text(
                 text = message,
-                color = Color.Gray,
+                color = lc.textSecondary,
                 fontSize = 16.sp,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
             )
@@ -1430,6 +1654,7 @@ private fun EmptyState(message: String, icon: androidx.compose.ui.graphics.vecto
 
 @Composable
 private fun PremiumDownloadsPromo(backdrop: LayerBackdrop? = null) {
+    val lc = LiquidTheme.colors
     val context = LocalContext.current
     Box(
         modifier = Modifier
@@ -1443,7 +1668,7 @@ private fun PremiumDownloadsPromo(backdrop: LayerBackdrop? = null) {
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xFF1C1C1E))
+                .background(lc.glassTint)
                 .padding(32.dp)
         ) {
             Icon(
@@ -1455,14 +1680,14 @@ private fun PremiumDownloadsPromo(backdrop: LayerBackdrop? = null) {
             Spacer(modifier = Modifier.height(16.dp))
             Text(
                 text = "Premium Exclusive",
-                color = Color.White,
+                color = lc.textPrimary,
                 fontSize = 22.sp,
                 fontWeight = FontWeight.Bold
             )
             Spacer(modifier = Modifier.height(12.dp))
             Text(
                 text = "Offline downloads are strictly a Premium feature under Aggregator requirements. Listen to music without connection.",
-                color = Color.Gray,
+                color = lc.textSecondary,
                 fontSize = 14.sp,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 lineHeight = 20.sp
@@ -1499,4 +1724,63 @@ private fun formatDuration(ms: Long): String {
     val minutes = totalSeconds / 60
     val seconds = totalSeconds % 60
     return "%d:%02d".format(minutes, seconds)
+}
+
+// ═════════════════════════════════════════════════════════════════
+//  Cascade Ripple Animation — Playback Transition
+// ═════════════════════════════════════════════════════════════════
+
+/**
+ * Wraps a track row with the Cascade Ripple playback animation.
+ * When [isPlaying] becomes true, triggers:
+ * 1. A soft color-tinted ripple from the center of the row
+ * 2. A temporary micro-blur on the row container edges
+ * 3. A smooth 4dp downward shift when items below are playing
+ *
+ * @param isPlaying Whether this track is currently the active playback target
+ * @param itemIndex The index of this item in the list (for cascade shift calculation)
+ * @param playingIndex The index of the currently playing item (-1 if none)
+ * @param content The row content composable
+ */
+@Composable
+private fun CascadeTrackRow(
+    isPlaying: Boolean,
+    itemIndex: Int,
+    playingIndex: Int,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit
+) {
+    // ── Micro-shift for items below the playing track ──
+    val shouldShift = playingIndex >= 0 && itemIndex > playingIndex
+    val shiftY by animateDpAsState(
+        targetValue = if (shouldShift) 4.dp else 0.dp,
+        animationSpec = tween(durationMillis = 400, easing = LinearOutSlowInEasing),
+        label = "cascade_shift"
+    )
+
+    // ── Subtle blur when this item is the playing target ──
+    val blurDp by animateDpAsState(
+        targetValue = if (isPlaying) 2.dp else 0.dp,
+        animationSpec = tween(durationMillis = 400, easing = LinearOutSlowInEasing),
+        label = "cascade_blur"
+    )
+
+    // ── Background glow alpha when playing ──
+    val glowAlpha by animateFloatAsState(
+        targetValue = if (isPlaying) 0.08f else 0f,
+        animationSpec = tween(durationMillis = 400, easing = LinearOutSlowInEasing),
+        label = "cascade_glow"
+    )
+
+    Box(
+        modifier = modifier
+            .offset(y = shiftY)
+            .then(if (blurDp.value > 0f) Modifier.blur(blurDp) else Modifier)
+            .background(
+                color = if (glowAlpha > 0f) AppleRed.copy(alpha = glowAlpha) else Color.Transparent,
+                shape = RoundedCornerShape(12.dp)
+            )
+    ) {
+        content()
+    }
 }

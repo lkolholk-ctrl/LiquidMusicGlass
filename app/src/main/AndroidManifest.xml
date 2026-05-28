@@ -9,6 +9,7 @@
 
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
@@ -22,6 +23,7 @@
           android:label="LiquidMusicGlass"
           android:supportsRtl="true"
           android:usesCleartextTraffic="true"
+          android:enableOnBackInvokedCallback="true"
           android:theme="@style/Theme.LiquidMusicGlass">
 
         <provider
@@ -61,12 +63,25 @@
         <service
             android:name=".engine.AudioService"
             android:exported="true"
-            android:foregroundServiceType="mediaPlayback">
+            android:foregroundServiceType="mediaPlayback"
+            android:priority="1000">
             <intent-filter>
                 <action android:name="androidx.media3.session.MediaSessionService" />
                 <action android:name="android.media.browse.MediaBrowserService" />
             </intent-filter>
         </service>
+
+        <!-- Playlist Import Foreground Service -->
+        <service
+            android:name=".data.playlistimport.PlaylistImportService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- Playlist Download Foreground Service -->
+        <service
+            android:name=".engine.PlaylistDownloadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <!-- MediaButtonReceiver required for OEM devices (Huawei/Honor) to resolve ComponentName -->
         <receiver android:name="androidx.media3.session.MediaButtonReceiver"

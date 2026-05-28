@@ -1,0 +1,351 @@
+package com.liquidmusicglass.data.playlistimport
+
+import com.liquidmusicglass.api.icm.IcmRepository
+import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
+
+/**
+ * Repository for importing playlists from external platforms (Yandex, Apple)
+ * into the local player via ICM catalog matching.
+ *
+ * Architecture:
+ *   - Yandex URLs: Resolved via private FastAPI (bypasses geo-blocks),
+ *     then matched against ICM catalog track-by-track.
+ *   - Apple URLs: Delegated to native ICM import API (server-side matching).
+ *
+ * All operations run on Dispatchers.IO. No UI blocking.
+ */
+class PlaylistImportRepository(
+    private val yandexResolver: YandexResolverApi,
+    private val icmSearch: IcmSearchApi
+) {
+
+    companion object {
+        /** Max concurrent ICM search requests to avoid rate limiting. */
+        private const val DEFAULT_CONCURRENCY = 3
+
+        /** Batch size for progress reporting. */
+        private const val BATCH_SIZE = 25
+
+        /** Delay between individual requests in ms. */
+        private const val REQUEST_DELAY_MS = 300L
+
+        /** ICM search region for track matching. */
+        private const val SEARCH_REGION = "us"
+
+        /** ICM search source — primary + secondary catalogs. */
+        private const val SEARCH_SOURCE = "all"
+    }
+
+    /**
+     * Main entry point: resolve and import a playlist from a URL.
+     *
+     * @param url Playlist URL (Yandex or Apple)
+     * @param onState Optional callback for state updates (Loading/Success/Error)
+     * @param logger Optional file logger for debugging
+     * @return Import result with matched/failed/error tracks
+     */
+    suspend fun importPlaylist(
+        url: String,
+        onState: ((ImportState) -> Unit)? = null,
+        logger: ImportFileLogger? = null
+    ): PlaylistImportResult = withContext(Dispatchers.IO) {
+
+        val sourceType = detectSourceType(url)
+
+        when (sourceType) {
+            PlaylistSourceType.YANDEX -> importFromYandex(url, onState, logger)
+            PlaylistSourceType.APPLE -> importFromApple(url, onState, logger)
+            PlaylistSourceType.UNKNOWN -> throw IllegalArgumentException(
+                "Unsupported playlist URL: $url"
+            )
+        }
+    }
+
+    /**
+     * Yandex import flow:
+     *   1. Resolve URL via FastAPI → [{title, artist}]
+     *   2. Match each track against ICM catalog (concurrent, limited)
+     *   3. Collect results and save to local playlist
+     */
+    private suspend fun importFromYandex(
+        url: String,
+        onState: ((ImportState) -> Unit)?,
+        logger: ImportFileLogger?
+    ): PlaylistImportResult = coroutineScope {
+
+        logger?.log("I", "ImportRepo", "=== Starting Yandex import ===")
+        logger?.log("I", "ImportRepo", "URL: $url")
+
+        onState?.invoke(ImportState.Loading(0, 0, LoadingPhase.RESOLVING))
+
+        // Step 1: Resolve Yandex URL to raw tracks
+        val rawTracks = try {
+            logger?.log("I", "ImportRepo", "Fetching playlist from Yandex...")
+            yandexResolver.resolvePlaylist(url)
+        } catch (e: Exception) {
+            logger?.log("E", "ImportRepo", "Resolver failed: ${e.message}")
+            val errorMsg = when (e) {
+                is SocketTimeoutException -> "Network timeout while fetching playlist. Please check your connection."
+                is UnknownHostException -> "Cannot reach Yandex resolver. Is the server running?"
+                else -> "Failed to resolve Yandex playlist: ${e.message}"
+            }
+            onState?.invoke(ImportState.Error(errorMsg))
+            throw PlaylistImportException(errorMsg, e)
+        }
+
+        logger?.log("I", "ImportRepo", "Resolved ${rawTracks.size} tracks from Yandex")
+
+        if (rawTracks.isEmpty()) {
+            logger?.log("W", "ImportRepo", "No tracks found in playlist")
+            onState?.invoke(ImportState.Success(0, "", ""))
+            return@coroutineScope PlaylistImportResult(
+                sourceUrl = url,
+                sourceType = PlaylistSourceType.YANDEX,
+                totalTracks = 0,
+                matchedTracks = emptyList(),
+                failedTracks = emptyList(),
+                errorTracks = emptyList()
+            )
+        }
+
+        val importedTracks = rawTracks.map { dto ->
+            ImportedTrack(title = dto.title, artist = dto.artist)
+        }
+
+        logger?.log("I", "ImportRepo", "Starting ICM matching for ${importedTracks.size} tracks")
+
+        // Step 2: Match tracks against ICM catalog with limited concurrency
+        onState?.invoke(ImportState.Loading(0, importedTracks.size, LoadingPhase.MATCHING))
+
+        val semaphore = Semaphore(DEFAULT_CONCURRENCY)
+        val results = mutableListOf<TrackMatchResult>()
+        var matchedCount = 0
+        var failedCount = 0
+
+        // Process in batches for progress reporting
+        importedTracks.chunked(BATCH_SIZE).forEachIndexed { batchIndex, batch ->
+            logger?.log("I", "ImportRepo", "Batch ${batchIndex + 1}: ${batch.size} tracks")
+
+            val batchResults = batch.map { track ->
+                async {
+                    semaphore.withPermit {
+                        searchIcmForTrack(track, logger)
+                    }
+                }
+            }.awaitAll()
+
+            results.addAll(batchResults)
+
+            // Update counters and report progress
+            batchResults.forEach { result ->
+                when (result) {
+                    is TrackMatchResult.Matched -> matchedCount++
+                    is TrackMatchResult.NotFound -> failedCount++
+                    is TrackMatchResult.Error -> failedCount++
+                }
+            }
+
+            val processed = matchedCount + failedCount
+            logger?.log("I", "ImportRepo", "Progress: $matchedCount matched, $failedCount failed / ${importedTracks.size} total")
+            onState?.invoke(ImportState.Loading(processed, importedTracks.size, LoadingPhase.MATCHING))
+        }
+
+        logger?.log("I", "ImportRepo", "=== Import complete: $matchedCount matched, $failedCount failed, ${importedTracks.size} total ===")
+
+        PlaylistImportResult(
+            sourceUrl = url,
+            sourceType = PlaylistSourceType.YANDEX,
+            totalTracks = importedTracks.size,
+            matchedTracks = results.filterIsInstance<TrackMatchResult.Matched>(),
+            failedTracks = results.filterIsInstance<TrackMatchResult.NotFound>(),
+            errorTracks = results.filterIsInstance<TrackMatchResult.Error>()
+        )
+    }
+
+    /**
+     * Apple import flow: delegate to native ICM import API.
+     */
+    private suspend fun importFromApple(
+        url: String,
+        onState: ((ImportState) -> Unit)?,
+        logger: ImportFileLogger?
+    ): PlaylistImportResult {
+        onState?.invoke(ImportState.Loading(0, 0, LoadingPhase.RESOLVING))
+
+        val response = try {
+            IcmRepository.importPlaylist(
+                source = "apple",
+                url = url,
+                name = null
+            )
+        } catch (e: Exception) {
+            val errorMsg = when (e) {
+                is SocketTimeoutException -> "Network timeout while importing from Apple Music."
+                is UnknownHostException -> "Cannot reach ICM server. Check your connection."
+                else -> "Apple import failed: ${e.message}"
+            }
+            onState?.invoke(ImportState.Error(errorMsg))
+            throw PlaylistImportException(errorMsg, e)
+        }
+
+        if (response == null) {
+            val errorCode = IcmRepository.getLastErrorCode()
+            val errorMsg = IcmRepository.lastError.value
+                ?: "Apple import failed${errorCode?.let { " (code: $it)" } ?: ""}: Unknown error"
+            onState?.invoke(ImportState.Error(errorMsg))
+            throw PlaylistImportException(errorMsg)
+        }
+
+        val playlistId = response.playlistId
+            ?: throw PlaylistImportException("Apple import succeeded but no playlist_id returned")
+
+        val matchedTracks = response.tracks?.mapNotNull { track ->
+            val tid = track.trackId ?: return@mapNotNull null
+            TrackMatchResult.Matched(
+                importedTrack = ImportedTrack(
+                    title = track.title ?: "",
+                    artist = track.artist ?: ""
+                ),
+                icmTrackId = tid,
+                icmTitle = track.title ?: "",
+                icmArtist = track.artist ?: "",
+                icmAlbum = null,
+                icmDurationMs = track.duration?.toInt(),
+                icmCover = track.cover
+            )
+        } ?: emptyList()
+
+        val failedTracks = response.failedTracks?.map { failed ->
+            TrackMatchResult.NotFound(
+                importedTrack = ImportedTrack(
+                    title = failed.yandexTitle ?: "",
+                    artist = failed.yandexArtists.firstOrNull() ?: ""
+                ),
+                searchQuery = failed.reason ?: ""
+            )
+        } ?: emptyList()
+
+        return PlaylistImportResult(
+            sourceUrl = url,
+            sourceType = PlaylistSourceType.APPLE,
+            totalTracks = response.total ?: matchedTracks.size,
+            matchedTracks = matchedTracks,
+            failedTracks = failedTracks,
+            errorTracks = emptyList(),
+            icmPlaylistId = playlistId
+        )
+    }
+
+    /**
+     * Search ICM catalog for a single imported track.
+     */
+    private suspend fun searchIcmForTrack(track: ImportedTrack, logger: ImportFileLogger?): TrackMatchResult {
+        return try {
+            delay(REQUEST_DELAY_MS)
+
+            val response = icmSearch.search(
+                q = track.query,
+                region = SEARCH_REGION,
+                source = SEARCH_SOURCE,
+                limit = 5,
+                logger = logger
+            )
+
+            val firstTrack = response.items.firstOrNull { item ->
+                !item.isArtist && !item.isAlbum
+            }
+
+            if (firstTrack != null) {
+                TrackMatchResult.Matched(
+                    importedTrack = track,
+                    icmTrackId = firstTrack.id,
+                    icmTitle = firstTrack.title,
+                    icmArtist = firstTrack.artist ?: track.artist,
+                    icmAlbum = firstTrack.album,
+                    icmDurationMs = normalizeDuration(firstTrack.duration),
+                    icmCover = firstTrack.cover
+                )
+            } else {
+                TrackMatchResult.NotFound(
+                    importedTrack = track,
+                    searchQuery = track.query
+                )
+            }
+        } catch (e: Exception) {
+            TrackMatchResult.Error(track, e)
+        }
+    }
+
+    private fun normalizeDuration(duration: Int?): Int? {
+        return duration?.let {
+            if (it < 1000) it * 1000 else it
+        }
+    }
+
+    fun matchedTracksToPlayableTracks(result: PlaylistImportResult): List<com.liquidmusicglass.engine.Track> {
+        return result.matchedTracks.map { matched ->
+            com.liquidmusicglass.engine.Track(
+                id = matched.icmTrackId,
+                title = matched.icmTitle,
+                artist = matched.icmArtist,
+                albumName = matched.icmAlbum ?: "",
+                uri = android.net.Uri.parse("https://byicloud.online/track/${matched.icmTrackId}"),
+                durationMs = matched.icmDurationMs?.toLong() ?: 0L,
+                albumId = -1L,
+                coverUrl = matched.icmCover
+            )
+        }
+    }
+
+    /**
+     * Save import result to local PlaylistManager with full metadata.
+     */
+    fun saveToLocalPlaylist(
+        result: PlaylistImportResult,
+        originalName: String? = null
+    ): String {
+        val tracks = result.matchedTracks.map { matched ->
+            com.liquidmusicglass.engine.PlaylistManager.PlaylistTrack(
+                id = matched.icmTrackId,
+                title = matched.icmTitle,
+                artist = matched.icmArtist,
+                coverUrl = matched.icmCover,
+                durationMs = matched.icmDurationMs?.toLong() ?: 0L
+            )
+        }
+        val sourceName = when (result.sourceType) {
+            PlaylistSourceType.YANDEX -> "Yandex Music"
+            PlaylistSourceType.APPLE -> "Apple Music"
+            else -> "Imported"
+        }
+        val playlistName = originalName ?: "$sourceName Playlist"
+
+        val playlist = com.liquidmusicglass.engine.PlaylistManager.createFromImport(
+            name = playlistName,
+            tracks = tracks,
+            sourceType = sourceName
+        )
+
+        return playlist.id
+    }
+
+    fun getTrackIds(result: PlaylistImportResult): List<String> {
+        return result.matchedTracks.map { it.icmTrackId }
+    }
+
+    private fun detectSourceType(url: String): PlaylistSourceType {
+        val lower = url.lowercase()
+        return when {
+            lower.contains("music.yandex") -> PlaylistSourceType.YANDEX
+            lower.contains("apple.com") || lower.contains("music.apple") -> PlaylistSourceType.APPLE
+            else -> PlaylistSourceType.UNKNOWN
+        }
+    }
+}
+
+class PlaylistImportException(message: String, cause: Throwable? = null) :
+    Exception(message, cause)

@@ -381,14 +381,6 @@ private fun QueueTrackRow(
             )
         }
 
-        val minutes = (track.durationMs / 1000 / 60).toInt()
-        val seconds = ((track.durationMs / 1000) % 60).toInt()
-        Text(
-            text = "$minutes:${seconds.toString().padStart(2, '0')}",
-            color = Color.White.copy(alpha = 0.30f),
-            fontSize = 12.sp
-        )
-
         if (showDragHandle) {
             Spacer(modifier = Modifier.width(8.dp))
             Icon(

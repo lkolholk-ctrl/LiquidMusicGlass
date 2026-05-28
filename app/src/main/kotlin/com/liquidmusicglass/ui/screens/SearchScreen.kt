@@ -125,7 +125,7 @@ fun SearchScreen(
     val albums = searchResults.filter { it.isAlbum }
     val artists = searchResults.filter { it.isArtist }
 
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+    Box(modifier = Modifier.fillMaxSize().background(LiquidTheme.colors.settingsBackground)) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -170,13 +170,16 @@ fun SearchScreen(
             Spacer(modifier = Modifier.height(12.dp))
 
             // Search field — solid dark background
+            val isDark = LiquidTheme.colors.isDark
+            val searchBarBg = if (isDark) Color(0xFF1A1A1A) else Color(0xFFF2F2F7)
+
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp)
                     .height(44.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFF1A1A1A))
+                    .background(searchBarBg)
                     .padding(horizontal = 14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -221,7 +224,7 @@ fun SearchScreen(
                         modifier = Modifier
                             .size(24.dp)
                             .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.12f))
+                            .background(if (isDark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.10f))
                             .clickable(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null,
@@ -241,36 +244,38 @@ fun SearchScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // ─── IDLE STATE: Categories + History ───
-            AnimatedVisibility(
-                visible = query.isBlank(),
-                enter = fadeIn(),
-                exit = fadeOut()
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
             ) {
-                Column {
-                    // Categories grid (popular artists as genres)
-                    if (categories.isNotEmpty()) {
-                        Text(
-                            text = "Browse",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 22.sp,
-                            color = LiquidTheme.colors.textPrimary,
-                            modifier = Modifier.padding(horizontal = 20.dp)
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        // 2-column grid of category cards
-                        val chunkedCategories = categories.chunked(2)
-                        LazyColumn(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
-                            contentPadding = PaddingValues(horizontal = 20.dp)
-                        ) {
+                // ─── IDLE STATE: Categories + History ───
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = query.isBlank(),
+                    enter = fadeIn(),
+                    exit = fadeOut()
+                ) {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(bottom = 120.dp)
+                    ) {
+                        if (categories.isNotEmpty()) {
+                            item {
+                                Text(
+                                    text = "Browse",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 22.sp,
+                                    color = LiquidTheme.colors.textPrimary,
+                                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
+                                )
+                            }
+                            val chunkedCategories = categories.chunked(2)
                             itemsIndexed(
                                 items = chunkedCategories,
                                 key = { index, pair -> "cat_${index}_${pair.first().id}" }
                             ) { _, pair ->
                                 Row(
-                                    modifier = Modifier.fillMaxWidth(),
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
                                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
                                     pair.forEach { category ->
@@ -279,52 +284,46 @@ fun SearchScreen(
                                             modifier = Modifier.weight(1f),
                                             onClick = {
                                                 hideKeyboard()
-                                                // Navigate to artist screen instead of searching
                                                 onNavigateToArtist(category.id)
                                             }
                                         )
                                     }
-                                    // Fill empty slot if odd number
                                     if (pair.size == 1) {
                                         Spacer(modifier = Modifier.weight(1f))
                                     }
                                 }
+                                Spacer(modifier = Modifier.height(10.dp))
                             }
-                            item { Spacer(modifier = Modifier.height(16.dp)) }
                         }
-                    }
 
-                    // Search history
-                    if (history.isNotEmpty()) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 20.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "Recent Searches",
-                                color = LiquidTheme.colors.sectionLabel,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Text(
-                                text = "Clear",
-                                color = AppleRed,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Medium,
-                                modifier = Modifier.clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null,
-                                    onClick = { clearHistory() }
-                                )
-                            )
-                        }
-                        LazyColumn(
-                            modifier = Modifier.fillMaxSize(),
-                            verticalArrangement = Arrangement.spacedBy(2.dp)
-                        ) {
+                        if (history.isNotEmpty()) {
+                            item {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Recent Searches",
+                                        color = LiquidTheme.colors.sectionLabel,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = "Clear",
+                                        color = AppleRed,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        modifier = Modifier.clickable(
+                                            interactionSource = remember { MutableInteractionSource() },
+                                            indication = null,
+                                            onClick = { clearHistory() }
+                                        )
+                                    )
+                                }
+                            }
                             itemsIndexed(
                                 items = history,
                                 key = { index, item -> "hist_${index}_${item.hashCode()}" }
@@ -337,187 +336,167 @@ fun SearchScreen(
                                         viewModel.searchNow()
                                     }
                                 )
-                            }
-                            item { Spacer(modifier = Modifier.height(200.dp)) }
-                        }
-                    } else if (categories.isEmpty()) {
-                        // Empty state
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Search,
-                                    contentDescription = null,
-                                    tint = LiquidTheme.colors.textTertiary,
-                                    modifier = Modifier.size(56.dp)
-                                )
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Text(
-                                    text = "Search ICM Music",
-                                    color = LiquidTheme.colors.textTertiary,
-                                    fontSize = 16.sp
-                                )
+                                Spacer(modifier = Modifier.height(6.dp))
                             }
                         }
                     }
                 }
-            }
 
-            // ─── ACTIVE SEARCH: Results ───
-            AnimatedVisibility(
-                visible = query.isNotBlank(),
-                enter = fadeIn(),
-                exit = fadeOut()
-            ) {
-                when {
-                    isLoading -> {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            CircularProgressIndicator(
-                                color = AppleRed,
-                                modifier = Modifier.size(32.dp)
-                            )
-                        }
-                    }
-                    error != null -> {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(
-                                    text = "Error",
+                // ─── ACTIVE SEARCH: Results ───
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = query.isNotBlank(),
+                    enter = fadeIn(),
+                    exit = fadeOut()
+                ) {
+                    when {
+                        isLoading -> {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(
                                     color = AppleRed,
-                                    fontSize = 18.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    text = error ?: "Unknown error",
-                                    color = LiquidTheme.colors.textTertiary,
-                                    fontSize = 14.sp
+                                    modifier = Modifier.size(32.dp)
                                 )
                             }
                         }
-                    }
-                    else -> {
-                        LazyColumn(
-                            modifier = Modifier.fillMaxSize(),
-                            verticalArrangement = Arrangement.spacedBy(2.dp)
-                        ) {
-                            // Artists section
-                            if (artists.isNotEmpty()) {
-                                item(key = "artists_label") {
-                                    SearchSectionLabel("Artists")
-                                }
-                                // Artists as horizontal row of circular avatars
-                                item(key = "artists_row") {
-                                    LazyRow(
-                                        contentPadding = PaddingValues(horizontal = 20.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(16.dp)
-                                    ) {
-                                        itemsIndexed(
-                                            items = artists,
-                                            key = { index, artist -> "artist_${index}_${artist.id}" }
-                                        ) { _, artist ->
-                                            ArtistChip(
-                                                artist = artist,
-                                                onClick = {
-                                                    hideKeyboard()
-                                                    onNavigateToArtist(artist.id)
-                                                }
-                                            )
-                                        }
-                                    }
-                                    Spacer(modifier = Modifier.height(16.dp))
-                                }
-                            }
-
-                            // Albums section
-                            if (albums.isNotEmpty()) {
-                                item(key = "albums_label") {
-                                    SearchSectionLabel("Albums")
-                                }
-                                // Albums as horizontal row of square cards
-                                item(key = "albums_row") {
-                                    LazyRow(
-                                        contentPadding = PaddingValues(horizontal = 20.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(14.dp)
-                                    ) {
-                                        itemsIndexed(
-                                            items = albums,
-                                            key = { index, album -> "album_${index}_${album.id}" }
-                                        ) { _, album ->
-                                            AlbumCard(
-                                                album = album,
-                                                onClick = {
-                                                    hideKeyboard()
-                                                    onNavigateToAlbum(album.id)
-                                                }
-                                            )
-                                        }
-                                    }
-                                    Spacer(modifier = Modifier.height(16.dp))
-                                }
-                            }
-
-                            // Tracks section
-                            if (tracks.isNotEmpty()) {
-                                item(key = "tracks_label") {
-                                    SearchSectionLabel("Songs")
-                                }
-                                val playableTracks = tracks.map { it.toTrack() }
-                                itemsIndexed(
-                                    items = tracks,
-                                    key = { index, track -> "track_${index}_${track.id}" }
-                                ) { _, item ->
-                                    SearchResultRow(
-                                        title = item.title,
-                                        subtitle = item.displayArtist,
-                                        icon = Icons.Rounded.MusicNote,
-                                        coverUrl = item.cover,
-                                        isExplicit = item.isExplicit,
-                                        isCustom = item.isCustom,
-                                        onClick = {
-                                            hideKeyboard()
-                                            val startIdx = playableTracks.indexOfFirst { it.id == item.id }
-                                                .coerceAtLeast(0)
-                                            PlayerController.playFromList(
-                                                context = context,
-                                                tracks = playableTracks,
-                                                startIndex = startIdx,
-                                                autoRefillType = "search",
-                                                autoRefillId = query,
-                                                autoRefillName = query
-                                            )
-                                        }
+                        error != null -> {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text(
+                                        text = "Error",
+                                        color = AppleRed,
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = error ?: "Unknown error",
+                                        color = LiquidTheme.colors.textTertiary,
+                                        fontSize = 14.sp
                                     )
                                 }
                             }
+                        }
+                        else -> {
+                            LazyColumn(
+                                modifier = Modifier.fillMaxSize(),
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                                contentPadding = PaddingValues(bottom = 120.dp)
+                            ) {
+                                // Artists section
+                                if (artists.isNotEmpty()) {
+                                    item(key = "artists_label") {
+                                        SearchSectionLabel("Artists")
+                                    }
+                                    // Artists as horizontal row of circular avatars
+                                    item(key = "artists_row") {
+                                        LazyRow(
+                                            contentPadding = PaddingValues(horizontal = 20.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                        ) {
+                                            itemsIndexed(
+                                                items = artists,
+                                                key = { index, artist -> "artist_${index}_${artist.id}" }
+                                            ) { _, artist ->
+                                                ArtistChip(
+                                                    artist = artist,
+                                                    onClick = {
+                                                        hideKeyboard()
+                                                        onNavigateToArtist(artist.id)
+                                                    }
+                                                )
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.height(16.dp))
+                                    }
+                                }
 
-                            // No results
-                            if (tracks.isEmpty() && albums.isEmpty() && artists.isEmpty()) {
-                                item {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(top = 60.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = "No results for \"$query\"",
-                                            color = LiquidTheme.colors.textTertiary,
-                                            fontSize = 16.sp
+                                // Albums section
+                                if (albums.isNotEmpty()) {
+                                    item(key = "albums_label") {
+                                        SearchSectionLabel("Albums")
+                                    }
+                                    // Albums as horizontal row of square cards
+                                    item(key = "albums_row") {
+                                        LazyRow(
+                                            contentPadding = PaddingValues(horizontal = 20.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(14.dp)
+                                        ) {
+                                            itemsIndexed(
+                                                items = albums,
+                                                key = { index, album -> "album_${index}_${album.id}" }
+                                            ) { _, album ->
+                                                AlbumCard(
+                                                    album = album,
+                                                    onClick = {
+                                                        hideKeyboard()
+                                                        onNavigateToAlbum(album.id)
+                                                    }
+                                                )
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.height(16.dp))
+                                    }
+                                }
+
+                                // Tracks section
+                                if (tracks.isNotEmpty()) {
+                                    item(key = "tracks_label") {
+                                        SearchSectionLabel("Songs")
+                                    }
+                                    val playableTracks = tracks.map { it.toTrack() }
+                                    itemsIndexed(
+                                        items = tracks,
+                                        key = { index, track -> "track_${index}_${track.id}" }
+                                    ) { _, item ->
+                                        SearchResultRow(
+                                            title = item.title,
+                                            subtitle = item.displayArtist,
+                                            icon = Icons.Rounded.MusicNote,
+                                            coverUrl = item.cover,
+                                            isExplicit = item.isExplicit,
+                                            isCustom = item.isCustom,
+                                            onClick = {
+                                                hideKeyboard()
+                                                val startIdx = playableTracks.indexOfFirst { it.id == item.id }
+                                                    .coerceAtLeast(0)
+                                                PlayerController.playFromList(
+                                                    context = context,
+                                                    tracks = playableTracks,
+                                                    startIndex = startIdx,
+                                                    autoRefillType = "search",
+                                                    autoRefillId = query,
+                                                    autoRefillName = query
+                                                )
+                                            }
                                         )
                                     }
                                 }
-                            }
 
-                            item { Spacer(modifier = Modifier.height(200.dp)) }
+                                // No results
+                                if (tracks.isEmpty() && albums.isEmpty() && artists.isEmpty()) {
+                                    item {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(top = 60.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = "No results for \"$query\"",
+                                                color = LiquidTheme.colors.textTertiary,
+                                                fontSize = 16.sp
+                                            )
+                                        }
+                                    }
+                                }
+
+                                item { Spacer(modifier = Modifier.height(200.dp)) }
+                            }
                         }
                     }
                 }
@@ -611,7 +590,7 @@ private fun ArtistChip(
                 modifier = Modifier
                     .size(72.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFF2A2A2A)),
+                    .background(if (LiquidTheme.colors.isDark) Color(0xFF2A2A2A) else Color(0xFFF2F2F7)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -688,7 +667,7 @@ private fun HistoryRow(
             .padding(horizontal = 16.dp)
             .height(52.dp)
             .clip(RoundedCornerShape(12.dp))
-            .background(Color(0xFF1A1A1A))
+            .background(if (LiquidTheme.colors.isDark) Color(0xFF1A1A1A) else Color(0xFFF2F2F7))
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -737,7 +716,7 @@ private fun SearchResultRow(
             .padding(horizontal = 16.dp)
             .height(64.dp)
             .clip(RoundedCornerShape(12.dp))
-            .background(Color(0xFF1A1A1A))
+            .background(if (LiquidTheme.colors.isDark) Color(0xFF1A1A1A) else Color(0xFFF2F2F7))
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -763,7 +742,7 @@ private fun SearchResultRow(
                 modifier = Modifier
                     .size(48.dp)
                     .clip(RoundedCornerShape(6.dp))
-                    .background(Color(0xFF2A2A2A)),
+                    .background(if (LiquidTheme.colors.isDark) Color(0xFF2A2A2A) else Color(0xFFF2F2F7)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -814,16 +793,18 @@ private fun SourceChip(
     enabled: Boolean = true,
     onClick: () -> Unit
 ) {
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(20.dp))
-            .background(
-                when {
-                    !enabled -> Color(0xFF1A1A1A)
-                    selected -> AppleRed
-                    else -> Color(0xFF1A1A1A)
-                }
-            )
+        val isDark = LiquidTheme.colors.isDark
+        val chipBg = if (isDark) Color(0xFF1A1A1A) else Color(0xFFF2F2F7)
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(20.dp))
+                .background(
+                    when {
+                        !enabled -> chipBg
+                        selected -> AppleRed
+                        else -> chipBg
+                    }
+                )
             .then(
                 if (enabled) {
                     Modifier.clickable(

@@ -55,6 +55,7 @@ import com.kyant.backdrop.shadow.InnerShadow
 import com.kyant.backdrop.shadow.Shadow
 import com.liquidmusicglass.engine.AppSettings
 import com.liquidmusicglass.engine.AppUpdater
+import com.liquidmusicglass.engine.NotificationRouter
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.ui.navigation.BottomBar
 import com.liquidmusicglass.ui.player.FullPlayer
@@ -69,6 +70,8 @@ import com.liquidmusicglass.ui.screens.PlaylistDetailScreen
 import com.liquidmusicglass.ui.screens.SettingsScreen
 import com.liquidmusicglass.ui.screens.AuthScreen
 import com.liquidmusicglass.ui.screens.ProfileScreen
+import com.liquidmusicglass.ui.screens.WaveOnboardingScreen
+import com.liquidmusicglass.ui.screens.youtube.YouTubeSearchScreen
 import com.liquidmusicglass.ui.theme.LiquidTheme
 import kotlinx.coroutines.launch
 
@@ -76,20 +79,6 @@ import kotlinx.coroutines.launch
 fun AppRoot() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-
-    // Check for updates on launch
-    LaunchedEffect(Unit) {
-        try {
-            val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
-            val versionCode = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
-                packageInfo.longVersionCode.toInt()
-            } else {
-                @Suppress("DEPRECATION")
-                packageInfo.versionCode
-            }
-            AppUpdater.checkForUpdate(versionCode)
-        } catch (_: Exception) {}
-    }
 
     var selectedIndex by remember { 
         mutableIntStateOf(
@@ -105,6 +94,7 @@ fun AppRoot() {
     var playlistDetailId by remember { mutableStateOf<String?>(null) }
     var authOpen by remember { mutableStateOf(false) }
     var profileOpen by remember { mutableStateOf(false) }
+    var youtubeSearchOpen by remember { mutableStateOf(false) }
 
     val currentTrack by PlayerController.currentTrack.collectAsState()
     val isPlaying by PlayerController.isPlaying.collectAsState()
@@ -136,6 +126,27 @@ fun AppRoot() {
         }
     }
 
+    LaunchedEffect(Unit) {
+        // Collect notification tap events and expand player
+        NotificationRouter.openLargePlayer.collect {
+            animateExpand()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        // Check for updates on launch
+        try {
+            val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+            val versionCode = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                packageInfo.longVersionCode.toInt()
+            } else {
+                @Suppress("DEPRECATION")
+                packageInfo.versionCode
+            }
+            AppUpdater.checkForUpdate(versionCode)
+        } catch (_: Exception) {}
+    }
+
     val miniAlpha = (1f - expandProgress.value * 3f).coerceIn(0f, 1f)
 
     // ── Apple-style parallax: background scales down when player opens ──
@@ -146,11 +157,12 @@ fun AppRoot() {
     val rootBackdrop: LayerBackdrop = rememberLayerBackdrop()
 
     // Back handler: close detail screens first, then player, then app
-    BackHandler(enabled = detailAlbumId != null || detailArtistId != null || equalizerOpen || playlistDetailId != null || settingsOpen || authOpen || profileOpen || expandProgress.value > 0.5f) {
+    BackHandler(enabled = detailAlbumId != null || detailArtistId != null || equalizerOpen || playlistDetailId != null || settingsOpen || authOpen || profileOpen || youtubeSearchOpen || expandProgress.value > 0.5f) {
         when {
             settingsOpen -> settingsOpen = false
             authOpen -> authOpen = false
             profileOpen -> profileOpen = false
+            youtubeSearchOpen -> youtubeSearchOpen = false
             equalizerOpen -> equalizerOpen = false
             playlistDetailId != null -> playlistDetailId = null
             detailAlbumId != null -> detailAlbumId = null
@@ -159,12 +171,27 @@ fun AppRoot() {
         }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black) // visible behind scaled content
-            .onGloballyPositioned { screenHeightPx = it.size.height.toFloat() }
-    ) {
+    val lc = LiquidTheme.colors
+    val rootBg = if (lc.isDark) Color.Black else Color(0xFFF5F5F7)
+
+    val isOnboardingCompleted by AppSettings.isOnboardingCompleted.collectAsState()
+
+    if (!isOnboardingCompleted) {
+        WaveOnboardingScreen(
+            onComplete = {
+                AppSettings.setOnboardingCompleted(true)
+            },
+            onDismiss = {
+                AppSettings.setOnboardingCompleted(true)
+            }
+        )
+    } else {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(rootBg) // visible behind scaled content
+                .onGloballyPositioned { screenHeightPx = it.size.height.toFloat() }
+        ) {
         // ── Background content with parallax ──
         Box(
             modifier = Modifier
@@ -176,6 +203,7 @@ fun AppRoot() {
                     clip = true
                     shape = RoundedCornerShape(bgCorner.dp)
                 }
+                .background(lc.settingsBackground)
                 .layerBackdrop(rootBackdrop)
         ) {
             val isHomeActive = selectedIndex == 0 &&
@@ -186,6 +214,7 @@ fun AppRoot() {
                     !settingsOpen &&
                     !authOpen &&
                     !profileOpen &&
+                    !youtubeSearchOpen &&
                     expandProgress.value < 0.05f
 
             // ── Main screens ──
@@ -193,7 +222,8 @@ fun AppRoot() {
                 0 -> HomeScreen(
                     onNavigateToAlbum = { detailAlbumId = it },
                     onNavigateToArtist = { detailArtistId = it },
-                    onNavigateToPlaylist = { playlistDetailId = it }
+                    onNavigateToPlaylist = { playlistDetailId = it },
+                    onNavigateToYouTube = { youtubeSearchOpen = true }
                 )
                 1 -> SearchScreen(
                     onNavigateToAlbum = { detailAlbumId = it },
@@ -303,7 +333,7 @@ fun AppRoot() {
 
      val barsVisible = detailAlbumId == null && detailArtistId == null &&
                         !equalizerOpen && playlistDetailId == null &&
-                        !settingsOpen && !authOpen && !profileOpen
+                        !settingsOpen && !authOpen && !profileOpen && !youtubeSearchOpen
 
     if (barsVisible) {
             val density = androidx.compose.ui.platform.LocalDensity.current
@@ -528,7 +558,23 @@ fun AppRoot() {
             )
         }
 
+        // ── YouTube Search Screen ──
+        AnimatedVisibility(
+            visible = youtubeSearchOpen,
+            enter = slideInHorizontally(
+                initialOffsetX = { it },
+                animationSpec = spring(dampingRatio = 0.9f, stiffness = 300f)
+            ) + fadeIn(tween(200)),
+            exit = slideOutHorizontally(
+                targetOffsetX = { it },
+                animationSpec = spring(dampingRatio = 0.9f, stiffness = 350f)
+            ) + fadeOut(tween(150))
+        ) {
+            YouTubeSearchScreen(onBack = { youtubeSearchOpen = false })
+        }
+
         // ── Update Dialog ──
         UpdateDialog(backdrop = rootBackdrop)
+        }
     }
 }

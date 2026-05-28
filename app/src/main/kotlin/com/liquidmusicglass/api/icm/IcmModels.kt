@@ -643,7 +643,8 @@ data class IcmWaveTrack(
             albumId = collectionId?.hashCode()?.toLong() ?: id.hashCode().toLong(),
             coverUrl = cover?.replace("1000x1000", "600x600"),
             isExplicit = isExplicit,
-            isCustom = isCustom
+            isCustom = isCustom,
+            source = source
         )
     }
 }
@@ -904,7 +905,19 @@ data class IcmSubscriptionResponse(
     @SerialName("is_family_owner") val isFamilyOwner: Boolean = false,
     @SerialName("is_family_member") val isFamilyMember: Boolean = false,
     val regions: List<IcmSubscriptionRegion> = emptyList()
-)
+) {
+    /** Whether subscription is currently active and not expired. */
+    val isActive: Boolean
+        get() = active && (daysLeft > 0 || expiresAt == null)
+
+    /** Whether subscription has expired. */
+    val isExpired: Boolean
+        get() = !active || (daysLeft <= 0 && expiresAt != null)
+
+    /** Subscription tier name (plan_type or default). */
+    val tier: String
+        get() = planType ?: "standard"
+}
 
 @Serializable
 data class IcmSubscriptionRegion(

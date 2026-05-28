@@ -87,6 +87,7 @@ class FavoriteTrackDatabase private constructor(context: Context) : SQLiteOpenHe
                 durationMs INTEGER DEFAULT 0,
                 imageUrl TEXT,
                 localPath TEXT NOT NULL,
+                localCoverPath TEXT,
                 quality TEXT,
                 downloadedAt INTEGER DEFAULT 0
             )
@@ -108,6 +109,7 @@ class FavoriteTrackDatabase private constructor(context: Context) : SQLiteOpenHe
                     durationMs INTEGER DEFAULT 0,
                     imageUrl TEXT,
                     localPath TEXT NOT NULL,
+                    localCoverPath TEXT,
                     quality TEXT,
                     downloadedAt INTEGER DEFAULT 0
                 )
@@ -117,6 +119,9 @@ class FavoriteTrackDatabase private constructor(context: Context) : SQLiteOpenHe
         } else if (oldVersion < 3) {
             // Migration: add quality column to existing downloaded_tracks table
             db.execSQL("ALTER TABLE downloaded_tracks ADD COLUMN quality TEXT")
+        } else if (oldVersion < 4) {
+            // Migration: add localCoverPath column to existing downloaded_tracks table
+            db.execSQL("ALTER TABLE downloaded_tracks ADD COLUMN localCoverPath TEXT")
         } else {
             db.execSQL("DROP TABLE IF EXISTS favorite_tracks")
             db.execSQL("DROP TABLE IF EXISTS downloaded_tracks")
@@ -371,6 +376,7 @@ class FavoriteTrackDatabase private constructor(context: Context) : SQLiteOpenHe
             put("durationMs", entity.durationMs)
             put("imageUrl", entity.imageUrl)
             put("localPath", entity.localPath)
+            put("localCoverPath", entity.localCoverPath)
             put("quality", entity.quality)
             put("downloadedAt", entity.downloadedAt)
         }
@@ -425,6 +431,7 @@ class FavoriteTrackDatabase private constructor(context: Context) : SQLiteOpenHe
             durationMs = cursor.getLong(cursor.getColumnIndexOrThrow("durationMs")),
             imageUrl = cursor.getString(cursor.getColumnIndexOrThrow("imageUrl")),
             localPath = cursor.getString(cursor.getColumnIndexOrThrow("localPath")),
+            localCoverPath = cursor.getString(cursor.getColumnIndexOrThrow("localCoverPath")),
             quality = cursor.getString(cursor.getColumnIndexOrThrow("quality")),
             downloadedAt = cursor.getLong(cursor.getColumnIndexOrThrow("downloadedAt"))
         )
@@ -432,7 +439,7 @@ class FavoriteTrackDatabase private constructor(context: Context) : SQLiteOpenHe
 
     companion object {
         private const val DB_NAME = "favorite_tracks.db"
-        private const val DB_VERSION = 3
+        private const val DB_VERSION = 4
 
         @Volatile
         private var INSTANCE: FavoriteTrackDatabase? = null

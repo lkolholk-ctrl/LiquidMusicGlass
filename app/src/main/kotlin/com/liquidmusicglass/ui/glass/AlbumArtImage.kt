@@ -170,23 +170,35 @@ fun AlbumArtImage(
 @Composable
 private fun PlaceholderArt(modifier: Modifier = Modifier) {
     Box(
-        modifier = modifier
-            .background(
-                Brush.linearGradient(
-                    colors = listOf(
-                        Color(0xFF2A2A3E),
-                        Color(0xFF1A1A2E),
-                        Color(0xFF0F0F1A)
-                    )
-                )
-            ),
+        modifier = modifier,
         contentAlignment = Alignment.Center
     ) {
+        // Darkened base gradient underneath
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.linearGradient(
+                        colors = listOf(
+                            Color(0xFF151520),
+                            Color(0xFF0A0A12),
+                            Color(0xFF050508)
+                        )
+                    )
+                )
+        )
+        // Dark overlay at 50% opacity to darken the base
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.5f))
+        )
+        // Bold, heavy icon on top
         Icon(
             imageVector = Icons.Rounded.MusicNote,
             contentDescription = null,
-            tint = Color.White.copy(alpha = 0.30f),
-            modifier = Modifier.fillMaxSize(0.4f)
+            tint = Color.White.copy(alpha = 0.85f),
+            modifier = Modifier.fillMaxSize(0.55f)
         )
     }
 }

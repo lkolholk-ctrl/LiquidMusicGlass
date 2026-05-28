@@ -17,29 +17,37 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsTopHeight
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ExitToApp
-import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.rounded.DeleteForever
+import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Star
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -47,13 +55,23 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.liquidmusicglass.api.icm.IcmAuthRepository
 import com.liquidmusicglass.data.local.LocalAuthManager
+import com.liquidmusicglass.engine.AudioDownloadManager
+import com.liquidmusicglass.ui.glass.GlassDialog
+import com.liquidmusicglass.ui.glass.GlassDialogButton
+import com.liquidmusicglass.ui.screens.camp.CampSelectorScreen
+import com.liquidmusicglass.ui.theme.JetBrainsMonoFontFamily
 import com.liquidmusicglass.ui.theme.LiquidTheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 private val AppleRed = Color(0xFFFC3C44)
 private val PremiumPurple = Color(0xFF8B5CF6)
+private val SurfaceDark = Color(0xFF1C1C1E)
+private val SurfaceElevated = Color(0xFF2C2C2E)
 
 @Composable
 fun ProfileScreen(
@@ -61,8 +79,9 @@ fun ProfileScreen(
     onLogout: () -> Unit = {},
     onOpenAuth: () -> Unit = {}
 ) {
-    val scroll = rememberScrollState()
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val lc = LiquidTheme.colors
 
     val isLoggedIn by IcmAuthRepository.isLoggedIn.collectAsState()
     val isPremium by IcmAuthRepository.isPremium.collectAsState()
@@ -73,10 +92,10 @@ fun ProfileScreen(
     val avatarUrl by IcmAuthRepository.avatarUrl.collectAsState()
     val subscription by IcmAuthRepository.subscription.collectAsState()
 
+    var showClearDialog by remember { mutableStateOf(false) }
+
     LaunchedEffect(isLoggedIn) {
-        if (isLoggedIn) {
-            IcmAuthRepository.fetchUserData()
-        }
+        if (isLoggedIn) IcmAuthRepository.fetchUserData()
     }
 
     val displayName = when {
@@ -86,376 +105,461 @@ fun ProfileScreen(
         else -> "Guest"
     }
 
-    val emailDisplay = when {
-        userEmail != null -> userEmail!!
-        isLoggedIn -> "Signed in via Telegram"
-        else -> "Not signed in"
+    // ── Danger Zone Dialog ──
+    if (showClearDialog) {
+        GlassDialog(
+            visible = showClearDialog,
+            onDismiss = { showClearDialog = false },
+            icon = Icons.Rounded.DeleteForever,
+            iconTint = AppleRed,
+            title = "CLEAR ALL DOWNLOADS",
+            message = "This will permanently delete all downloaded tracks from your device. This action cannot be undone.",
+            primaryButton = GlassDialogButton(
+                text = "Clear All",
+                onClick = {
+                    showClearDialog = false
+                    scope.launch(Dispatchers.IO) {
+                        AudioDownloadManager.clearAllDownloads(context)
+                    }
+                },
+                backgroundColor = AppleRed,
+                textColor = Color.White
+            ),
+            secondaryButton = GlassDialogButton(
+                text = "Cancel",
+                onClick = { showClearDialog = false },
+                backgroundColor = if (lc.isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.05f),
+                textColor = lc.textSecondary
+            )
+        )
     }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(LiquidTheme.colors.settingsBackground)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(scroll)
-                .padding(horizontal = 20.dp)
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(modifier = Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
-            Spacer(modifier = Modifier.height(20.dp))
+            // ── Status bar spacing ──
+            item { Spacer(modifier = Modifier.windowInsetsTopHeight(WindowInsets.statusBars)) }
+            item { Spacer(modifier = Modifier.height(24.dp)) }
 
-            // Header
-            Text(
-                text = "Profile",
-                color = LiquidTheme.colors.textPrimary,
-                fontSize = 32.sp,
-                fontWeight = FontWeight.Bold
-            )
-
-            Spacer(modifier = Modifier.height(32.dp))
-
-            // Avatar + Name
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (!avatarUrl.isNullOrBlank()) {
-                    AsyncImage(
-                        model = avatarUrl,
-                        contentDescription = null,
-                        modifier = Modifier
-                            .size(72.dp)
-                            .clip(CircleShape)
-                    )
-                } else {
+            // ═══════════════════════════════════════════════════════════
+            //  1. PROFILE HEADER & IDENTITY BLOCK
+            // ═══════════════════════════════════════════════════════════
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    // Avatar
                     Box(
                         modifier = Modifier
                             .size(72.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFF2A2A2A)),
+                            .clip(RoundedCornerShape(24.dp))
+                            .background(if (lc.isDark) SurfaceDark else Color(0xFFF2F2F7)),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            Icons.Rounded.Person,
-                            null,
-                            tint = Color.White.copy(alpha = 0.5f),
-                            modifier = Modifier.size(36.dp)
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.width(16.dp))
-
-                Column {
-                    Text(
-                        text = displayName,
-                        color = Color.White,
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = emailDisplay,
-                        color = Color.White.copy(alpha = 0.5f),
-                        fontSize = 14.sp
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // Premium Badge
-            if (isPremium) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp)
-                        .clip(RoundedCornerShape(28.dp))
-                        .background(PremiumPurple.copy(alpha = 0.15f))
-                        .padding(horizontal = 16.dp),
-                    contentAlignment = Alignment.CenterStart
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Rounded.Star,
-                            null,
-                            tint = PremiumPurple,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                text = "PREMIUM",
-                                color = PremiumPurple,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold
+                        if (!avatarUrl.isNullOrBlank()) {
+                            AsyncImage(
+                                model = avatarUrl,
+                                contentDescription = null,
+                                modifier = Modifier.fillMaxSize()
                             )
-                            if (premiumExpiresAt > 0) {
-                                val date = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
-                                    .format(Date(premiumExpiresAt))
-                                Text(
-                                    text = "Valid until $date",
-                                    color = PremiumPurple.copy(alpha = 0.7f),
-                                    fontSize = 12.sp
-                                )
-                            }
+                        } else {
+                            Icon(
+                                Icons.Rounded.Person,
+                                null,
+                                tint = lc.iconMuted,
+                                modifier = Modifier.size(36.dp)
+                            )
                         }
                     }
-                }
-                Spacer(modifier = Modifier.height(16.dp))
-            } else {
-                // Upgrade to Premium banner
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(80.dp)
-                        .clip(RoundedCornerShape(26.dp))
-                        .background(Color(0xFF1A1A1A))
-                        .padding(horizontal = 16.dp),
-                    contentAlignment = Alignment.CenterStart
-                ) {
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Username + Premium Star inline
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
                     ) {
-                        Column {
-                            Text(
-                                text = "Upgrade to Premium",
-                                color = Color.White,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "Download tracks, high quality audio",
-                                color = Color.White.copy(alpha = 0.5f),
-                                fontSize = 13.sp
-                            )
-                        }
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(20.dp))
-                                .background(AppleRed)
-                                .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null
-                                ) {
-                                    // Open the ICM premium bot in Telegram
-                                    try {
-                                        val builder = androidx.browser.customtabs.CustomTabsIntent.Builder()
-                                        builder.setShowTitle(true)
-                                        builder.setToolbarColor(android.graphics.Color.parseColor("#0088CC"))
-                                        builder.build().launchUrl(
-                                            context,
-                                            android.net.Uri.parse("https://t.me/byicmbot")
-                                        )
-                                    } catch (e: Exception) {
-                                        context.startActivity(
-                                            android.content.Intent(
-                                                android.content.Intent.ACTION_VIEW,
-                                                android.net.Uri.parse("https://t.me/byicmbot")
-                                            )
-                                        )
-                                    }
-                                }
-                                .padding(horizontal = 12.dp, vertical = 6.dp)
-                        ) {
-                            Text(
-                                text = "Upgrade",
-                                color = Color.White,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold
+                        Text(
+                            text = displayName,
+                            fontFamily = JetBrainsMonoFontFamily,
+                            color = lc.textPrimary,
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = (-0.02).sp
+                        )
+                        if (isPremium) {
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Icon(
+                                imageVector = Icons.Rounded.Star,
+                                contentDescription = "Premium",
+                                tint = AppleRed,
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // Premium status text — clean, no background substrate
+                    if (isPremium) {
+                        val sub = subscription
+                        val planLabel = when (sub?.planType) {
+                            "family" -> if (sub.isFamilyOwner) "Premium (Family Owner)" else "Premium (Family Member)"
+                            "personal" -> "Premium (Personal)"
+                            else -> "Premium"
+                        }
+                        val expiryText = when {
+                            !sub?.expiresAtIso.isNullOrBlank() -> {
+                                val dateStr = sub!!.expiresAtIso.substringBefore("T")
+                                try {
+                                    val parts = dateStr.split("-")
+                                    "${parts[2]}.${parts[1]}.${parts[0]}"
+                                } catch (_: Exception) { dateStr }
+                            }
+                            premiumExpiresAt > 0 -> SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
+                                .format(Date(premiumExpiresAt))
+                            else -> "Lifetime"
+                        }
+                        val daysLeftText = if (sub != null && sub.daysLeft > 0) " • ${sub.daysLeft} days left" else ""
+                        Text(
+                            text = "$planLabel • Until $expiryText$daysLeftText",
+                            fontFamily = JetBrainsMonoFontFamily,
+                            color = lc.textSecondary,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            letterSpacing = 0.5.sp
+                        )
+                        // Region line
+                        val regionName = sub?.regions?.firstOrNull()?.name ?: "Global"
+                        val regionCode = sub?.regions?.firstOrNull()?.code?.uppercase() ?: "WW"
+                        val displayRegion = when {
+                            regionName.equals("США", ignoreCase = true) ||
+                            regionName.equals("US", ignoreCase = true) ||
+                            regionName.equals("United States", ignoreCase = true) -> "America"
+                            else -> regionName
+                        }
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Region: $displayRegion ($regionCode)",
+                            fontFamily = JetBrainsMonoFontFamily,
+                            color = lc.textSecondary,
+                            fontSize = 12.sp,
+                            letterSpacing = 0.3.sp
+                        )
+                    } else {
+                        Text(
+                            text = "Free Plan",
+                            fontFamily = JetBrainsMonoFontFamily,
+                            color = lc.textSecondary,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            letterSpacing = 0.5.sp
+                        )
+                    }
                 }
-                Spacer(modifier = Modifier.height(16.dp))
             }
 
-            // Menu Items
-            ProfileMenuItem(
-                icon = Icons.Rounded.Settings,
-                title = "Settings",
-                subtitle = "Playback, EQ, Appearance",
-                onClick = onOpenSettings
-            )
+            item { Spacer(modifier = Modifier.height(24.dp)) }
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            if (isLoggedIn) {
-                ProfileMenuItem(
-                    icon = Icons.AutoMirrored.Rounded.ExitToApp,
-                    title = "Sign Out",
-                    subtitle = "Log out of your account",
-                    onClick = {
-                        LocalAuthManager.logout()
-                        IcmAuthRepository.logout()
-                        onLogout()
+            // ═══════════════════════════════════════════════════════════
+            //  2. CAMP SELECTOR (Music Source)
+            // ═══════════════════════════════════════════════════════════
+            item {
+                CampSelectorScreen(
+                    onCampChanged = { camp ->
+                        android.util.Log.i("ProfileScreen", "Camp changed to ${camp.id}")
                     },
-                    tint = AppleRed
+                    modifier = Modifier.fillMaxWidth()
                 )
-            } else {
-                // Sign In button
-                Box(
+            }
+
+            item { Spacer(modifier = Modifier.height(24.dp)) }
+
+            // ═══════════════════════════════════════════════════════════
+            //  4. SETTINGS LIST
+            // ═══════════════════════════════════════════════════════════
+            item {
+                Text(
+                    text = "SETTINGS",
+                    fontFamily = JetBrainsMonoFontFamily,
+                    color = lc.textSecondary,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.5.sp,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(52.dp)
-                        .clip(RoundedCornerShape(percent = 50))
-                        .background(AppleRed)
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null
-                        ) { onOpenAuth() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "Sign In",
-                        color = Color.White,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 16.sp
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(32.dp))
-
-            // Subscription info
-            if (isPremium) {
-                Text(
-                    text = "Your Subscription",
-                    color = LiquidTheme.colors.textPrimary,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.SemiBold
+                        .padding(horizontal = 20.dp, vertical = 8.dp)
                 )
-                Spacer(modifier = Modifier.height(12.dp))
+            }
 
-                val sub = subscription
-                if (sub != null) {
-                    SubscriptionCard(
-                        subscription = sub,
-                        premiumExpiresAt = premiumExpiresAt
+            item {
+                SettingRowNavigable(
+                    icon = Icons.Rounded.Settings,
+                    label = "Playback & Appearance",
+                    value = "EQ, Theme, Quality",
+                    onClick = onOpenSettings
+                )
+            }
+
+            item {
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 20.dp),
+                    color = lc.divider
+                )
+            }
+
+            // ── Account section ──
+            if (isLoggedIn) {
+                item {
+                    SettingRowAction(
+                        icon = Icons.AutoMirrored.Rounded.ExitToApp,
+                        label = "Sign Out",
+                        tint = AppleRed,
+                        onClick = {
+                            LocalAuthManager.logout()
+                            IcmAuthRepository.logout()
+                            onLogout()
+                        }
                     )
-                } else {
-                    SubscriptionCard(
-                        name = "Premium",
-                        validUntil = if (premiumExpiresAt > 0) {
-                            SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
-                                .format(Date(premiumExpiresAt))
-                        } else "Lifetime"
+                }
+            } else {
+                item {
+                    SettingRowNavigable(
+                        icon = Icons.Rounded.Person,
+                        label = "Sign In",
+                        value = "Connect your account",
+                        onClick = onOpenAuth
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.weight(1f))
+            item { Spacer(modifier = Modifier.height(24.dp)) }
 
-            // Footer
-            Text(
-                text = "Liquid Music Glass v1.0",
-                color = Color.White.copy(alpha = 0.2f),
-                fontSize = 12.sp,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth()
-            )
-            Spacer(modifier = Modifier.height(24.dp))
+            // ═══════════════════════════════════════════════════════════
+            //  5. DANGER ZONE
+            // ═══════════════════════════════════════════════════════════
+            item {
+                Text(
+                    text = "DANGER ZONE",
+                    fontFamily = JetBrainsMonoFontFamily,
+                    color = AppleRed,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.5.sp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 8.dp)
+                )
+            }
+
+            item {
+                SettingRowAction(
+                    icon = Icons.Rounded.DeleteForever,
+                    label = "Clear All Downloads",
+                    subtitle = "Permanently delete offline tracks",
+                    tint = AppleRed,
+                    onClick = { showClearDialog = true }
+                )
+            }
+
+            item { Spacer(modifier = Modifier.height(32.dp)) }
+
+            // ── Footer ──
+            item {
+                Text(
+                    text = "Liquid Music Glass v1.0",
+                    fontFamily = JetBrainsMonoFontFamily,
+                    color = lc.textTertiary,
+                    fontSize = 10.sp,
+                    textAlign = TextAlign.Center,
+                    letterSpacing = 1.sp,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            item { Spacer(modifier = Modifier.height(24.dp)) }
         }
     }
 }
 
+// ═══════════════════════════════════════════════════════════
+//  Data class for storage stats
+// ═══════════════════════════════════════════════════════════
+
+private data class StorageStats(
+    val gbString: String,
+    val syncedCount: Int,
+    val totalCount: Int
+) {
+    companion object {
+        val ZERO = StorageStats("0.00", 0, 0)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Setting Row — Navigable (with chevron)
+// ═══════════════════════════════════════════════════════════
+
 @Composable
-private fun ProfileMenuItem(
+private fun SettingRowNavigable(
     icon: ImageVector,
-    title: String,
-    subtitle: String,
-    onClick: () -> Unit,
-    tint: Color = Color.White
+    label: String,
+    value: String,
+    onClick: () -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(64.dp)
-            .clip(RoundedCornerShape(22.dp))
-            .background(Color(0xFF1A1A1A))
+            .height(56.dp)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = onClick
             )
-            .padding(horizontal = 16.dp),
+            .padding(horizontal = 20.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
             icon,
             null,
-            tint = tint.copy(alpha = 0.7f),
-            modifier = Modifier.size(24.dp)
+            tint = LiquidTheme.colors.iconDefault.copy(alpha = 0.6f),
+            modifier = Modifier.size(22.dp)
         )
         Spacer(modifier = Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = title,
-                color = tint,
+                text = label,
+                fontFamily = JetBrainsMonoFontFamily,
+                color = LiquidTheme.colors.textPrimary,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Medium
             )
             Text(
-                text = subtitle,
-                color = Color.White.copy(alpha = 0.4f),
+                text = value,
+                fontFamily = JetBrainsMonoFontFamily,
+                color = LiquidTheme.colors.textSecondary,
                 fontSize = 12.sp
             )
         }
         Icon(
-            Icons.Rounded.ChevronRight,
+            Icons.AutoMirrored.Rounded.KeyboardArrowRight,
             null,
-            tint = Color.White.copy(alpha = 0.3f),
+            tint = LiquidTheme.colors.iconMuted,
             modifier = Modifier.size(20.dp)
         )
     }
 }
 
+// ═══════════════════════════════════════════════════════════
+//  Setting Row — Action (no chevron, optional subtitle)
+// ═══════════════════════════════════════════════════════════
+
 @Composable
-private fun SubscriptionCard(
+private fun SettingRowAction(
+    icon: ImageVector,
+    label: String,
+    subtitle: String? = null,
+    tint: Color = LiquidTheme.colors.iconDefault,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(if (subtitle != null) 64.dp else 56.dp)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick
+            )
+            .padding(horizontal = 20.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            icon,
+            null,
+            tint = tint.copy(alpha = 0.8f),
+            modifier = Modifier.size(22.dp)
+        )
+        Spacer(modifier = Modifier.width(16.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = label,
+                fontFamily = JetBrainsMonoFontFamily,
+                color = tint,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium
+            )
+            if (subtitle != null) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = subtitle,
+                    fontFamily = JetBrainsMonoFontFamily,
+                    color = LiquidTheme.colors.textSecondary,
+                    fontSize = 12.sp
+                )
+            }
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Subscription Cards
+// ═══════════════════════════════════════════════════════════
+
+@Composable
+private fun SimpleSubscriptionCard(
     name: String,
     validUntil: String
 ) {
+    val isDark = LiquidTheme.colors.isDark
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(72.dp)
-            .clip(RoundedCornerShape(22.dp))
-            .background(Color(0xFF1A1A1A))
+            .padding(horizontal = 20.dp)
+            .height(64.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(if (isDark) Color(0xFF10141D) else Color(0xFFF2F2F7))
             .padding(horizontal = 16.dp),
         contentAlignment = Alignment.CenterStart
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
                 modifier = Modifier
-                    .size(40.dp)
+                    .size(36.dp)
                     .clip(RoundedCornerShape(10.dp))
-                    .background(PremiumPurple.copy(alpha = 0.2f)),
+                    .background(PremiumPurple.copy(alpha = 0.15f)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     Icons.Rounded.Star,
                     null,
                     tint = PremiumPurple,
-                    modifier = Modifier.size(22.dp)
+                    modifier = Modifier.size(18.dp)
                 )
             }
             Spacer(modifier = Modifier.width(14.dp))
             Column {
                 Text(
                     text = name,
-                    color = Color.White,
-                    fontSize = 15.sp,
+                    fontFamily = JetBrainsMonoFontFamily,
+                    color = LiquidTheme.colors.textPrimary,
+                    fontSize = 14.sp,
                     fontWeight = FontWeight.Medium
                 )
                 Text(
                     text = "Valid until $validUntil",
-                    color = Color.White.copy(alpha = 0.5f),
-                    fontSize = 13.sp
+                    fontFamily = JetBrainsMonoFontFamily,
+                    color = LiquidTheme.colors.textSecondary,
+                    fontSize = 11.sp
                 )
             }
         }
@@ -463,19 +567,19 @@ private fun SubscriptionCard(
 }
 
 @Composable
-private fun SubscriptionCard(
-    subscription: com.liquidmusicglass.api.icm.IcmSubscriptionResponse,
+private fun SubscriptionDetailCard(
+    sub: com.liquidmusicglass.api.icm.IcmSubscriptionResponse,
     premiumExpiresAt: Long
 ) {
-    val planLabel = when (subscription.planType) {
-        "family" -> if (subscription.isFamilyOwner) "Premium (Family Owner)" else "Premium (Family Member)"
+    val planLabel = when (sub.planType) {
+        "family" -> if (sub.isFamilyOwner) "Premium (Family Owner)" else "Premium (Family Member)"
         "personal" -> "Premium (Personal)"
         else -> "Premium"
     }
 
     val expiryText = when {
-        !subscription.expiresAtIso.isNullOrBlank() -> {
-            val dateStr = subscription.expiresAtIso.substringBefore("T")
+        !sub.expiresAtIso.isNullOrBlank() -> {
+            val dateStr = sub.expiresAtIso.substringBefore("T")
             try {
                 val parts = dateStr.split("-")
                 "${parts[2]}.${parts[1]}.${parts[0]}"
@@ -489,79 +593,84 @@ private fun SubscriptionCard(
         else -> "Lifetime"
     }
 
-    val daysLeftText = if (subscription.daysLeft > 0) " (${subscription.daysLeft} days left)" else ""
+    val daysLeftText = if (sub.daysLeft > 0) " (${sub.daysLeft} days left)" else ""
 
+    val isDark = LiquidTheme.colors.isDark
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(22.dp))
-            .background(Color(0xFF1A1A1A))
+            .padding(horizontal = 20.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(if (isDark) Color(0xFF10141D) else Color(0xFFF2F2F7))
             .padding(16.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
                 modifier = Modifier
-                    .size(40.dp)
+                    .size(36.dp)
                     .clip(RoundedCornerShape(10.dp))
-                    .background(PremiumPurple.copy(alpha = 0.2f)),
+                    .background(PremiumPurple.copy(alpha = 0.15f)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     Icons.Rounded.Star,
                     null,
                     tint = PremiumPurple,
-                    modifier = Modifier.size(22.dp)
+                    modifier = Modifier.size(18.dp)
                 )
             }
             Spacer(modifier = Modifier.width(14.dp))
             Column {
                 Text(
                     text = planLabel,
-                    color = Color.White,
-                    fontSize = 15.sp,
+                    fontFamily = JetBrainsMonoFontFamily,
+                    color = LiquidTheme.colors.textPrimary,
+                    fontSize = 14.sp,
                     fontWeight = FontWeight.Medium
                 )
                 Text(
                     text = "Valid until $expiryText$daysLeftText",
-                    color = Color.White.copy(alpha = 0.5f),
-                    fontSize = 13.sp
+                    fontFamily = JetBrainsMonoFontFamily,
+                    color = LiquidTheme.colors.textSecondary,
+                    fontSize = 11.sp
                 )
             }
         }
 
-        if (subscription.regions.isNotEmpty()) {
-            Spacer(modifier = Modifier.height(14.dp))
+        if (sub.regions.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(12.dp))
             Text(
                 text = "Active Storefronts:",
-                color = Color.White.copy(alpha = 0.4f),
+                fontFamily = JetBrainsMonoFontFamily,
+                color = LiquidTheme.colors.textSecondary,
                 fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 0.5.sp
             )
             Spacer(modifier = Modifier.height(6.dp))
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                subscription.regions.forEach { region ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                sub.regions.forEach { region ->
                     Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color(0xFF2A2A2A))
-                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                         modifier = Modifier
+                             .clip(RoundedCornerShape(10.dp))
+                             .background(if (isDark) SurfaceElevated else Color(0xFFF2F2F7))
+                             .padding(horizontal = 10.dp, vertical = 4.dp)
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(
                                 modifier = Modifier
-                                    .size(6.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFF22C55E))
+                                    .size(5.dp)
+                                    .clip(RoundedCornerShape(50))
+                                    .background(Color(0xFF34C759))
                             )
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "${region.name} (${region.code.uppercase()})",
-                                color = Color.White.copy(alpha = 0.8f),
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Medium
-                            )
+                             Text(
+                                 text = "${region.name} (${region.code.uppercase()})",
+                                 fontFamily = JetBrainsMonoFontFamily,
+                                 color = LiquidTheme.colors.textPrimary.copy(alpha = 0.75f),
+                                 fontSize = 10.sp,
+                                 fontWeight = FontWeight.Medium
+                             )
                         }
                     }
                 }

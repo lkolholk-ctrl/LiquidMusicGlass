@@ -67,6 +67,7 @@ object AudioDownloadManager {
                         durationMs = track.durationMs,
                         imageUrl = track.coverUrl,
                         localPath = finalFile.absolutePath,
+                        localCoverPath = null, // Single-track download doesn't cache cover locally yet
                         quality = quality
                     )
                 )
@@ -83,11 +84,58 @@ object AudioDownloadManager {
         val db = FavoriteTrackDatabase.getInstance(context)
         val entity = db.getDownloadedTracks().find { it.trackId == trackId }
         val ext = if (entity?.quality?.uppercase() == "ALAC") ".m4a" else ".mp3"
-        val file = File(context.filesDir, "downloads/$trackId$ext")
-        if (file.exists()) {
-            file.delete()
+
+        // Delete physical audio file
+        val audioFile = File(context.filesDir, "downloads/$trackId$ext")
+        if (audioFile.exists()) {
+            audioFile.delete()
         }
+
+        // Delete physical cover art file if it exists
+        entity?.localCoverPath?.let { coverPath ->
+            val coverFile = File(coverPath)
+            if (coverFile.exists()) {
+                coverFile.delete()
+            }
+        }
+
+        // Remove from database
         db.deleteDownloaded(trackId)
+    }
+
+    /**
+     * Clears ALL downloaded tracks from both the database and the file system.
+     * Deletes everything in Downloads/LiquidMusicGlass/ including the .covers/ folder.
+     * Runs on Dispatchers.IO to avoid ANR when deleting thousands of files.
+     */
+    suspend fun clearAllDownloads(context: Context) = withContext(Dispatchers.IO) {
+        val db = FavoriteTrackDatabase.getInstance(context)
+
+        // 1. Delete all physical files in the public Downloads/LiquidMusicGlass directory
+        val publicDir = File(
+            android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
+            "LiquidMusicGlass"
+        )
+        if (publicDir.exists()) {
+            publicDir.listFiles()?.forEach { file ->
+                if (file.isDirectory) {
+                    // Recursively delete subdirectories (e.g., .covers/)
+                    file.listFiles()?.forEach { it.delete() }
+                }
+                file.delete()
+            }
+            // Delete the directory itself if empty
+            publicDir.delete()
+        }
+
+        // 2. Delete all physical files in the private app downloads directory
+        val privateDir = File(context.filesDir, "downloads")
+        if (privateDir.exists()) {
+            privateDir.listFiles()?.forEach { it.delete() }
+        }
+
+        // 3. Clear the database table
+        db.clearAllDownloads()
     }
 
     private suspend fun performDownload(context: Context, track: Track, ext: String): Boolean = withContext(Dispatchers.IO) {

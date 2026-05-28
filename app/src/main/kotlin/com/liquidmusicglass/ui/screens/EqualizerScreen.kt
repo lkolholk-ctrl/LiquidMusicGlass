@@ -27,7 +27,7 @@ fun EqualizerScreen(onBack: () -> Unit) {
     val lc = LiquidTheme.colors
     val scroll = rememberScrollState()
 
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+    Box(modifier = Modifier.fillMaxSize().background(LiquidTheme.colors.settingsBackground)) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -81,7 +81,7 @@ private fun CircleButton(
     Box(
         modifier = Modifier
             .size(40.dp)
-            .background(Color(0xFF1C1C1E), CircleShape)
+            .background(if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7), CircleShape)
             .clip(CircleShape)
             .clickable(remember { MutableInteractionSource() }, null, onClick = onClick),
         contentAlignment = Alignment.Center

@@ -3,7 +3,9 @@ package com.liquidmusicglass.ui.screens
 import android.content.Context
 import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
@@ -27,6 +29,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -39,6 +42,8 @@ import com.liquidmusicglass.api.icm.IcmHomeItem
 import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.api.icm.IcmWaveTrack
 import com.liquidmusicglass.api.icm.toTrack
+import com.liquidmusicglass.camp.FeatureAccessManager
+import com.liquidmusicglass.camp.MusicCamp
 import com.liquidmusicglass.data.local.WaveRepository
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.Track
@@ -51,15 +56,30 @@ private val AppleRed = Color(0xFFFC3C44)
 
 private suspend fun resolveWaveTrackUrl(track: Track?): Track? {
     if (track == null) return null
+
+    // YouTube tracks use their own resolver
+    if (track.isYouTubeTrack) {
+        return try {
+            val result = com.liquidmusicglass.api.youtube.YouTubeMusicRepository.getInstance()
+                .getAudioStream(track.id)
+            if (result.isSuccess) {
+                val stream = result.getOrThrow()
+                track.copy(uri = Uri.parse(stream.url))
+            } else null
+        } catch (_: Exception) { null }
+    }
+
     return try {
-        val url = IcmRepository.getStreamUrl(track.id)
+        val url = IcmRepository.getStreamUrl(track.id, source = track.source)
         if (url != null) {
             track.copy(uri = Uri.parse(url))
         } else {
-            track
+            android.util.Log.w("HomeScreen", "Wave track ${track.id} (${track.title}) failed URL resolution, skipping")
+            null
         }
-    } catch (_: Exception) {
-        track
+    } catch (e: Exception) {
+        android.util.Log.w("HomeScreen", "Wave track ${track.id} (${track.title}) URL resolve exception: ${e.message}")
+        null
     }
 }
 
@@ -88,47 +108,47 @@ private data class MoodCategory(
 
 private val moodCategories = listOf(
     MoodCategory(
-        "my_wave", "Моя волна",
+        "my_wave", "My Wave",
         listOf(Color(0xFFFC3C44), Color(0xFFFF6B6B)), "",
         listOf("") // Personal wave — no seed queries, uses getWaveNext directly
     ),
     MoodCategory(
-        "melancholy", "Меланхолия",
+        "melancholy", "Melancholy",
         listOf(Color(0xFF1E3A5F), Color(0xFF2D5A87)), "",
         listOf("melancholy", "sad indie", "lo-fi sad")
     ),
     MoodCategory(
-        "good_mood", "Хорошее настроение",
+        "good_mood", "Good Mood",
         listOf(Color(0xFFD4730E), Color(0xFFF5A623)), "",
         listOf("happy pop hits", "feel good", "summer hits")
     ),
     MoodCategory(
-        "broken_heart", "Для разбитых сердец",
+        "broken_heart", "Broken Heart",
         listOf(Color(0xFF8B1538), Color(0xFFC41E3A)), "",
         listOf("breakup songs", "heartbreak", "sad love songs")
     ),
     MoodCategory(
-        "focus", "Концентрация",
+        "focus", "Focus",
         listOf(Color(0xFF2D5016), Color(0xFF4A7C23)), "",
         listOf("focus instrumental", "deep focus", "study beats")
     ),
     MoodCategory(
-        "energy", "Энергия",
+        "energy", "Energy",
         listOf(Color(0xFF8B4513), Color(0xFFD2691E)), "",
         listOf("high energy", "power hits", "edm energy")
     ),
     MoodCategory(
-        "night", "Ночная волна",
+        "night", "Night Wave",
         listOf(Color(0xFF1A1A2E), Color(0xFF16213E)), "",
         listOf("late night", "night drive", "synthwave night")
     ),
     MoodCategory(
-        "workout", "Тренировка",
+        "workout", "Workout",
         listOf(Color(0xFF4A0000), Color(0xFF8B0000)), "",
         listOf("workout", "gym motivation", "running mix")
     ),
     MoodCategory(
-        "chill", "Чилл",
+        "chill", "Chill",
         listOf(Color(0xFF483D8B), Color(0xFF6A5ACD)), "",
         listOf("chillhop", "chill lofi", "ambient chill")
     ),
@@ -162,7 +182,8 @@ private suspend fun loadMoodFallbackTracks(mood: MoodCategory, count: Int): List
 fun HomeScreen(
     onNavigateToAlbum: (String) -> Unit = {},
     onNavigateToArtist: (String) -> Unit = {},
-    onNavigateToPlaylist: (String) -> Unit = {}
+    onNavigateToPlaylist: (String) -> Unit = {},
+    onNavigateToYouTube: () -> Unit = {}
 ) {
     val viewModel = remember { HomeViewModel() }
     val context = LocalContext.current
@@ -230,8 +251,10 @@ fun HomeScreen(
                 }
             }
             moodTracks = moodTracks + (moodId to waveTracks)
-            // Append new tracks to player queue
-            val newTracks = waveTracks.drop(existing.size).map { waveTrackToTrack(it) }
+            // Append new tracks to player queue — pre-validate URLs first
+            val newTracks = waveTracks.drop(existing.size)
+                .map { waveTrackToTrack(it) }
+                .mapNotNull { resolveWaveTrackUrl(it) }
             newTracks.forEach { PlayerController.addToQueue(it) }
             moodLoading = moodLoading - moodId
         }
@@ -252,11 +275,9 @@ fun HomeScreen(
             isPlayingMood = true
             scope.launch {
                 val tracks = existing.map { waveTrackToTrack(it) }
-                // Resolve first track URL immediately for fast start
-                val firstResolved = resolveWaveTrackUrl(tracks.firstOrNull())
-                if (firstResolved != null) {
-                    val resolvedTracks = tracks.toMutableList()
-                    resolvedTracks[0] = firstResolved
+                // Resolve all track URLs and filter out those that fail
+                val resolvedTracks = tracks.mapNotNull { resolveWaveTrackUrl(it) }
+                if (resolvedTracks.isNotEmpty()) {
                     PlayerController.setQueue(resolvedTracks)
                     PlayerController.playTrack(context, 0)
                 }
@@ -271,28 +292,84 @@ fun HomeScreen(
         isPlayingMood = true
         moodLoading = moodLoading + moodId
         scope.launch {
-            if (moodId == "my_wave") {
-                // === МОЯ ВОЛНА через WaveRepository с фильтрацией по жанрам ===
-                val waveRepo = WaveRepository.getInstance(context)
-                val queue = waveRepo.buildWaveQueue()
-                moodLoading = moodLoading - moodId
+            // Check current camp
+            val campManager = FeatureAccessManager.getInstance(context)
+            val currentCamp = campManager.currentCamp.value
 
-                if (queue.isNotEmpty()) {
-                    // Резолвим URL первого трека
-                    val firstResolved = resolveWaveTrackUrl(queue.firstOrNull())
-                    val resolvedQueue = queue.toMutableList()
-                    if (firstResolved != null) resolvedQueue[0] = firstResolved
-                    PlayerController.setQueue(resolvedQueue)
-                    PlayerController.playTrack(context, 0)
-                    // Добавляем следующие треки в очередь
-                    queue.drop(1).forEach { PlayerController.addToQueue(it) }
-                } else {
-                    // Очередь пуста — показываем onboarding
-                    pendingMoodId = moodId
-                    activeMoodId = null
-                    isPlayingMood = false
-                    PlayerController.clearAutoRefillContext()
-                    showWaveOnboarding = true
+            if (moodId == "my_wave") {
+                when (currentCamp) {
+                    is MusicCamp.Youtube -> {
+                        // === YOUTUBE RADIO ===
+                        val ytRepo = com.liquidmusicglass.api.youtube.YouTubeMusicRepository.getInstance()
+                        // Search for a seed track based on mood
+                        val seedQuery = mood.seedQueries.firstOrNull() ?: "popular music"
+                        val searchResult = ytRepo.search(seedQuery, com.liquidmusicglass.api.youtube.YtSearchFilter.SONGS)
+                        val seedTrack = searchResult.getOrNull()?.firstOrNull()
+
+                        if (seedTrack != null) {
+                            val radioResult = ytRepo.getRadioQueue(seedTrack.videoId)
+                            moodLoading = moodLoading - moodId
+
+                            if (radioResult.isSuccess) {
+                                val ytTracks = radioResult.getOrThrow()
+                                val resolvedTracks = ytTracks.mapNotNull { ytTrack ->
+                                    val streamResult = ytRepo.getAudioStream(ytTrack.videoId)
+                                    if (streamResult.isSuccess) {
+                                        val stream = streamResult.getOrThrow()
+                                        ytTrack.toEngineTrack(stream.url)
+                                    } else null
+                                }
+
+                                if (resolvedTracks.isNotEmpty()) {
+                                    PlayerController.playFromList(
+                                        context = context,
+                                        tracks = resolvedTracks,
+                                        startIndex = 0,
+                                        autoRefillType = "YOUTUBE_RADIO",
+                                        autoRefillId = seedTrack.videoId,
+                                        autoRefillName = mood.title,
+                                        seedTrackId = seedTrack.videoId
+                                    )
+                                } else {
+                                    activeMoodId = null
+                                    isPlayingMood = false
+                                }
+                            } else {
+                                activeMoodId = null
+                                isPlayingMood = false
+                            }
+                        } else {
+                            moodLoading = moodLoading - moodId
+                            activeMoodId = null
+                            isPlayingMood = false
+                        }
+                    }
+                    else -> {
+                        // === ICM МОЯ ВОЛНА ===
+                        val waveRepo = WaveRepository.getInstance(context)
+                        val queue = waveRepo.buildWaveQueue()
+                        moodLoading = moodLoading - moodId
+
+                        if (queue.isNotEmpty()) {
+                            val resolvedQueue = queue.mapNotNull { resolveWaveTrackUrl(it) }
+                            if (resolvedQueue.isNotEmpty()) {
+                                PlayerController.setQueue(resolvedQueue)
+                                PlayerController.playTrack(context, 0)
+                            } else {
+                                pendingMoodId = moodId
+                                activeMoodId = null
+                                isPlayingMood = false
+                                PlayerController.clearAutoRefillContext()
+                                showWaveOnboarding = true
+                            }
+                        } else {
+                            pendingMoodId = moodId
+                            activeMoodId = null
+                            isPlayingMood = false
+                            PlayerController.clearAutoRefillContext()
+                            showWaveOnboarding = true
+                        }
+                    }
                 }
             } else {
                 // === Остальные настроения через seed-based wave ===
@@ -325,27 +402,51 @@ fun HomeScreen(
                 moodLoading = moodLoading - moodId
 
                 if (waveTracks.isNotEmpty()) {
-                    val tracks = waveTracks.map { waveTrackToTrack(it) }
-                    // Resolve first track URL immediately for fast start
-                    val firstResolved = resolveWaveTrackUrl(tracks.firstOrNull())
-                    if (firstResolved != null) {
-                        val resolvedTracks = tracks.toMutableList()
-                        resolvedTracks[0] = firstResolved
+                    // Resolve all track URLs and filter out those that fail
+                    val resolvedTracks = waveTracks
+                        .map { waveTrackToTrack(it) }
+                        .mapNotNull { resolveWaveTrackUrl(it) }
+                    
+                    if (resolvedTracks.isNotEmpty()) {
                         PlayerController.setQueue(resolvedTracks)
                         PlayerController.playTrack(context, 0)
+                        // Preload next batch
+                        loadMoreMoodTracks(moodId, waveTracks)
+                    } else {
+                        // All wave tracks failed to resolve — fall back to search
+                        val fallback = loadMoodFallbackTracks(mood, count = 12)
+                        if (fallback.isNotEmpty()) {
+                            val fallbackResolved = fallback
+                                .mapNotNull { resolveWaveTrackUrl(it) }
+                            if (fallbackResolved.isNotEmpty()) {
+                                PlayerController.clearAutoRefillContext()
+                                PlayerController.setQueue(fallbackResolved)
+                                PlayerController.playTrack(context, 0)
+                            } else {
+                                activeMoodId = null
+                                isPlayingMood = false
+                                PlayerController.clearAutoRefillContext()
+                            }
+                        } else {
+                            activeMoodId = null
+                            isPlayingMood = false
+                            PlayerController.clearAutoRefillContext()
+                        }
                     }
-                    // Preload next batch
-                    loadMoreMoodTracks(moodId, waveTracks)
                 } else {
                     // Wave is empty — fall back to search-driven playlist
                     val fallback = loadMoodFallbackTracks(mood, count = 12)
                     if (fallback.isNotEmpty()) {
-                        val firstResolved = resolveWaveTrackUrl(fallback.firstOrNull())
-                        val resolvedTracks = fallback.toMutableList()
-                        if (firstResolved != null) resolvedTracks[0] = firstResolved
-                        PlayerController.clearAutoRefillContext()
-                        PlayerController.setQueue(resolvedTracks)
-                        PlayerController.playTrack(context, 0)
+                        val resolvedTracks = fallback.mapNotNull { resolveWaveTrackUrl(it) }
+                        if (resolvedTracks.isNotEmpty()) {
+                            PlayerController.clearAutoRefillContext()
+                            PlayerController.setQueue(resolvedTracks)
+                            PlayerController.playTrack(context, 0)
+                        } else {
+                            activeMoodId = null
+                            isPlayingMood = false
+                            PlayerController.clearAutoRefillContext()
+                        }
                     } else {
                         activeMoodId = null
                         isPlayingMood = false
@@ -360,7 +461,7 @@ fun HomeScreen(
         scope.launch { IcmRepository.sendWaveFeedback(feedbackType, value) }
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+    Box(modifier = Modifier.fillMaxSize().background(LiquidTheme.colors.settingsBackground)) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -394,6 +495,17 @@ fun HomeScreen(
 
             Spacer(modifier = Modifier.height(28.dp))
 
+            // ─── YouTube Music Quick Access ───
+            val currentCamp by remember {
+                com.liquidmusicglass.camp.FeatureAccessManager.getInstance(context)
+                    .currentCamp
+            }.collectAsState()
+
+            if (currentCamp is com.liquidmusicglass.camp.MusicCamp.Youtube) {
+                YouTubeMusicBanner(onClick = onNavigateToYouTube)
+                Spacer(modifier = Modifier.height(20.dp))
+            }
+
             // Loading state
             if (isLoading && homeContent == null) {
                 Box(
@@ -426,6 +538,65 @@ fun HomeScreen(
                 Spacer(modifier = Modifier.height(16.dp))
             }
 
+            // ─── My Wave - Mood Categories (Moods to the Top) ───
+            SectionHeader(title = "Moods")
+            Spacer(modifier = Modifier.height(12.dp))
+
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                items(moodCategories, key = { it.id }) { mood ->
+                    val isLoading = mood.id in moodLoading && moodTracks[mood.id].isNullOrEmpty()
+                    MoodCard(
+                        mood = mood,
+                        isActive = activeMoodId == mood.id,
+                        isLoading = isLoading,
+                        onClick = {
+                            if (activeMoodId == mood.id) {
+                                // Stop / collapse
+                                activeMoodId = null
+                                isPlayingMood = false
+                                PlayerController.clearAutoRefillContext()
+                            } else {
+                                playMoodStation(mood.id)
+                            }
+                        }
+                    )
+                }
+            }
+
+            // Playing indicator
+            if (isPlayingMood && activeMoodId != null) {
+                Spacer(modifier = Modifier.height(12.dp))
+                val moodTitle = moodCategories.find { it.id == activeMoodId }?.title ?: ""
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(Color(0xFF1C1C1E))
+                        .padding(horizontal = 16.dp, vertical = 10.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .background(AppleRed, RoundedCornerShape(50))
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Playing: $moodTitle",
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(32.dp))
+
             // ─── Popular Tracks ───
             popularBlock?.let { block ->
                 if (block.items.isNotEmpty()) {
@@ -442,7 +613,9 @@ fun HomeScreen(
                                     val track = item.toTrack()
                                     scope.launch {
                                         val resolved = resolveWaveTrackUrl(track)
-                                        PlayerController.playNext(resolved ?: track, context)
+                                        if (resolved != null) {
+                                            PlayerController.playNext(resolved, context)
+                                        }
                                     }
                                 }
                             )
@@ -468,7 +641,9 @@ fun HomeScreen(
                                     val track = item.toTrack()
                                     scope.launch {
                                         val resolved = resolveWaveTrackUrl(track)
-                                        PlayerController.playNext(resolved ?: track, context)
+                                        if (resolved != null) {
+                                            PlayerController.playNext(resolved, context)
+                                        }
                                     }
                                 }
                             )
@@ -560,7 +735,9 @@ fun HomeScreen(
                                     val track = item.toTrack()
                                     scope.launch {
                                         val resolved = resolveWaveTrackUrl(track)
-                                        PlayerController.playNext(resolved ?: track, context)
+                                        if (resolved != null) {
+                                            PlayerController.playNext(resolved, context)
+                                        }
                                     }
                                 }
                             )
@@ -569,65 +746,6 @@ fun HomeScreen(
                     Spacer(modifier = Modifier.height(32.dp))
                 }
             }
-
-            // ─── My Wave - Mood Categories ───
-            SectionHeader(title = "Под настроение")
-            Spacer(modifier = Modifier.height(12.dp))
-
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = 20.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                items(moodCategories, key = { it.id }) { mood ->
-                    val isLoading = mood.id in moodLoading && moodTracks[mood.id].isNullOrEmpty()
-                    MoodCard(
-                        mood = mood,
-                        isActive = activeMoodId == mood.id,
-                        isLoading = isLoading,
-                        onClick = {
-                            if (activeMoodId == mood.id) {
-                                // Stop / collapse
-                                activeMoodId = null
-                                isPlayingMood = false
-                                PlayerController.clearAutoRefillContext()
-                            } else {
-                                playMoodStation(mood.id)
-                            }
-                        }
-                    )
-                }
-            }
-
-            // Playing indicator
-            if (isPlayingMood && activeMoodId != null) {
-                Spacer(modifier = Modifier.height(12.dp))
-                val moodTitle = moodCategories.find { it.id == activeMoodId }?.title ?: ""
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp)
-                        .clip(RoundedCornerShape(50))
-                        .background(Color(0xFF1C1C1E))
-                        .padding(horizontal = 16.dp, vertical = 10.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .background(AppleRed, RoundedCornerShape(50))
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Playing: $moodTitle",
-                            color = Color.White,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(32.dp))
 
             // ─── Recently Played ───
             if (recentlyPlayed.isNotEmpty()) {
@@ -992,10 +1110,132 @@ private fun MoodCard(
 ) {
     Box(
         modifier = Modifier
-            .width(160.dp)
-            .height(100.dp)
-            .clip(RoundedCornerShape(16.dp))
+            .size(130.dp)
+            .clip(RoundedCornerShape(20.dp))
             .background(Brush.linearGradient(mood.gradientColors))
+            .drawBehind {
+                val w = size.width
+                val h = size.height
+                val color = Color.White.copy(alpha = 0.08f)
+                val color2 = Color.White.copy(alpha = 0.04f)
+                
+                when (mood.id) {
+                    "my_wave" -> {
+                        val path = androidx.compose.ui.graphics.Path()
+                        path.moveTo(0f, h * 0.7f)
+                        path.quadraticTo(w * 0.25f, h * 0.4f, w * 0.5f, h * 0.6f)
+                        path.quadraticTo(w * 0.75f, h * 0.8f, w, h * 0.5f)
+                        drawPath(path, color, style = Stroke(width = 4.dp.toPx()))
+
+                        val path2 = androidx.compose.ui.graphics.Path()
+                        path2.moveTo(0f, h * 0.8f)
+                        path2.quadraticTo(w * 0.3f, h * 0.5f, w * 0.6f, h * 0.7f)
+                        path2.quadraticTo(w * 0.8f, h * 0.9f, w, h * 0.6f)
+                        drawPath(path2, color2, style = Stroke(width = 3.dp.toPx()))
+                    }
+                    "melancholy" -> {
+                        for (i in 0..6) {
+                            val startX = w * (i * 0.2f - 0.2f)
+                            drawLine(
+                                color = color,
+                                start = androidx.compose.ui.geometry.Offset(startX, 0f),
+                                end = androidx.compose.ui.geometry.Offset(startX + w * 0.4f, h),
+                                strokeWidth = 1.5.dp.toPx()
+                            )
+                        }
+                    }
+                    "good_mood" -> {
+                        drawCircle(
+                            color = color,
+                            radius = w * 0.6f,
+                            center = androidx.compose.ui.geometry.Offset(w, 0f),
+                            style = Stroke(width = 2.dp.toPx())
+                        )
+                        drawCircle(
+                            color = color,
+                            radius = w * 0.4f,
+                            center = androidx.compose.ui.geometry.Offset(w, 0f),
+                            style = Stroke(width = 2.dp.toPx())
+                        )
+                        drawCircle(
+                            color = color2,
+                            radius = w * 0.8f,
+                            center = androidx.compose.ui.geometry.Offset(w, 0f),
+                            style = Stroke(width = 2.dp.toPx())
+                        )
+                    }
+                    "broken_heart" -> {
+                        val path = androidx.compose.ui.graphics.Path()
+                        path.moveTo(w * 0.4f, 0f)
+                        path.lineTo(w * 0.6f, h * 0.4f)
+                        path.lineTo(w * 0.3f, h * 0.6f)
+                        path.lineTo(w * 0.5f, h)
+                        drawPath(path, color, style = Stroke(width = 2.dp.toPx()))
+                    }
+                    "focus" -> {
+                        for (i in 1..4) {
+                            drawCircle(
+                                color = color,
+                                radius = i * 20.dp.toPx(),
+                                center = androidx.compose.ui.geometry.Offset(w / 2f, h / 2f),
+                                style = Stroke(width = 1.dp.toPx())
+                            )
+                        }
+                    }
+                    "energy" -> {
+                        val path = androidx.compose.ui.graphics.Path()
+                        path.moveTo(w * 0.7f, 0f)
+                        path.lineTo(w * 0.3f, h * 0.55f)
+                        path.lineTo(w * 0.6f, h * 0.55f)
+                        path.lineTo(w * 0.2f, h)
+                        drawPath(path, color, style = Stroke(width = 2.dp.toPx()))
+                    }
+                    "night" -> {
+                        drawCircle(
+                            color = color,
+                            radius = w * 0.35f,
+                            center = androidx.compose.ui.geometry.Offset(w * 0.25f, h * 0.25f),
+                            style = Stroke(width = 1.5.dp.toPx())
+                        )
+                        drawCircle(
+                            color = color2,
+                            radius = w * 0.32f,
+                            center = androidx.compose.ui.geometry.Offset(w * 0.28f, h * 0.22f),
+                            style = Stroke(width = 1.5.dp.toPx())
+                        )
+                    }
+                    "workout" -> {
+                        for (i in 0..2) {
+                            val offset = i * 20.dp.toPx()
+                            val path = androidx.compose.ui.graphics.Path()
+                            path.moveTo(0f, offset)
+                            path.lineTo(w * 0.4f, offset + h * 0.3f)
+                            path.lineTo(w * 0.8f, offset)
+                            drawPath(path, color, style = Stroke(width = 2.dp.toPx()))
+                        }
+                    }
+                    "chill" -> {
+                        drawCircle(
+                            color = color,
+                            radius = w * 0.45f,
+                            center = androidx.compose.ui.geometry.Offset(w * 0.2f, h * 0.8f)
+                        )
+                        drawCircle(
+                            color = color2,
+                            radius = w * 0.35f,
+                            center = androidx.compose.ui.geometry.Offset(w * 0.8f, h * 0.7f)
+                        )
+                    }
+                    else -> {
+                        drawLine(
+                            color = color,
+                            start = androidx.compose.ui.geometry.Offset(0f, h),
+                            end = androidx.compose.ui.geometry.Offset(w, 0f),
+                            strokeWidth = 2.dp.toPx()
+                        )
+                    }
+                }
+            }
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -1008,15 +1248,6 @@ private fun MoodCard(
                 modifier = Modifier.size(20.dp).align(Alignment.BottomEnd),
                 color = Color.White,
                 strokeWidth = 2.dp
-            )
-        }
-        // Show heart icon for "My Wave", nothing for others (clean look)
-        if (mood.id == "my_wave") {
-            Icon(
-                imageVector = Icons.Filled.Favorite,
-                contentDescription = null,
-                tint = Color.White.copy(alpha = 0.8f),
-                modifier = Modifier.align(Alignment.TopEnd).size(22.dp)
             )
         }
         Text(
@@ -1071,5 +1302,69 @@ private fun RecentTrackCard(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
+    }
+}
+
+// ─── YouTube Music Banner ───
+@Composable
+private fun YouTubeMusicBanner(
+    onClick: () -> Unit
+) {
+    val YouTubeRed = Color(0xFFFF0000)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color(0xFF1A1A1A))
+            .border(1.dp, YouTubeRed.copy(alpha = 0.3f), RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick)
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(YouTubeRed.copy(alpha = 0.15f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = androidx.compose.material.icons.Icons.Rounded.PlayArrow,
+                contentDescription = null,
+                tint = YouTubeRed,
+                modifier = Modifier.size(28.dp)
+            )
+        }
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "YouTube Music",
+                color = Color.White,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = "Search millions of songs · Free streaming",
+                color = Color.White.copy(alpha = 0.6f),
+                fontSize = 13.sp
+            )
+        }
+
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .background(YouTubeRed)
+                .padding(horizontal = 14.dp, vertical = 8.dp)
+        ) {
+            Text(
+                text = "Open",
+                color = Color.White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
     }
 }

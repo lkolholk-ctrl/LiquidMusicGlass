@@ -74,13 +74,17 @@ fun UpdateDialog(backdrop: LayerBackdrop) {
             contentAlignment = Alignment.Center
         ) {
             // Premium solid dialog card
+            val isDark = lc.isDark
+            val dialogBg = if (isDark) Color(0xFF1C1C1E) else Color.White
+            val dialogBorder = if (isDark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.10f)
+
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 32.dp)
                     .clip(RoundedCornerShape(28.dp))
-                    .background(Color(0xFF1C1C1E))
-                    .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(28.dp))
+                    .background(dialogBg)
+                    .border(1.dp, dialogBorder, RoundedCornerShape(28.dp))
                     .padding(28.dp)
             ) {
                 Column {
@@ -132,24 +136,19 @@ fun UpdateDialog(backdrop: LayerBackdrop) {
                             modifier = Modifier
                                 .weight(1f)
                                 .height(46.dp)
-                                .drawBackdrop(
-                                    backdrop = backdrop,
-                                    shape = { Capsule() },
-                                    effects = { vibrancy(); blur(4.dp.toPx()) },
-                                    highlight = { Highlight.Ambient },
-                                    shadow = { Shadow(radius = 4.dp, color = Color.Black.copy(0.1f)) },
-                                    onDrawSurface = {
-                                        drawRect(Color.White.copy(0.05f))
-                                        drawRect(Color.White.copy(0.15f), style = Stroke(1.dp.toPx()))
-                                    }
+                                .clip(RoundedCornerShape(23.dp))
+                                .background(if (lc.isDark) Color.White.copy(alpha = 0.08f) else Color(0xFFF2F2F7))
+                                .border(
+                                    1.dp,
+                                    if (lc.isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.05f),
+                                    RoundedCornerShape(23.dp)
                                 )
-                                .clip(RoundedCornerShape(50))
                                 .clickable(remember { MutableInteractionSource() }, null) {
                                     AppUpdater.dismiss()
                                 },
                             contentAlignment = Alignment.Center
                         ) {
-                            Text("Later", color = lc.textSecondary, fontWeight = FontWeight.SemiBold)
+                            Text("Later", color = lc.textPrimary, fontWeight = FontWeight.SemiBold)
                         }
 
                         // Update

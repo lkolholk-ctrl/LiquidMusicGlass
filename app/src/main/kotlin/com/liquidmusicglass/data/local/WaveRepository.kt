@@ -25,6 +25,7 @@ class WaveRepository(context: Context) {
 
     private val db = AppDatabase.getInstance(context)
     private val dao = db.waveDao()
+    private val playbackDao = db.playbackHistoryDao()
 
     companion object {
         private const val TAG = "WaveRepository"
@@ -59,8 +60,14 @@ class WaveRepository(context: Context) {
             Log.d(TAG, "Top genres: ${topGenres.map { "${it.genre}=${it.count}" }}")
             topGenres.map { it.genre }
         } else {
-            Log.d(TAG, "No history, using defaults")
-            listOf("Electronic", "Electro House", "Techno")
+            val onboarding = com.liquidmusicglass.engine.AppSettings.onboardingGenres.value
+            if (onboarding.isNotEmpty()) {
+                Log.d(TAG, "No history, using onboarding genres: $onboarding")
+                onboarding
+            } else {
+                Log.d(TAG, "No history, using defaults")
+                listOf("Electronic", "Electro House", "Techno")
+            }
         }
     }
 
@@ -99,7 +106,7 @@ class WaveRepository(context: Context) {
             trackId = track.id,
             title = track.title,
             artist = track.artist,
-            genre = track.genre, // TODO: добавить genre в Track
+            genre = track.genre,
             source = source,
             durationPlayedMs = durationPlayedMs
         )
@@ -108,63 +115,164 @@ class WaveRepository(context: Context) {
         Log.d(TAG, "Logged: ${track.title} | genre=${track.genre} | source=$source | ${durationPlayedMs}ms")
     }
 
+    // ─── Track Stats & Playback History (for Wave de-duplication) ───
+
+    /**
+     * Log a completed play (track finished or played > 85%).
+     * Writes to both TrackStats and PlaybackHistory.
+     */
+    suspend fun logTrackPlayed(track: Track) = withContext(Dispatchers.IO) {
+        playbackDao.incrementPlayCount(
+            trackId = track.id,
+            title = track.title,
+            artistId = track.artist, // Using artist name as artistId for now
+            timestamp = System.currentTimeMillis()
+        )
+        Log.d(TAG, "TrackStats: playCount++ for ${track.title}")
+    }
+
+    /**
+     * Log a skipped track (user skipped early, < 30% played).
+     */
+    suspend fun logTrackSkipped(track: Track) = withContext(Dispatchers.IO) {
+        playbackDao.incrementSkipCount(
+            trackId = track.id,
+            title = track.title,
+            artistId = track.artist
+        )
+        Log.d(TAG, "TrackStats: skipCount++ for ${track.title}")
+    }
+
+    /**
+     * Get recent track IDs for wave exclude list.
+     * Returns the last [limit] played track IDs ordered by most recent first.
+     */
+    suspend fun getRecentTrackIdsForExclude(limit: Int = 50): List<String> = withContext(Dispatchers.IO) {
+        playbackDao.getRecentTrackIds(limit)
+    }
+
+    /**
+     * Get play count for a specific track.
+     */
+    suspend fun getTrackPlayCount(trackId: String): Int = withContext(Dispatchers.IO) {
+        playbackDao.getPlayCountForTrack(trackId)
+    }
+
+    /**
+     * Get total skip count for a specific track.
+     */
+    suspend fun getTrackSkipCount(trackId: String): Int = withContext(Dispatchers.IO) {
+        val stat = playbackDao.getTrackStat(trackId)
+        stat?.skippedCount ?: 0
+    }
+
     // ─── Wave Queue Building ───
 
     /**
-     * Строит очередь "Моей волны" строго по белому списку жанров.
-     *
-     * Алгоритм:
-     * 1. Получаем топ-жанры из истории
-     * 2. Ищем треки в кеше по этим жанрам
-     * 3. Дополняем из API с фильтром по жанрам
-     * 4. Отбраковываем треки с жанрами вне белого списка
+     * Builds a "My Wave" queue using the ICM /library/wave/next endpoint.
+     * 
+     * Uses random favorite seeds, applies ban filters and skipRatio filters, and heuristic genre tagging.
      */
-    suspend fun buildWaveQueue(): List<Track> = withContext(Dispatchers.IO) {
-        val whiteList = getTopGenres()
-        Log.d(TAG, "Building wave with whitelist: $whiteList")
+    suspend fun buildWaveQueue(count: Int = 5): List<Track> = withContext(Dispatchers.IO) {
+        Log.d(TAG, "Building wave queue with custom Favorite seeding & Ban Filters")
 
         val queue = mutableListOf<Track>()
+        val excludeIds = mutableSetOf<String>()
+        
+        // Get recent track IDs to exclude from wave
+        val recentIds = try {
+            playbackDao.getRecentTrackIds(50)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to get recent track IDs: ${e.message}")
+            emptyList()
+        }
+        excludeIds.addAll(recentIds)
 
-        // 1. Берём из кеша
-        val cached = dao.getTracksByGenres(whiteList, WAVE_QUEUE_SIZE / 2)
-        queue.addAll(cached.map { it.toEngineTrack() })
-        Log.d(TAG, "From cache: ${cached.size} tracks")
+        var attempts = 0
+        val maxAttempts = count * 6 // Fail-safe boundary limit
 
-        // 2. Дополняем из API по жанрам
-        val needed = WAVE_QUEUE_SIZE - queue.size
-        if (needed > 0) {
+        while (queue.size < count && attempts < maxAttempts) {
+            attempts++
             try {
-                // Для каждого топ-жанра ищем треки
-                for (genre in whiteList) {
-                    if (queue.size >= WAVE_QUEUE_SIZE) break
-                    val genreTracks = IcmRepository.searchTracksByGenre(genre, limit = needed)
-                    val filtered = genreTracks.filter { track ->
-                        // Жёсткая фильтрация: только жанры из белого списка
-                        val trackGenre = track.genre ?: getTrackGenre(track.id)
-                        val allowed = trackGenre != null && whiteList.any { 
-                            trackGenre.contains(it, ignoreCase = true) 
-                        }
-                        if (!allowed) {
-                            Log.d(TAG, "REJECTED: ${track.title} | genre=$trackGenre | not in whitelist")
-                        }
-                        allowed && queue.none { it.id == track.id } // без дубликатов
-                    }
-                    queue.addAll(filtered)
-                    Log.d(TAG, "From API [$genre]: ${filtered.size} tracks")
+                // Seeding with random favorite ID from Room DB cached_tracks
+                val seedTrackId = dao.getRandomFavoriteTrackId()
+                Log.d(TAG, "Attempt $attempts: Seeding wave query with random favorite seedTrackId=$seedTrackId")
+
+                val response = IcmRepository.getWaveNext(
+                    seedTrackId = seedTrackId,
+                    exclude = excludeIds.toList().takeIf { it.isNotEmpty() },
+                    recentSkips = 0,
+                    genre = null // Server ignores text genres, seeding by seedTrackId is the source of truth
+                )
+
+                if (response == null || response.status != "ok") {
+                    Log.w(TAG, "Wave response status: ${response?.status ?: "null"}")
+                    continue
                 }
+
+                val waveTrack = response.track ?: run {
+                    Log.w(TAG, "Wave track is null")
+                    continue
+                }
+
+                val trackId = waveTrack.id
+                val title = waveTrack.title
+                val artist = waveTrack.artist ?: "Unknown Artist"
+
+                // ── 1. HARD BAN FILTER: Excluding CIS trash music (Case-Insensitive) ──
+                val tLower = title.lowercase()
+                val aLower = artist.lowercase()
+                val badWords = listOf("кишлак", "soda luv", "face", "принц", "рэп", "rap")
+                if (badWords.any { tLower.contains(it) || aLower.contains(it) }) {
+                    Log.d(TAG, "Ban Filter: Blocked trash track $trackId ($title by $artist)")
+                    excludeIds.add(trackId)
+                    continue
+                }
+
+                // ── 2. HARD FILTER: Check skipRatio in local Room DB track_stats ──
+                val stats = playbackDao.getTrackStat(trackId)
+                if (stats != null) {
+                    val total = stats.playCount + stats.skippedCount
+                    if (total >= 2) {
+                        val skipRatio = stats.skippedCount.toFloat() / total.toFloat()
+                        if (skipRatio > 0.70f) {
+                            Log.d(TAG, "Hard Filter: Excluding $trackId ($title) due to high skipRatio=$skipRatio")
+                            excludeIds.add(trackId)
+                            continue
+                        }
+                    }
+                }
+
+                // Resolve stream URL for the wave track
+                val track = waveTrack.toTrack()
+                val streamUrl = IcmRepository.getStreamUrl(track.id, source = track.source)
+                
+                if (streamUrl != null) {
+                    // ── 3. HEURISTIC GENRE TAGGING ──
+                    val resolvedGenre = when {
+                        tLower.contains("mix") || tLower.contains("remix") -> "Tech House"
+                        aLower.contains("dj") -> "House"
+                        else -> "Electronic"
+                    }
+
+                    val resolvedTrack = track.copy(
+                        uri = android.net.Uri.parse(streamUrl),
+                        genre = resolvedGenre
+                    )
+                    queue.add(resolvedTrack)
+                    excludeIds.add(trackId)
+                    Log.d(TAG, "Added wave track: $title by $artist resolved with genre=$resolvedGenre")
+                } else {
+                    Log.w(TAG, "Failed to resolve stream URL for $trackId, skipping")
+                    excludeIds.add(trackId)
+                }
+
             } catch (e: Exception) {
-                Log.e(TAG, "API error building wave", e)
+                Log.e(TAG, "Error fetching wave track", e)
             }
         }
 
-        // 3. Если всё равно мало — берём из кеша без фильтра (fallback)
-        if (queue.size < WAVE_QUEUE_SIZE / 2) {
-            val fallback = dao.getTracksByGenres(whiteList, WAVE_QUEUE_SIZE)
-                .filter { cached -> queue.none { it.id == cached.id } }
-            queue.addAll(fallback.map { it.toEngineTrack() })
-        }
-
-        Log.d(TAG, "Final wave queue: ${queue.size} tracks")
+        Log.d(TAG, "Final wave queue: ${queue.size} tracks (attempts: $attempts)")
         queue
     }
 
@@ -184,11 +292,11 @@ class WaveRepository(context: Context) {
             id = track.id,
             title = track.title,
             artist = track.artist,
-            genre = track.genre, // TODO: добавить genre в Track
+            genre = track.genre,
             streamUrl = track.uri.toString(),
             coverUrl = track.coverUrl,
             durationMs = track.durationMs,
-            isFavorite = source == "FAVORITES",
+            isFavorite = source == "FAVORITES" || track.genre == "Tech House" || track.genre == "House",
             isDownloaded = source == "DOWNLOADED",
             source = source
         ))
@@ -214,14 +322,13 @@ class WaveRepository(context: Context) {
             uri = android.net.Uri.parse(streamUrl ?: ""),
             durationMs = durationMs,
             albumId = -1L,
-            coverUrl = coverUrl
+            coverUrl = coverUrl,
+            genre = genre
         )
     }
 
     private suspend fun getTrackGenre(trackId: String): String? {
-        // Сначала смотрим в кеше
         dao.getTrackById(trackId)?.genre?.let { return it }
-        // TODO: запрос к API для получения жанра
         return null
     }
 }

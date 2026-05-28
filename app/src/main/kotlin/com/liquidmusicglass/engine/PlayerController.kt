@@ -20,12 +20,27 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlin.coroutines.resume
+
+/**
+ * Strict playback scope isolation.
+ * - Downloads / Playlist contexts are BOUNDED — the player must NEVER
+ *   auto-advance beyond the injected local array or fetch global recommendations.
+ * - Only [Global] allows the EndlessPlaybackEngine to refill the queue.
+ */
+sealed class PlaybackContext {
+    object Downloads : PlaybackContext()
+    data class Playlist(val id: String) : PlaybackContext()
+    data class Album(val id: String) : PlaybackContext()
+    data class Artist(val id: String) : PlaybackContext()
+    object Global : PlaybackContext()
+}
 
 /**
  * PlayerController — единая точка управления воспроизведением.
@@ -45,12 +60,20 @@ object PlayerController {
     private var queue = listOf<Track>()
     private var currentIndex = -1
 
+    // ── Playback Context (isolation gate) ──
+    private var _playbackContext: PlaybackContext = PlaybackContext.Global
+    val playbackContext: PlaybackContext get() = _playbackContext
+
     // ── Endless Playback (AutoMix) ──
     private val endlessEngine = EndlessPlaybackEngine(
         scope = ioScope,
         getController = { controller },
         getCompanionPlayer = { null }
     )
+
+    /** Public accessor for the endless engine's refill context (mood/genre) */
+    val waveRefillContext: kotlinx.coroutines.flow.StateFlow<EndlessPlaybackEngine.RefillContext?>
+        get() = endlessEngine.refillContext
 
     // ── Stream URL cache ──
     private val streamUrlCache = java.util.concurrent.ConcurrentHashMap<String, CachedStreamUrl>()
@@ -138,15 +161,25 @@ object PlayerController {
     //  Playback Control
     // ═══════════════════════════════════════════════════════════
 
-    fun playTrack(context: Context, index: Int) {
+    /**
+     * Play a track by its unique ID using the FULL native timeline.
+     * NEVER inject a single MediaItem — always seek inside the populated timeline.
+     */
+    fun playTrackById(context: Context, trackId: String) {
+        android.util.Log.d("VOIDPIXEL_MEDIA", "UI requested Playback for Track ID: $trackId")
+
         val currentQueue = queue
-        if (index !in currentQueue.indices) return
+        val queueIndex = currentQueue.indexOfFirst { it.id == trackId }
+        if (queueIndex == -1) {
+            android.util.Log.e("VOIDPIXEL_MEDIA", "Track ID $trackId NOT FOUND in local queue!")
+            return
+        }
 
         ioScope.launch {
-            val track = currentQueue.getOrNull(index) ?: return@launch
+            val track = currentQueue.getOrNull(queueIndex) ?: return@launch
 
             withContext(Dispatchers.Main) {
-                currentIndex = index
+                currentIndex = queueIndex
                 _currentTrack.value = track
                 _durationMs.value = track.durationMs
                 _currentPositionMs.value = 0L
@@ -164,16 +197,44 @@ object PlayerController {
                     withContext(Dispatchers.Main) {
                         val player = getPlayer(context)
                         if (player != null) {
-                            val currentMediaItem = buildMediaItem(track, streamResult.uri)
-                            player.playWhenReady = true
-                            player.setMediaItem(currentMediaItem)
-                            player.prepare()
-                            resetPlaybackLogging(track.durationMs)
+                            // ── HARD RESET: stop kills any active transitions ──
+                            player.stop()
+                            player.clearMediaItems()
+                            android.util.Log.d("VOIDPIXEL_MEDIA", "[HARD_RESET] stop() + clearMediaItems() executed")
 
-                            // Запускаем предзагрузку оконных треков
-                            prefetchAhead(context, index, depth = 3)
+                            // ── AGGRESSIVE DEBUG: dump full ExoPlayer timeline ──
+                            android.util.Log.d("VOIDPIXEL_MEDIA", "ExoPlayer timeline dump (mediaItemCount=${player.mediaItemCount}):")
+                            for (i in 0 until player.mediaItemCount) {
+                                val mid = player.getMediaItemAt(i).mediaId
+                                android.util.Log.d("VOIDPIXEL_MEDIA", "ExoPlayer Timeline Index [$i] has MediaID: $mid")
+                            }
+
+                            // ── STRICT ID-MATCHED NAVIGATION ──
+                            val targetIndex = (0 until player.mediaItemCount).indexOfFirst {
+                                player.getMediaItemAt(it).mediaId == trackId
+                            }
+
+                            if (targetIndex != -1) {
+                                android.util.Log.d("VOIDPIXEL_MEDIA", "ID MATCH: trackId=$trackId found at ExoPlayer index=$targetIndex — seeking")
+                                player.seekTo(targetIndex, 0L)
+                                player.prepare()
+                                player.play()
+                            } else {
+                                // Track missing from timeline — rebuild with strict ID order
+                                android.util.Log.w("VOIDPIXEL_MEDIA", "ID MISMATCH: trackId=$trackId NOT in ExoPlayer timeline. Rebuilding queue...")
+                                val allMediaItems = currentQueue.map { t ->
+                                    buildMediaItem(t, if (t.id == trackId) streamResult.uri else t.uri)
+                                }
+                                player.setMediaItems(allMediaItems, queueIndex, 0L)
+                                player.prepare()
+                                player.play()
+                                audioServiceRef?.setQueue(allMediaItems, queueIndex, 0L)
+                                android.util.Log.d("VOIDPIXEL_MEDIA", "Queue rebuilt with ${allMediaItems.size} items, startIndex=$queueIndex")
+                            }
+                            resetPlaybackLogging(track.durationMs)
+                            prefetchAhead(context, queueIndex, depth = 3)
                         } else {
-                            android.util.Log.e("PlayerController", "No player available")
+                            android.util.Log.e("VOIDPIXEL_MEDIA", "No player available for trackId=$trackId")
                             _isBuffering.value = false
                         }
                     }
@@ -207,6 +268,16 @@ object PlayerController {
         }
     }
 
+    fun playTrack(context: Context, index: Int) {
+        val currentQueue = queue
+        if (index !in currentQueue.indices) {
+            android.util.Log.e("VOIDPIXEL_MEDIA", "playTrack called with invalid index=$index, queue size=${currentQueue.size}")
+            return
+        }
+        val trackId = currentQueue[index].id
+        playTrackById(context, trackId)
+    }
+
     /**
      * Предзагружает (прогревает кэш) для следующих треков в очереди.
      */
@@ -231,7 +302,6 @@ object PlayerController {
     fun addTracksToQueue(newTracks: List<Track>) {
         if (newTracks.isEmpty()) return
         mainScope.launch {
-            val oldSize = queue.size
             queue = queue + newTracks
             _queueFlow.value = queue
             
@@ -243,11 +313,21 @@ object PlayerController {
                     }
                     p.addMediaItems(mediaItems)
                     
+                    // Sync service-scoped solid queue reference
+                    audioServiceRef?.addToQueue(mediaItems)
+                    
                     // Сразу обновляем плейсхолдеры для свежих элементов
                     appContext?.let { prefetchAhead(it, currentIndex, depth = 3) }
                 }
             }
         }
+    }
+
+    fun addTracksFromService(newTracks: List<Track>, mediaItems: List<MediaItem>) {
+        queue = queue + newTracks
+        _queueFlow.value = queue
+        appContext?.let { prefetchAhead(it, currentIndex, depth = 3) }
+        android.util.Log.d("VOIDPIXEL_MEDIA", "Sync queue from service: added ${newTracks.size} tracks, total=${queue.size}")
     }
 
     fun playFromList(
@@ -259,16 +339,50 @@ object PlayerController {
         autoRefillName: String? = null,
         seedTrackId: String? = null
     ) {
-        if (tracks.isEmpty() || startIndex !in tracks.indices) return
+        if (tracks.isEmpty() || startIndex !in tracks.indices) {
+            android.util.Log.e("VOIDPIXEL_MEDIA", "playFromList called with empty tracks or invalid startIndex=$startIndex")
+            return
+        }
+
+        val startTrack = tracks[startIndex]
+        android.util.Log.d("VOIDPIXEL_MEDIA", "playFromList: tracks=${tracks.size}, startIndex=$startIndex, startTrackId=${startTrack.id}")
+
+        // ── Determine playback context BEFORE any async work ──
+        val newContext = when {
+            autoRefillType.equals("library", ignoreCase = true) && autoRefillId.equals("downloads", ignoreCase = true) ->
+                PlaybackContext.Downloads
+            autoRefillType.equals("playlist", ignoreCase = true) && autoRefillId != null ->
+                PlaybackContext.Playlist(autoRefillId)
+            autoRefillType.equals("album", ignoreCase = true) && autoRefillId != null ->
+                PlaybackContext.Album(autoRefillId)
+            autoRefillType.equals("artist", ignoreCase = true) && autoRefillId != null ->
+                PlaybackContext.Artist(autoRefillId)
+            else -> PlaybackContext.Global
+        }
+
+        // ── Check camp capabilities for crossfade ──
+        val campManager = com.liquidmusicglass.camp.FeatureAccessManager.getInstance(context)
+        val campCaps = campManager.capabilities.value
+        if (!campCaps.flags[com.liquidmusicglass.camp.Feature.BACKGROUND_PLAYBACK]!!) {
+            // Disable gapless/crossfade for YouTube tracks
+            com.liquidmusicglass.engine.AppSettings.setGapless(false)
+        }
 
         ioScope.launch {
-            val startTrack = tracks.getOrNull(startIndex) ?: run {
-                withContext(Dispatchers.Main) { _isBuffering.value = false }
-                return@launch
+            // ── ABSOLUTE QUEUE PURGE: wipe old queue before loading ──
+            withContext(Dispatchers.Main) {
+                val player = getPlayer(context)
+                player?.let {
+                    it.stop()
+                    it.clearMediaItems()
+                }
             }
 
+            _playbackContext = newContext
+            android.util.Log.d("VOIDPIXEL_MEDIA", "[CONTEXT_SET] $newContext")
+
             endlessEngine.reset()
-            if (autoRefillType != null) {
+            if (newContext is PlaybackContext.Global && autoRefillType != null) {
                 val type = try {
                     EndlessPlaybackEngine.RefillContext.Type.valueOf(autoRefillType.uppercase())
                 } catch (e: Exception) {
@@ -282,8 +396,8 @@ object PlayerController {
                         seedTrackId = seedTrackId
                     )
                 )
+                endlessEngine.registerTracks(tracks.map { it.id })
             }
-            endlessEngine.registerTracks(tracks.map { it.id })
 
             val streamResult = if (startTrack.isOnlineTrack) {
                 resolveStreamUrl(startTrack.id)
@@ -310,55 +424,33 @@ object PlayerController {
 
                         val player = getPlayer(context)
                         player?.let {
+                            it.stop()
+                            it.clearMediaItems()
                             it.setMediaItems(mediaItems, startIndex, 0L)
                             it.prepare()
                             it.play()
                             resetPlaybackLogging(startTrack.durationMs)
                         }
+
+                        // Sync service-scoped queue
+                        audioServiceRef?.setQueue(mediaItems, startIndex, 0L)
                     }
                     addToRecent(startTrack)
 
-                    launch {
-                        kotlinx.coroutines.delay(3000)
-                        endlessEngine.checkAndRefillIfNeeded()
+                    if (newContext is PlaybackContext.Global) {
+                        launch {
+                            kotlinx.coroutines.delay(3000)
+                            endlessEngine.checkAndRefillIfNeeded()
+                        }
                     }
 
                     prefetchAhead(context, startIndex, depth = 10)
-
-                    // Дополнительно: предзагружаем первые треки с реальными URLs параллельно
-                    // чтобы при переключении не было паузы
-                    launch {
-                        val prefetchIndices = (startIndex + 1 until minOf(startIndex + 6, tracks.size))
-                        prefetchIndices.forEach { idx ->
-                            val t = tracks.getOrNull(idx) ?: return@forEach
-                            if (t.isOnlineTrack) {
-                                resolveStreamUrl(t.id)
-                            }
-                        }
-                    }
                 }
                 is StreamResult.Error -> {
-                    android.util.Log.e("PlayerController", "Stream error for ${startTrack.id}: ${streamResult.code} | ${streamResult.message}")
+                    android.util.Log.e("PlayerController", "Stream error for ${startTrack.id}")
                     withContext(Dispatchers.Main) {
                         _isBuffering.value = false
-                        val msg = when (streamResult.code) {
-                            "source_not_allowed" -> "VK Music is not enabled for this API key"
-                            "track_not_found" -> "Track not found"
-                            "region_unavailable" -> "Track not available in your region"
-                            "early_access" -> "This feature requires early access"
-                            "network_error" -> "Network error. Please check your connection"
-                            else -> {
-                                val rawMsg = streamResult.message ?: ""
-                                when {
-                                    rawMsg.contains("track_cache_missing_after_download") ->
-                                        "VK Music is temporarily unavailable. Please try again later or use Apple Music"
-                                    rawMsg.contains("cache_missing") ->
-                                        "VK Music is temporarily unavailable. Please try again later"
-                                    else -> "Failed to load track: ${streamResult.message ?: streamResult.code}"
-                                }
-                            }
-                        }
-                        android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
+                        android.widget.Toast.makeText(context, "Failed to resolve track stream", android.widget.Toast.LENGTH_SHORT).show()
                     }
                 }
             }
@@ -372,7 +464,10 @@ object PlayerController {
                 player.pause()
             } else {
                 if (player.mediaItemCount == 0 && queue.isNotEmpty()) {
-                    playTrack(context, if (currentIndex >= 0) currentIndex else 0)
+                    val trackId = queue.getOrNull(currentIndex)?.id ?: queue.firstOrNull()?.id
+                    if (trackId != null) {
+                        playTrackById(context, trackId)
+                    }
                 } else {
                     player.play()
                 }
@@ -381,16 +476,24 @@ object PlayerController {
     }
 
     fun skipNext(context: Context) {
-        logPlayback(completed = false, skipped = true)
         val currentQueue = queue
         if (currentQueue.isEmpty()) return
         val nextIndex = if (currentIndex + 1 < currentQueue.size) currentIndex + 1 else 0
+        val nextTrackId = currentQueue.getOrNull(nextIndex)?.id ?: return
         mainScope.launch {
             val player = getPlayer(context)
-            if (player != null && nextIndex > currentIndex && player.mediaItemCount > nextIndex) {
-                player.seekToNextMediaItem()
+            if (player != null) {
+                val targetIndex = (0 until player.mediaItemCount).indexOfFirst {
+                    player.getMediaItemAt(it).mediaId == nextTrackId
+                }
+                if (targetIndex != -1) {
+                    player.playWhenReady = true
+                    player.seekTo(targetIndex, 0L)
+                } else {
+                    playTrackById(context, nextTrackId)
+                }
             } else {
-                playTrack(context, nextIndex)
+                playTrackById(context, nextTrackId)
             }
         }
     }
@@ -403,14 +506,22 @@ object PlayerController {
                 _currentPositionMs.value = 0L
                 return@launch
             }
-            logPlayback(completed = false, skipped = true)
             val currentQueue = queue
             if (currentQueue.isEmpty()) return@launch
             val prevIndex = if (currentIndex > 0) currentIndex - 1 else currentQueue.lastIndex
-            if (player != null && prevIndex < currentIndex && prevIndex >= 0) {
-                player.seekToPreviousMediaItem()
+            val prevTrackId = currentQueue.getOrNull(prevIndex)?.id ?: return@launch
+            if (player != null) {
+                val targetIndex = (0 until player.mediaItemCount).indexOfFirst {
+                    player.getMediaItemAt(it).mediaId == prevTrackId
+                }
+                if (targetIndex != -1) {
+                    player.playWhenReady = true
+                    player.seekTo(targetIndex, 0L)
+                } else {
+                    playTrackById(context, prevTrackId)
+                }
             } else {
-                playTrack(context, prevIndex)
+                playTrackById(context, prevTrackId)
             }
         }
     }
@@ -426,17 +537,17 @@ object PlayerController {
     fun setPlaying(playing: Boolean) {
         _isPlaying.value = playing
         lastIsPlaying = playing
-        if (!playing) _isBuffering.value = false
+        if (!playing && _isBuffering.value) {
+            _isBuffering.value = false
+        }
     }
 
-    // Фикс: Принимаем живой durationMs и обновляем StateFlow для Seekbar и обратного отсчета
     fun updatePosition(positionMs: Long, durationMs: Long) {
         _currentPositionMs.value = positionMs
         lastPlayerPositionMs = positionMs
         lastSyncTimeMs = SystemClock.elapsedRealtime()
 
         if (durationMs > 0L && _durationMs.value != durationMs) {
-            android.util.Log.d("PlayerController", "[UPDATE] duration updated: ${_durationMs.value} -> $durationMs, pos=$positionMs")
             _durationMs.value = durationMs
             _currentTrack.value?.let { track ->
                 if (track.durationMs != durationMs) {
@@ -455,37 +566,26 @@ object PlayerController {
     fun onTrackChanged(mediaId: String) {
         val currentQueue = queue
         val index = currentQueue.indexOfFirst { it.id == mediaId }
-        val track = currentQueue.getOrNull(index) ?: return
+        if (index == -1) {
+            android.util.Log.w("VOIDPIXEL_MEDIA", "[TRACK_CHANGED] mediaId=$mediaId not found in local queue")
+            return
+        }
+        val track = currentQueue[index]
         currentIndex = index
         _currentTrack.value = track
-        android.util.Log.d("PlayerController", "[TRACK_CHANGED] id=$mediaId track.durationMs=${track.durationMs}")
         _durationMs.value = track.durationMs
         _currentPositionMs.value = 0L
         
-        // Предзагружаем следующие треки
+        resetPlaybackLogging(track.durationMs)
         appContext?.let { prefetchAhead(it, index, depth = 5) }
-
-        ioScope.launch {
-            endlessEngine.checkAndRefillIfNeeded()
-        }
     }
 
     fun onTrackEnded() {
-        logPlayback(completed = true, skipped = false)
         val currentQueue = queue
         val nextIndex = currentIndex + 1
         if (nextIndex < currentQueue.size) {
-            appContext?.let { ctx ->
-                mainScope.launch {
-                    val player = getPlayer(ctx)
-                    if (player != null && nextIndex > currentIndex && player.mediaItemCount > nextIndex) {
-                        player.seekToNextMediaItem()
-                        player.playWhenReady = true
-                    } else {
-                        playTrack(ctx, nextIndex)
-                    }
-                }
-            }
+            val nextTrackId = currentQueue.getOrNull(nextIndex)?.id
+            android.util.Log.d("VOIDPIXEL_MEDIA", "onTrackEnded: nextIndex=$nextIndex, nextTrackId=$nextTrackId")
         }
     }
 
@@ -508,7 +608,6 @@ object PlayerController {
     fun addToQueue(track: Track) {
         queue = queue + track
         _queueFlow.value = queue
-        // Также добавляем в ExoPlayer чтобы индексы синхронизировались
         mainScope.launch {
             val player = controller ?: appContext?.let { getPlayer(it) }
             player?.addMediaItem(buildMediaItem(track, track.uri))
@@ -517,25 +616,17 @@ object PlayerController {
 
     fun setAutoRefillContext(type: String, id: String, name: String, seedTrackId: String? = null) {}
     fun clearAutoRefillContext() {}
+
     fun playNext(track: Track, context: Context) {
         addToQueue(track)
-        // Переключаемся на добавленный трек если сейчас ничего не играет
         mainScope.launch {
             val player = controller ?: appContext?.let { getPlayer(it) }
             if (player != null && !player.isPlaying && player.mediaItemCount > 0) {
-                val newIndex = queue.lastIndex
-                playTrack(context, newIndex)
+                playTrackById(context, track.id)
             }
         }
     }
 
-    // ═══════════════════════════════════════════════════════════
-    //  Stream URL Resolution & External Bridge Fixes
-    // ═══════════════════════════════════════════════════════════
-
-    /**
-     * ДОБАВЛЕНО: Публичный мост для AutoMixEngine, чтобы вторичный плеер не падал на заглушках.
-     */
     suspend fun getValidStreamUri(trackId: String): Uri? {
         return when (val result = resolveStreamUrl(trackId)) {
             is StreamResult.Success -> result.uri
@@ -562,6 +653,31 @@ object PlayerController {
             return cached.uri
         }
 
+        // ── Check if this is a YouTube track ──
+        val ytTrack = queue.find { it.id == trackId && it.isYouTubeTrack }
+        if (ytTrack != null) {
+            return runBlocking {
+                try {
+                    val result = com.liquidmusicglass.api.youtube.YouTubeMusicRepository.getInstance()
+                        .getAudioStream(trackId)
+                    if (result.isSuccess) {
+                        val stream = result.getOrThrow()
+                        val uri = Uri.parse(stream.url)
+                        streamUrlCache[trackId] = CachedStreamUrl(
+                            uri = uri,
+                            expiresAtMs = now + 6 * 60 * 60 * 1000L, // 6 hours for YT
+                            fileId = null
+                        )
+                        uri
+                    } else {
+                        null
+                    }
+                } catch (_: Exception) {
+                    null
+                }
+            }
+        }
+
         return try {
             val quality = getEffectiveQuality(trackId)
             val trackInfo = IcmRepository.getTrackInfoSync(trackId, quality = quality)
@@ -581,67 +697,60 @@ object PlayerController {
                 )
                 uri
             } else {
-                val error = IcmRepository.lastError.value
-                val apiException = IcmRepository.lastApiException.value
-                val requiredRegion = apiException?.requiredRegion
-                if ((error?.contains("region_unavailable") == true || error?.contains("451") == true) && requiredRegion != null) {
-                    val retryTrackInfo = IcmRepository.getTrackInfoSync(trackId, quality = quality, region = requiredRegion)
-                    if (retryTrackInfo != null) {
-                        val uri = Uri.parse(retryTrackInfo.url)
-                        val ttl = if (retryTrackInfo.expiresAt > 0) {
-                            (retryTrackInfo.expiresAt * 1000L - now - 60_000L).coerceAtLeast(60_000L)
-                        } else {
-                            STREAM_CACHE_TTL_MS
-                        }
-                        streamUrlCache[trackId] = CachedStreamUrl(
-                            uri = uri,
-                            expiresAtMs = now + ttl,
-                            fileId = retryTrackInfo.fileId
-                        )
-                        uri
-                    } else {
-                        null
-                    }
-                } else {
-                    null
-                }
+                null
             }
         } catch (e: Exception) {
-            android.util.Log.e("PlayerController", "URL resolve sync failed: ${e.message}")
             null
         }
     }
 
     private suspend fun resolveStreamUrl(trackId: String): StreamResult {
-        android.util.Log.d("PlayerController", "[VK_DEBUG] resolveStreamUrl called for trackId=$trackId")
         val now = System.currentTimeMillis()
         val cached = streamUrlCache[trackId]
 
         if (cached != null && now < cached.expiresAtMs) {
-            android.util.Log.d("PlayerController", "[VK_DEBUG] Using cached URL for $trackId")
             return StreamResult.Success(cached.uri)
+        }
+
+        // ── Check if this is a YouTube track ──
+        val ytTrack = queue.find { it.id == trackId && it.isYouTubeTrack }
+        if (ytTrack != null) {
+            return try {
+                withTimeout(20_000) {
+                    val result = com.liquidmusicglass.api.youtube.YouTubeMusicRepository.getInstance()
+                        .getAudioStream(trackId)
+                    if (result.isSuccess) {
+                        val stream = result.getOrThrow()
+                        val uri = Uri.parse(stream.url)
+                        streamUrlCache[trackId] = CachedStreamUrl(
+                            uri = uri,
+                            expiresAtMs = now + 6 * 60 * 60 * 1000L,
+                            fileId = null
+                        )
+                        StreamResult.Success(uri)
+                    } else {
+                        StreamResult.Error("youtube_error", result.exceptionOrNull()?.message)
+                    }
+                }
+            } catch (e: Exception) {
+                StreamResult.Error("youtube_error", e.message)
+            }
         }
 
         return try {
             withTimeout(15_000) {
                 val quality = getEffectiveQuality(trackId)
-                android.util.Log.d("PlayerController", "[VK_DEBUG] quality=$quality for trackId=$trackId")
-                
                 val trackInfo = IcmRepository.getTrackInfo(trackId, quality = quality)
-                android.util.Log.d("PlayerController", "[VK_DEBUG] getTrackInfo returned: ${if (trackInfo != null) "SUCCESS url=${trackInfo.url.take(60)}..." else "NULL"}")
 
                 if (trackInfo != null) {
                     cacheAndReturn(trackId, trackInfo)
                 } else {
                     val error = IcmRepository.lastError.value
                     val apiException = IcmRepository.lastApiException.value
-                    android.util.Log.e("PlayerController", "[VK_DEBUG] getTrackInfo failed. error=$error, apiException=$apiException, code=${apiException?.code}, requiredRegion=${apiException?.requiredRegion}")
                     
                     when {
-                        error?.contains("region_unavailable") == true ||
-                        error?.contains("451") == true -> {
+                        error?.contains("region_unavailable") == true || error?.contains("451") == true -> {
                             val requiredRegion = apiException?.requiredRegion
-                            
                             if (requiredRegion != null) {
                                 val retryTrackInfo = IcmRepository.getTrackInfo(trackId, quality = quality, region = requiredRegion)
                                 if (retryTrackInfo != null) {
@@ -667,7 +776,6 @@ object PlayerController {
                 }
             }
         } catch (e: Exception) {
-            android.util.Log.e("PlayerController", "[VK_DEBUG] URL resolve exception: ${e.javaClass.simpleName}: ${e.message}")
             StreamResult.Error("network_error", e.message)
         }
     }
@@ -699,15 +807,16 @@ object PlayerController {
                     val player = getPlayer(context) ?: return@withContext
                     val currentMediaItem = player.currentMediaItem
                     if (currentMediaItem?.mediaId == trackId) {
-                        // Защита: проверяем что currentIndex валиден
                         val currentQueue = queue
-                        val track = currentQueue.getOrNull(currentIndex) ?: return@withContext
+                        val track = currentQueue.find { it.id == trackId } ?: return@withContext
                         val currentPosition = player.currentPosition
                         val newItem = buildMediaItem(track, result.uri)
-                        // Защита: заменяем только если индекс существует в плеере
-                        if (currentIndex < player.mediaItemCount) {
-                            player.replaceMediaItem(currentIndex, newItem)
-                            player.seekTo(currentIndex, currentPosition)
+                        val targetIndex = (0 until player.mediaItemCount).indexOfFirst {
+                            player.getMediaItemAt(it).mediaId == trackId
+                        }
+                        if (targetIndex != -1) {
+                            player.replaceMediaItem(targetIndex, newItem)
+                            player.seekTo(targetIndex, currentPosition)
                             player.prepare()
                             player.playWhenReady = true
                         }
@@ -735,34 +844,40 @@ object PlayerController {
         lastPositionMs = 0L
     }
 
-    private fun logPlayback(completed: Boolean, skipped: Boolean) {
-        val track = _currentTrack.value ?: return
+    private fun logPreviousTrack(track: Track, playedMs: Long) {
         val durationSec = track.durationMs / 1000f
-        val playedSec = totalPlayedMs / 1000f
+        val playedSec = playedMs / 1000f
 
-        val isCompleted = completed || (playedSec >= 0.85f * durationSec)
-        val isSkipped = !isCompleted && (skipped || (playedSec < 0.15f * durationSec))
+        val isCompleted = playedMs >= 30_000L
+        val isSkipped = !isCompleted
 
-        // Логируем в локальную базу для аналитики "Моей волны"
+        val sourceStr = when (_playbackContext) {
+            is PlaybackContext.Downloads -> "downloads"
+            is PlaybackContext.Playlist -> "playlist"
+            is PlaybackContext.Album -> "album"
+            is PlaybackContext.Artist -> "artist"
+            is PlaybackContext.Global -> "wave"
+        }
+
+        android.util.Log.d("PlayerController", "[LOG_PREVIOUS] track=${track.title} | played=${playedMs}ms | isCompleted=$isCompleted | source=$sourceStr")
+
         appContext?.let { ctx ->
             ioScope.launch {
                 try {
-                    val repo = WaveRepository(ctx)
-                    repo.logListening(
-                        track = track,
-                        durationPlayedMs = totalPlayedMs,
-                        source = track.source ?: "WAVE"
-                    )
+                    val repo = WaveRepository.getInstance(ctx)
+                    if (isCompleted) {
+                        repo.logListening(track, playedMs, sourceStr)
+                        repo.logTrackPlayed(track)
+                    } else {
+                        repo.logTrackSkipped(track)
+                    }
                 } catch (e: Exception) {
-                    android.util.Log.e("PlayerController", "Wave logging failed", e)
+                    android.util.Log.e("PlayerController", "Room logging failed for ${track.title}", e)
                 }
             }
         }
 
-        // Per ICM API docs: "logged=false for non-primary track IDs (secondary catalog
-        // tracks ignored). On client you can send uniformly for all tracks — it does not
-        // harm us."  We therefore log every track; the server silently ignores
-        // non-Apple / non-wave IDs if it chooses to.
+        // Also log to ICM API wave playback
         ioScope.launch {
             try {
                 IcmRepository.logWavePlayback(
@@ -777,8 +892,6 @@ object PlayerController {
     }
 
     private fun buildMediaItem(track: Track, uri: Uri = track.uri): MediaItem {
-        // Для онлайн треков — используем liquid:// URI с track ID
-        // DataSource лениво резолвит URL если нужно
         val mediaUri = if (track.isOnlineTrack && uri.scheme != "file") {
             Uri.Builder()
                 .scheme(StreamingDataSource.SCHEME_LIQUID)
@@ -790,25 +903,29 @@ object PlayerController {
             uri
         }
 
-        return MediaItem.Builder()
+        val metaBuilder = MediaMetadata.Builder()
+            .setTitle(track.title)
+            .setArtist(track.artist)
+            .setAlbumArtist(track.artist)
+            .setArtworkUri(track.displayArtUri)
+
+        if (track.durationMs > 0) {
+            metaBuilder.setDurationMs(track.durationMs)
+        }
+
+        val item = MediaItem.Builder()
             .setMediaId(track.id)
             .setUri(mediaUri)
-            .setMediaMetadata(
-                MediaMetadata.Builder()
-                    .setTitle(track.title)
-                    .setArtist(track.artist)
-                    .setAlbumArtist(track.artist)
-                    .setArtworkUri(track.displayArtUri)
-                    .build()
-            )
+            .setMediaMetadata(metaBuilder.build())
             .build()
+
+        return item
     }
 
     private suspend fun getPlayer(context: Context): MediaController? {
         controller?.let { return it }
         if (mediaControllerUnavailable) return null
 
-        // Запускаем AudioService если ещё не запущен
         try {
             val serviceIntent = android.content.Intent(context.applicationContext, AudioService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -862,6 +979,43 @@ object PlayerController {
     private class PlayerStateBridge : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) {
             _isBuffering.value = (playbackState == Player.STATE_BUFFERING)
+        }
+
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            setPlaying(isPlaying)
+        }
+
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            // ── Unified room logging for previous track ──
+            val prevTrack = _currentTrack.value
+            if (prevTrack != null) {
+                logPreviousTrack(prevTrack, totalPlayedMs)
+            }
+
+            if (mediaItem != null) {
+                mediaItem.mediaId?.let { mediaId ->
+                    android.util.Log.d("VOIDPIXEL_MEDIA", "[BRIDGE_TRANSITION] Transitioned to mediaId=$mediaId, reason=$reason")
+                    onTrackChanged(mediaId)
+
+                    // ── Endless refill background monitoring ──
+                    val player = controller
+                    if (player != null) {
+                        val total = player.mediaItemCount
+                        val current = player.currentMediaItemIndex
+                        val remaining = if (total > 0 && current >= 0) (total - current) else 0
+                        if (_playbackContext is PlaybackContext.Global && remaining < 3) {
+                            ioScope.launch {
+                                endlessEngine.checkAndRefillIfNeeded(remaining)
+                            }
+                        }
+                    }
+                }
+            } else {
+                android.util.Log.d("VOIDPIXEL_MEDIA", "[BRIDGE_TRANSITION] Transitioned to null (playback stopped/ended), reason=$reason")
+                _currentTrack.value = null
+                _currentPositionMs.value = 0L
+                _durationMs.value = 0L
+            }
         }
     }
 

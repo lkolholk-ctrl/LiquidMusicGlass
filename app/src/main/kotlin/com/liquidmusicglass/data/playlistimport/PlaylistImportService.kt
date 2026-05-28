@@ -1,0 +1,310 @@
+package com.liquidmusicglass.data.playlistimport
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.Context
+import android.content.Intent
+import android.os.Build
+import android.os.IBinder
+import androidx.core.app.NotificationCompat
+import com.liquidmusicglass.MainActivity
+import com.liquidmusicglass.R
+import com.liquidmusicglass.data.playlistimport.di.PlaylistImportModule
+import kotlinx.coroutines.*
+
+/**
+ * Foreground Service for playlist import.
+ *
+ * Runs independently of the UI lifecycle — survives app minimization,
+ * screen lock, and tab switches. Posts a native system notification
+ * with a progress bar that updates as tracks are matched.
+ *
+ * Start via:
+ *   val intent = Intent(context, PlaylistImportService::class.java)
+ *   intent.putExtra(EXTRA_URL, url)
+ *   context.startForegroundService(intent)
+ */
+class PlaylistImportService : Service() {
+
+    companion object {
+        const val CHANNEL_ID = "yandex_import_channel"
+        const val CHANNEL_NAME = "Playlist Import Services"
+        const val NOTIFICATION_ID = 1001
+
+        const val EXTRA_URL = "extra_url"
+        const val EXTRA_PLAYLIST_NAME = "extra_playlist_name"
+
+        private const val ACTION_CANCEL = "action_cancel"
+
+        /** Convenience: start the service with a URL. */
+        fun start(context: Context, url: String, playlistName: String? = null) {
+            val intent = Intent(context, PlaylistImportService::class.java).apply {
+                putExtra(EXTRA_URL, url)
+                playlistName?.let { putExtra(EXTRA_PLAYLIST_NAME, it) }
+            }
+            context.startForegroundService(intent)
+        }
+
+        /** Convenience: cancel the running import. */
+        fun cancel(context: Context) {
+            val intent = Intent(context, PlaylistImportService::class.java).apply {
+                action = ACTION_CANCEL
+            }
+            context.startService(intent)
+        }
+    }
+
+    private val serviceScope = CoroutineScope(
+        SupervisorJob() + Dispatchers.IO + CoroutineName("PlaylistImportService")
+    )
+    private var currentJob: Job? = null
+    private lateinit var notificationManager: NotificationManager
+
+    override fun onCreate() {
+        super.onCreate()
+        notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        createNotificationChannel()
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            ACTION_CANCEL -> {
+                cancelImport()
+                return START_NOT_STICKY
+            }
+        }
+
+        val url = intent?.getStringExtra(EXTRA_URL)
+        if (url.isNullOrBlank()) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
+
+        val playlistName = intent.getStringExtra(EXTRA_PLAYLIST_NAME)
+
+        // Start as foreground service immediately (required within 5s on Android O+)
+        startForeground(NOTIFICATION_ID, buildInitialNotification())
+
+        // Cancel any previous job
+        currentJob?.cancel()
+
+        currentJob = serviceScope.launch {
+            runImport(url, playlistName)
+        }
+
+        return START_NOT_STICKY
+    }
+
+    private suspend fun runImport(url: String, playlistName: String?) {
+        val logger = ImportFileLogger(this)
+        logger.clear()
+        logger.log("I", "Service", "Starting import for: $url")
+
+        val repository = PlaylistImportModule.providePlaylistImportRepository()
+
+        try {
+            // Phase 1: Resolving
+            updateNotification(
+                title = "Importing Your Playlist",
+                content = "Initializing... Please wait.",
+                progress = 0,
+                max = 0,
+                indeterminate = true
+            )
+
+            val result = repository.importPlaylist(
+                url = url,
+                onState = { state ->
+                    when (state) {
+                        is ImportState.Loading -> {
+                            val phaseText = when (state.phase) {
+                                LoadingPhase.RESOLVING -> "Fetching playlist..."
+                                LoadingPhase.MATCHING -> "Matching tracks against catalog: ${state.processedTracks} / ${state.totalTracks}"
+                                LoadingPhase.SAVING -> "Saving to your library..."
+                            }
+                            updateNotification(
+                                title = "Importing Your Playlist",
+                                content = phaseText,
+                                progress = state.processedTracks,
+                                max = state.totalTracks.coerceAtLeast(1),
+                                indeterminate = false
+                            )
+                        }
+                        else -> {} // Success/Error handled after importPlaylist returns
+                    }
+                },
+                logger = logger
+            )
+
+            // Phase 2: Saving
+            updateNotification(
+                title = "Importing Your Playlist",
+                content = "Saving to your library...",
+                progress = result.matchedTracks.size,
+                max = result.totalTracks.coerceAtLeast(1),
+                indeterminate = false
+            )
+
+            val localPlaylistId = repository.saveToLocalPlaylist(result, playlistName)
+            val savedPlaylistName = com.liquidmusicglass.engine.PlaylistManager.getById(localPlaylistId)?.name
+                ?: "Imported Playlist"
+
+            logger.log("I", "Service", "Import complete: ${result.matchedTracks.size} tracks saved to $savedPlaylistName")
+
+            // Final success notification (non-ongoing, dismissible)
+            showCompletionNotification(
+                title = "Import completed successfully!",
+                content = "Total tracks added: ${result.matchedTracks.size}",
+                playlistId = localPlaylistId
+            )
+
+        } catch (e: CancellationException) {
+            logger.log("I", "Service", "Import cancelled")
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+        } catch (e: PlaylistImportException) {
+            logger.log("E", "Service", "Import failed: ${e.message}")
+            showErrorNotification(e.message ?: "Import failed")
+        } catch (e: Exception) {
+            val msg = "Import failed: ${e.javaClass.simpleName}: ${e.message}"
+            logger.log("E", "Service", msg)
+            showErrorNotification(msg)
+        }
+    }
+
+    private fun cancelImport() {
+        currentJob?.cancel()
+        currentJob = null
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
+    // ═════════════════════════════════════════════════════════════════
+    //  Notification Helpers
+    // ═════════════════════════════════════════════════════════════════
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                CHANNEL_NAME,
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Shows progress when importing playlists from external services"
+                setShowBadge(false)
+            }
+            notificationManager.createNotificationChannel(channel)
+        }
+    }
+
+    private fun buildInitialNotification(): Notification {
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_launcher)
+            .setContentTitle("Importing Your Playlist")
+            .setContentText("Initializing... Please wait.")
+            .setOngoing(true)
+            .setProgress(0, 0, true)
+            .setContentIntent(buildMainActivityPendingIntent())
+            .addAction(buildCancelAction())
+            .build()
+    }
+
+    private fun updateNotification(
+        title: String,
+        content: String,
+        progress: Int,
+        max: Int,
+        indeterminate: Boolean
+    ) {
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_launcher)
+            .setContentTitle(title)
+            .setContentText(content)
+            .setOngoing(true)
+            .setProgress(max, progress, indeterminate)
+            .setOnlyAlertOnce(true)
+            .setContentIntent(buildMainActivityPendingIntent())
+            .addAction(buildCancelAction())
+            .build()
+
+        notificationManager.notify(NOTIFICATION_ID, notification)
+    }
+
+    private fun showCompletionNotification(title: String, content: String, playlistId: String) {
+        stopForeground(STOP_FOREGROUND_DETACH)
+
+        val openPlaylistIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra("navigate_to_playlist", playlistId)
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            this, 2, openPlaylistIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_launcher)
+            .setContentTitle(title)
+            .setContentText(content)
+            .setOngoing(false)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .build()
+
+        notificationManager.notify(NOTIFICATION_ID, notification)
+        stopSelf()
+    }
+
+    private fun showErrorNotification(message: String) {
+        stopForeground(STOP_FOREGROUND_DETACH)
+
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_launcher)
+            .setContentTitle("Import failed")
+            .setContentText(message)
+            .setOngoing(false)
+            .setAutoCancel(true)
+            .setContentIntent(buildMainActivityPendingIntent())
+            .build()
+
+        notificationManager.notify(NOTIFICATION_ID, notification)
+        stopSelf()
+    }
+
+    private fun buildMainActivityPendingIntent(): PendingIntent {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        return PendingIntent.getActivity(
+            this, 0, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
+    private fun buildCancelAction(): NotificationCompat.Action {
+        val intent = Intent(this, PlaylistImportService::class.java).apply {
+            action = ACTION_CANCEL
+        }
+        val pendingIntent = PendingIntent.getService(
+            this, 1, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        return NotificationCompat.Action.Builder(
+            R.drawable.ic_launcher,
+            "Cancel",
+            pendingIntent
+        ).build()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        currentJob?.cancel()
+        serviceScope.cancel("Service destroyed")
+    }
+}

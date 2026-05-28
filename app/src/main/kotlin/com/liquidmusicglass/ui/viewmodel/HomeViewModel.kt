@@ -23,7 +23,7 @@ import kotlinx.coroutines.launch
  * ViewModel for the Home (Listen Now) screen.
  * 
  * Offline-first: loads from cache immediately, then refreshes from API in background.
- * Uses WaveRepository for "Моя волна" analytics and queue building.
+ * Uses WaveRepository for "My Wave" analytics and queue building.
  */
 class HomeViewModel : ViewModel() {
 
@@ -119,10 +119,11 @@ class HomeViewModel : ViewModel() {
 
     /**
      * Refresh home content (pull-to-refresh).
+     * Clears the in-memory wave exclude set so recommendations can include
+     * previously-played tracks again.
      */
     fun refresh() {
         _homeContent.value = null
-        IcmRepository.clearWaveExclude()
         HomeCacheManager.clear()
         loadHomeContent()
     }
@@ -134,10 +135,10 @@ class HomeViewModel : ViewModel() {
         return _homeContent.value?.blocks?.find { it.type == type }
     }
 
-    // ─── Wave (Моя Волна) ───
+    // ─── Wave (My Wave) ───
 
     /**
-     * Загружает топ-жанры пользователя из истории прослушиваний.
+     * Loads the user's top genres from their playback history.
      */
     fun loadTopGenres(context: Context) {
         viewModelScope.launch {
@@ -152,7 +153,7 @@ class HomeViewModel : ViewModel() {
     }
 
     /**
-     * Строит очередь "Моей волны" с фильтрацией по топ-жанрам.
+     * Builds the "My Wave" queue with filtering by top genres.
      */
     fun buildWaveQueue(context: Context) {
         if (_isBuildingWave.value) return
@@ -165,7 +166,7 @@ class HomeViewModel : ViewModel() {
                 _waveTracks.value = tracks
 
                 if (tracks.isNotEmpty()) {
-                    // Запускаем воспроизведение
+                    // Start playback
                     PlayerController.playFromList(
                         context = context,
                         tracks = tracks,
@@ -182,7 +183,7 @@ class HomeViewModel : ViewModel() {
     }
 
     /**
-     * Останавливает "Мою волну".
+     * Stops the "My Wave" playback.
      */
     fun stopWave() {
         _waveTracks.value = emptyList()
