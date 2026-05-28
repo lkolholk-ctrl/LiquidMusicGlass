@@ -223,6 +223,7 @@ fun WaveOnboardingScreen(
     var isSaving by remember { mutableStateOf(false) }
 
     val visibleArtists = if (searchQuery.trim().isEmpty()) popularArtists else searchResults
+    val hasIcmKey = remember { com.liquidmusicglass.api.icm.IcmAuthRepository.getPartnerKey().isNotBlank() }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -237,222 +238,290 @@ fun WaveOnboardingScreen(
                 .background(LiquidTheme.colors.settingsBackground)
                 .padding(horizontal = 20.dp)
         ) {
-            Column(
-                modifier = Modifier.fillMaxSize(),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Spacer(modifier = Modifier.height(48.dp))
-
-                // Step Indicator Header
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+            if (!hasIcmKey) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .align(Alignment.Center),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
                 ) {
-                    StepIndicator(step = 1, currentStep = currentStep)
-                    Spacer(modifier = Modifier.width(4.dp))
-                    StepIndicator(step = 2, currentStep = currentStep)
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                AnimatedContent(
-                    targetState = currentStep,
-                    transitionSpec = {
-                        fadeIn().togetherWith(fadeOut())
-                    },
-                    modifier = Modifier.weight(1f),
-                    label = "StepTransition"
-                ) { step ->
-                    if (step == 1) {
-                        GenreSelectionView(
-                            selectedGenres = selectedGenres,
-                            onToggleGenre = { genre ->
-                                selectedGenres = if (genre in selectedGenres) {
-                                    selectedGenres - genre
-                                } else {
-                                    selectedGenres + genre
-                                }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(if (LiquidTheme.colors.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
+                            .padding(24.dp)
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "Личное радио недоступно",
+                                color = LiquidTheme.colors.textPrimary,
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Bold,
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = "Для работы Apple Music / ICM Music требуется партнерский API-ключ. Пожалуйста, укажите его в настройках приложения или переключитесь на YouTube Music, который работает бесплатно и без ограничений.",
+                                color = LiquidTheme.colors.textSecondary,
+                                fontSize = 14.sp,
+                                textAlign = TextAlign.Center,
+                                lineHeight = 20.sp
+                            )
+                            Spacer(modifier = Modifier.height(24.dp))
+                            Button(
+                                onClick = {
+                                    com.liquidmusicglass.camp.FeatureAccessManager.getInstance(context)
+                                        .selectCamp(com.liquidmusicglass.camp.MusicCamp.Youtube)
+                                    onComplete()
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(containerColor = AppleRed),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("Использовать YouTube Music", color = Color.White, fontSize = 15.sp)
                             }
-                        )
-                    } else {
-                        ArtistSelectionView(
-                            artists = visibleArtists,
-                            selectedIds = selectedArtists.keys,
-                            searchQuery = searchQuery,
-                            onQueryChange = { onboardingViewModel.setQuery(it) },
-                            isLoading = isLoadingArtists,
-                            error = apiError,
-                            onToggleArtist = { artist -> onboardingViewModel.toggleArtist(artist) }
-                        )
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Button(
+                                onClick = {
+                                    onDismiss()
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        "Вы можете настроить API-ключ в меню настроек плеера",
+                                        android.widget.Toast.LENGTH_LONG
+                                    ).show()
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (LiquidTheme.colors.isDark) Color(0xFF2C2C2E) else Color(0xFFE5E5EA),
+                                    contentColor = LiquidTheme.colors.textPrimary
+                                ),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("Закрыть", fontSize = 15.sp)
+                            }
+                        }
                     }
                 }
+            } else {
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Spacer(modifier = Modifier.height(48.dp))
 
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Selection Counters and Navigation Controls
-                val selectedGenresCount = selectedGenres.size
-                val selectedArtistsCount = selectedArtists.size
-
-                if (currentStep == 1) {
-                    Text(
-                        text = "Genres selected: $selectedGenresCount / $MinSelection",
-                        fontSize = 14.sp,
-                        color = if (selectedGenresCount >= MinSelection) AppleRed else LiquidTheme.colors.textSecondary,
-                        fontWeight = if (selectedGenresCount >= MinSelection) FontWeight.SemiBold else FontWeight.Normal
-                    )
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
+                    // Step Indicator Header
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Button(
-                            onClick = onDismiss,
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (LiquidTheme.colors.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7),
-                                contentColor = LiquidTheme.colors.textPrimary
-                            ),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Text("Skip", fontSize = 15.sp)
-                        }
+                        StepIndicator(step = 1, currentStep = currentStep)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        StepIndicator(step = 2, currentStep = currentStep)
+                    }
 
-                        Button(
-                            onClick = { if (selectedGenresCount >= MinSelection) currentStep = 2 },
-                            modifier = Modifier.weight(1f),
-                            enabled = selectedGenresCount >= MinSelection,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = AppleRed,
-                                contentColor = Color.White,
-                                disabledContainerColor = AppleRed.copy(alpha = 0.4f),
-                                disabledContentColor = Color.White.copy(alpha = 0.6f)
-                            ),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Text("Next", fontSize = 15.sp)
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    AnimatedContent(
+                        targetState = currentStep,
+                        transitionSpec = {
+                            fadeIn().togetherWith(fadeOut())
+                        },
+                        modifier = Modifier.weight(1f),
+                        label = "StepTransition"
+                    ) { step ->
+                        if (step == 1) {
+                            GenreSelectionView(
+                                selectedGenres = selectedGenres,
+                                onToggleGenre = { genre ->
+                                    selectedGenres = if (genre in selectedGenres) {
+                                        selectedGenres - genre
+                                    } else {
+                                        selectedGenres + genre
+                                    }
+                                }
+                            )
+                        } else {
+                            ArtistSelectionView(
+                                artists = visibleArtists,
+                                selectedIds = selectedArtists.keys,
+                                searchQuery = searchQuery,
+                                onQueryChange = { onboardingViewModel.setQuery(it) },
+                                isLoading = isLoadingArtists,
+                                error = apiError,
+                                onToggleArtist = { artist -> onboardingViewModel.toggleArtist(artist) }
+                            )
                         }
                     }
-                } else {
-                    Text(
-                        text = "Artists selected: $selectedArtistsCount / $MinSelection",
-                        fontSize = 14.sp,
-                        color = if (selectedArtistsCount >= MinSelection) AppleRed else LiquidTheme.colors.textSecondary,
-                        fontWeight = if (selectedArtistsCount >= MinSelection) FontWeight.SemiBold else FontWeight.Normal
-                    )
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Button(
-                            onClick = { currentStep = 1 },
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (LiquidTheme.colors.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7),
-                                contentColor = LiquidTheme.colors.textPrimary
-                            ),
-                            shape = RoundedCornerShape(12.dp)
+                    // Selection Counters and Navigation Controls
+                    val selectedGenresCount = selectedGenres.size
+                    val selectedArtistsCount = selectedArtists.size
+
+                    if (currentStep == 1) {
+                        Text(
+                            text = "Genres selected: $selectedGenresCount / $MinSelection",
+                            fontSize = 14.sp,
+                            color = if (selectedGenresCount >= MinSelection) AppleRed else LiquidTheme.colors.textSecondary,
+                            fontWeight = if (selectedGenresCount >= MinSelection) FontWeight.SemiBold else FontWeight.Normal
+                        )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            Text("Back", fontSize = 15.sp)
+                            Button(
+                                onClick = onDismiss,
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (LiquidTheme.colors.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7),
+                                    contentColor = LiquidTheme.colors.textPrimary
+                                ),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("Skip", fontSize = 15.sp)
+                            }
+
+                            Button(
+                                onClick = { if (selectedGenresCount >= MinSelection) currentStep = 2 },
+                                modifier = Modifier.weight(1f),
+                                enabled = selectedGenresCount >= MinSelection,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = AppleRed,
+                                    contentColor = Color.White,
+                                    disabledContainerColor = AppleRed.copy(alpha = 0.4f),
+                                    disabledContentColor = Color.White.copy(alpha = 0.6f)
+                                ),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("Next", fontSize = 15.sp)
+                            }
                         }
+                    } else {
+                        Text(
+                            text = "Artists selected: $selectedArtistsCount / $MinSelection",
+                            fontSize = 14.sp,
+                            color = if (selectedArtistsCount >= MinSelection) AppleRed else LiquidTheme.colors.textSecondary,
+                            fontWeight = if (selectedArtistsCount >= MinSelection) FontWeight.SemiBold else FontWeight.Normal
+                        )
 
-                        Button(
-                            onClick = {
-                                if (selectedArtistsCount < MinSelection || isSaving) return@Button
-                                scope.launch {
-                                    isSaving = true
-                                    val selectedArtistsList = selectedArtists.values.toList()
-                                    
-                                    val savePayload = selectedArtistsList.map { 
-                                        IcmWaveOnboardingArtistSave(id = it.id, name = it.name) 
-                                    }
+                        Spacer(modifier = Modifier.height(12.dp))
 
-                                    // 1. Save onboarding preferences remotely to API
-                                    val success = IcmRepository.saveWaveOnboarding(savePayload)
-                                    
-                                    // 2. Save selected onboarding settings locally as preference seeder
-                                    val artistNames = selectedArtistsList.map { it.name }
-                                    val genreNames = selectedGenres.toList()
-                                    AppSettings.setOnboardingData(genreNames, artistNames)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Button(
+                                onClick = { currentStep = 1 },
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (LiquidTheme.colors.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7),
+                                    contentColor = LiquidTheme.colors.textPrimary
+                                ),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("Back", fontSize = 15.sp)
+                            }
 
-                                    // 3. Seeding the Local Room Database for cold start analytics queries
-                                    scope.launch(Dispatchers.IO) {
-                                        try {
-                                            val db = com.liquidmusicglass.data.local.db.AppDatabase.getInstance(context)
-                                            val playbackDao = db.playbackHistoryDao()
-                                            val waveDao = db.waveDao()
+                            Button(
+                                onClick = {
+                                    if (selectedArtistsCount < MinSelection || isSaving) return@Button
+                                    scope.launch {
+                                        isSaving = true
+                                        val selectedArtistsList = selectedArtists.values.toList()
+                                        
+                                        val savePayload = selectedArtistsList.map { 
+                                            IcmWaveOnboardingArtistSave(id = it.id, name = it.name) 
+                                        }
 
-                                            // Seed selected artists in track_stats
-                                            artistNames.forEach { artistName ->
-                                                playbackDao.insertTrackStat(
-                                                    com.liquidmusicglass.data.local.db.TrackStatsEntity(
-                                                        trackId = "seed_art_${artistName.hashCode()}_${System.currentTimeMillis()}",
-                                                        title = "Seed Artist Track",
-                                                        artistId = artistName,
-                                                        playCount = 5, // make it highly played so user top queries hit it
-                                                        skippedCount = 0,
-                                                        lastPlayedTimestamp = System.currentTimeMillis()
+                                        // 1. Save onboarding preferences remotely to API
+                                        val success = IcmRepository.saveWaveOnboarding(savePayload)
+                                        
+                                        // 2. Save selected onboarding settings locally as preference seeder
+                                        val artistNames = selectedArtistsList.map { it.name }
+                                        val genreNames = selectedGenres.toList()
+                                        AppSettings.setOnboardingData(genreNames, artistNames)
+
+                                        // 3. Seeding the Local Room Database for cold start analytics queries
+                                        scope.launch(Dispatchers.IO) {
+                                            try {
+                                                val db = com.liquidmusicglass.data.local.db.AppDatabase.getInstance(context)
+                                                val playbackDao = db.playbackHistoryDao()
+                                                val waveDao = db.waveDao()
+
+                                                // Seed selected artists in track_stats
+                                                artistNames.forEach { artistName ->
+                                                    playbackDao.insertTrackStat(
+                                                        com.liquidmusicglass.data.local.db.TrackStatsEntity(
+                                                            trackId = "seed_art_${artistName.hashCode()}_${System.currentTimeMillis()}",
+                                                            title = "Seed Artist Track",
+                                                            artistId = artistName,
+                                                            playCount = 5, // make it highly played so user top queries hit it
+                                                            skippedCount = 0,
+                                                            lastPlayedTimestamp = System.currentTimeMillis()
+                                                        )
                                                     )
-                                                )
-                                            }
+                                                }
 
-                                            // Seed selected genres in listening_history
-                                            genreNames.forEach { genreName ->
-                                                waveDao.insertListeningRecord(
-                                                    com.liquidmusicglass.data.local.db.ListeningHistory(
-                                                        trackId = "seed_genre_${genreName.hashCode()}_${System.currentTimeMillis()}",
-                                                        title = "Seed Genre Track",
-                                                        artist = "Onboarding Seeder",
-                                                        genre = genreName,
-                                                        source = "ONBOARDING",
-                                                        durationPlayedMs = 60_000L,
-                                                        timestamp = System.currentTimeMillis()
+                                                // Seed selected genres in listening_history
+                                                genreNames.forEach { genreName ->
+                                                    waveDao.insertListeningRecord(
+                                                        com.liquidmusicglass.data.local.db.ListeningHistory(
+                                                            trackId = "seed_genre_${genreName.hashCode()}_${System.currentTimeMillis()}",
+                                                            title = "Seed Genre Track",
+                                                            artist = "Onboarding Seeder",
+                                                            genre = genreName,
+                                                            source = "ONBOARDING",
+                                                            durationPlayedMs = 60_000L,
+                                                            timestamp = System.currentTimeMillis()
+                                                        )
                                                     )
-                                                )
+                                                }
+                                                android.util.Log.d("WaveOnboarding", "Room Database seeded successfully on cold start")
+                                            } catch (e: Exception) {
+                                                android.util.Log.e("WaveOnboarding", "Failed to seed Room Database", e)
                                             }
-                                            android.util.Log.d("WaveOnboarding", "Room Database seeded successfully on cold start")
-                                        } catch (e: Exception) {
-                                            android.util.Log.e("WaveOnboarding", "Failed to seed Room Database", e)
+                                        }
+
+                                        isSaving = false
+                                        if (success) {
+                                            onComplete()
+                                        } else {
+                                            // Save fallback complete even if API saves fails (network offline-first fallback)
+                                            onComplete()
                                         }
                                     }
-
-                                    isSaving = false
-                                    if (success) {
-                                        onComplete()
-                                    } else {
-                                        // Save fallback complete even if API saves fails (network offline-first fallback)
-                                        onComplete()
-                                    }
+                                },
+                                modifier = Modifier.weight(1f),
+                                enabled = selectedArtistsCount >= MinSelection && !isSaving,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = AppleRed,
+                                    contentColor = Color.White,
+                                    disabledContainerColor = AppleRed.copy(alpha = 0.4f),
+                                    disabledContentColor = Color.White.copy(alpha = 0.6f)
+                                ),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                if (isSaving) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(20.dp),
+                                        color = Color.White,
+                                        strokeWidth = 2.dp
+                                    )
+                                } else {
+                                    Text("Finish", fontSize = 15.sp)
                                 }
-                            },
-                            modifier = Modifier.weight(1f),
-                            enabled = selectedArtistsCount >= MinSelection && !isSaving,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = AppleRed,
-                                contentColor = Color.White,
-                                disabledContainerColor = AppleRed.copy(alpha = 0.4f),
-                                disabledContentColor = Color.White.copy(alpha = 0.6f)
-                            ),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            if (isSaving) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(20.dp),
-                                    color = Color.White,
-                                    strokeWidth = 2.dp
-                                )
-                            } else {
-                                Text("Finish", fontSize = 15.sp)
                             }
                         }
                     }
-                }
 
-                Spacer(modifier = Modifier.height(24.dp))
+                    Spacer(modifier = Modifier.height(24.dp))
+                }
             }
         }
     }

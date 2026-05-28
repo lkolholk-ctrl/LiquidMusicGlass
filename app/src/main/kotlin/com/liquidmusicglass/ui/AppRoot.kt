@@ -108,6 +108,11 @@ fun AppRoot() {
     val expandProgress = remember { Animatable(0f) }
     var screenHeightPx by remember { mutableStateOf(1f) }
 
+    val currentCamp by remember {
+        com.liquidmusicglass.camp.FeatureAccessManager.getInstance(context)
+            .currentCamp
+    }.collectAsState()
+
     fun animateExpand() {
         scope.launch {
             expandProgress.animateTo(
@@ -176,7 +181,7 @@ fun AppRoot() {
 
     val isOnboardingCompleted by AppSettings.isOnboardingCompleted.collectAsState()
 
-    if (!isOnboardingCompleted) {
+    if (!isOnboardingCompleted && currentCamp is com.liquidmusicglass.camp.MusicCamp.Icm) {
         WaveOnboardingScreen(
             onComplete = {
                 AppSettings.setOnboardingCompleted(true)

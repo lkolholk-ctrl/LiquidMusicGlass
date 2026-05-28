@@ -127,14 +127,8 @@ class EndlessPlaybackEngine(
                                 .getRadioQueue(seedId)
                             if (result.isSuccess) {
                                 val ytTracks = result.getOrThrow()
-                                // Resolve stream URLs for each track
-                                ytTracks.mapNotNull { ytTrack ->
-                                    val streamResult = com.liquidmusicglass.api.youtube.YouTubeMusicRepository.getInstance()
-                                        .getAudioStream(ytTrack.videoId)
-                                    if (streamResult.isSuccess) {
-                                        val stream = streamResult.getOrThrow()
-                                        ytTrack.toEngineTrack(stream.url)
-                                    } else null
+                                ytTracks.map { ytTrack ->
+                                    ytTrack.toEngineTrack(ytTrack.shareUrl)
                                 }
                             } else emptyList()
                         }

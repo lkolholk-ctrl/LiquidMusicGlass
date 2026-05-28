@@ -340,14 +340,8 @@ fun YouTubeSearchScreen(
                                 item = item,
                                 onClick = {
                                     hideKeyboard()
-                                    scope.launch {
-                                        val streamResult = ytRepo.getAudioStream(item.videoId)
-                                        if (streamResult.isSuccess) {
-                                            val stream = streamResult.getOrThrow()
-                                            val track = item.toEngineTrack(stream.url)
-                                            PlayerController.playNext(track, context)
-                                        }
-                                    }
+                                    val track = item.toEngineTrack(item.shareUrl)
+                                    PlayerController.playNext(track, context)
                                 },
                                 onPlayRadio = {
                                     hideKeyboard()
@@ -355,12 +349,8 @@ fun YouTubeSearchScreen(
                                         val radioResult = ytRepo.getRadioQueue(item.videoId)
                                         if (radioResult.isSuccess) {
                                             val ytTracks = radioResult.getOrThrow()
-                                            val resolvedTracks = ytTracks.mapNotNull { ytTrack ->
-                                                val streamResult = ytRepo.getAudioStream(ytTrack.videoId)
-                                                if (streamResult.isSuccess) {
-                                                    val stream = streamResult.getOrThrow()
-                                                    ytTrack.toEngineTrack(stream.url)
-                                                } else null
+                                            val resolvedTracks = ytTracks.map { ytTrack ->
+                                                ytTrack.toEngineTrack(ytTrack.shareUrl)
                                             }
                                             if (resolvedTracks.isNotEmpty()) {
                                                 PlayerController.playFromList(
