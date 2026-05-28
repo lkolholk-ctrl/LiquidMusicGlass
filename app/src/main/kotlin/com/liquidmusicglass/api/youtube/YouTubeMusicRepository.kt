@@ -51,6 +51,7 @@ import com.liquidmusicglass.api.youtube.models.response.YtMusicCardShelfHeaderBa
 import com.liquidmusicglass.api.youtube.models.response.YtMusicShelfRenderer
 import com.liquidmusicglass.api.youtube.models.response.YtMusicShelfItem
 import com.liquidmusicglass.api.youtube.models.response.YtSectionContent
+import com.liquidmusicglass.api.youtube.models.response.YtItemSectionRenderer
 import com.liquidmusicglass.api.youtube.models.response.YtSectionListRenderer
 import com.liquidmusicglass.api.youtube.models.response.YtSearchContents
 import com.liquidmusicglass.api.youtube.models.response.YtSearchContinuationContents
@@ -113,8 +114,8 @@ class YouTubeMusicRepository private constructor() {
     private val httpClient = createClient()
 
     private var locale = YouTubeLocale(
-        gl = Locale.getDefault().country,
-        hl = Locale.getDefault().toLanguageTag()
+        gl = Locale.getDefault().country.let { if (it.isNullOrBlank() || it.length != 2) "US" else it.uppercase(Locale.US) },
+        hl = Locale.getDefault().toLanguageTag().let { if (it.isNullOrBlank()) "en" else it }
     )
 
     private var visitorData: String = "CgtsZG1ySnZiQWtSbyiMjuGSBg%3D%3D"
@@ -366,13 +367,42 @@ class YouTubeMusicRepository private constructor() {
     // ─── Parsing ───
 
     private fun parseSearchResults(response: YtSearchResponse): List<YtTrack> {
-        val shelf = response.contents?.tabbedSearchResultsRenderer?.tabs?.firstOrNull()
-            ?.tabRenderer?.content?.sectionListRenderer?.contents?.lastOrNull()
-            ?.musicShelfRenderer
+        val tracks = mutableListOf<YtTrack>()
 
-        return shelf?.contents?.mapNotNull { item ->
-            item.musicResponsiveListItemRenderer?.let { parseMusicResponsiveListItem(it) }
-        } ?: emptyList()
+        // 1. Parse from main contents
+        response.contents?.tabbedSearchResultsRenderer?.tabs?.firstOrNull()
+            ?.tabRenderer?.content?.sectionListRenderer?.contents?.forEach { section ->
+                
+                // From musicShelfRenderer
+                section.musicShelfRenderer?.contents?.forEach { item ->
+                    item.musicResponsiveListItemRenderer?.let { renderer ->
+                        parseMusicResponsiveListItem(renderer)?.let { tracks.add(it) }
+                    }
+                }
+                
+                // From itemSectionRenderer
+                section.itemSectionRenderer?.contents?.forEach { item ->
+                    item.musicResponsiveListItemRenderer?.let { renderer ->
+                        parseMusicResponsiveListItem(renderer)?.let { tracks.add(it) }
+                    }
+                }
+
+                // From musicCardShelfRenderer
+                section.musicCardShelfRenderer?.contents?.forEach { item ->
+                    item.musicResponsiveListItemRenderer?.let { renderer ->
+                        parseMusicResponsiveListItem(renderer)?.let { tracks.add(it) }
+                    }
+                }
+            }
+
+        // 2. Parse from continuation contents
+        response.continuationContents?.musicShelfContinuation?.contents?.forEach { item ->
+            item.musicResponsiveListItemRenderer?.let { renderer ->
+                parseMusicResponsiveListItem(renderer)?.let { tracks.add(it) }
+            }
+        }
+
+        return tracks
     }
 
     private fun parseMusicResponsiveListItem(

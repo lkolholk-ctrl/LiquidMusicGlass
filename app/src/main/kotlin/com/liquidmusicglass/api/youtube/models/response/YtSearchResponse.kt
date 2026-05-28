@@ -45,7 +45,13 @@ data class YtSectionListRenderer(
 @Serializable
 data class YtSectionContent(
     val musicShelfRenderer: YtMusicShelfRenderer? = null,
-    val musicCardShelfRenderer: YtMusicCardShelfRenderer? = null
+    val musicCardShelfRenderer: YtMusicCardShelfRenderer? = null,
+    val itemSectionRenderer: YtItemSectionRenderer? = null
+)
+
+@Serializable
+data class YtItemSectionRenderer(
+    val contents: List<YtMusicShelfItem>? = null
 )
 
 @Serializable
