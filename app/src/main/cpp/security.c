@@ -125,7 +125,7 @@ static int check_emulator() {
 // ═══════════════════════════════════
 // Signature verification
 // ═══════════════════════════════════
-static const unsigned char ENCODED_SIG_RELEASE[] = { 0x50, 0xDF, 0x2B, 0xDA };
+static const unsigned char ENCODED_SIG_RELEASE[] = { 0x50, 0xDF, 0x35, 0xDA };
 static const unsigned char ENCODED_SIG_DEBUG[]   = { 0x2D, 0xD1, 0x2C, 0xCB };
 static const unsigned char XOR_KEY = 0x5A;
 
