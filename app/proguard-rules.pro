@@ -60,3 +60,16 @@
 # Keep all API models and network structures from obfuscation/shrinking
 -keep class com.liquidmusicglass.api.icm.** { *; }
 -keepclassmembers class com.liquidmusicglass.api.icm.** { *; }
+
+# Keep all security and JNI bridge classes from obfuscation/shrinking (NativeSecurity, LcmNative)
+-keep class com.liquidmusicglass.security.** { *; }
+-keepclassmembers class com.liquidmusicglass.security.** { *; }
+
+# Additional kotlinx.serialization safety rules
+-keep class * implements kotlinx.serialization.KSerializer { *; }
+-keepclassmembers class * {
+    *** Companion;
+}
+-keepclassmembers class * {
+    *** $serializer;
+}
