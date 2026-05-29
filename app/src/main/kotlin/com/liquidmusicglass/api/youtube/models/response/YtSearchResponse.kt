@@ -46,7 +46,10 @@ data class YtSectionListRenderer(
 data class YtSectionContent(
     val musicShelfRenderer: YtMusicShelfRenderer? = null,
     val musicCardShelfRenderer: YtMusicCardShelfRenderer? = null,
-    val itemSectionRenderer: YtItemSectionRenderer? = null
+    val itemSectionRenderer: YtItemSectionRenderer? = null,
+    val gridRenderer: YtGridRenderer? = null,
+    val musicCarouselShelfRenderer: YtMusicCarouselShelfRenderer? = null,
+    val musicDescriptionShelfRenderer: YtMusicDescriptionShelfRenderer? = null
 )
 
 @Serializable
@@ -96,8 +99,24 @@ data class YtMusicResponsiveListItemRenderer(
     val menu: YtMenu? = null,
     val playlistItemData: YtPlaylistItemData? = null,
     val navigationEndpoint: YtNavigationEndpoint? = null,
-    val badges: List<YtBadge>? = null
-)
+    val badges: List<YtBadge>? = null,
+    val fixedColumns: List<YtFlexColumn>? = null
+) {
+    val isSong: Boolean
+        get() = playlistItemData?.videoId != null
+            || navigationEndpoint?.watchEndpoint != null
+
+    val isAlbum: Boolean
+        get() = navigationEndpoint?.browseEndpoint?.browseId?.startsWith("MPR") == true
+            || navigationEndpoint?.browseEndpoint?.browseId?.startsWith("MPA") == true
+
+    val isArtist: Boolean
+        get() = navigationEndpoint?.browseEndpoint?.browseId?.startsWith("UC") == true
+
+    val isPlaylist: Boolean
+        get() = navigationEndpoint?.browseEndpoint?.browseId?.startsWith("VL") == true
+            || navigationEndpoint?.browseEndpoint?.browseId?.startsWith("PL") == true
+}
 
 @Serializable
 data class YtMusicThumbnail(

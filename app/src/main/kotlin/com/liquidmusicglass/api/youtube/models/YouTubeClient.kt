@@ -20,11 +20,9 @@ data class YouTubeClient(
         client = YtContext.Client(
             clientName = clientName,
             clientVersion = clientVersion,
-            osVersion = osVersion,
             gl = locale.gl,
             hl = locale.hl,
-            visitorData = visitorData,
-            deviceModel = deviceModel
+            visitorData = visitorData
         )
     )
 
@@ -45,6 +43,20 @@ data class YouTubeClient(
             apiKey = "AIzaSyAOghZGza2MQSZkY_zfZ370N-PUdXEo8AI",
             userAgent = UA_ANDROID,
             deviceModel = "SM-S918B"
+        )
+
+        val ANDROID = YouTubeClient(
+            clientName = "ANDROID",
+            clientVersion = "19.44.33",
+            apiKey = "AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w",
+            userAgent = UA_ANDROID
+        )
+
+        val WEB = YouTubeClient(
+            clientName = "WEB",
+            clientVersion = "2.20241126.01.00",
+            apiKey = "AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX3",
+            userAgent = UA_WEB
         )
 
         /**

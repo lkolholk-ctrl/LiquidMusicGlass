@@ -30,9 +30,11 @@ data class Track(
     val albumArtUri: Uri
         get() = Uri.parse("content://media/external/audio/albumart/$albumId")
 
-    /** Является ли трек онлайн-треком из ICM API. */
+    /** Является ли трек онлайн-треком, требующим разрешения стрим-URL. */
     val isOnlineTrack: Boolean
-        get() = uri.toString().startsWith("https://byicloud.online") || uri.toString().startsWith("http://byicloud.online")
+        get() = uri.toString().startsWith("https://byicloud.online")
+            || uri.toString().startsWith("http://byicloud.online")
+            || isYouTubeTrack
 
     /** Является ли треком из YouTube Music. */
     val isYouTubeTrack: Boolean

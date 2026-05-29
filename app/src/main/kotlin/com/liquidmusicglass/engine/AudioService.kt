@@ -16,7 +16,9 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -384,12 +386,40 @@ class AudioService : MediaSessionService() {
                 "User-Agent" to "LiquidMusicGlass/1.0"
             ))
 
-        val dataSourceFactory = StreamingDataSource.create(
-            context = this,
-            httpDataSource = httpFactory
-        )
+        // Base data source: offline files + cache + HTTP
+        val baseFactory = DefaultDataSource.Factory(this, httpFactory)
+        val cacheFactory = MediaCacheManager.getCacheDataSourceFactory()?.let { cacheDSFactory ->
+            // Wrap cache over base
+            cacheDSFactory
+        } ?: baseFactory
 
-        val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
+        // ResolvingDataSource: resolves mediaId (track ID) to real stream URL on demand
+        // This is how InnerTune does it — much more reliable than liquid:// scheme
+        val resolvingFactory = ResolvingDataSource.Factory(cacheFactory) { dataSpec ->
+            val mediaId = dataSpec.key ?: return@Factory dataSpec
+
+            // Check if cached in PlayerController's URL cache
+            val cachedUri = PlayerController.getValidCachedUri(mediaId)
+            if (cachedUri != null) {
+                return@Factory dataSpec.withUri(cachedUri)
+            }
+
+            // Resolve stream URL synchronously (runs on ExoPlayer's IO thread)
+            val resolvedUri = PlayerController.resolveStreamUrlSync(mediaId)
+            if (resolvedUri != null) {
+                dataSpec.withUri(resolvedUri)
+            } else {
+                // Check if dataSpec already has a usable URI (not just the mediaId)
+                val currentUri = dataSpec.uri
+                if (currentUri.scheme == "http" || currentUri.scheme == "https" || currentUri.scheme == "file") {
+                    dataSpec
+                } else {
+                    throw java.io.IOException("Cannot resolve stream URL for track $mediaId")
+                }
+            }
+        }
+
+        val mediaSourceFactory = DefaultMediaSourceFactory(resolvingFactory)
 
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(30_000, 60_000, 2_500, 5_000)
@@ -908,12 +938,7 @@ class AudioService : MediaSessionService() {
      */
     private fun buildMediaItemForPrefetch(track: Track): MediaItem {
         val mediaUri = if (track.isOnlineTrack && track.uri.scheme != "file") {
-            Uri.Builder()
-                .scheme(StreamingDataSource.SCHEME_LIQUID)
-                .authority("track")
-                .appendQueryParameter(StreamingDataSource.PARAM_TRACK_ID, track.id)
-                .appendQueryParameter(StreamingDataSource.PARAM_URL, track.uri.toString())
-                .build()
+            Uri.parse(track.id)
         } else {
             track.uri
         }
@@ -931,6 +956,7 @@ class AudioService : MediaSessionService() {
         return MediaItem.Builder()
             .setMediaId(track.id)
             .setUri(mediaUri)
+            .setCustomCacheKey(track.id)
             .setMediaMetadata(metaBuilder.build())
             .build()
     }

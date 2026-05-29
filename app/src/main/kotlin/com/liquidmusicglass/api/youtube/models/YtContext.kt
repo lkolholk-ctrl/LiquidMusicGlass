@@ -15,12 +15,9 @@ data class YtContext(
     data class Client(
         val clientName: String,
         val clientVersion: String,
-        val osVersion: String? = null,
         val gl: String,
         val hl: String,
-        val visitorData: String? = null,
-        val deviceModel: String? = null,
-        val platform: String? = null
+        val visitorData: String? = null
     )
 
     @Serializable

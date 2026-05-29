@@ -340,7 +340,7 @@ fun YouTubeSearchScreen(
                                 item = item,
                                 onClick = {
                                     hideKeyboard()
-                                    val track = item.toEngineTrack(item.shareUrl)
+                                    val track = item.toEngineTrack()
                                     PlayerController.playNext(track, context)
                                 },
                                 onPlayRadio = {
@@ -350,7 +350,7 @@ fun YouTubeSearchScreen(
                                         if (radioResult.isSuccess) {
                                             val ytTracks = radioResult.getOrThrow()
                                             val resolvedTracks = ytTracks.map { ytTrack ->
-                                                ytTrack.toEngineTrack(ytTrack.shareUrl)
+                                                ytTrack.toEngineTrack()
                                             }
                                             if (resolvedTracks.isNotEmpty()) {
                                                 PlayerController.playFromList(

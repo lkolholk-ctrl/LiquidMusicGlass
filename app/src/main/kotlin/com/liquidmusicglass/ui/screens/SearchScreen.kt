@@ -32,6 +32,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,6 +59,15 @@ import com.liquidmusicglass.api.icm.IcmSearchItem
 import com.liquidmusicglass.api.icm.IcmSearchSource
 import com.liquidmusicglass.api.icm.IcmWaveOnboardingArtist
 import com.liquidmusicglass.api.icm.toTrack
+import com.liquidmusicglass.api.youtube.YouTubeMusicRepository
+import com.liquidmusicglass.api.youtube.YtSearchFilter
+import com.liquidmusicglass.api.youtube.YtSearchResult
+import com.liquidmusicglass.api.youtube.YtSearchItem
+import com.liquidmusicglass.api.youtube.YtTrack
+import com.liquidmusicglass.api.youtube.YtAlbumItem
+import com.liquidmusicglass.api.youtube.YtArtistItem
+import com.liquidmusicglass.camp.FeatureAccessManager
+import com.liquidmusicglass.camp.MusicCamp
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.Track
 import com.liquidmusicglass.ui.glass.AlbumArtImage
@@ -66,6 +76,7 @@ import com.liquidmusicglass.ui.viewmodel.SearchViewModel
 import kotlinx.coroutines.launch
 
 private val AppleRed = Color(0xFFFC3C44)
+private val YouTubeRed = Color(0xFFFF0000)
 
 @Composable
 fun SearchScreen(
@@ -76,7 +87,14 @@ fun SearchScreen(
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
     val prefs = remember { context.getSharedPreferences("search_history", Context.MODE_PRIVATE) }
+    val scope = rememberCoroutineScope()
 
+    // Camp observation
+    val campManager = remember { FeatureAccessManager.getInstance(context) }
+    val currentCamp by campManager.currentCamp.collectAsState()
+    val isYoutubeCamp = currentCamp is MusicCamp.Youtube
+
+    // ICM search state
     val viewModel = remember { SearchViewModel() }
     val query by viewModel.query.collectAsState()
     val searchResults by viewModel.searchResults.collectAsState()
@@ -85,9 +103,22 @@ fun SearchScreen(
     val error by viewModel.error.collectAsState()
     val selectedSource by viewModel.selectedSource.collectAsState()
 
-    // Load categories on first composition
+    // YouTube search state
+    var ytQuery by remember { mutableStateOf("") }
+    var ytSearchResult by remember { mutableStateOf<YtSearchResult?>(null) }
+    var ytIsLoading by remember { mutableStateOf(false) }
+    var ytError by remember { mutableStateOf<String?>(null) }
+    var ytFilter by remember { mutableStateOf(YtSearchFilter.SONGS) }
+    val ytRepo = remember { YouTubeMusicRepository.getInstance() }
+
+    // Active query/source based on camp
+    val activeQuery = if (isYoutubeCamp) ytQuery else query
+    val activeIsLoading = if (isYoutubeCamp) ytIsLoading else isLoading
+    val activeError = if (isYoutubeCamp) ytError else error
+
+    // Load categories on first composition (ICM only)
     LaunchedEffect(Unit) {
-        viewModel.loadCategories()
+        if (!isYoutubeCamp) viewModel.loadCategories()
     }
 
     fun hideKeyboard() {
@@ -112,6 +143,27 @@ fun SearchScreen(
     fun clearHistory() {
         prefs.edit().remove("queries").apply()
         history = emptyList()
+    }
+
+    fun performYtSearch(q: String) {
+        if (q.isBlank()) return
+        ytIsLoading = true
+        ytError = null
+        scope.launch {
+            try {
+                val result = ytRepo.searchAll(q, ytFilter)
+                if (result.isSuccess) {
+                    ytSearchResult = result.getOrThrow()
+                    saveQuery(q)
+                } else {
+                    ytError = result.exceptionOrNull()?.message ?: "Search failed"
+                }
+            } catch (e: Exception) {
+                ytError = e.message ?: "Unknown error"
+            } finally {
+                ytIsLoading = false
+            }
+        }
     }
 
     // Save query when search completes with results
@@ -143,28 +195,46 @@ fun SearchScreen(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Source selector
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                SourceChip(
-                    text = "Apple Music",
-                    selected = selectedSource == IcmSearchSource.APPLE,
-                    onClick = { viewModel.setSource(IcmSearchSource.APPLE) }
-                )
-                SourceChip(
-                    text = "VK",
-                    selected = selectedSource == IcmSearchSource.VK,
-                    onClick = { viewModel.setSource(IcmSearchSource.VK) }
-                )
-                SourceChip(
-                    text = "All",
-                    selected = selectedSource == IcmSearchSource.ALL,
-                    onClick = { viewModel.setSource(IcmSearchSource.ALL) }
-                )
+            // Source selector — camp-aware
+            if (isYoutubeCamp) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    YtSearchFilter.entries.forEach { filter ->
+                        SourceChip(
+                            text = filter.name.lowercase().replaceFirstChar { it.uppercase() },
+                            selected = ytFilter == filter,
+                            accentColor = YouTubeRed,
+                            onClick = { ytFilter = filter; if (ytQuery.isNotBlank()) performYtSearch(ytQuery) }
+                        )
+                    }
+                }
+            } else {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    SourceChip(
+                        text = "Apple Music",
+                        selected = selectedSource == IcmSearchSource.APPLE,
+                        onClick = { viewModel.setSource(IcmSearchSource.APPLE) }
+                    )
+                    SourceChip(
+                        text = "VK",
+                        selected = selectedSource == IcmSearchSource.VK,
+                        onClick = { viewModel.setSource(IcmSearchSource.VK) }
+                    )
+                    SourceChip(
+                        text = "All",
+                        selected = selectedSource == IcmSearchSource.ALL,
+                        onClick = { viewModel.setSource(IcmSearchSource.ALL) }
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -172,6 +242,7 @@ fun SearchScreen(
             // Search field — solid dark background
             val isDark = LiquidTheme.colors.isDark
             val searchBarBg = if (isDark) Color(0xFF1A1A1A) else Color(0xFFF2F2F7)
+            val accentColor = if (isYoutubeCamp) YouTubeRed else AppleRed
 
             Row(
                 modifier = Modifier
@@ -191,26 +262,37 @@ fun SearchScreen(
                 )
                 Spacer(modifier = Modifier.width(10.dp))
                 BasicTextField(
-                    value = query,
-                    onValueChange = { viewModel.setQuery(it) },
+                    value = if (isYoutubeCamp) ytQuery else query,
+                    onValueChange = {
+                        if (isYoutubeCamp) {
+                            ytQuery = it
+                            if (it.isBlank()) ytSearchResult = null
+                        } else {
+                            viewModel.setQuery(it)
+                        }
+                    },
                     textStyle = TextStyle(
                         color = LiquidTheme.colors.textPrimary,
                         fontSize = 16.sp
                     ),
                     singleLine = true,
-                    cursorBrush = SolidColor(AppleRed),
+                    cursorBrush = SolidColor(accentColor),
                     modifier = Modifier.weight(1f),
                     keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                         imeAction = androidx.compose.ui.text.input.ImeAction.Search
                     ),
                     keyboardActions = androidx.compose.foundation.text.KeyboardActions(
-                        onSearch = { hideKeyboard(); viewModel.searchNow() }
+                        onSearch = {
+                            hideKeyboard()
+                            if (isYoutubeCamp) performYtSearch(ytQuery)
+                            else viewModel.searchNow()
+                        }
                     ),
                     decorationBox = { innerTextField ->
                         Box {
-                            if (query.isEmpty()) {
+                            if ((if (isYoutubeCamp) ytQuery else query).isEmpty()) {
                                 Text(
-                                    text = "Songs, artists, albums",
+                                    text = if (isYoutubeCamp) "Search YouTube Music..." else "Songs, artists, albums",
                                     color = LiquidTheme.colors.textTertiary,
                                     fontSize = 16.sp
                                 )
@@ -219,7 +301,7 @@ fun SearchScreen(
                         }
                     }
                 )
-                if (query.isNotEmpty()) {
+                if ((if (isYoutubeCamp) ytQuery else query).isNotEmpty()) {
                     Box(
                         modifier = Modifier
                             .size(24.dp)
@@ -228,7 +310,11 @@ fun SearchScreen(
                             .clickable(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null,
-                                onClick = { viewModel.clearQuery(); hideKeyboard() }
+                                onClick = {
+                                    if (isYoutubeCamp) { ytQuery = ""; ytSearchResult = null }
+                                    else viewModel.clearQuery()
+                                    hideKeyboard()
+                                }
                             ),
                         contentAlignment = Alignment.Center
                     ) {
@@ -251,7 +337,7 @@ fun SearchScreen(
             ) {
                 // ─── IDLE STATE: Categories + History ───
                 androidx.compose.animation.AnimatedVisibility(
-                    visible = query.isBlank(),
+                    visible = activeQuery.isBlank(),
                     enter = fadeIn(),
                     exit = fadeOut()
                 ) {
@@ -344,158 +430,331 @@ fun SearchScreen(
 
                 // ─── ACTIVE SEARCH: Results ───
                 androidx.compose.animation.AnimatedVisibility(
-                    visible = query.isNotBlank(),
+                    visible = activeQuery.isNotBlank(),
                     enter = fadeIn(),
                     exit = fadeOut()
                 ) {
-                    when {
-                        isLoading -> {
-                            Box(
-                                modifier = Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                CircularProgressIndicator(
-                                    color = AppleRed,
-                                    modifier = Modifier.size(32.dp)
-                                )
-                            }
-                        }
-                        error != null -> {
-                            Box(
-                                modifier = Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Text(
-                                        text = "Error",
-                                        color = AppleRed,
-                                        fontSize = 18.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    Text(
-                                        text = error ?: "Unknown error",
-                                        color = LiquidTheme.colors.textTertiary,
-                                        fontSize = 14.sp
+                    if (isYoutubeCamp) {
+                        // YouTube search results
+                        when {
+                            ytIsLoading -> {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    CircularProgressIndicator(
+                                        color = YouTubeRed,
+                                        modifier = Modifier.size(32.dp)
                                     )
                                 }
                             }
-                        }
-                        else -> {
-                            LazyColumn(
-                                modifier = Modifier.fillMaxSize(),
-                                verticalArrangement = Arrangement.spacedBy(2.dp),
-                                contentPadding = PaddingValues(bottom = 120.dp)
-                            ) {
-                                // Artists section
-                                if (artists.isNotEmpty()) {
-                                    item(key = "artists_label") {
-                                        SearchSectionLabel("Artists")
-                                    }
-                                    // Artists as horizontal row of circular avatars
-                                    item(key = "artists_row") {
-                                        LazyRow(
-                                            contentPadding = PaddingValues(horizontal = 20.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(16.dp)
-                                        ) {
-                                            itemsIndexed(
-                                                items = artists,
-                                                key = { index, artist -> "artist_${index}_${artist.id}" }
-                                            ) { _, artist ->
-                                                ArtistChip(
-                                                    artist = artist,
-                                                    onClick = {
-                                                        hideKeyboard()
-                                                        onNavigateToArtist(artist.id)
-                                                    }
-                                                )
-                                            }
-                                        }
-                                        Spacer(modifier = Modifier.height(16.dp))
-                                    }
-                                }
-
-                                // Albums section
-                                if (albums.isNotEmpty()) {
-                                    item(key = "albums_label") {
-                                        SearchSectionLabel("Albums")
-                                    }
-                                    // Albums as horizontal row of square cards
-                                    item(key = "albums_row") {
-                                        LazyRow(
-                                            contentPadding = PaddingValues(horizontal = 20.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(14.dp)
-                                        ) {
-                                            itemsIndexed(
-                                                items = albums,
-                                                key = { index, album -> "album_${index}_${album.id}" }
-                                            ) { _, album ->
-                                                AlbumCard(
-                                                    album = album,
-                                                    onClick = {
-                                                        hideKeyboard()
-                                                        onNavigateToAlbum(album.id)
-                                                    }
-                                                )
-                                            }
-                                        }
-                                        Spacer(modifier = Modifier.height(16.dp))
-                                    }
-                                }
-
-                                // Tracks section
-                                if (tracks.isNotEmpty()) {
-                                    item(key = "tracks_label") {
-                                        SearchSectionLabel("Songs")
-                                    }
-                                    val playableTracks = tracks.map { it.toTrack() }
-                                    itemsIndexed(
-                                        items = tracks,
-                                        key = { index, track -> "track_${index}_${track.id}" }
-                                    ) { _, item ->
-                                        SearchResultRow(
-                                            title = item.title,
-                                            subtitle = item.displayArtist,
-                                            icon = Icons.Rounded.MusicNote,
-                                            coverUrl = item.cover,
-                                            isExplicit = item.isExplicit,
-                                            isCustom = item.isCustom,
-                                            onClick = {
-                                                hideKeyboard()
-                                                val startIdx = playableTracks.indexOfFirst { it.id == item.id }
-                                                    .coerceAtLeast(0)
-                                                PlayerController.playFromList(
-                                                    context = context,
-                                                    tracks = playableTracks,
-                                                    startIndex = startIdx,
-                                                    autoRefillType = "search",
-                                                    autoRefillId = query,
-                                                    autoRefillName = query
-                                                )
-                                            }
+                            ytError != null -> {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text(
+                                            text = "Error",
+                                            color = YouTubeRed,
+                                            fontSize = 18.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Text(
+                                            text = ytError ?: "Unknown error",
+                                            color = LiquidTheme.colors.textTertiary,
+                                            fontSize = 14.sp
                                         )
                                     }
                                 }
+                            }
+                            else -> {
+                                val ytTracks = ytSearchResult?.tracks ?: emptyList()
+                                val ytAlbums = ytSearchResult?.albums ?: emptyList()
+                                val ytArtists = ytSearchResult?.artists ?: emptyList()
+                                val ytPlaylists = ytSearchResult?.playlists ?: emptyList()
+                                val hasResults = ytTracks.isNotEmpty() || ytAlbums.isNotEmpty() || ytArtists.isNotEmpty() || ytPlaylists.isNotEmpty()
 
-                                // No results
-                                if (tracks.isEmpty() && albums.isEmpty() && artists.isEmpty()) {
-                                    item {
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(top = 60.dp),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text(
-                                                text = "No results for \"$query\"",
-                                                color = LiquidTheme.colors.textTertiary,
-                                                fontSize = 16.sp
+                                LazyColumn(
+                                    modifier = Modifier.fillMaxSize(),
+                                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                                    contentPadding = PaddingValues(bottom = 120.dp)
+                                ) {
+                                    // Artists section
+                                    if (ytArtists.isNotEmpty()) {
+                                        item(key = "yt_artists_label") {
+                                            SearchSectionLabel("Artists")
+                                        }
+                                        item(key = "yt_artists_row") {
+                                            LazyRow(
+                                                contentPadding = PaddingValues(horizontal = 20.dp),
+                                                horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                            ) {
+                                                itemsIndexed(
+                                                    items = ytArtists,
+                                                    key = { index, artist -> "yt_artist_${index}_${artist.browseId}" }
+                                                ) { _, artist ->
+                                                    YtArtistChip(
+                                                        artist = artist,
+                                                        onClick = {
+                                                            hideKeyboard()
+                                                            onNavigateToArtist(artist.browseId)
+                                                        }
+                                                    )
+                                                }
+                                            }
+                                            Spacer(modifier = Modifier.height(16.dp))
+                                        }
+                                    }
+
+                                    // Albums section
+                                    if (ytAlbums.isNotEmpty()) {
+                                        item(key = "yt_albums_label") {
+                                            SearchSectionLabel("Albums")
+                                        }
+                                        item(key = "yt_albums_row") {
+                                            LazyRow(
+                                                contentPadding = PaddingValues(horizontal = 20.dp),
+                                                horizontalArrangement = Arrangement.spacedBy(14.dp)
+                                            ) {
+                                                itemsIndexed(
+                                                    items = ytAlbums,
+                                                    key = { index, album -> "yt_album_${index}_${album.browseId}" }
+                                                ) { _, album ->
+                                                    YtAlbumCard(
+                                                        album = album,
+                                                        onClick = {
+                                                            hideKeyboard()
+                                                            onNavigateToAlbum(album.browseId)
+                                                        }
+                                                    )
+                                                }
+                                            }
+                                            Spacer(modifier = Modifier.height(16.dp))
+                                        }
+                                    }
+
+                                    // Songs section
+                                    if (ytTracks.isNotEmpty()) {
+                                        item(key = "yt_tracks_label") {
+                                            SearchSectionLabel("Songs")
+                                        }
+                                        val playableTracks = ytTracks.map { it.toEngineTrack() }
+                                        itemsIndexed(
+                                            items = ytTracks,
+                                            key = { index, track -> "yt_track_${index}_${track.videoId}" }
+                                        ) { _, ytTrack ->
+                                            SearchResultRow(
+                                                title = ytTrack.title,
+                                                subtitle = ytTrack.artist,
+                                                icon = Icons.Rounded.MusicNote,
+                                                coverUrl = ytTrack.thumbnail,
+                                                isExplicit = ytTrack.isExplicit,
+                                                onClick = {
+                                                    hideKeyboard()
+                                                    val startIdx = playableTracks.indexOfFirst { it.id == ytTrack.videoId }
+                                                        .coerceAtLeast(0)
+                                                    PlayerController.playFromList(
+                                                        context = context,
+                                                        tracks = playableTracks,
+                                                        startIndex = startIdx,
+                                                        autoRefillType = "YOUTUBE_RADIO",
+                                                        autoRefillId = ytTrack.videoId,
+                                                        autoRefillName = ytTrack.title
+                                                    )
+                                                }
                                             )
                                         }
                                     }
-                                }
 
-                                item { Spacer(modifier = Modifier.height(200.dp)) }
+                                    // Playlists section
+                                    if (ytPlaylists.isNotEmpty()) {
+                                        item(key = "yt_playlists_label") {
+                                            SearchSectionLabel("Playlists")
+                                        }
+                                        itemsIndexed(
+                                            items = ytPlaylists,
+                                            key = { index, playlist -> "yt_playlist_${index}_${playlist.id}" }
+                                        ) { _, playlist ->
+                                            SearchResultRow(
+                                                title = playlist.title,
+                                                subtitle = listOfNotNull(playlist.author, playlist.songCountText).joinToString(" · "),
+                                                icon = Icons.Rounded.Album,
+                                                coverUrl = playlist.thumbnail,
+                                                onClick = {}
+                                            )
+                                        }
+                                    }
+
+                                    if (!hasResults) {
+                                        item {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(top = 60.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = "No results for \"$ytQuery\"",
+                                                    color = LiquidTheme.colors.textTertiary,
+                                                    fontSize = 16.sp
+                                                )
+                                            }
+                                        }
+                                    }
+                                    item { Spacer(modifier = Modifier.height(200.dp)) }
+                                }
+                            }
+                        }
+                    } else {
+                        // ICM search results (original)
+                        when {
+                            isLoading -> {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    CircularProgressIndicator(
+                                        color = AppleRed,
+                                        modifier = Modifier.size(32.dp)
+                                    )
+                                }
+                            }
+                            error != null -> {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text(
+                                            text = "Error",
+                                            color = AppleRed,
+                                            fontSize = 18.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Text(
+                                            text = error ?: "Unknown error",
+                                            color = LiquidTheme.colors.textTertiary,
+                                            fontSize = 14.sp
+                                        )
+                                    }
+                                }
+                            }
+                            else -> {
+                                LazyColumn(
+                                    modifier = Modifier.fillMaxSize(),
+                                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                                    contentPadding = PaddingValues(bottom = 120.dp)
+                                ) {
+                                    // Artists section
+                                    if (artists.isNotEmpty()) {
+                                        item(key = "artists_label") {
+                                            SearchSectionLabel("Artists")
+                                        }
+                                        item(key = "artists_row") {
+                                            LazyRow(
+                                                contentPadding = PaddingValues(horizontal = 20.dp),
+                                                horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                            ) {
+                                                itemsIndexed(
+                                                    items = artists,
+                                                    key = { index, artist -> "artist_${index}_${artist.id}" }
+                                                ) { _, artist ->
+                                                    ArtistChip(
+                                                        artist = artist,
+                                                        onClick = {
+                                                            hideKeyboard()
+                                                            onNavigateToArtist(artist.id)
+                                                        }
+                                                    )
+                                                }
+                                            }
+                                            Spacer(modifier = Modifier.height(16.dp))
+                                        }
+                                    }
+
+                                    // Albums section
+                                    if (albums.isNotEmpty()) {
+                                        item(key = "albums_label") {
+                                            SearchSectionLabel("Albums")
+                                        }
+                                        item(key = "albums_row") {
+                                            LazyRow(
+                                                contentPadding = PaddingValues(horizontal = 20.dp),
+                                                horizontalArrangement = Arrangement.spacedBy(14.dp)
+                                            ) {
+                                                itemsIndexed(
+                                                    items = albums,
+                                                    key = { index, album -> "album_${index}_${album.id}" }
+                                                ) { _, album ->
+                                                    AlbumCard(
+                                                        album = album,
+                                                        onClick = {
+                                                            hideKeyboard()
+                                                            onNavigateToAlbum(album.id)
+                                                        }
+                                                    )
+                                                }
+                                            }
+                                            Spacer(modifier = Modifier.height(16.dp))
+                                        }
+                                    }
+
+                                    // Tracks section
+                                    if (tracks.isNotEmpty()) {
+                                        item(key = "tracks_label") {
+                                            SearchSectionLabel("Songs")
+                                        }
+                                        val playableTracks = tracks.map { it.toTrack() }
+                                        itemsIndexed(
+                                            items = tracks,
+                                            key = { index, track -> "track_${index}_${track.id}" }
+                                        ) { _, item ->
+                                            SearchResultRow(
+                                                title = item.title,
+                                                subtitle = item.displayArtist,
+                                                icon = Icons.Rounded.MusicNote,
+                                                coverUrl = item.cover,
+                                                isExplicit = item.isExplicit,
+                                                isCustom = item.isCustom,
+                                                onClick = {
+                                                    hideKeyboard()
+                                                    val startIdx = playableTracks.indexOfFirst { it.id == item.id }
+                                                        .coerceAtLeast(0)
+                                                    PlayerController.playFromList(
+                                                        context = context,
+                                                        tracks = playableTracks,
+                                                        startIndex = startIdx,
+                                                        autoRefillType = "search",
+                                                        autoRefillId = query,
+                                                        autoRefillName = query
+                                                    )
+                                                }
+                                            )
+                                        }
+                                    }
+
+                                    if (tracks.isEmpty() && albums.isEmpty() && artists.isEmpty()) {
+                                        item {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(top = 60.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = "No results for \"$query\"",
+                                                    color = LiquidTheme.colors.textTertiary,
+                                                    fontSize = 16.sp
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    item { Spacer(modifier = Modifier.height(200.dp)) }
+                                }
                             }
                         }
                     }
@@ -791,6 +1050,7 @@ private fun SourceChip(
     text: String,
     selected: Boolean,
     enabled: Boolean = true,
+    accentColor: Color = AppleRed,
     onClick: () -> Unit
 ) {
         val isDark = LiquidTheme.colors.isDark
@@ -801,7 +1061,7 @@ private fun SourceChip(
                 .background(
                     when {
                         !enabled -> chipBg
-                        selected -> AppleRed
+                        selected -> accentColor
                         else -> chipBg
                     }
                 )
@@ -838,4 +1098,115 @@ private fun SearchSectionLabel(text: String) {
         color = LiquidTheme.colors.textPrimary,
         modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
     )
+}
+
+@Composable
+private fun YtArtistChip(
+    artist: YtArtistItem,
+    onClick: () -> Unit
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .width(80.dp)
+            .clickable(onClick = onClick)
+    ) {
+        if (artist.thumbnail.isNotBlank()) {
+            AsyncImage(
+                model = ImageRequest.Builder(LocalContext.current)
+                    .data(artist.thumbnail)
+                    .crossfade(true)
+                    .build(),
+                contentDescription = artist.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(72.dp)
+                    .clip(CircleShape)
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(72.dp)
+                    .clip(CircleShape)
+                    .background(if (LiquidTheme.colors.isDark) Color(0xFF2A2A2A) else Color(0xFFF2F2F7)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Person,
+                    contentDescription = null,
+                    tint = LiquidTheme.colors.iconMuted,
+                    modifier = Modifier.size(32.dp)
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = artist.title,
+            color = LiquidTheme.colors.textPrimary,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth(),
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+        )
+    }
+}
+
+@Composable
+private fun YtAlbumCard(
+    album: YtAlbumItem,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .width(140.dp)
+            .clickable(onClick = onClick)
+    ) {
+        if (album.thumbnail.isNotBlank()) {
+            AsyncImage(
+                model = ImageRequest.Builder(LocalContext.current)
+                    .data(album.thumbnail)
+                    .crossfade(true)
+                    .build(),
+                contentDescription = album.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(140.dp)
+                    .clip(RoundedCornerShape(8.dp))
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(140.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (LiquidTheme.colors.isDark) Color(0xFF2A2A2A) else Color(0xFFF2F2F7)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.MusicNote,
+                    contentDescription = null,
+                    tint = LiquidTheme.colors.iconMuted,
+                    modifier = Modifier.size(32.dp)
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = album.title,
+            color = LiquidTheme.colors.textPrimary,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = listOfNotNull(album.artist, album.year?.toString()).joinToString(" · "),
+            color = LiquidTheme.colors.textSecondary,
+            fontSize = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
 }

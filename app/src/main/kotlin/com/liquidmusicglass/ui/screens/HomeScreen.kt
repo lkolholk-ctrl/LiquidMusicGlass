@@ -14,6 +14,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
@@ -42,6 +43,10 @@ import com.liquidmusicglass.api.icm.IcmHomeItem
 import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.api.icm.IcmWaveTrack
 import com.liquidmusicglass.api.icm.toTrack
+import com.liquidmusicglass.api.youtube.YouTubeMusicRepository
+import com.liquidmusicglass.api.youtube.YtAlbumItem
+import com.liquidmusicglass.api.youtube.YtMoodItem
+import com.liquidmusicglass.api.youtube.YtExplorePage
 import com.liquidmusicglass.camp.FeatureAccessManager
 import com.liquidmusicglass.camp.MusicCamp
 import com.liquidmusicglass.data.local.WaveRepository
@@ -53,6 +58,7 @@ import com.liquidmusicglass.ui.viewmodel.HomeViewModel
 import kotlinx.coroutines.launch
 
 private val AppleRed = Color(0xFFFC3C44)
+private val YouTubeRed = Color(0xFFFF0000)
 
 private suspend fun resolveWaveTrackUrl(track: Track?): Track? {
     if (track == null) return null
@@ -190,11 +196,22 @@ fun HomeScreen(
     val scope = rememberCoroutineScope()
     val scroll = rememberScrollState()
 
+    // Camp observation
+    val campManager = remember { FeatureAccessManager.getInstance(context) }
+    val currentCamp by campManager.currentCamp.collectAsState()
+    val isYoutubeCamp = currentCamp is MusicCamp.Youtube
+
     val homeContent by viewModel.homeContent.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val error by viewModel.error.collectAsState()
     val charts by viewModel.charts.collectAsState()
     val isLoadingCharts by viewModel.isLoadingCharts.collectAsState()
+
+    // YouTube explore state
+    var ytExplore by remember { mutableStateOf<YtExplorePage?>(null) }
+    var ytExploreLoading by remember { mutableStateOf(false) }
+    var ytExploreError by remember { mutableStateOf<String?>(null) }
+    val ytRepo = remember { YouTubeMusicRepository.getInstance() }
 
     val allTracks by PlayerController.queueFlow.collectAsState()
     val recentlyPlayed by PlayerController.recentlyPlayed.collectAsState()
@@ -206,9 +223,26 @@ fun HomeScreen(
 
     val isLoggedIn by IcmAuthRepository.isLoggedIn.collectAsState()
 
-    // Load home content on first composition or when login state changes
-    LaunchedEffect(isLoggedIn) {
-        viewModel.loadHomeContent()
+    // Load home content based on camp
+    LaunchedEffect(isYoutubeCamp, isLoggedIn) {
+        if (isYoutubeCamp) {
+            ytExploreLoading = true
+            ytExploreError = null
+            try {
+                val result = ytRepo.explore()
+                if (result.isSuccess) {
+                    ytExplore = result.getOrThrow()
+                } else {
+                    ytExploreError = result.exceptionOrNull()?.message ?: "Failed to load"
+                }
+            } catch (e: Exception) {
+                ytExploreError = e.message ?: "Unknown error"
+            } finally {
+                ytExploreLoading = false
+            }
+        } else {
+            viewModel.loadHomeContent()
+        }
     }
 
     // Extract blocks from home content
@@ -313,7 +347,7 @@ fun HomeScreen(
                             if (radioResult.isSuccess) {
                                 val ytTracks = radioResult.getOrThrow()
                                 val resolvedTracks = ytTracks.map { ytTrack ->
-                                    ytTrack.toEngineTrack(ytTrack.shareUrl)
+                                    ytTrack.toEngineTrack()
                                 }
 
                                 if (resolvedTracks.isNotEmpty()) {
@@ -457,6 +491,68 @@ fun HomeScreen(
         scope.launch { IcmRepository.sendWaveFeedback(feedbackType, value) }
     }
 
+    fun playYtMoodStation(mood: YtMoodItem) {
+        activeMoodId = mood.browseId
+        isPlayingMood = true
+        scope.launch {
+            try {
+                // Browse the mood category to get a playlist
+                val browseResult = ytRepo.browse(mood.browseId, mood.params)
+                if (browseResult.isSuccess) {
+                    val result = browseResult.getOrThrow()
+                    val tracks = result.sections.flatMap { section ->
+                        section.items.mapNotNull { item ->
+                            when (item) {
+                                is com.liquidmusicglass.api.youtube.YtBrowseItem.TrackItem -> item.track.toEngineTrack()
+                                else -> null
+                            }
+                        }
+                    }
+                    if (tracks.isNotEmpty()) {
+                        PlayerController.playFromList(
+                            context = context,
+                            tracks = tracks,
+                            startIndex = 0,
+                            autoRefillType = "YOUTUBE_RADIO",
+                            autoRefillId = mood.browseId,
+                            autoRefillName = mood.title
+                        )
+                    } else {
+                        // Fallback: search by mood name and build radio
+                        val searchResult = ytRepo.search(mood.title, com.liquidmusicglass.api.youtube.YtSearchFilter.SONGS)
+                        val seedTrack = searchResult.getOrNull()?.firstOrNull()
+                        if (seedTrack != null) {
+                            val radioResult = ytRepo.getRadioQueue(seedTrack.videoId)
+                            if (radioResult.isSuccess) {
+                                val radioTracks = radioResult.getOrThrow().map { it.toEngineTrack() }
+                                if (radioTracks.isNotEmpty()) {
+                                    PlayerController.playFromList(
+                                        context = context,
+                                        tracks = radioTracks,
+                                        startIndex = 0,
+                                        autoRefillType = "YOUTUBE_RADIO",
+                                        autoRefillId = seedTrack.videoId,
+                                        autoRefillName = mood.title
+                                    )
+                                }
+                            }
+                        } else {
+                            activeMoodId = null
+                            isPlayingMood = false
+                        }
+                    }
+                } else {
+                    activeMoodId = null
+                    isPlayingMood = false
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("HomeScreen", "YT mood station error: ${e.message}")
+                activeMoodId = null
+                isPlayingMood = false
+            }
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize().background(LiquidTheme.colors.settingsBackground)) {
         Column(
             modifier = Modifier
@@ -491,16 +587,87 @@ fun HomeScreen(
 
             Spacer(modifier = Modifier.height(28.dp))
 
-            // ─── YouTube Music Quick Access ───
-            val currentCamp by remember {
-                com.liquidmusicglass.camp.FeatureAccessManager.getInstance(context)
-                    .currentCamp
-            }.collectAsState()
+            // ─── Camp-aware content ───
+            if (isYoutubeCamp) {
+                // === YOUTUBE CAMP HOME ===
+                if (ytExploreLoading && ytExplore == null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(400.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(color = YouTubeRed)
+                    }
+                }
 
-            if (currentCamp is com.liquidmusicglass.camp.MusicCamp.Youtube) {
-                YouTubeMusicBanner(onClick = onNavigateToYouTube)
-                Spacer(modifier = Modifier.height(20.dp))
-            }
+                ytExploreError?.let { errorMsg ->
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xFF1C1C1E))
+                            .padding(16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = errorMsg,
+                            color = Color(0xFFFF453A),
+                            fontSize = 14.sp
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+
+                // YouTube Moods & Genres
+                val moods = ytExplore?.moodAndGenres ?: emptyList()
+                if (moods.isNotEmpty()) {
+                    SectionHeader(title = "Moods & Genres")
+                    Spacer(modifier = Modifier.height(12.dp))
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 20.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        items(moods, key = { it.browseId }) { mood ->
+                            YtMoodCard(
+                                mood = mood,
+                                isActive = activeMoodId == mood.browseId,
+                                onClick = {
+                                    if (activeMoodId == mood.browseId) {
+                                        activeMoodId = null
+                                        isPlayingMood = false
+                                        PlayerController.clearAutoRefillContext()
+                                    } else {
+                                        playYtMoodStation(mood)
+                                    }
+                                }
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(32.dp))
+                }
+
+                // YouTube New Releases
+                val newReleases = ytExplore?.newReleaseAlbums ?: emptyList()
+                if (newReleases.isNotEmpty()) {
+                    SectionHeader(title = "New Releases")
+                    Spacer(modifier = Modifier.height(12.dp))
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 20.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        items(newReleases, key = { it.browseId }) { album ->
+                            YtAlbumCard(
+                                album = album,
+                                onClick = { onNavigateToAlbum(album.browseId) }
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(32.dp))
+                }
+            } else {
+                // === ICM CAMP HOME (original) ===
 
             // Loading state
             if (isLoading && homeContent == null) {
@@ -784,6 +951,7 @@ fun HomeScreen(
             }
 
             Spacer(modifier = Modifier.height(200.dp))
+            } // end ICM camp else block
         }
     }
 
@@ -1301,66 +1469,109 @@ private fun RecentTrackCard(
     }
 }
 
-// ─── YouTube Music Banner ───
+// ─── YouTube Mood Card ───
 @Composable
-private fun YouTubeMusicBanner(
+private fun YtMoodCard(
+    mood: YtMoodItem,
+    isActive: Boolean,
     onClick: () -> Unit
 ) {
-    val YouTubeRed = Color(0xFFFF0000)
-    Row(
+    val stripeColor = if (mood.stripeColor != 0L) Color(mood.stripeColor) else YouTubeRed
+    Box(
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(Color(0xFF1A1A1A))
-            .border(1.dp, YouTubeRed.copy(alpha = 0.3f), RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick)
-            .padding(16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+            .size(130.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .background(Color(0xFF1C1C1E))
+            .drawBehind {
+                drawLine(
+                    color = stripeColor,
+                    start = androidx.compose.ui.geometry.Offset(0f, 0f),
+                    end = androidx.compose.ui.geometry.Offset(0f, size.height),
+                    strokeWidth = 4.dp.toPx()
+                )
+            }
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick
+            )
+            .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 16.dp)
     ) {
-        Box(
-            modifier = Modifier
-                .size(48.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(YouTubeRed.copy(alpha = 0.15f)),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = androidx.compose.material.icons.Icons.Rounded.PlayArrow,
-                contentDescription = null,
-                tint = YouTubeRed,
-                modifier = Modifier.size(28.dp)
+        Text(
+            text = mood.title,
+            color = Color.White,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.align(Alignment.BottomStart)
+        )
+        if (isActive) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .background(YouTubeRed, RoundedCornerShape(50))
+                    .align(Alignment.TopEnd)
             )
         }
+    }
+}
 
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = "YouTube Music",
-                color = Color.White,
-                fontSize = 17.sp,
-                fontWeight = FontWeight.SemiBold
+// ─── YouTube Album Card ───
+@Composable
+private fun YtAlbumCard(
+    album: YtAlbumItem,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .width(140.dp)
+            .clickable(onClick = onClick)
+    ) {
+        if (album.thumbnail.isNotBlank()) {
+            AsyncImage(
+                model = ImageRequest.Builder(LocalContext.current)
+                    .data(album.thumbnail)
+                    .crossfade(true)
+                    .build(),
+                contentDescription = album.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(140.dp)
+                    .clip(RoundedCornerShape(8.dp))
             )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = "Search millions of songs · Free streaming",
-                color = Color.White.copy(alpha = 0.6f),
-                fontSize = 13.sp
-            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(140.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xFF2A2A2A)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.MusicNote,
+                    contentDescription = null,
+                    tint = Color.White.copy(alpha = 0.5f),
+                    modifier = Modifier.size(32.dp)
+                )
+            }
         }
-
-        Box(
-            modifier = Modifier
-                .clip(RoundedCornerShape(8.dp))
-                .background(YouTubeRed)
-                .padding(horizontal = 14.dp, vertical = 8.dp)
-        ) {
-            Text(
-                text = "Open",
-                color = Color.White,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold
-            )
-        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = album.title,
+            color = LiquidTheme.colors.textPrimary,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = listOfNotNull(album.artist, album.year?.toString()).joinToString(" · "),
+            color = LiquidTheme.colors.textSecondary,
+            fontSize = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }

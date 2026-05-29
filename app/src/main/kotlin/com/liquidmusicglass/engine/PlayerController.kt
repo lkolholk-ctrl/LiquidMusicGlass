@@ -157,6 +157,10 @@ object PlayerController {
         appContext = context.applicationContext
     }
 
+    // ── YouTube video ID detection (works without queue) ──
+    private val ytVideoIdRegex = Regex("^[a-zA-Z0-9_-]{11}$")
+    private fun isYouTubeVideoId(id: String): Boolean = ytVideoIdRegex.matches(id)
+
     // ═══════════════════════════════════════════════════════════
     //  Playback Control
     // ═══════════════════════════════════════════════════════════
@@ -186,85 +190,38 @@ object PlayerController {
                 _isBuffering.value = true
             }
 
-            val streamResult = if (track.isOnlineTrack) {
-                resolveStreamUrl(track.id)
-            } else {
-                StreamResult.Success(track.uri)
-            }
+            // ResolvingDataSource handles URL resolution on demand
+            withContext(Dispatchers.Main) {
+                val player = getPlayer(context)
+                if (player != null) {
+                    player.stop()
+                    player.clearMediaItems()
 
-            when (streamResult) {
-                is StreamResult.Success -> {
-                    withContext(Dispatchers.Main) {
-                        val player = getPlayer(context)
-                        if (player != null) {
-                            // ── HARD RESET: stop kills any active transitions ──
-                            player.stop()
-                            player.clearMediaItems()
-                            android.util.Log.d("VOIDPIXEL_MEDIA", "[HARD_RESET] stop() + clearMediaItems() executed")
-
-                            // ── AGGRESSIVE DEBUG: dump full ExoPlayer timeline ──
-                            android.util.Log.d("VOIDPIXEL_MEDIA", "ExoPlayer timeline dump (mediaItemCount=${player.mediaItemCount}):")
-                            for (i in 0 until player.mediaItemCount) {
-                                val mid = player.getMediaItemAt(i).mediaId
-                                android.util.Log.d("VOIDPIXEL_MEDIA", "ExoPlayer Timeline Index [$i] has MediaID: $mid")
-                            }
-
-                            // ── STRICT ID-MATCHED NAVIGATION ──
-                            val targetIndex = (0 until player.mediaItemCount).indexOfFirst {
-                                player.getMediaItemAt(it).mediaId == trackId
-                            }
-
-                            if (targetIndex != -1) {
-                                android.util.Log.d("VOIDPIXEL_MEDIA", "ID MATCH: trackId=$trackId found at ExoPlayer index=$targetIndex — seeking")
-                                player.seekTo(targetIndex, 0L)
-                                player.prepare()
-                                player.play()
-                            } else {
-                                // Track missing from timeline — rebuild with strict ID order
-                                android.util.Log.w("VOIDPIXEL_MEDIA", "ID MISMATCH: trackId=$trackId NOT in ExoPlayer timeline. Rebuilding queue...")
-                                val allMediaItems = currentQueue.map { t ->
-                                    buildMediaItem(t, if (t.id == trackId) streamResult.uri else t.uri)
-                                }
-                                player.setMediaItems(allMediaItems, queueIndex, 0L)
-                                player.prepare()
-                                player.play()
-                                audioServiceRef?.setQueue(allMediaItems, queueIndex, 0L)
-                                android.util.Log.d("VOIDPIXEL_MEDIA", "Queue rebuilt with ${allMediaItems.size} items, startIndex=$queueIndex")
-                            }
-                            resetPlaybackLogging(track.durationMs)
-                            prefetchAhead(context, queueIndex, depth = 3)
-                        } else {
-                            android.util.Log.e("VOIDPIXEL_MEDIA", "No player available for trackId=$trackId")
-                            _isBuffering.value = false
-                        }
+                    // ── STRICT ID-MATCHED NAVIGATION ──
+                    val targetIndex = (0 until player.mediaItemCount).indexOfFirst {
+                        player.getMediaItemAt(it).mediaId == trackId
                     }
-                    addToRecent(track)
-                }
-                is StreamResult.Error -> {
-                    android.util.Log.e("PlayerController", "Stream error for ${track.id}: ${streamResult.code} | ${streamResult.message}")
-                    withContext(Dispatchers.Main) {
-                        _isBuffering.value = false
-                        val msg = when (streamResult.code) {
-                            "source_not_allowed" -> "VK Music is not enabled for this API key"
-                            "track_not_found" -> "Track not found"
-                            "region_unavailable" -> "Track not available in your region"
-                            "early_access" -> "This feature requires early access"
-                            "network_error" -> "Network error. Please check your connection"
-                            else -> {
-                                val rawMsg = streamResult.message ?: ""
-                                when {
-                                    rawMsg.contains("track_cache_missing_after_download") ->
-                                        "VK Music is temporarily unavailable. Please try again later or use Apple Music"
-                                    rawMsg.contains("cache_missing") ->
-                                        "VK Music is temporarily unavailable. Please try again later"
-                                    else -> "Failed to load track: ${streamResult.message ?: streamResult.code}"
-                                }
-                            }
-                        }
-                        android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
+
+                    if (targetIndex != -1) {
+                        player.seekTo(targetIndex, 0L)
+                        player.prepare()
+                        player.play()
+                    } else {
+                        // Track missing from timeline — rebuild queue
+                        val allMediaItems = currentQueue.map { t -> buildMediaItem(t) }
+                        player.setMediaItems(allMediaItems, queueIndex, 0L)
+                        player.prepare()
+                        player.play()
+                        audioServiceRef?.setQueue(allMediaItems, queueIndex, 0L)
                     }
+                    resetPlaybackLogging(track.durationMs)
+                    prefetchAhead(context, queueIndex, depth = 3)
+                } else {
+                    android.util.Log.e("VOIDPIXEL_MEDIA", "No player available for trackId=$trackId")
+                    _isBuffering.value = false
                 }
             }
+            addToRecent(track)
         }
     }
 
@@ -399,61 +356,46 @@ object PlayerController {
                 endlessEngine.registerTracks(tracks.map { it.id })
             }
 
-            val streamResult = if (startTrack.isOnlineTrack) {
-                resolveStreamUrl(startTrack.id)
-            } else {
-                StreamResult.Success(startTrack.uri)
+            // Build media items — ResolvingDataSource resolves stream URLs on demand
+            // when ExoPlayer actually needs them, so we don't need to resolve upfront.
+            val mediaItems = tracks.map { track ->
+                buildMediaItem(track)
             }
 
-            when (streamResult) {
-                is StreamResult.Success -> {
-                    val mediaItems = tracks.mapIndexed { i, track ->
-                        val uri = if (i == startIndex) streamResult.uri else track.uri
-                        buildMediaItem(track, uri)
-                    }
+            withContext(Dispatchers.Main) {
+                val immutableTracks = tracks.toList()
+                queue = immutableTracks
+                _queueFlow.value = immutableTracks
+                currentIndex = startIndex
+                _currentTrack.value = startTrack
+                _durationMs.value = startTrack.durationMs
+                _currentPositionMs.value = 0L
+                _isBuffering.value = true
 
-                    withContext(Dispatchers.Main) {
-                        val immutableTracks = tracks.toList()
-                        queue = immutableTracks
-                        _queueFlow.value = immutableTracks
-                        currentIndex = startIndex
-                        _currentTrack.value = startTrack
-                        _durationMs.value = startTrack.durationMs
-                        _currentPositionMs.value = 0L
-                        _isBuffering.value = true
-
-                        val player = getPlayer(context)
-                        player?.let {
-                            it.stop()
-                            it.clearMediaItems()
-                            it.setMediaItems(mediaItems, startIndex, 0L)
-                            it.prepare()
-                            it.play()
-                            resetPlaybackLogging(startTrack.durationMs)
-                        }
-
-                        // Sync service-scoped queue
-                        audioServiceRef?.setQueue(mediaItems, startIndex, 0L)
-                    }
-                    addToRecent(startTrack)
-
-                    if (newContext is PlaybackContext.Global) {
-                        launch {
-                            kotlinx.coroutines.delay(3000)
-                            endlessEngine.checkAndRefillIfNeeded()
-                        }
-                    }
-
-                    prefetchAhead(context, startIndex, depth = 10)
+                val player = getPlayer(context)
+                player?.let {
+                    it.stop()
+                    it.clearMediaItems()
+                    it.setMediaItems(mediaItems, startIndex, 0L)
+                    it.prepare()
+                    it.play()
+                    resetPlaybackLogging(startTrack.durationMs)
                 }
-                is StreamResult.Error -> {
-                    android.util.Log.e("PlayerController", "Stream error for ${startTrack.id}")
-                    withContext(Dispatchers.Main) {
-                        _isBuffering.value = false
-                        android.widget.Toast.makeText(context, "Failed to resolve track stream", android.widget.Toast.LENGTH_SHORT).show()
-                    }
+
+                // Sync service-scoped queue
+                audioServiceRef?.setQueue(mediaItems, startIndex, 0L)
+            }
+            addToRecent(startTrack)
+
+            if (newContext is PlaybackContext.Global) {
+                launch {
+                    kotlinx.coroutines.delay(3000)
+                    endlessEngine.checkAndRefillIfNeeded()
                 }
             }
+
+            // Pre-warm URL cache for upcoming tracks
+            prefetchAhead(context, startIndex, depth = 10)
         }
     }
 
@@ -653,9 +595,9 @@ object PlayerController {
             return cached.uri
         }
 
-        // ── Check if this is a YouTube track ──
-        val ytTrack = queue.find { it.id == trackId && it.isYouTubeTrack }
-        if (ytTrack != null) {
+        // ── Check if this is a YouTube track (by queue or ID pattern) ──
+        val isYt = queue.any { it.id == trackId && it.isYouTubeTrack } || isYouTubeVideoId(trackId)
+        if (isYt) {
             return runBlocking {
                 try {
                     val result = com.liquidmusicglass.api.youtube.YouTubeMusicRepository.getInstance()
@@ -712,9 +654,9 @@ object PlayerController {
             return StreamResult.Success(cached.uri)
         }
 
-        // ── Check if this is a YouTube track ──
-        val ytTrack = queue.find { it.id == trackId && it.isYouTubeTrack }
-        if (ytTrack != null) {
+        // ── Check if this is a YouTube track (by queue or ID pattern) ──
+        val isYt = queue.any { it.id == trackId && it.isYouTubeTrack } || isYouTubeVideoId(trackId)
+        if (isYt) {
             return try {
                 withTimeout(20_000) {
                     val result = com.liquidmusicglass.api.youtube.YouTubeMusicRepository.getInstance()
@@ -892,13 +834,11 @@ object PlayerController {
     }
 
     private fun buildMediaItem(track: Track, uri: Uri = track.uri): MediaItem {
+        // For online tracks: URI = mediaId (track ID). ResolvingDataSource in AudioService
+        // resolves it to the real stream URL on demand. Same approach as InnerTune.
+        // For local tracks: URI = actual file URI.
         val mediaUri = if (track.isOnlineTrack && uri.scheme != "file") {
-            Uri.Builder()
-                .scheme(StreamingDataSource.SCHEME_LIQUID)
-                .authority("track")
-                .appendQueryParameter(StreamingDataSource.PARAM_TRACK_ID, track.id)
-                .appendQueryParameter(StreamingDataSource.PARAM_URL, uri.toString())
-                .build()
+            Uri.parse(track.id)
         } else {
             uri
         }
@@ -916,6 +856,7 @@ object PlayerController {
         val item = MediaItem.Builder()
             .setMediaId(track.id)
             .setUri(mediaUri)
+            .setCustomCacheKey(track.id)
             .setMediaMetadata(metaBuilder.build())
             .build()
 

@@ -58,7 +58,7 @@ class YouTubeMusicRepositoryTest {
                 client.referer?.let { header("Referer", it) }
                 header("User-Agent", client.userAgent)
                 parameter("key", client.apiKey)
-                parameter("prettyPrint", "false")
+
                 
                 setBody(
                     YtSearchBody(

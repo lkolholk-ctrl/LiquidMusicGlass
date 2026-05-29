@@ -128,7 +128,7 @@ class EndlessPlaybackEngine(
                             if (result.isSuccess) {
                                 val ytTracks = result.getOrThrow()
                                 ytTracks.map { ytTrack ->
-                                    ytTrack.toEngineTrack(ytTrack.shareUrl)
+                                    ytTrack.toEngineTrack()
                                 }
                             } else emptyList()
                         }
