@@ -105,8 +105,9 @@ class MainActivity : ComponentActivity() {
         authScope.launch {
             val isRooted = com.liquidmusicglass.engine.SecurityUtils.isDeviceRooted()
             val isEmulator = com.liquidmusicglass.engine.SecurityUtils.isEmulator()
-            if (isRooted || isEmulator) {
-                android.util.Log.e("Security", "Security risk detected: Root=$isRooted, Emulator=$isEmulator")
+            val isSafe = com.liquidmusicglass.engine.SecurityUtils.isEnvironmentSafe(this@MainActivity)
+            if (isRooted || isEmulator || !isSafe) {
+                android.util.Log.e("Security", "Security risk detected: Root=$isRooted, Emulator=$isEmulator, EnvironmentSafe=$isSafe")
             }
         }
 
