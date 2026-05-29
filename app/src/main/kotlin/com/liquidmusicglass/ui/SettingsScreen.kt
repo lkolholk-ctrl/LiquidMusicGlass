@@ -163,8 +163,7 @@ fun SettingsScreen(
             val qualityOptions = listOf(
                 "128K" to "Compressed. Fastest load, lowest data usage.",
                 "256K" to "Balanced. Standard high-quality AAC.",
-                "320K" to "Premium. Near-lossless perceptual quality.",
-                "ALAC" to "Lossless Apple format. Studio quality."
+                "320K" to "Premium. Near-lossless perceptual quality."
             )
             var selectedQuality by remember {
                 mutableStateOf(
@@ -177,9 +176,14 @@ fun SettingsScreen(
                 Column(modifier = Modifier.padding(vertical = 14.dp)) {
                     val isPremium by com.liquidmusicglass.api.icm.IcmAuthRepository.isPremium.collectAsState()
                     
-                    // Auto-fallback to 256K if premium is lost but high quality was selected
-                    androidx.compose.runtime.LaunchedEffect(isPremium) {
-                        if (!isPremium && (selectedQuality == "320K" || selectedQuality == "ALAC")) {
+                    // Auto-fallback to 256K if premium is lost or ALAC is selected (as ALAC is deprecated due to decryption latency)
+                    androidx.compose.runtime.LaunchedEffect(isPremium, selectedQuality) {
+                        if (selectedQuality == "ALAC") {
+                            selectedQuality = "256K"
+                            context.getSharedPreferences("icm", Context.MODE_PRIVATE)
+                                .edit().putString("stream_quality", "256K").apply()
+                            com.liquidmusicglass.api.icm.IcmRepository.streamQuality = "256K"
+                        } else if (!isPremium && selectedQuality == "320K") {
                             selectedQuality = "256K"
                             context.getSharedPreferences("icm", Context.MODE_PRIVATE)
                                 .edit().putString("stream_quality", "256K").apply()
@@ -189,7 +193,7 @@ fun SettingsScreen(
 
                     qualityOptions.forEach { (quality, description) ->
                         val isSelected = selectedQuality == quality
-                        val isAvailable = isPremium || (quality != "320K" && quality != "ALAC")
+                        val isAvailable = isPremium || quality != "320K"
                         
                         Row(
                             modifier = Modifier

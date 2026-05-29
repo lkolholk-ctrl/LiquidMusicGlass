@@ -194,16 +194,31 @@ class WaveRepository(context: Context) {
         while (queue.size < count && attempts < maxAttempts) {
             attempts++
             try {
-                // Seeding with random favorite ID from Room DB cached_tracks
-                val seedTrackId = dao.getRandomFavoriteTrackId()
-                Log.d(TAG, "Attempt $attempts: Seeding wave query with random favorite seedTrackId=$seedTrackId")
-
-                val response = IcmRepository.getWaveNext(
-                    seedTrackId = seedTrackId,
+                // Request the true personalized personal wave (seedTrackId = null)
+                // Use recentSkips from PlayerController to let the server adapt to recent skips!
+                val recentSkipsVal = com.liquidmusicglass.engine.PlayerController.consecutiveSkips
+                
+                var response = IcmRepository.getWaveNext(
+                    seedTrackId = null,
                     exclude = excludeIds.toList().takeIf { it.isNotEmpty() },
-                    recentSkips = 0,
-                    genre = null // Server ignores text genres, seeding by seedTrackId is the source of truth
+                    recentSkips = recentSkipsVal,
+                    genre = null
                 )
+
+                // Robust fallback: if personal wave is empty (e.g. no server-side history/likes),
+                // we seed it with a random favorite from the local DB!
+                if (response == null || response.status == "empty") {
+                    val fallbackSeed = dao.getRandomFavoriteTrackId()
+                    if (fallbackSeed != null) {
+                        Log.d(TAG, "Personal wave empty, falling back to favorite seed: $fallbackSeed")
+                        response = IcmRepository.getWaveNext(
+                            seedTrackId = fallbackSeed,
+                            exclude = excludeIds.toList().takeIf { it.isNotEmpty() },
+                            recentSkips = recentSkipsVal,
+                            genre = null
+                        )
+                    }
+                }
 
                 if (response == null || response.status != "ok") {
                     Log.w(TAG, "Wave response status: ${response?.status ?: "null"}")

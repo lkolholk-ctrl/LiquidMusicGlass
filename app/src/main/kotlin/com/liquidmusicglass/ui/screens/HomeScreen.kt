@@ -266,7 +266,7 @@ fun HomeScreen(
                 val response = IcmRepository.getWaveNext(
                     seedTrackId = seed,
                     exclude = exclude.takeIf { it.isNotEmpty() },
-                    recentSkips = 0
+                    recentSkips = PlayerController.consecutiveSkips
                 )
                 if (response != null && response.status == "ok" && response.track != null) {
                     waveTracks.add(response.track)
@@ -407,7 +407,7 @@ fun HomeScreen(
                     val response = IcmRepository.getWaveNext(
                         seedTrackId = seed,
                         exclude = exclude.takeIf { it.isNotEmpty() },
-                        recentSkips = 0
+                        recentSkips = PlayerController.consecutiveSkips
                     )
                     if (response != null) {
                         waveStatus = response.status

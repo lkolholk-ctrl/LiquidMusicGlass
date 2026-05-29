@@ -661,6 +661,19 @@ data class IcmLibraryLikesResponse(
 )
 
 @Serializable
+data class IcmLikeRequest(
+    @SerialName("track_id") val trackIdSnake: String,
+    @SerialName("trackId") val trackIdCamel: String
+)
+
+@Serializable
+data class IcmLikeResponse(
+    @SerialName("status") val status: String? = null,
+    @SerialName("ok") val ok: Boolean = false,
+    @SerialName("logged") val logged: Boolean = false
+)
+
+@Serializable
 data class IcmLibrarySubscriptionsResponse(
     val items: List<IcmLibraryArtist> = emptyList(),
     val count: Int? = null,

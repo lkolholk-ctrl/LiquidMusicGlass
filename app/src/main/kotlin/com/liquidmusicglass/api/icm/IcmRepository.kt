@@ -577,6 +577,30 @@ object IcmRepository {
     }
 
     /**
+     * Like a track in cloud library.
+     */
+    suspend fun likeTrack(trackId: String): Boolean {
+        val result = api.likeTrack(trackId)
+        result.exceptionOrNull()?.let {
+            _lastException = it as? Exception
+            _lastError.value = it.message
+        }
+        return result.isSuccess
+    }
+
+    /**
+     * Unlike a track in cloud library.
+     */
+    suspend fun unlikeTrack(trackId: String): Boolean {
+        val result = api.unlikeTrack(trackId)
+        result.exceptionOrNull()?.let {
+            _lastException = it as? Exception
+            _lastError.value = it.message
+        }
+        return result.isSuccess
+    }
+
+    /**
      * Get user's artist subscriptions from library.
      * Requires partnerUserId to be set and user to be linked.
      */

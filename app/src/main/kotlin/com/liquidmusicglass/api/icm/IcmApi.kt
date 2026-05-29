@@ -641,6 +641,21 @@ suspend fun search(
     }
 
     /**
+     * Like a track.
+     */
+    suspend fun likeTrack(trackId: String): Result<IcmLikeResponse> {
+        val body = json.encodeToString(IcmLikeRequest(trackIdSnake = trackId, trackIdCamel = trackId))
+        return execute("/library/likes", method = "POST", body = body)
+    }
+
+    /**
+     * Unlike a track.
+     */
+    suspend fun unlikeTrack(trackId: String): Result<IcmLikeResponse> {
+        return execute("/library/likes/$trackId", method = "DELETE")
+    }
+
+    /**
      * Get user's artist subscriptions.
      * Requires partnerUserId to be set.
      */

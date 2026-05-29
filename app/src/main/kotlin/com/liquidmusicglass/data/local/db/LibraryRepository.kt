@@ -132,9 +132,21 @@ class LibraryRepository private constructor(context: Context) {
             }
 
             // 5. Push pending local changes to cloud
-            // Note: ICM API currently does not expose POST/DELETE /library/likes endpoints
-            // in the public docs. When they become available, uncomment the code below.
-            // For now, the local state is authoritative and cloud sync is pull-only.
+            val pendingInserts = db.getPendingInserts()
+            for (insert in pendingInserts) {
+                val success = IcmRepository.likeTrack(insert.trackId)
+                if (success) {
+                    db.markSynced(insert.trackId)
+                }
+            }
+
+            val pendingDeletes = db.getPendingDeletes()
+            for (delete in pendingDeletes) {
+                val success = IcmRepository.unlikeTrack(delete.trackId)
+                if (success) {
+                    db.deleteByTrackId(delete.trackId)
+                }
+            }
 
             Result.success(Unit)
         } catch (e: Exception) {
@@ -175,8 +187,16 @@ class LibraryRepository private constructor(context: Context) {
             // Update PlayerController favorite IDs for reactive UI
             updatePlayerControllerFavorites()
 
-            // TODO: POST /library/likes/{trackId} when API endpoint is available
-            // For now, local state is authoritative
+            // Asynchronously push to cloud
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    val success = IcmRepository.likeTrack(track.id)
+                    if (success) {
+                        db.markSynced(track.id)
+                    }
+                } catch (_: Exception) {}
+            }
+
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -196,9 +216,15 @@ class LibraryRepository private constructor(context: Context) {
             // Update PlayerController favorite IDs for reactive UI
             updatePlayerControllerFavorites()
 
-            // TODO: DELETE /library/likes/{trackId} when API endpoint is available
-            // For now, hard delete locally since cloud doesn't support it yet
-            db.deleteByTrackId(trackId)
+            // Asynchronously push delete to cloud
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    val success = IcmRepository.unlikeTrack(trackId)
+                    if (success) {
+                        db.deleteByTrackId(trackId)
+                    }
+                } catch (_: Exception) {}
+            }
 
             Result.success(Unit)
         } catch (e: Exception) {

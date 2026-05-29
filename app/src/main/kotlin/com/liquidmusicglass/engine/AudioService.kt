@@ -241,12 +241,20 @@ class AudioService : MediaSessionService() {
             val failedMediaId = currentTrackId ?: "unknown"
             android.util.Log.e("AudioService", "[ERROR_RECOVERY] Permanent failure for track at index=$failedIndex, mediaId=$failedMediaId, error=${error.errorCodeName}")
 
-            // HALT: user must explicitly choose next action after retries exhausted
-            player.playWhenReady = false
-            android.util.Log.w("AudioService", "[ERROR_RECOVERY] Retries exhausted. Playback halted.")
+            val nextIndex = failedIndex + 1
+            if (nextIndex < player.mediaItemCount) {
+                android.util.Log.w("AudioService", "[ERROR_RECOVERY] Auto-skipping to next track (index=$nextIndex) since current track failed permanently.")
+                player.seekTo(nextIndex, 0L)
+                player.prepare()
+                player.play()
+            } else {
+                // HALT: user must explicitly choose next action after retries exhausted and no more items in queue
+                player.playWhenReady = false
+                android.util.Log.w("AudioService", "[ERROR_RECOVERY] Retries exhausted and no more items. Playback halted.")
 
-            PlayerController.setPlaying(false)
-            PlayerController.onPlaybackError(error.errorCodeName)
+                PlayerController.setPlaying(false)
+                PlayerController.onPlaybackError(error.errorCodeName)
+            }
         }
     }
 
@@ -428,6 +436,7 @@ class AudioService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        PlayerController.logFinalPlayback()
         positionJob?.cancel()
         abandonAudioFocus()
 
@@ -852,7 +861,7 @@ class AudioService : MediaSessionService() {
                 try {
                     val response = com.liquidmusicglass.api.icm.IcmRepository.getWaveNext(
                         exclude = excludeIds.toList().takeIf { it.isNotEmpty() },
-                        recentSkips = 0,
+                        recentSkips = com.liquidmusicglass.engine.PlayerController.consecutiveSkips,
                         mood = mood,
                         genre = seedGenre
                     )

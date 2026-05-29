@@ -93,6 +93,14 @@ object PlayerController {
     private var totalPlayedMs: Long = 0L
     private var lastPositionMs: Long = 0L
 
+    // ── Consecutive Skips ──
+    private var _consecutiveSkips = 0
+    val consecutiveSkips: Int get() = _consecutiveSkips
+
+    fun resetConsecutiveSkips() {
+        _consecutiveSkips = 0
+    }
+
     // ── StateFlow (UI observes these) ──
     private val _currentTrack = MutableStateFlow<Track?>(null)
     val currentTrack: StateFlow<Track?> = _currentTrack
@@ -500,6 +508,7 @@ object PlayerController {
         mainScope.launch {
             getPlayer(appContext ?: return@launch)?.seekTo(safePosition)
             _currentPositionMs.value = safePosition
+            lastPositionMs = safePosition
         }
     }
 
@@ -527,7 +536,9 @@ object PlayerController {
 
         if (_isPlaying.value) {
             val delta = positionMs - lastPositionMs
-            if (delta > 0) totalPlayedMs += delta
+            if (delta > 0 && delta < 2000L) { // Only log actual playing time, ignore seek jumps
+                totalPlayedMs += delta
+            }
             lastPositionMs = positionMs
         }
     }
@@ -569,6 +580,11 @@ object PlayerController {
         queue = immutableTracks
         _queueFlow.value = immutableTracks
         currentIndex = startIndex
+        
+        // Also register tracks to endlessEngine if context is global
+        if (_playbackContext is PlaybackContext.Global) {
+            endlessEngine.registerTracks(immutableTracks.map { it.id })
+        }
     }
 
     fun getCurrentQueue(): List<Track> = queue
@@ -583,8 +599,45 @@ object PlayerController {
         }
     }
 
-    fun setAutoRefillContext(type: String, id: String, name: String, seedTrackId: String? = null) {}
-    fun clearAutoRefillContext() {}
+    fun setAutoRefillContext(type: String, id: String, name: String, seedTrackId: String? = null) {
+        val newContext = when {
+            type.equals("library", ignoreCase = true) && id.equals("downloads", ignoreCase = true) ->
+                PlaybackContext.Downloads
+            type.equals("playlist", ignoreCase = true) ->
+                PlaybackContext.Playlist(id)
+            type.equals("album", ignoreCase = true) ->
+                PlaybackContext.Album(id)
+            type.equals("artist", ignoreCase = true) ->
+                PlaybackContext.Artist(id)
+            else -> PlaybackContext.Global
+        }
+        _playbackContext = newContext
+        android.util.Log.d("VOIDPIXEL_MEDIA", "[CONTEXT_SET] setAutoRefillContext: type=$type, id=$id, name=$name, seedTrackId=$seedTrackId -> context=$newContext")
+
+        endlessEngine.reset()
+        if (newContext is PlaybackContext.Global) {
+            val refillType = try {
+                EndlessPlaybackEngine.RefillContext.Type.valueOf(type.uppercase())
+            } catch (e: Exception) {
+                EndlessPlaybackEngine.RefillContext.Type.WAVE
+            }
+            endlessEngine.setRefillContext(
+                EndlessPlaybackEngine.RefillContext(
+                    type = refillType,
+                    id = id,
+                    name = name,
+                    seedTrackId = seedTrackId
+                )
+            )
+            endlessEngine.registerTracks(queue.map { it.id })
+        }
+    }
+
+    fun clearAutoRefillContext() {
+        _playbackContext = PlaybackContext.Global
+        endlessEngine.reset()
+        android.util.Log.d("VOIDPIXEL_MEDIA", "[CONTEXT_CLEAR] Context cleared, reset to Global")
+    }
 
     fun playNext(track: Track, context: Context) {
         addToQueue(track)
@@ -773,6 +826,14 @@ object PlayerController {
         val isCompleted = playedMs >= 30_000L
         val isSkipped = !isCompleted
 
+        // Determine if it was skipped for the recommendation engine (less than 15% played)
+        val isSkippedForServer = if (track.durationMs > 0L) playedMs < 0.15f * track.durationMs else isSkipped
+        if (isSkippedForServer) {
+            _consecutiveSkips++
+        } else {
+            _consecutiveSkips = 0
+        }
+
         val sourceStr = when (_playbackContext) {
             is PlaybackContext.Downloads -> "downloads"
             is PlaybackContext.Playlist -> "playlist"
@@ -781,7 +842,7 @@ object PlayerController {
             is PlaybackContext.Global -> "wave"
         }
 
-        android.util.Log.d("PlayerController", "[LOG_PREVIOUS] track=${track.title} | played=${playedMs}ms | isCompleted=$isCompleted | source=$sourceStr")
+        android.util.Log.d("PlayerController", "[LOG_PREVIOUS] track=${track.title} | played=${playedMs}ms | isCompleted=$isCompleted | consecutiveSkips=$_consecutiveSkips | source=$sourceStr")
 
         appContext?.let { ctx ->
             ioScope.launch {
@@ -806,10 +867,19 @@ object PlayerController {
                     trackId = track.id,
                     playedSeconds = playedSec.toDouble(),
                     totalSeconds = durationSec.toDouble(),
-                    completed = isCompleted,
-                    skipped = isSkipped
+                    completed = if (track.durationMs > 0L) playedMs >= 0.85f * track.durationMs else isCompleted,
+                    skipped = isSkippedForServer
                 )
             } catch (_: Exception) {}
+        }
+    }
+
+    fun logFinalPlayback() {
+        val track = _currentTrack.value
+        if (track != null && totalPlayedMs > 0L) {
+            logPreviousTrack(track, totalPlayedMs)
+            resetPlaybackLogging(0L)
+            _currentTrack.value = null
         }
     }
 
