@@ -63,18 +63,6 @@ private val YouTubeRed = Color(0xFFFF0000)
 private suspend fun resolveWaveTrackUrl(track: Track?): Track? {
     if (track == null) return null
 
-    // YouTube tracks use their own resolver
-    if (track.isYouTubeTrack) {
-        return try {
-            val result = com.liquidmusicglass.api.youtube.YouTubeMusicRepository.getInstance()
-                .getAudioStream(track.id)
-            if (result.isSuccess) {
-                val stream = result.getOrThrow()
-                track.copy(uri = Uri.parse(stream.url))
-            } else null
-        } catch (_: Exception) { null }
-    }
-
     return try {
         val url = IcmRepository.getStreamUrl(track.id, source = track.source)
         if (url != null) {

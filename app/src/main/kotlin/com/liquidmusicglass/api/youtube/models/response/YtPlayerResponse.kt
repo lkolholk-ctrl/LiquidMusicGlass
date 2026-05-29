@@ -19,12 +19,13 @@ data class YtPlayerResponse(
 
     /**
      * Best audio-only format for streaming.
-     * Prefers Opus (webm) > AAC (m4a) by bitrate.
+     * Only considers formats with direct URLs (not signature cipher).
+     * Prefers Opus (webm) over AAC (m4a) at same tier, then by bitrate.
      */
     val bestAudioFormat: YtFormat?
         get() = streamingData?.adaptiveFormats
-            ?.filter { it.isAudio }
-            ?.maxByOrNull { it.bitrate }
+            ?.filter { it.isAudio && it.url != null }
+            ?.maxByOrNull { it.bitrate + (if (it.isOpus) 10240 else 0) }
 
     @Serializable
     data class YtPlayabilityStatus(

@@ -20,6 +20,7 @@ data class YouTubeClient(
         client = YtContext.Client(
             clientName = clientName,
             clientVersion = clientVersion,
+            osVersion = osVersion,
             gl = locale.gl,
             hl = locale.hl,
             visitorData = visitorData
@@ -29,9 +30,10 @@ data class YouTubeClient(
     companion object {
         private const val REFERER_YT_MUSIC = "https://music.youtube.com/"
 
-        private const val UA_ANDROID = "Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
-        private const val UA_WEB = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        private const val UA_IOS = "com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X)"
+        private const val UA_ANDROID = "com.google.android.youtube/19.44.33 (Linux; U; Android 14; en_US; SM-S918B; Build/UQ1A.240105.004)"
+        private const val UA_ANDROID_MUSIC = "com.google.android.apps.youtube.music/7.27.52 (Linux; U; Android 11; gzip)"
+        private const val UA_WEB = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        private const val UA_IOS = "com.google.ios.youtube/19.45.4 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X;)"
 
         /**
          * ANDROID_MUSIC — primary client for streaming.
@@ -39,9 +41,9 @@ data class YouTubeClient(
          */
         val ANDROID_MUSIC = YouTubeClient(
             clientName = "ANDROID_MUSIC",
-            clientVersion = "6.48.52",
+            clientVersion = "7.27.52",
             apiKey = "AIzaSyAOghZGza2MQSZkY_zfZ370N-PUdXEo8AI",
-            userAgent = UA_ANDROID,
+            userAgent = UA_ANDROID_MUSIC,
             deviceModel = "SM-S918B"
         )
 
@@ -65,7 +67,7 @@ data class YouTubeClient(
          */
         val WEB_REMIX = YouTubeClient(
             clientName = "WEB_REMIX",
-            clientVersion = "1.20241204.01.00",
+            clientVersion = "1.20241126.01.00",
             apiKey = "AIzaSyC9XL3ZjWEdXiaejLYdd3kjX8WlMMMozmE",
             userAgent = UA_WEB,
             referer = REFERER_YT_MUSIC
@@ -77,7 +79,7 @@ data class YouTubeClient(
          */
         val IOS = YouTubeClient(
             clientName = "IOS",
-            clientVersion = "19.29.1",
+            clientVersion = "19.45.4",
             apiKey = "AIzaSyB-63vPrdThhKuerbB2N_l7Kwwcxj6yUAc",
             userAgent = UA_IOS,
             osVersion = "17.5.1.21F90"

@@ -37,6 +37,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
@@ -79,6 +82,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -109,6 +113,7 @@ import com.kyant.backdrop.shadow.InnerShadow
 import com.kyant.backdrop.shadow.Shadow
 import com.kyant.shapes.Capsule
 import com.liquidmusicglass.engine.PlayerController
+import com.liquidmusicglass.engine.UiLogger
 import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.ui.glass.GlassKit
 import com.liquidmusicglass.ui.glass.GlassDialog
@@ -168,6 +173,7 @@ fun FullPlayer(
     var showQueue by remember { mutableStateOf(false) }
     var showLyrics by remember { mutableStateOf(false) }
     var showArtistSheet by remember { mutableStateOf(false) }
+    var showDebugPanel by remember { mutableStateOf(false) }
     val artistSheetState = rememberModalBottomSheetState(
         skipPartiallyExpanded = true
     )
@@ -470,14 +476,17 @@ fun FullPlayer(
                 .windowInsetsPadding(WindowInsets.navigationBars),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Drag Handle
+            // Drag Handle — long press opens debug panel
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .graphicsLayer { alpha = controlsAlpha }
-                    .clickable(
-                        remember { MutableInteractionSource() }, null
-                    ) { onClose() }
+                    .pointerInput(Unit) {
+                        detectTapGestures(
+                            onTap = { onClose() },
+                            onLongPress = { showDebugPanel = true }
+                        )
+                    }
                     .padding(top = 8.dp, bottom = 4.dp),
                 contentAlignment = Alignment.Center
             ) {
@@ -912,6 +921,17 @@ fun FullPlayer(
             onDismiss = { showAirPlay = false }
         )
 
+        // ═══ Debug Panel ═══
+        AnimatedVisibility(
+            visible = showDebugPanel,
+            enter = fadeIn(tween(250)),
+            exit = fadeOut(tween(200))
+        ) {
+            DebugPanel(
+                onDismiss = { showDebugPanel = false }
+            )
+        }
+
 
         // ═══ Artist Selection BottomSheet (for multi-artist tracks) ═══
         if (showArtistSheet) {
@@ -1087,4 +1107,138 @@ private fun BottomIcon(icon: ImageVector, onClick: () -> Unit = {}) {
 private fun formatTime(ms: Long): String {
     val s = (ms / 1000).coerceAtLeast(0)
     return "${s / 60}:%02d".format(s % 60)
+}
+
+@Composable
+private fun DebugPanel(onDismiss: () -> Unit) {
+    val logs = remember { UiLogger.logs }
+    val listState = rememberLazyListState()
+    val logCount by remember { derivedStateOf { logs.size } }
+
+    // Auto-scroll to bottom on new entries
+    LaunchedEffect(logCount) {
+        if (logs.isNotEmpty()) {
+            listState.animateScrollToItem(logs.lastIndex)
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.92f))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) { onDismiss() }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.statusBars)
+                .windowInsetsPadding(WindowInsets.navigationBars)
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+        ) {
+            // Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Debug Log",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+                Row {
+                    // Clear button
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) { UiLogger.clear() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Clear",
+                            color = Color(0xFFFC3C44),
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    // Close button
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) { onDismiss() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Rounded.Close, null,
+                            tint = Color.White.copy(alpha = 0.70f),
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Log entries
+            LazyColumn(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                state = listState
+            ) {
+                items(logs) { entry ->
+                    val tint = when {
+                        entry.contains("FAILED") || entry.contains("exception") -> Color(0xFFFF5252)
+                        entry.contains("OK") || entry.contains("Cache hit") -> Color(0xFF4CAF50)
+                        entry.contains("[YT]") -> Color(0xFFFF9800)
+                        else -> Color.White.copy(alpha = 0.75f)
+                    }
+                    Text(
+                        text = entry,
+                        color = tint,
+                        fontSize = 11.sp,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 1.dp)
+                    )
+                }
+            }
+
+            // Status bar
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                val isPlaying by PlayerController.isPlaying.collectAsState()
+                val currentTrack by PlayerController.currentTrack.collectAsState()
+                val queue by PlayerController.queueFlow.collectAsState()
+
+                Text(
+                    text = "playing=$isPlaying  queue=${queue.size}  track=${currentTrack?.id?.take(20) ?: "none"}",
+                    color = Color.White.copy(alpha = 0.40f),
+                    fontSize = 10.sp,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                )
+                Text(
+                    text = "${logCount} entries",
+                    color = Color.White.copy(alpha = 0.40f),
+                    fontSize = 10.sp,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                )
+            }
+        }
+    }
 }

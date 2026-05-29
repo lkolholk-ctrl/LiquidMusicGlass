@@ -102,15 +102,7 @@ class FeatureAccessManager private constructor(context: Context) {
     }
 
     private fun loadCamp(): MusicCamp {
-        val hasIcmKey = IcmAuthRepository.getPartnerKey().isNotBlank()
-        val defaultCampId = if (hasIcmKey) MusicCamp.Icm.id else MusicCamp.Youtube.id
-        val saved = prefs.getString(KEY_SELECTED_CAMP, defaultCampId)
-        val loaded = MusicCamp.fromId(saved ?: defaultCampId)
-        return if (loaded is MusicCamp.Icm && !hasIcmKey) {
-            MusicCamp.Youtube
-        } else {
-            loaded
-        }
+        return MusicCamp.Icm
     }
 
     private fun saveCamp(camp: MusicCamp) {

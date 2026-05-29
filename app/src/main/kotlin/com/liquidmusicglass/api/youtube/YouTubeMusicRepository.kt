@@ -88,6 +88,7 @@ import io.ktor.client.plugins.HttpRequestRetry
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.compression.ContentEncoding
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.headers
 import io.ktor.client.request.parameter
@@ -120,7 +121,7 @@ class YouTubeMusicRepository private constructor() {
         isLenient = true
     }
 
-    private val httpClient = createClient()
+    private val httpClient by lazy { createClient() }
 
     private var locale = YouTubeLocale(
     gl = "US",
@@ -174,11 +175,15 @@ class YouTubeMusicRepository private constructor() {
 
     /**
      * Get direct audio stream URL for a video.
-     * Follows InnerTune's approach: IOS as primary, TVHTML5 as fallback.
-     * Returns as soon as a playable response is found — no unnecessary retries.
+     * Follows InnerTune's approach exactly:
+     * 1. IOS — primary client
+     * 2. ANDROID_MUSIC — fallback
+     * 3. TVHTML5 — last resort for restricted content
+     * 4. Piped — replaces signature-cipher URLs when TVHTML5 has no direct URLs
      */
     suspend fun getAudioStream(videoId: String): Result<YtAudioStream> = runCatching {
         Log.d(TAG, "Getting audio stream for $videoId")
+        com.liquidmusicglass.engine.UiLogger.log("[YT] getAudioStream start for $videoId")
 
         // 1. IOS — primary client, works for most content including age-restricted
         var playerResponse = try {
@@ -186,40 +191,167 @@ class YouTubeMusicRepository private constructor() {
             parseResponse<YtPlayerResponse>(response)
         } catch (e: Exception) {
             Log.w(TAG, "IOS request failed: ${e.message}")
+            com.liquidmusicglass.engine.UiLogger.log("[YT] IOS failed: ${e.message}")
             null
         }
 
         if (playerResponse?.isPlayable == true) {
-            return@runCatching extractAudioStream(playerResponse)
+            // Check if we have direct URLs (not signature cipher)
+            val hasDirectUrl = playerResponse.streamingData?.adaptiveFormats?.any { it.url != null } == true
+            if (hasDirectUrl) {
+                com.liquidmusicglass.engine.UiLogger.log("[YT] IOS playable with direct URLs, formats=${playerResponse.streamingData?.adaptiveFormats?.size}")
+                return@runCatching extractAudioStream(playerResponse)
+            }
+            com.liquidmusicglass.engine.UiLogger.log("[YT] IOS playable but no direct URLs (signature cipher), trying next client")
+        } else {
+            val reason = playerResponse?.playabilityStatus?.reason ?: "null response"
+            com.liquidmusicglass.engine.UiLogger.log("[YT] IOS not playable: $reason")
         }
 
         // 2. ANDROID_MUSIC — good quality, sometimes works when IOS doesn't
-        playerResponse = try {
+        var androidMusicResponse = try {
             val response = innerTubePlayer(client = YouTubeClient.ANDROID_MUSIC, videoId = videoId)
             parseResponse<YtPlayerResponse>(response)
         } catch (e: Exception) {
-            Log.w(TAG, "ANDROID_MUSIC request failed: ${e.message}")
+            com.liquidmusicglass.engine.UiLogger.log("[YT] ANDROID_MUSIC failed: ${e.message}")
             null
         }
 
-        if (playerResponse?.isPlayable == true) {
-            return@runCatching extractAudioStream(playerResponse)
+        if (androidMusicResponse?.isPlayable == true) {
+            val hasDirectUrl = androidMusicResponse.streamingData?.adaptiveFormats?.any { it.url != null } == true
+            if (hasDirectUrl) {
+                com.liquidmusicglass.engine.UiLogger.log("[YT] ANDROID_MUSIC playable with direct URLs")
+                return@runCatching extractAudioStream(androidMusicResponse)
+            }
+            com.liquidmusicglass.engine.UiLogger.log("[YT] ANDROID_MUSIC playable but no direct URLs")
+        } else {
+            val reason = androidMusicResponse?.playabilityStatus?.reason ?: "null response"
+            com.liquidmusicglass.engine.UiLogger.log("[YT] ANDROID_MUSIC not playable: $reason")
+        }
+
+        // 2b. ANDROID — standard YouTube Android app (highly reliable fallback)
+        var androidResponse = try {
+            val response = innerTubePlayer(client = YouTubeClient.ANDROID, videoId = videoId)
+            parseResponse<YtPlayerResponse>(response)
+        } catch (e: Exception) {
+            com.liquidmusicglass.engine.UiLogger.log("[YT] ANDROID failed: ${e.message}")
+            null
+        }
+
+        if (androidResponse?.isPlayable == true) {
+            val hasDirectUrl = androidResponse.streamingData?.adaptiveFormats?.any { it.url != null } == true
+            if (hasDirectUrl) {
+                com.liquidmusicglass.engine.UiLogger.log("[YT] ANDROID playable with direct URLs")
+                return@runCatching extractAudioStream(androidResponse)
+            }
+            com.liquidmusicglass.engine.UiLogger.log("[YT] ANDROID playable but no direct URLs")
+        } else {
+            val reason = androidResponse?.playabilityStatus?.reason ?: "null response"
+            com.liquidmusicglass.engine.UiLogger.log("[YT] ANDROID not playable: $reason")
+        }
+
+        // 2c. WEB — standard YouTube Web client (extremely stable, returns direct streams)
+        var webResponse = try {
+            val response = innerTubePlayer(client = YouTubeClient.WEB, videoId = videoId)
+            parseResponse<YtPlayerResponse>(response)
+        } catch (e: Exception) {
+            com.liquidmusicglass.engine.UiLogger.log("[YT] WEB failed: ${e.message}")
+            null
+        }
+
+        if (webResponse?.isPlayable == true) {
+            val hasDirectUrl = webResponse.streamingData?.adaptiveFormats?.any { it.url != null } == true
+            if (hasDirectUrl) {
+                com.liquidmusicglass.engine.UiLogger.log("[YT] WEB playable with direct URLs")
+                return@runCatching extractAudioStream(webResponse)
+            }
+            com.liquidmusicglass.engine.UiLogger.log("[YT] WEB playable but no direct URLs")
+        } else {
+            val reason = webResponse?.playabilityStatus?.reason ?: "null response"
+            com.liquidmusicglass.engine.UiLogger.log("[YT] WEB not playable: $reason")
         }
 
         // 3. TVHTML5 — last resort for restricted content
-        playerResponse = try {
+        val tvResponse = try {
             val response = innerTubePlayer(client = YouTubeClient.TVHTML5, videoId = videoId)
             parseResponse<YtPlayerResponse>(response)
         } catch (e: Exception) {
-            Log.w(TAG, "TVHTML5 request failed: ${e.message}")
+            com.liquidmusicglass.engine.UiLogger.log("[YT] TVHTML5 failed: ${e.message}")
             null
         }
 
-        if (playerResponse?.isPlayable == true) {
-            return@runCatching extractAudioStream(playerResponse)
+        if (tvResponse?.isPlayable == true) {
+            val hasDirectUrl = tvResponse.streamingData?.adaptiveFormats?.any { it.url != null } == true
+            if (hasDirectUrl) {
+                com.liquidmusicglass.engine.UiLogger.log("[YT] TVHTML5 playable with direct URLs")
+                return@runCatching extractAudioStream(tvResponse)
+            }
+
+            // 4. Piped fallback — InnerTune approach:
+            // TVHTML5 returns playable but with signature cipher (null URLs).
+            // Get real URLs from Piped API and substitute them by matching bitrate.
+            com.liquidmusicglass.engine.UiLogger.log("[YT] TVHTML5 playable but cipher URLs — trying Piped fallback")
+            try {
+                val pipedResponse = pipedStreams(videoId)
+                val pipedAudio = pipedResponse.audioStreams
+                if (pipedAudio.isNotEmpty()) {
+                    com.liquidmusicglass.engine.UiLogger.log("[YT] Piped returned ${pipedAudio.size} audio streams")
+                    // Merge Piped URLs into TVHTML5 formats by matching bitrate
+                    val mergedFormats: List<YtFormat> = tvResponse.streamingData?.adaptiveFormats?.map { format ->
+                        if (!format.isAudio) return@map format
+                        val pipedMatch = pipedAudio.find { it.bitrate == format.bitrate }
+                        if (pipedMatch != null) {
+                            format.copy(url = pipedMatch.url)
+                        } else {
+                            // No bitrate match — try closest
+                            val closestPiped = pipedAudio.minByOrNull { kotlin.math.abs(it.bitrate - format.bitrate) }
+                            if (format.url != null) format
+                            else if (closestPiped != null) format.copy(url = closestPiped.url)
+                            else format
+                        }
+                    } ?: emptyList()
+
+                    val mergedResponse = tvResponse.copy(
+                        streamingData = tvResponse.streamingData?.copy(adaptiveFormats = mergedFormats)
+                    )
+                    val hasMergedUrl = mergedFormats.any { it.isAudio && it.url != null }
+                    if (hasMergedUrl) {
+                        com.liquidmusicglass.engine.UiLogger.log("[YT] Piped URLs merged successfully")
+                        return@runCatching extractAudioStream(mergedResponse)
+                    }
+                }
+                com.liquidmusicglass.engine.UiLogger.log("[YT] Piped fallback failed — no audio streams")
+            } catch (e: Exception) {
+                com.liquidmusicglass.engine.UiLogger.log("[YT] Piped exception: ${e.message}")
+            }
+
+            // If Piped didn't help, try the original TVHTML5 response anyway
+            // (some formats might have URLs even if others don't)
+            val anyAudioUrl = tvResponse.streamingData?.adaptiveFormats?.firstOrNull { it.isAudio && it.url != null }
+            if (anyAudioUrl != null) {
+                com.liquidmusicglass.engine.UiLogger.log("[YT] TVHTML5 has at least one direct audio URL")
+                return@runCatching extractAudioStream(tvResponse)
+            }
         }
 
-        throw YtMusicException(playerResponse?.playabilityStatus?.reason ?: "Video not playable")
+        // Return the error from the best response we got
+        val reason = tvResponse?.playabilityStatus?.reason
+            ?: webResponse?.playabilityStatus?.reason
+            ?: androidResponse?.playabilityStatus?.reason
+            ?: androidMusicResponse?.playabilityStatus?.reason
+            ?: playerResponse?.playabilityStatus?.reason
+            ?: "Video not playable"
+        com.liquidmusicglass.engine.UiLogger.log("[YT] ALL CLIENTS FAILED for $videoId: $reason")
+        throw YtMusicException(reason)
+    }
+
+    private suspend fun pipedStreams(videoId: String): PipedResponse {
+        val response = httpClient.get("https://pipedapi.kavin.rocks/streams/$videoId") {
+            headers {
+                append("Accept", "application/json")
+            }
+        }
+        return parseResponse<PipedResponse>(response)
     }
 
     private fun extractAudioStream(playerResponse: YtPlayerResponse): YtAudioStream {
@@ -381,6 +513,14 @@ class YouTubeMusicRepository private constructor() {
 
     @OptIn(ExperimentalSerializationApi::class)
     private fun createClient(): HttpClient = HttpClient(OkHttp) {
+        engine {
+            config {
+                connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                writeTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+            }
+        }
+
         install(ContentNegotiation) {
             json(this@YouTubeMusicRepository.json)
         }
@@ -391,8 +531,9 @@ class YouTubeMusicRepository private constructor() {
         }
 
         install(HttpTimeout) {
-            requestTimeoutMillis = 15000
-            connectTimeoutMillis = 8000
+            requestTimeoutMillis = 10000
+            connectTimeoutMillis = 10000
+            socketTimeoutMillis = 10000
         }
 
         install(HttpRequestRetry) {
@@ -421,7 +562,7 @@ class YouTubeMusicRepository private constructor() {
         continuation: String? = null
     ) = httpClient.post("https://music.youtube.com/youtubei/v1/search") {
         ytClientHeaders(client)
-        
+        parameter("prettyPrint", false)
         val bodyObj = YtSearchBody(
             context = client.toContext(locale, visitorData),
             query = query,
@@ -450,6 +591,7 @@ class YouTubeMusicRepository private constructor() {
         playlistId: String? = null
     ) = httpClient.post("https://music.youtube.com/youtubei/v1/player") {
         ytClientHeaders(client, setLogin = true)
+        parameter("prettyPrint", false)
         setBody(
             YtPlayerBody(
                 context = client.toContext(locale, visitorData).let { ctx ->
@@ -477,6 +619,7 @@ class YouTubeMusicRepository private constructor() {
         continuation: String? = null
     ) = httpClient.post("https://music.youtube.com/youtubei/v1/next") {
         ytClientHeaders(client, setLogin = true)
+        parameter("prettyPrint", false)
         setBody(
             YtNextBody(
                 context = client.toContext(locale, visitorData),
@@ -521,19 +664,9 @@ private fun io.ktor.client.request.HttpRequestBuilder.ytClientHeaders(
     contentType(ContentType.Application.Json)
     headers {
         append("X-Goog-Api-Format-Version", "1")
-        
-        // Мапим строковое имя клиента в числовой ID для InnerTube (Строка 380)
-        val clientId = when (client.clientName) { 
-            "WEB_REMIX" -> "67"
-            "ANDROID_MUSIC" -> "16"
-            "IOS" -> "26"
-            "TVHTML5" -> "7"
-            else -> "67"
-        }
-        append("X-YouTube-Client-Name", clientId)
-        
+        append("X-YouTube-Client-Name", client.clientName)
         append("X-YouTube-Client-Version", client.clientVersion)
-        append("Origin", "https://music.youtube.com") // Исправлено x-origin -> Origin (Строка 382)
+        append("x-origin", "https://music.youtube.com")
         if (client.referer != null) {
             append("Referer", client.referer)
         }
@@ -1145,8 +1278,8 @@ data class YtTrack(
 
     /**
      * Convert to LiquidMusicGlass Track for PlayerController.
-     * URI = videoId — ResolvingDataSource in AudioService resolves it to
-     * the real audio stream URL on demand (same as InnerTune).
+     * URI = videoId (no scheme) — ResolvingDataSource resolves
+     * the real audio stream URL on demand via PlayerController.resolveStreamUrlSync.
      */
     fun toEngineTrack(): Track = Track(
         id = videoId,
@@ -1278,3 +1411,19 @@ data class YtPlaylistItem(
     val songCountText: String?,
     val thumbnail: String
 )
+
+/**
+ * Piped API response — alternative YouTube stream source.
+ * Used as fallback when InnerTube returns signature cipher URLs.
+ */
+@kotlinx.serialization.Serializable
+data class PipedResponse(
+    val audioStreams: List<PipedAudioStream> = emptyList()
+) {
+    @kotlinx.serialization.Serializable
+    data class PipedAudioStream(
+        val itag: Int = 0,
+        val url: String,
+        val bitrate: Int = 0
+    )
+}

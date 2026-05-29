@@ -15,6 +15,7 @@ data class YtContext(
     data class Client(
         val clientName: String,
         val clientVersion: String,
+        val osVersion: String? = null,
         val gl: String,
         val hl: String,
         val visitorData: String? = null

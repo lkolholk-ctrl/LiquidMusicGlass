@@ -157,9 +157,7 @@ object PlayerController {
         appContext = context.applicationContext
     }
 
-    // ── YouTube video ID detection (works without queue) ──
-    private val ytVideoIdRegex = Regex("^[a-zA-Z0-9_-]{11}$")
-    private fun isYouTubeVideoId(id: String): Boolean = ytVideoIdRegex.matches(id)
+
 
     // ═══════════════════════════════════════════════════════════
     //  Playback Control
@@ -356,36 +354,65 @@ object PlayerController {
                 endlessEngine.registerTracks(tracks.map { it.id })
             }
 
-            // Build media items — ResolvingDataSource resolves stream URLs on demand
-            // when ExoPlayer actually needs them, so we don't need to resolve upfront.
-            val mediaItems = tracks.map { track ->
-                buildMediaItem(track)
+            // Resolve stream URL for the starting track upfront (fast — single IOS client)
+            // Other tracks in the queue will be resolved on demand by ResolvingDataSource
+            val startStreamResult = if (startTrack.isOnlineTrack) {
+                resolveStreamUrl(startTrack.id)
+            } else {
+                StreamResult.Success(startTrack.uri)
             }
 
-            withContext(Dispatchers.Main) {
-                val immutableTracks = tracks.toList()
-                queue = immutableTracks
-                _queueFlow.value = immutableTracks
-                currentIndex = startIndex
-                _currentTrack.value = startTrack
-                _durationMs.value = startTrack.durationMs
-                _currentPositionMs.value = 0L
-                _isBuffering.value = true
+            when (startStreamResult) {
+                is StreamResult.Success -> {
+                    // Set queue BEFORE building MediaItems so resolveStreamUrlSync can find tracks
+                    val immutableTracks = tracks.toList()
+                    queue = immutableTracks
+                    _queueFlow.value = immutableTracks
+                    currentIndex = startIndex
 
-                val player = getPlayer(context)
-                player?.let {
-                    it.stop()
-                    it.clearMediaItems()
-                    it.setMediaItems(mediaItems, startIndex, 0L)
-                    it.prepare()
-                    it.play()
-                    resetPlaybackLogging(startTrack.durationMs)
+                    val mediaItems = tracks.mapIndexed { i, track ->
+                        // Start track gets resolved URL, others use trackId (resolved on demand)
+                        val uri = if (i == startIndex) startStreamResult.uri else track.uri
+                        buildMediaItem(track, uri)
+                    }
+
+                    withContext(Dispatchers.Main) {
+                        _currentTrack.value = startTrack
+                        _durationMs.value = startTrack.durationMs
+                        _currentPositionMs.value = 0L
+                        _isBuffering.value = true
+
+                        val player = getPlayer(context)
+                        player?.let {
+                            it.stop()
+                            it.clearMediaItems()
+                            it.setMediaItems(mediaItems, startIndex, 0L)
+                            it.prepare()
+                            it.play()
+                            resetPlaybackLogging(startTrack.durationMs)
+                        }
+
+                        audioServiceRef?.setQueue(mediaItems, startIndex, 0L)
+                    }
+                    addToRecent(startTrack)
+
+                    if (newContext is PlaybackContext.Global) {
+                        launch {
+                            kotlinx.coroutines.delay(3000)
+                            endlessEngine.checkAndRefillIfNeeded()
+                        }
+                    }
+
+                    prefetchAhead(context, startIndex, depth = 10)
                 }
-
-                // Sync service-scoped queue
-                audioServiceRef?.setQueue(mediaItems, startIndex, 0L)
+                is StreamResult.Error -> {
+                    android.util.Log.e("PlayerController", "Stream error for ${startTrack.id}: ${startStreamResult.code}")
+                    withContext(Dispatchers.Main) {
+                        _isBuffering.value = false
+                        android.widget.Toast.makeText(context, "Failed to resolve track: ${startStreamResult.message ?: startStreamResult.code}", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
             }
-            addToRecent(startTrack)
 
             if (newContext is PlaybackContext.Global) {
                 launch {
@@ -592,32 +619,8 @@ object PlayerController {
         val cached = streamUrlCache[trackId]
 
         if (cached != null && now < cached.expiresAtMs) {
+            UiLogger.log("[SYNC] Cache hit for $trackId")
             return cached.uri
-        }
-
-        // ── Check if this is a YouTube track (by queue or ID pattern) ──
-        val isYt = queue.any { it.id == trackId && it.isYouTubeTrack } || isYouTubeVideoId(trackId)
-        if (isYt) {
-            return runBlocking {
-                try {
-                    val result = com.liquidmusicglass.api.youtube.YouTubeMusicRepository.getInstance()
-                        .getAudioStream(trackId)
-                    if (result.isSuccess) {
-                        val stream = result.getOrThrow()
-                        val uri = Uri.parse(stream.url)
-                        streamUrlCache[trackId] = CachedStreamUrl(
-                            uri = uri,
-                            expiresAtMs = now + 6 * 60 * 60 * 1000L, // 6 hours for YT
-                            fileId = null
-                        )
-                        uri
-                    } else {
-                        null
-                    }
-                } catch (_: Exception) {
-                    null
-                }
-            }
         }
 
         return try {
@@ -654,30 +657,7 @@ object PlayerController {
             return StreamResult.Success(cached.uri)
         }
 
-        // ── Check if this is a YouTube track (by queue or ID pattern) ──
-        val isYt = queue.any { it.id == trackId && it.isYouTubeTrack } || isYouTubeVideoId(trackId)
-        if (isYt) {
-            return try {
-                withTimeout(20_000) {
-                    val result = com.liquidmusicglass.api.youtube.YouTubeMusicRepository.getInstance()
-                        .getAudioStream(trackId)
-                    if (result.isSuccess) {
-                        val stream = result.getOrThrow()
-                        val uri = Uri.parse(stream.url)
-                        streamUrlCache[trackId] = CachedStreamUrl(
-                            uri = uri,
-                            expiresAtMs = now + 6 * 60 * 60 * 1000L,
-                            fileId = null
-                        )
-                        StreamResult.Success(uri)
-                    } else {
-                        StreamResult.Error("youtube_error", result.exceptionOrNull()?.message)
-                    }
-                }
-            } catch (e: Exception) {
-                StreamResult.Error("youtube_error", e.message)
-            }
-        }
+
 
         return try {
             withTimeout(15_000) {
@@ -834,11 +814,13 @@ object PlayerController {
     }
 
     private fun buildMediaItem(track: Track, uri: Uri = track.uri): MediaItem {
-        // For online tracks: URI = mediaId (track ID). ResolvingDataSource in AudioService
-        // resolves it to the real stream URL on demand. Same approach as InnerTune.
-        // For local tracks: URI = actual file URI.
         val mediaUri = if (track.isOnlineTrack && uri.scheme != "file") {
-            Uri.parse(track.id)
+            Uri.Builder()
+                .scheme(StreamingDataSource.SCHEME_LIQUID)
+                .authority("track")
+                .appendQueryParameter(StreamingDataSource.PARAM_TRACK_ID, track.id)
+                .appendQueryParameter(StreamingDataSource.PARAM_URL, uri.toString())
+                .build()
         } else {
             uri
         }
@@ -856,7 +838,6 @@ object PlayerController {
         val item = MediaItem.Builder()
             .setMediaId(track.id)
             .setUri(mediaUri)
-            .setCustomCacheKey(track.id)
             .setMediaMetadata(metaBuilder.build())
             .build()
 

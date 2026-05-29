@@ -263,7 +263,7 @@ fun WaveOnboardingScreen(
                             )
                             Spacer(modifier = Modifier.height(12.dp))
                             Text(
-                                text = "Для работы Apple Music / ICM Music требуется партнерский API-ключ. Пожалуйста, укажите его в настройках приложения или переключитесь на YouTube Music, который работает бесплатно и без ограничений.",
+                                text = "Для работы Apple Music / ICM Music требуется партнерский API-ключ. Пожалуйста, укажите его в настройках профиля приложения.",
                                 color = LiquidTheme.colors.textSecondary,
                                 fontSize = 14.sp,
                                 textAlign = TextAlign.Center,
@@ -272,25 +272,23 @@ fun WaveOnboardingScreen(
                             Spacer(modifier = Modifier.height(24.dp))
                             Button(
                                 onClick = {
-                                    com.liquidmusicglass.camp.FeatureAccessManager.getInstance(context)
-                                        .selectCamp(com.liquidmusicglass.camp.MusicCamp.Youtube)
-                                    onComplete()
+                                    onDismiss()
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        "Вы можете настроить API-ключ в профиле пользователя",
+                                        android.widget.Toast.LENGTH_LONG
+                                    ).show()
                                 },
                                 modifier = Modifier.fillMaxWidth(),
                                 colors = ButtonDefaults.buttonColors(containerColor = AppleRed),
                                 shape = RoundedCornerShape(12.dp)
                             ) {
-                                Text("Использовать YouTube Music", color = Color.White, fontSize = 15.sp)
+                                Text("Настроить API-ключ", color = Color.White, fontSize = 15.sp)
                             }
                             Spacer(modifier = Modifier.height(10.dp))
                             Button(
                                 onClick = {
                                     onDismiss()
-                                    android.widget.Toast.makeText(
-                                        context,
-                                        "Вы можете настроить API-ключ в меню настроек плеера",
-                                        android.widget.Toast.LENGTH_LONG
-                                    ).show()
                                 },
                                 modifier = Modifier.fillMaxWidth(),
                                 colors = ButtonDefaults.buttonColors(

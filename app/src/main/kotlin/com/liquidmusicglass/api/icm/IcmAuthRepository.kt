@@ -79,39 +79,41 @@ object IcmAuthRepository {
 
     private var prefs: SharedPreferences? = null
 
-    private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
-        .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
-        .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
-        .retryOnConnectionFailure(true)
-        .addInterceptor { chain ->
-            val request = chain.request()
-            var response: okhttp3.Response? = null
-            var exception: java.io.IOException? = null
-            var tryCount = 0
-            val maxRetries = 3
-            while (tryCount < maxRetries) {
-                try {
-                    response = chain.proceed(request)
-                    if (response.isSuccessful || response.code < 500) {
-                        return@addInterceptor response
+    private val httpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+            .writeTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
+            .addInterceptor { chain ->
+                val request = chain.request()
+                var response: okhttp3.Response? = null
+                var exception: java.io.IOException? = null
+                var tryCount = 0
+                val maxRetries = 3
+                while (tryCount < maxRetries) {
+                    try {
+                        response = chain.proceed(request)
+                        if (response.isSuccessful || response.code < 500) {
+                            return@addInterceptor response
+                        }
+                        // Server error (5xx) — retry
+                        tryCount++
+                        if (tryCount >= maxRetries) {
+                            return@addInterceptor response
+                        }
+                        response.close()
+                    } catch (e: java.io.IOException) {
+                        exception = e
+                        tryCount++
+                        if (tryCount >= maxRetries) throw e
+                        try { Thread.sleep(500L * tryCount) } catch (_: Exception) {}
                     }
-                    // Server error (5xx) — retry
-                    tryCount++
-                    if (tryCount >= maxRetries) {
-                        return@addInterceptor response
-                    }
-                    response.close()
-                } catch (e: java.io.IOException) {
-                    exception = e
-                    tryCount++
-                    if (tryCount >= maxRetries) throw e
-                    try { Thread.sleep(500L * tryCount) } catch (_: Exception) {}
                 }
+                response ?: throw exception ?: java.io.IOException("Network error")
             }
-            response ?: throw exception ?: java.io.IOException("Network error")
-        }
-        .build()
+            .build()
+    }
 
     /**
      * Data class for token + expiry. Declared early for use in method signatures.

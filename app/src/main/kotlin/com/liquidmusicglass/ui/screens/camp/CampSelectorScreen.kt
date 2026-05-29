@@ -87,7 +87,7 @@ fun CampSelectorScreen(
         )
 
         Text(
-            text = "Choose your music provider. YouTube Music is free with no subscription required.",
+            text = "Your premium music catalog with high-fidelity lossless streaming and offline downloads.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             lineHeight = 20.sp
@@ -96,36 +96,18 @@ fun CampSelectorScreen(
         Spacer(modifier = Modifier.height(8.dp))
 
         // Camp cards
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            CampCard(
-                camp = MusicCamp.Icm,
-                isSelected = currentCamp is MusicCamp.Icm,
-                capabilities = capabilities,
-                onClick = {
-                    if (currentCamp !is MusicCamp.Icm) {
-                        manager.selectCamp(MusicCamp.Icm)
-                        onCampChanged?.invoke(MusicCamp.Icm)
-                    }
-                },
-                modifier = Modifier.weight(1f)
-            )
-
-            CampCard(
-                camp = MusicCamp.Youtube,
-                isSelected = currentCamp is MusicCamp.Youtube,
-                capabilities = capabilities,
-                onClick = {
-                    if (currentCamp !is MusicCamp.Youtube) {
-                        manager.selectCamp(MusicCamp.Youtube)
-                        onCampChanged?.invoke(MusicCamp.Youtube)
-                    }
-                },
-                modifier = Modifier.weight(1f)
-            )
-        }
+        CampCard(
+            camp = MusicCamp.Icm,
+            isSelected = currentCamp is MusicCamp.Icm,
+            capabilities = capabilities,
+            onClick = {
+                if (currentCamp !is MusicCamp.Icm) {
+                    manager.selectCamp(MusicCamp.Icm)
+                    onCampChanged?.invoke(MusicCamp.Icm)
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
+        )
 
         Spacer(modifier = Modifier.height(8.dp))
 

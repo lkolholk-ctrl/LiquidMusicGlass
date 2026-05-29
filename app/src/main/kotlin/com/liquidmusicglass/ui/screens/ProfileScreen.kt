@@ -271,20 +271,6 @@ fun ProfileScreen(
             item { Spacer(modifier = Modifier.height(24.dp)) }
 
             // ═══════════════════════════════════════════════════════════
-            //  2. CAMP SELECTOR (Music Source)
-            // ═══════════════════════════════════════════════════════════
-            item {
-                CampSelectorScreen(
-                    onCampChanged = { camp ->
-                        android.util.Log.i("ProfileScreen", "Camp changed to ${camp.id}")
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-
-            item { Spacer(modifier = Modifier.height(24.dp)) }
-
-            // ═══════════════════════════════════════════════════════════
             //  4. SETTINGS LIST
             // ═══════════════════════════════════════════════════════════
             item {

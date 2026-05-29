@@ -34,11 +34,7 @@ data class Track(
     val isOnlineTrack: Boolean
         get() = uri.toString().startsWith("https://byicloud.online")
             || uri.toString().startsWith("http://byicloud.online")
-            || isYouTubeTrack
-
-    /** Является ли треком из YouTube Music. */
-    val isYouTubeTrack: Boolean
-        get() = source == "youtube" || uri.toString().contains("googlevideo.com") || uri.toString().contains("youtube.com")
+            || (uri.scheme != "http" && uri.scheme != "https" && uri.scheme != "file" && uri.scheme != "content" && uri.toString().isNotBlank())
 
     /** URI для отображения обложки (coverUrl имеет приоритет).
      *  Автоматически оборачивает локальные пути в file:// URI. */

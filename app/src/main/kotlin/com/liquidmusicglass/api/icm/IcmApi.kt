@@ -92,36 +92,38 @@ class IcmApi private constructor() {
         isLenient = true
     }
 
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
-        .retryOnConnectionFailure(true)
-        .connectionPool(okhttp3.ConnectionPool(5, 30, TimeUnit.SECONDS))
-        .protocols(listOf(okhttp3.Protocol.HTTP_2, okhttp3.Protocol.HTTP_1_1))
-        .addInterceptor { chain ->
-            val request = chain.request()
-            var response: okhttp3.Response? = null
-            var exception: java.io.IOException? = null
-            var tryCount = 0
-            val maxRetries = 3
-            while (tryCount < maxRetries) {
-                try {
-                    response = chain.proceed(request)
-                    if (response.isSuccessful || response.code < 500) {
-                        return@addInterceptor response
+    private val client by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(10, TimeUnit.SECONDS)
+            .writeTimeout(10, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
+            .connectionPool(okhttp3.ConnectionPool(5, 30, TimeUnit.SECONDS))
+            .protocols(listOf(okhttp3.Protocol.HTTP_2, okhttp3.Protocol.HTTP_1_1))
+            .addInterceptor { chain ->
+                val request = chain.request()
+                var response: okhttp3.Response? = null
+                var exception: java.io.IOException? = null
+                var tryCount = 0
+                val maxRetries = 3
+                while (tryCount < maxRetries) {
+                    try {
+                        response = chain.proceed(request)
+                        if (response.isSuccessful || response.code < 500) {
+                            return@addInterceptor response
+                        }
+                        tryCount++
+                    } catch (e: java.io.IOException) {
+                        exception = e
+                        tryCount++
+                        if (tryCount >= maxRetries) throw e
+                        try { Thread.sleep(250L * tryCount) } catch (_: Exception) {}
                     }
-                    tryCount++
-                } catch (e: java.io.IOException) {
-                    exception = e
-                    tryCount++
-                    if (tryCount >= maxRetries) throw e
-                    try { Thread.sleep(250L * tryCount) } catch (_: Exception) {}
                 }
+                response ?: throw exception ?: java.io.IOException("Network error")
             }
-            response ?: throw exception ?: java.io.IOException("Network error")
-        }
-        .build()
+            .build()
+    }
 
     private val mediaTypeJson = "application/json; charset=utf-8".toMediaType()
 

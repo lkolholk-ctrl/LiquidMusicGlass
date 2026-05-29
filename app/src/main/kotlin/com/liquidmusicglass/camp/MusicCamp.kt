@@ -45,7 +45,7 @@ sealed class MusicCamp(
         /**
          * All available camps in order of display.
          */
-        val ALL: List<MusicCamp> = listOf(Icm, Youtube)
+        val ALL: List<MusicCamp> = listOf(Icm)
 
         /**
          * Default camp on first launch.
@@ -57,7 +57,6 @@ sealed class MusicCamp(
          */
         fun fromId(id: String): MusicCamp = when (id.lowercase()) {
             "icm" -> Icm
-            "youtube", "yt" -> Youtube
             else -> DEFAULT
         }
     }
