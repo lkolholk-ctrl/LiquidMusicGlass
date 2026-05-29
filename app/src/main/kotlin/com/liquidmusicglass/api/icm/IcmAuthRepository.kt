@@ -78,6 +78,7 @@ object IcmAuthRepository {
     val allowedQualities: StateFlow<List<String>> = _allowedQualities
 
     private var prefs: SharedPreferences? = null
+    private var appContext: Context? = null
 
     private val httpClient by lazy {
         OkHttpClient.Builder()
@@ -124,6 +125,7 @@ object IcmAuthRepository {
     )
 
     fun init(context: Context) {
+        appContext = context.applicationContext
         prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         loadState()
         syncToIcmApi()
@@ -568,10 +570,26 @@ object IcmAuthRepository {
         }
 
         // 2. Fallback: native .so module (JNI) — production path
-        // val nativeKey = NativeLib.getPartnerKey()
-        // if (!nativeKey.isNullOrBlank()) return nativeKey
+        val ctx = appContext ?: com.liquidmusicglass.engine.PlayerController.context
+        if (ctx != null) {
+            try {
+                val nativeKey = com.liquidmusicglass.engine.IcmKeyProvider.getApiKey(ctx)
+                if (!nativeKey.isNullOrBlank() && nativeKey.startsWith("pk_")) {
+                    return nativeKey
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("IcmAuthRepository", "Failed to load partner key from JNI IcmKeyProvider", e)
+            }
+        }
 
-        // 3. Development fallback — MUST be replaced in production
+        // 3. Development fallback — fallback to BuildConfig.ICM_API_KEY if available
+        try {
+            val configKey = com.liquidmusicglass.BuildConfig.ICM_API_KEY
+            if (!configKey.isNullOrBlank() && configKey.startsWith("pk_")) {
+                return configKey
+            }
+        } catch (_: Throwable) {}
+
         return ""
     }
 
