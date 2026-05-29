@@ -11,6 +11,23 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.border
 import com.liquidmusicglass.api.icm.IcmAuthRepository
 import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.engine.IcmKeyProvider
@@ -101,20 +118,185 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // Security checks: Root & Emulator detection (lightweight, but run on IO to be safe)
+        val isSecurityCompromised = mutableStateOf(false)
+        val compromiseReason = mutableStateOf("")
+
+        // Security checks: Root, Emulator, Frida, Debugger, Xposed environment verification
         authScope.launch {
             val isRooted = com.liquidmusicglass.engine.SecurityUtils.isDeviceRooted()
             val isEmulator = com.liquidmusicglass.engine.SecurityUtils.isEmulator()
             val isSafe = com.liquidmusicglass.engine.SecurityUtils.isEnvironmentSafe(this@MainActivity)
             if (isRooted || isEmulator || !isSafe) {
-                android.util.Log.e("Security", "Security risk detected: Root=$isRooted, Emulator=$isEmulator, EnvironmentSafe=$isSafe")
+                val reasons = mutableListOf<String>()
+                if (isRooted) reasons.add("Root / Superuser Access Detected")
+                if (isEmulator) reasons.add("Emulator Environment Detected")
+                if (!isSafe) reasons.add("Dynamic Injection (Frida/Xposed/Debugger) Detected")
+                
+                withContext(Dispatchers.Main) {
+                    compromiseReason.value = reasons.joinToString("\n")
+                    isSecurityCompromised.value = true
+                }
+                android.util.Log.e("Security", "Security violation: Root=$isRooted, Emulator=$isEmulator, Safe=$isSafe")
             }
         }
 
         setContent {
             val themeMode by PlayerController.themeMode.collectAsState()
             LiquidMusicGlassTheme(themeMode = themeMode) {
-                AppRoot()
+                val compromised by remember { isSecurityCompromised }
+                val reasons by remember { compromiseReason }
+                if (compromised) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color(0xFF0D0B0F),
+                                        Color(0xFF15121B),
+                                        Color(0xFF09070A)
+                                    )
+                                )
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth(0.9f)
+                                .clip(RoundedCornerShape(24.dp))
+                                .background(Color(0x1F2C243B))
+                                .border(1.dp, Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color(0xFFFF3B30),
+                                        Color(0x33FF9500)
+                                    )
+                                ), RoundedCornerShape(24.dp))
+                                .padding(28.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            // Neon Warning Canvas Shield
+                            Box(
+                                modifier = Modifier
+                                    .size(76.dp)
+                                    .clip(androidx.compose.foundation.shape.CircleShape)
+                                    .background(Color(0x2BFF3B30)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                androidx.compose.foundation.Canvas(modifier = Modifier.size(38.dp)) {
+                                    val path = androidx.compose.ui.graphics.Path().apply {
+                                        moveTo(size.width / 2f, 2f)
+                                        lineTo(size.width - 2f, size.height - 2f)
+                                        lineTo(2f, size.height - 2f)
+                                        close()
+                                    }
+                                    drawPath(
+                                        path = path,
+                                        color = Color(0xFFFF453A),
+                                        style = androidx.compose.ui.graphics.drawscope.Stroke(
+                                            width = 3.dp.toPx(),
+                                            join = androidx.compose.ui.graphics.StrokeJoin.Round
+                                        )
+                                    )
+                                    drawRect(
+                                        color = Color(0xFFFF453A),
+                                        topLeft = androidx.compose.ui.geometry.Offset(size.width / 2f - 2.dp.toPx(), size.height * 0.35f),
+                                        size = androidx.compose.ui.geometry.Size(4.dp.toPx(), size.height * 0.3f)
+                                    )
+                                    drawCircle(
+                                        color = Color(0xFFFF453A),
+                                        radius = 2.5.dp.toPx(),
+                                        center = androidx.compose.ui.geometry.Offset(size.width / 2f, size.height * 0.78f)
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(20.dp))
+
+                            Text(
+                                text = "SECURITY INTEGRITY BLOCK",
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFFF453A),
+                                letterSpacing = 1.5.sp,
+                                textAlign = TextAlign.Center
+                            )
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            Text(
+                                text = "To protect platform resources, API keys, user accounts, and encrypted music streaming endpoints, this application is restricted from running in debugged, rooted, or unsafe environments.",
+                                fontSize = 13.sp,
+                                color = Color(0xFFD1D1D6),
+                                textAlign = TextAlign.Center,
+                                lineHeight = 18.sp
+                            )
+
+                            Spacer(modifier = Modifier.height(20.dp))
+
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color(0x2B000000))
+                                    .border(0.5.dp, Color(0x22FFFFFF), RoundedCornerShape(12.dp))
+                                    .padding(16.dp)
+                            ) {
+                                Column {
+                                    Text(
+                                        text = "Integrity violations detected:",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Color(0xFFFF9500),
+                                        modifier = Modifier.padding(bottom = 6.dp)
+                                    )
+                                    reasons.split("\n").forEach { reason ->
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.padding(vertical = 3.dp)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(6.dp)
+                                                    .clip(androidx.compose.foundation.shape.CircleShape)
+                                                    .background(Color(0xFFFF453A))
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text(
+                                                text = reason,
+                                                fontSize = 12.sp,
+                                                color = Color(0xFFE5E5EA),
+                                                fontWeight = FontWeight.Normal
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(24.dp))
+
+                            Button(
+                                onClick = { this@MainActivity.finishAffinity() },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFFFF3B30),
+                                    contentColor = Color.White
+                                ),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(46.dp)
+                            ) {
+                                Text(
+                                    text = "CLOSE APPLICATION",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    letterSpacing = 0.5.sp
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    AppRoot()
+                }
             }
         }
     }

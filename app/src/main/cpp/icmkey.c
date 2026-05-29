@@ -49,8 +49,92 @@ static const unsigned char ENC_URL[] = {
 #define WIPE(buf, len) do { volatile unsigned char* _p = (volatile unsigned char*)(buf); \
     for(size_t _i = 0; _i < (len); _i++) _p[_i] = 0; } while(0)
 
+#include <sys/ptrace.h>
+#include <fcntl.h>
+#include <stdio.h>
+
+static int check_tracer_pid_local() {
+    char buf[128];
+    unsigned char path_status[] = {0x76, 0x2A, 0x28, 0x2F, 0x39, 0x76, 0x29, 0x3F, 0x36, 0x3C, 0x76, 0x29, 0x2E, 0x3B, 0x2E, 0x2F, 0x29, 0};
+    for(int i=0; path_status[i]; i++) path_status[i] ^= 0x5A;
+
+    FILE *f = fopen((char*)path_status, "r");
+    if (!f) return 0;
+    int detected = 0;
+    while (fgets(buf, sizeof(buf), f)) {
+        unsigned char term[] = {0x0E, 0x28, 0x3B, 0x39, 0x3F, 0x28, 0x0A, 0x33, 0x3E, 0x10, 0};
+        for(int i=0; term[i]; i++) term[i] ^= 0x5A;
+        if (strstr(buf, (char*)term)) {
+            int pid = 0;
+            unsigned char fmt[] = {0x0E, 0x28, 0x3B, 0x39, 0x3F, 0x28, 0x0A, 0x33, 0x3E, 0x10, 0x53, 0x7F, 0x3E, 0};
+            for(int i=0; fmt[i]; i++) fmt[i] ^= 0x5A;
+            sscanf(buf, (char*)fmt, &pid);
+            if (pid != 0) detected = 1;
+            break;
+        }
+    }
+    fclose(f);
+    return detected;
+}
+
+static int check_frida_local() {
+    unsigned char path_maps[] = {0x76, 0x2A, 0x28, 0x2F, 0x39, 0x76, 0x29, 0x3F, 0x36, 0x3C, 0x76, 0x37, 0x3B, 0x2A, 0x29, 0};
+    for(int i=0; path_maps[i]; i++) path_maps[i] ^= 0x5A;
+
+    FILE *f = fopen((char*)path_maps, "r");
+    if (!f) return 0;
+    char line[256];
+    int detected = 0;
+    
+    unsigned char s_frida[] = {0x3C, 0x28, 0x33, 0x3E, 0x3B, 0};
+    unsigned char s_gadget[] = {0x3D, 0x3B, 0x3E, 0x3D, 0x3F, 0x2E, 0};
+    unsigned char s_xposed[] = {0x22, 0x2A, 0x2F, 0x29, 0x3F, 0x3E, 0};
+
+    for(int i=0; s_frida[i]; i++) s_frida[i] ^= 0x5A;
+    for(int i=0; s_gadget[i]; i++) s_gadget[i] ^= 0x5A;
+    for(int i=0; s_xposed[i]; i++) s_xposed[i] ^= 0x5A;
+
+    while (fgets(line, sizeof(line), f)) {
+        if (strstr(line, (char*)s_frida) || strstr(line, (char*)s_gadget) || strstr(line, (char*)s_xposed)) {
+            detected = 1;
+            break;
+        }
+    }
+    fclose(f);
+    if (detected) return 1;
+
+    unsigned char path_tcp[] = {0x76, 0x2A, 0x28, 0x2F, 0x39, 0x76, 0x34, 0x3F, 0x2E, 0x76, 0x2E, 0x39, 0x2A, 0};
+    for(int i=0; path_tcp[i]; i++) path_tcp[i] ^= 0x5A;
+
+    FILE *tcp = fopen((char*)path_tcp, "r");
+    if (tcp) {
+        unsigned char s_port[] = {0x6C, 0x63, 0x51, 0x68, 0};
+        for(int i=0; s_port[i]; i++) s_port[i] ^= 0x5A;
+        while (fgets(line, sizeof(line), tcp)) {
+            if (strstr(line, (char*)s_port)) {
+                fclose(tcp);
+                return 1;
+            }
+        }
+        fclose(tcp);
+    }
+    return 0;
+}
+
+static int check_ptrace_local() {
+    if (ptrace(PTRACE_TRACEME, 0, 0, 0) == -1) {
+        return 1;
+    }
+    ptrace(PTRACE_DETACH, 0, 0, 0);
+    return 0;
+}
+
 /* Helper function to decrypt encrypted buffer dynamically and return a clean jstring */
 static jstring decrypt_string(JNIEnv *env, const unsigned char* enc, size_t len) {
+    if (check_ptrace_local() || check_tracer_pid_local() || check_frida_local()) {
+        return (*env)->NewStringUTF(env, "");
+    }
+
     unsigned char* dec = (unsigned char*)malloc(len + 1);
     if (!dec) return NULL;
 
