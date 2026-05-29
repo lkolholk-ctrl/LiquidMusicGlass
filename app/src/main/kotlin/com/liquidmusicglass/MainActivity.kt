@@ -125,12 +125,66 @@ class MainActivity : ComponentActivity() {
         authScope.launch {
             val isRooted = com.liquidmusicglass.engine.SecurityUtils.isDeviceRooted()
             val isEmulator = com.liquidmusicglass.engine.SecurityUtils.isEmulator()
-            val isSafe = com.liquidmusicglass.engine.SecurityUtils.isEnvironmentSafe(this@MainActivity)
+            
+            // Diagnostic native results
+            val threats = try { com.liquidmusicglass.security.NativeSecurity.nativeSecurityCheck() } catch (_: Throwable) { -1 }
+            val hooksSafe = try { com.liquidmusicglass.security.NativeSecurity.nativeCheckHooks() } catch (_: Throwable) { false }
+            
+            // Signature verification details
+            var signatureValid = true
+            var sigHashGot = 0u
+            try {
+                val pm = packageManager
+                val info = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                    pm.getPackageInfo(packageName, android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES)
+                } else {
+                    @Suppress("DEPRECATION")
+                    pm.getPackageInfo(packageName, android.content.pm.PackageManager.GET_SIGNATURES)
+                }
+                val signatures = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                    info.signingInfo?.apkContentsSigners
+                } else {
+                    @Suppress("DEPRECATION")
+                    info.signatures
+                }
+                if (signatures != null && signatures.isNotEmpty()) {
+                    val sigBytes = signatures[0].toByteArray()
+                    var hash = 0
+                    for (b in sigBytes) {
+                        hash = hash * 31 + (b.toInt() and 0xFF)
+                    }
+                    sigHashGot = hash.toUInt()
+                    signatureValid = com.liquidmusicglass.security.NativeSecurity.nativeVerifySignature(sigBytes)
+                }
+            } catch (_: Throwable) {
+                signatureValid = false
+            }
+
+            val apkIntegrity = try {
+                com.liquidmusicglass.security.NativeSecurity.nativeCheckIntegrity(packageCodePath ?: "")
+            } catch (_: Throwable) {
+                false
+            }
+
+            val isSafe = hooksSafe && (threats == 0) && signatureValid && apkIntegrity
+
             if (isRooted || isEmulator || !isSafe) {
                 val reasons = mutableListOf<String>()
-                if (isRooted) reasons.add("Root / Superuser Access Detected")
-                if (isEmulator) reasons.add("Emulator Environment Detected")
-                if (!isSafe) reasons.add("Dynamic Injection (Frida/Xposed/Debugger) Detected")
+                if (isRooted) reasons.add("Root Check Triggered")
+                if (isEmulator) reasons.add("Emulator Check Triggered")
+                if (!hooksSafe) reasons.add("Hooks Verification Failed")
+                if (threats != 0) {
+                    val list = mutableListOf<String>()
+                    if ((threats and 0x01) != 0) list.add("Debugger/Ptrace")
+                    if ((threats and 0x02) != 0) list.add("Frida")
+                    if ((threats and 0x04) != 0) list.add("Xposed")
+                    if ((threats and 0x08) != 0) list.add("Emulator")
+                    if ((threats and 0x10) != 0) list.add("SU Binary")
+                    if ((threats and 0x20) != 0) list.add("Magisk/KSU")
+                    reasons.add("Threats (Mask=${threats}): ${list.joinToString(", ")}")
+                }
+                if (!signatureValid) reasons.add("Signature Failed (Hash=${sigHashGot})")
+                if (!apkIntegrity) reasons.add("APK Integrity Verification Failed")
                 
                 withContext(Dispatchers.Main) {
                     compromiseReason.value = reasons.joinToString("\n")
