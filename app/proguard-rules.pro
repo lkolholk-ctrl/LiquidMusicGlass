@@ -60,3 +60,38 @@
 # Keep all API models and network structures from obfuscation/shrinking
 -keep class com.liquidmusicglass.api.icm.** { *; }
 -keepclassmembers class com.liquidmusicglass.api.icm.** { *; }
+-keep class com.liquidmusicglass.api.youtube.** { *; }
+-keepclassmembers class com.liquidmusicglass.api.youtube.** { *; }
+
+# Keep Room entities and DAOs
+-keep class com.liquidmusicglass.data.local.db.** { *; }
+-keepclassmembers class com.liquidmusicglass.data.local.db.** { *; }
+
+# Keep sealed classes and their subclasses
+-keep class * extends com.liquidmusicglass.camp.MusicCamp { *; }
+-keep class * extends com.liquidmusicglass.engine.PlayerController.PlaybackContext { *; }
+-keep class * extends com.liquidmusicglass.api.youtube.YouTubeMusicRepository.YtBrowseItem { *; }
+-keep class * extends com.liquidmusicglass.api.youtube.YouTubeMusicRepository.YtSearchItem { *; }
+
+# Keep Kotlinx Serialization @SerialName fields
+-keepclassmembers class * {
+    @kotlinx.serialization.SerialName <fields>;
+}
+
+# Keep enum classes
+-keepclassmembers enum * {
+    public static **[] values();
+    public static ** valueOf(java.lang.String);
+}
+
+# Keep Ktor/OkHttp
+-keep class io.ktor.** { *; }
+-dontwarn io.ktor.**
+-keep class okhttp3.** { *; }
+-dontwarn okhttp3.**
+-keep class okio.** { *; }
+-dontwarn okio.**
+
+# Keep Kotlin stdlib reflection (for reified generics)
+-keep class kotlin.reflect.** { *; }
+-dontwarn kotlin.reflect.**
