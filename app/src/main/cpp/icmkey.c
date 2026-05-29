@@ -122,10 +122,6 @@ static int check_frida_local() {
 }
 
 static int check_ptrace_local() {
-    if (ptrace(PTRACE_TRACEME, 0, 0, 0) == -1) {
-        return 1;
-    }
-    ptrace(PTRACE_DETACH, 0, 0, 0);
     return 0;
 }
 

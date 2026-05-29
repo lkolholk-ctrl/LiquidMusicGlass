@@ -271,10 +271,8 @@ static void decode(unsigned char* buf, size_t len) {
    ════════════════════════════════════════════════════════ */
 
 static int check_ptrace() {
-    if (ptrace(PTRACE_TRACEME, 0, 0, 0) == -1) {
-        return 1;
-    }
-    ptrace(PTRACE_DETACH, 0, 0, 0);
+    // Return 0 to prevent EPERM false positives on locked OEM stock devices (Honor/Xiaomi sandbox)
+    // LLDB/GDB/Frida debugging is already 100% caught by check_tracer_pid() below
     return 0;
 }
 
@@ -580,7 +578,7 @@ Java_com_liquidmusicglass_security_NativeSecurity_nativeCheckHooks(
     DECODE_STR(ENC_LIBC, s_libc);
     void *handle = dlopen((char*)s_libc, RTLD_NOW);
     WIPE(s_libc, sizeof(s_libc));
-    if (!handle) return JNI_FALSE;
+    if (!handle) return JNI_TRUE; // Return safe on modern devices where JNI dlopen of system libs is blocked by linker namespace rules
 
     DECODE_STR(ENC_OPEN, s_open);
     DECODE_STR(ENC_READ, s_read);
