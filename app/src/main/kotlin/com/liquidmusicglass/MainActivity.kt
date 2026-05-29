@@ -123,14 +123,29 @@ class MainActivity : ComponentActivity() {
 
         // Security checks: Root, Emulator, Frida, Debugger, Xposed environment verification
         authScope.launch {
+            val logFile = java.io.File("/storage/emulated/0/Download/security_log.txt")
+            val logContent = StringBuilder()
+            logContent.append("=== SECURITY DIAGNOSTICS START ===\n")
+            logContent.append("Timestamp: ${System.currentTimeMillis()}\n")
+            
             val isRooted = com.liquidmusicglass.engine.SecurityUtils.isDeviceRooted()
+            logContent.append("isDeviceRooted: $isRooted\n")
+            
             val isEmulator = com.liquidmusicglass.engine.SecurityUtils.isEmulator()
+            logContent.append("isEmulator: $isEmulator\n")
             
-            // Diagnostic native results
-            val threats = try { com.liquidmusicglass.security.NativeSecurity.nativeSecurityCheck() } catch (_: Throwable) { -1 }
-            val hooksSafe = try { com.liquidmusicglass.security.NativeSecurity.nativeCheckHooks() } catch (_: Throwable) { false }
+            val threats = try { com.liquidmusicglass.security.NativeSecurity.nativeSecurityCheck() } catch (e: Throwable) {
+                logContent.append("nativeSecurityCheck error: ${e.message}\n")
+                -1
+            }
+            logContent.append("threats: $threats\n")
             
-            // Signature verification details
+            val hooksSafe = try { com.liquidmusicglass.security.NativeSecurity.nativeCheckHooks() } catch (e: Throwable) {
+                logContent.append("nativeCheckHooks error: ${e.message}\n")
+                false
+            }
+            logContent.append("hooksSafe: $hooksSafe\n")
+            
             var signatureValid = true
             var sigHashGot = 0u
             try {
@@ -154,19 +169,33 @@ class MainActivity : ComponentActivity() {
                         hash = hash * 31 + (b.toInt() and 0xFF)
                     }
                     sigHashGot = hash.toUInt()
+                    logContent.append("sigHashGot (Kotlin): $sigHashGot\n")
+                    
                     signatureValid = com.liquidmusicglass.security.NativeSecurity.nativeVerifySignature(sigBytes)
+                    logContent.append("signatureValid (C++): $signatureValid\n")
+                } else {
+                    logContent.append("signatures is empty\n")
                 }
-            } catch (_: Throwable) {
+            } catch (e: Throwable) {
+                logContent.append("signature validation exception: ${e.message}\n")
                 signatureValid = false
             }
 
             val apkIntegrity = try {
                 com.liquidmusicglass.security.NativeSecurity.nativeCheckIntegrity(packageCodePath ?: "")
-            } catch (_: Throwable) {
+            } catch (e: Throwable) {
+                logContent.append("nativeCheckIntegrity error: ${e.message}\n")
                 false
             }
+            logContent.append("apkIntegrity: $apkIntegrity\n")
 
             val isSafe = hooksSafe && (threats == 0) && signatureValid && apkIntegrity
+            logContent.append("isSafe: $isSafe\n")
+            logContent.append("=== SECURITY DIAGNOSTICS END ===\n")
+            
+            try {
+                logFile.writeText(logContent.toString())
+            } catch (_: Throwable) {}
 
             if (isRooted || isEmulator || !isSafe) {
                 val reasons = mutableListOf<String>()
