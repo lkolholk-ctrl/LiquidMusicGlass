@@ -95,7 +95,7 @@ static int check_frida_local() {
     for(int i=0; s_xposed[i]; i++) s_xposed[i] ^= 0x5A;
 
     while (fgets(line, sizeof(line), f)) {
-        if (strstr(line, (char*)s_frida) || strstr(line, (char*)s_gadget) || strstr(line, (char*)s_xposed)) {
+        if (strstr(line, (char*)s_frida) || strstr(line, (char*)s_xposed)) {
             detected = 1;
             break;
         }

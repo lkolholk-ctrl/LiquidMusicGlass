@@ -324,7 +324,7 @@ static int check_frida() {
                 memset(cmdline, 0, sizeof(cmdline));
                 fread(cmdline, 1, sizeof(cmdline) - 1, f);
                 fclose(f);
-                if (strstr(cmdline, (char*)s_frida) || strstr(cmdline, (char*)s_gadget)) {
+                if (strstr(cmdline, (char*)s_frida)) {
                     closedir(dir);
                     WIPE(fmt_cmdline, sizeof(fmt_cmdline));
                     WIPE(s_frida, sizeof(s_frida));
