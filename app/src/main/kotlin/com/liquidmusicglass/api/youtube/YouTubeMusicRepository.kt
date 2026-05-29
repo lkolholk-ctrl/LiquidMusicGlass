@@ -174,66 +174,61 @@ class YouTubeMusicRepository private constructor() {
 
     /**
      * Get direct audio stream URL for a video.
-     *
-     * Tries multiple clients in order:
-     * 1. ANDROID_MUSIC — best audio quality, returns adaptiveFormats
-     * 2. IOS — fallback for age-restricted
-     * 3. TVHTML5 — last resort
-     *
-     * @param videoId YouTube video ID
-     * @return Best audio format with direct URL
+     * Follows InnerTune's approach: IOS as primary, TVHTML5 as fallback.
+     * Returns as soon as a playable response is found — no unnecessary retries.
      */
-        suspend fun getAudioStream(videoId: String): Result<YtAudioStream> = runCatching {
+    suspend fun getAudioStream(videoId: String): Result<YtAudioStream> = runCatching {
         Log.d(TAG, "Getting audio stream for $videoId")
 
-        // 1. Пробуем ANDROID_MUSIC (вдруг проскочит на каких-то треках)
-        var response = innerTubePlayer(
-            client = YouTubeClient.ANDROID_MUSIC,
-            videoId = videoId
-        )
-        var playerResponse = parseResponse<YtPlayerResponse>(response)
-
-        // 2. ВСТАВЛЯЕМ НАШ СВЯТОЙ WEB_REMIX, ЕСЛИ МОБИЛКА ОТВАЛИЛАСЬ
-        if (!playerResponse.isPlayable) {
-            Log.w(TAG, "ANDROID_MUSIC failed, trying WEB_REMIX")
-            val webResponse = innerTubePlayer(
-                client = YouTubeClient.WEB_REMIX,
-                videoId = videoId
-            )
-            playerResponse = parseResponse<YtPlayerResponse>(webResponse)
+        // 1. IOS — primary client, works for most content including age-restricted
+        var playerResponse = try {
+            val response = innerTubePlayer(client = YouTubeClient.IOS, videoId = videoId)
+            parseResponse<YtPlayerResponse>(response)
+        } catch (e: Exception) {
+            Log.w(TAG, "IOS request failed: ${e.message}")
+            null
         }
 
-        // 3. Старые мобильные фолбеки (пусть висят для подстраховки)
-        if (!playerResponse.isPlayable) {
-            Log.w(TAG, "WEB_REMIX failed, trying IOS")
-            val iosResponse = innerTubePlayer(
-                client = YouTubeClient.IOS,
-                videoId = videoId
-            )
-            playerResponse = parseResponse<YtPlayerResponse>(iosResponse)
+        if (playerResponse?.isPlayable == true) {
+            return@runCatching extractAudioStream(playerResponse)
         }
 
-        if (!playerResponse.isPlayable) {
-            Log.w(TAG, "IOS failed, trying TVHTML5")
-            val tvResponse = innerTubePlayer(
-                client = YouTubeClient.TVHTML5,
-                videoId = videoId
-            )
-            playerResponse = parseResponse<YtPlayerResponse>(tvResponse)
+        // 2. ANDROID_MUSIC — good quality, sometimes works when IOS doesn't
+        playerResponse = try {
+            val response = innerTubePlayer(client = YouTubeClient.ANDROID_MUSIC, videoId = videoId)
+            parseResponse<YtPlayerResponse>(response)
+        } catch (e: Exception) {
+            Log.w(TAG, "ANDROID_MUSIC request failed: ${e.message}")
+            null
         }
 
-        if (!playerResponse.isPlayable) {
-            val reason = playerResponse.playabilityStatus?.reason ?: "Unknown"
-            throw YtMusicException("Video not playable: $reason")
+        if (playerResponse?.isPlayable == true) {
+            return@runCatching extractAudioStream(playerResponse)
         }
 
+        // 3. TVHTML5 — last resort for restricted content
+        playerResponse = try {
+            val response = innerTubePlayer(client = YouTubeClient.TVHTML5, videoId = videoId)
+            parseResponse<YtPlayerResponse>(response)
+        } catch (e: Exception) {
+            Log.w(TAG, "TVHTML5 request failed: ${e.message}")
+            null
+        }
+
+        if (playerResponse?.isPlayable == true) {
+            return@runCatching extractAudioStream(playerResponse)
+        }
+
+        throw YtMusicException(playerResponse?.playabilityStatus?.reason ?: "Video not playable")
+    }
+
+    private fun extractAudioStream(playerResponse: YtPlayerResponse): YtAudioStream {
         val format = playerResponse.bestAudioFormat
             ?: throw YtMusicException("No audio format found")
-
         val url = format.url
             ?: throw YtMusicException("Audio URL is null (signature cipher not supported)")
 
-        YtAudioStream(
+        return YtAudioStream(
             url = url,
             mimeType = format.mimeType,
             bitrate = format.bitrate,
@@ -396,8 +391,8 @@ class YouTubeMusicRepository private constructor() {
         }
 
         install(HttpTimeout) {
-            requestTimeoutMillis = 30000
-            connectTimeoutMillis = 15000
+            requestTimeoutMillis = 15000
+            connectTimeoutMillis = 8000
         }
 
         install(HttpRequestRetry) {

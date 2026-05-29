@@ -394,28 +394,40 @@ class AudioService : MediaSessionService() {
         } ?: baseFactory
 
         // ResolvingDataSource: resolves mediaId (track ID) to real stream URL on demand
-        // This is how InnerTune does it — much more reliable than liquid:// scheme
+        // Same approach as InnerTune — MediaItem URI = trackId, resolved here to real URL
         val resolvingFactory = ResolvingDataSource.Factory(cacheFactory) { dataSpec ->
-            val mediaId = dataSpec.key ?: return@Factory dataSpec
+            // dataSpec.key comes from MediaItem.customCacheKey (set to trackId)
+            // If not set, fall back to the URI itself
+            val mediaId = dataSpec.key
+                ?: dataSpec.uri?.toString()?.takeIf {
+                    // Only treat as mediaId if it looks like a track ID (no URL scheme)
+                    !it.startsWith("http://") && !it.startsWith("https://") && !it.startsWith("file://")
+                }
+                ?: return@Factory dataSpec
 
-            // Check if cached in PlayerController's URL cache
+            // Check offline downloads first
+            val offlineMp3 = java.io.File(filesDir, "downloads/$mediaId.mp3")
+            val offlineM4a = java.io.File(filesDir, "downloads/$mediaId.m4a")
+            when {
+                offlineMp3.exists() && offlineMp3.length() > 0 -> return@Factory dataSpec.withUri(Uri.fromFile(offlineMp3))
+                offlineM4a.exists() && offlineM4a.length() > 0 -> return@Factory dataSpec.withUri(Uri.fromFile(offlineM4a))
+            }
+
+            // Check URL cache
             val cachedUri = PlayerController.getValidCachedUri(mediaId)
             if (cachedUri != null) {
                 return@Factory dataSpec.withUri(cachedUri)
             }
 
             // Resolve stream URL synchronously (runs on ExoPlayer's IO thread)
+            android.util.Log.d("AudioService", "[RESOLVE] Resolving stream for mediaId=$mediaId")
             val resolvedUri = PlayerController.resolveStreamUrlSync(mediaId)
             if (resolvedUri != null) {
+                android.util.Log.d("AudioService", "[RESOLVE] Got URL for $mediaId: ${resolvedUri.toString().take(80)}...")
                 dataSpec.withUri(resolvedUri)
             } else {
-                // Check if dataSpec already has a usable URI (not just the mediaId)
-                val currentUri = dataSpec.uri
-                if (currentUri.scheme == "http" || currentUri.scheme == "https" || currentUri.scheme == "file") {
-                    dataSpec
-                } else {
-                    throw java.io.IOException("Cannot resolve stream URL for track $mediaId")
-                }
+                android.util.Log.e("AudioService", "[RESOLVE] Failed to resolve stream for $mediaId")
+                throw java.io.IOException("Cannot resolve stream URL for track $mediaId")
             }
         }
 
