@@ -500,7 +500,7 @@ Java_com_liquidmusicglass_security_NativeSecurity_nativeVerifySignature(
 
     unsigned int hash = 0;
     for (int i = 0; i < len; i++) {
-        hash = hash * 31 + (unsigned char)sig[i];
+        hash = hash * 31 + (sig[i] & 0xFF);
     }
 
     (*env)->ReleaseByteArrayElements(env, signatureBytes, sig, 0);
