@@ -162,7 +162,7 @@ fun LyricsSheet(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.25f))
+                .background(Color.Black.copy(alpha = 0.55f))
         )
 
         // ── Content ──
@@ -211,7 +211,7 @@ fun LyricsSheet(
                             targetValue = if (isCurrent) {
                                 Color.White
                             } else {
-                                Color.White.copy(alpha = 0.35f)
+                                Color.White.copy(alpha = 0.70f)
                             },
                             animationSpec = tween(400),
                             label = "lyricColor"
@@ -226,17 +226,24 @@ fun LyricsSheet(
                         Text(
                             text = line.text,
                             color = textColor,
-                            fontSize = if (isCurrent) 32.sp else 30.sp,
-                            fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.SemiBold,
-                            textAlign = TextAlign.Center,
-                            lineHeight = 44.sp,
+                            style = androidx.compose.ui.text.TextStyle(
+                                fontSize = if (isCurrent) 32.sp else 30.sp,
+                                fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.SemiBold,
+                                textAlign = TextAlign.Center,
+                                lineHeight = 44.sp,
+                                shadow = androidx.compose.ui.graphics.Shadow(
+                                    color = Color.Black.copy(alpha = 0.85f),
+                                    offset = androidx.compose.ui.geometry.Offset(0f, 2f),
+                                    blurRadius = 8f
+                                )
+                            ),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 32.dp, vertical = 10.dp)
                                 .graphicsLayer {
                                     scaleX = scale
                                     scaleY = scale
-                                    alpha = if (isCurrent) 1f else 0.5f
+                                    alpha = if (isCurrent) 1f else 0.65f
                                 }
                         )
                     }

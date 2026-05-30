@@ -135,10 +135,10 @@ fun AnimatedPlayerBackground(
                 .background(
                     Brush.verticalGradient(
                         colorStops = arrayOf(
-                            0.00f to Color.Black.copy(alpha = 0.08f),
-                            0.40f to Color.Black.copy(alpha = 0.02f),
-                            0.60f to Color.Black.copy(alpha = 0.08f),
-                            1.00f to Color.Black.copy(alpha = 0.35f)
+                            0.00f to Color.Black.copy(alpha = 0.25f),
+                            0.40f to Color.Black.copy(alpha = 0.15f),
+                            0.60f to Color.Black.copy(alpha = 0.25f),
+                            1.00f to Color.Black.copy(alpha = 0.55f)
                         )
                     )
                 )

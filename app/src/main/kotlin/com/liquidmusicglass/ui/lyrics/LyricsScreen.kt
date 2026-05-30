@@ -305,14 +305,9 @@ fun LyricsScreen(
                             val lineAlpha by animateFloatAsState(
                                 targetValue = when {
                                     isCurrentLine -> 1.0f
-                                    isPastLine -> 0.5f
-                                    else -> 0.25f
-                                },
-                                animationSpec = spring(
-                                    dampingRatio = Spring.DampingRatioNoBouncy,
-                                    stiffness = Spring.StiffnessLow
-                                ),
-                                label = "lineAlpha"
+                                    isPastLine -> 0.75f
+                                    else -> 0.50f
+                                }
                             )
 
                             // Убрано масштабирование активной строки — предотвращает вылет за экран
@@ -339,8 +334,8 @@ fun LyricsScreen(
                                 // Строка целиком: белая если текущая, полупрозрачная если нет
                                 val textColor = when {
                                     isCurrentLine -> duetColor ?: Color.White
-                                    isPastLine -> (duetColor ?: Color.White).copy(alpha = 0.5f)
-                                    else -> (duetColor ?: Color.White).copy(alpha = 0.25f)
+                                    isPastLine -> (duetColor ?: Color.White).copy(alpha = 0.70f)
+                                    else -> (duetColor ?: Color.White).copy(alpha = 0.45f)
                                 }
 
                                 Text(
@@ -351,6 +346,11 @@ fun LyricsScreen(
                                         fontWeight = if (isCurrentLine) FontWeight.Bold else FontWeight.SemiBold,
                                         textAlign = TextAlign.Start,
                                         lineHeight = 44.sp,
+                                        shadow = androidx.compose.ui.graphics.Shadow(
+                                            color = Color.Black.copy(alpha = 0.85f),
+                                            offset = Offset(0f, 2f),
+                                            blurRadius = 8f
+                                        ),
                                         platformStyle = PlatformTextStyle(includeFontPadding = false)
                                     ),
                                     modifier = Modifier.fillMaxWidth(),

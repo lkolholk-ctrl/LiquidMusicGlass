@@ -124,7 +124,7 @@ fun QueueSheet(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.35f))
+                    .background(Color.Black.copy(alpha = 0.65f))
             )
 
             Column(
@@ -266,9 +266,9 @@ fun QueueSheet(
                         item(key = "upnext_header") {
                             Text(
                                 text = "Up Next",
-                                color = Color.White.copy(alpha = 0.50f),
+                                color = Color.White.copy(alpha = 0.75f),
                                 fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold,
+                                fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(
                                     horizontal = 20.dp,
                                     vertical = 8.dp
@@ -367,14 +367,14 @@ private fun QueueTrackRow(
                 text = track.title,
                 color = if (isPlaying) AppleRed else Color.White,
                 fontSize = 14.sp,
-                fontWeight = if (isPlaying) FontWeight.SemiBold else FontWeight.Normal,
+                fontWeight = if (isPlaying) FontWeight.Bold else FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = track.artist,
-                color = Color.White.copy(alpha = 0.45f),
+                color = Color.White.copy(alpha = 0.70f),
                 fontSize = 12.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -386,7 +386,7 @@ private fun QueueTrackRow(
             Icon(
                 imageVector = Icons.Rounded.DragHandle,
                 contentDescription = null,
-                tint = Color.White.copy(alpha = 0.25f),
+                tint = Color.White.copy(alpha = 0.55f),
                 modifier = Modifier.size(20.dp)
             )
         }
