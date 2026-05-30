@@ -36,6 +36,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -71,6 +73,10 @@ fun LyricsSheet(
 ) {
     val context = LocalContext.current
     val lc = LiquidTheme.colors
+
+    val density = LocalDensity.current
+    val configuration = LocalConfiguration.current
+    val screenHeightPx = with(density) { configuration.screenHeightDp.dp.toPx() }
 
     val resolvedTrackId = remember(trackId, audioFileUri) {
         trackId ?: run {
@@ -132,9 +138,10 @@ fun LyricsSheet(
     val listState = rememberLazyListState()
     LaunchedEffect(currentLineIndex) {
         if (currentLineIndex >= 0 && lyrics.isSynced) {
+            val aboveCenterOffset = (screenHeightPx * 0.18f - with(density) { 40.dp.toPx() }).toInt()
             listState.animateScrollToItem(
                 index = currentLineIndex,
-                scrollOffset = -250
+                scrollOffset = -aboveCenterOffset
             )
         }
     }
@@ -213,13 +220,13 @@ fun LyricsSheet(
                             } else {
                                 Color.White.copy(alpha = 0.70f)
                             },
-                            animationSpec = tween(400),
+                            animationSpec = tween(600),
                             label = "lyricColor"
                         )
 
                         val scale by animateFloatAsState(
                             targetValue = if (isCurrent) 1.08f else 1f,
-                            animationSpec = tween(400),
+                            animationSpec = tween(600),
                             label = "lyricScale"
                         )
 

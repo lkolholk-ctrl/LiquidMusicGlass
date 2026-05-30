@@ -1,9 +1,11 @@
 package com.liquidmusicglass.ui.lyrics
 
 import android.net.Uri
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -176,9 +178,9 @@ fun LyricsScreen(
 
     LaunchedEffect(currentLineIndex) {
         if (currentLineIndex >= 0) {
-            // Поднимаем активную строку заметно ВЫШЕ центра (~25% от высоты)
+            // Поднимаем активную строку заметно ВЫШЕ центра (~18% от высоты)
             val targetIndex = currentLineIndex.coerceAtMost((lyrics.lines.size - 1).coerceAtLeast(0))
-            val aboveCenterOffset = (screenHeightPx * 0.25f - with(density) { 40.dp.toPx() }).toInt()
+            val aboveCenterOffset = (screenHeightPx * 0.18f - with(density) { 40.dp.toPx() }).toInt()
             listState.animateScrollToItem(
                 index = targetIndex,
                 scrollOffset = -aboveCenterOffset
@@ -307,7 +309,9 @@ fun LyricsScreen(
                                     isCurrentLine -> 1.0f
                                     isPastLine -> 0.75f
                                     else -> 0.50f
-                                }
+                                },
+                                animationSpec = tween(durationMillis = 600),
+                                label = "lineAlpha"
                             )
 
                             // Убрано масштабирование активной строки — предотвращает вылет за экран
@@ -332,11 +336,17 @@ fun LyricsScreen(
                                 contentAlignment = Alignment.CenterStart
                             ) {
                                 // Строка целиком: белая если текущая, полупрозрачная если нет
-                                val textColor = when {
+                                val targetTextColor = when {
                                     isCurrentLine -> duetColor ?: Color.White
                                     isPastLine -> (duetColor ?: Color.White).copy(alpha = 0.70f)
                                     else -> (duetColor ?: Color.White).copy(alpha = 0.45f)
                                 }
+
+                                val textColor by animateColorAsState(
+                                    targetValue = targetTextColor,
+                                    animationSpec = tween(durationMillis = 600),
+                                    label = "textColor"
+                                )
 
                                 Text(
                                     text = cleanText,
