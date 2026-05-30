@@ -680,10 +680,18 @@ object IcmRepository {
     suspend fun buildWaveQueue(count: Int = 5, seedTrackId: String? = null): List<com.liquidmusicglass.engine.Track> {
         val tracks = mutableListOf<com.liquidmusicglass.engine.Track>()
         val exclude = mutableListOf<String>()
-        repeat(count) {
-            val response = getWaveNext(seedTrackId, exclude.takeIf { it.isNotEmpty() }) ?: return@repeat
-            if (response.status == "empty") return@repeat
-            val track = response.track ?: return@repeat
+        for (i in 0 until count) {
+            val lastHttpCode = getLastHttpCode()
+            val lastErrCode = getLastErrorCode()
+            if (lastHttpCode == 429 || lastErrCode == "rate_limited" || lastErrCode == "ip_temporarily_blocked") {
+                break
+            }
+            if (i > 0) {
+                kotlinx.coroutines.delay(150)
+            }
+            val response = getWaveNext(seedTrackId, exclude.takeIf { it.isNotEmpty() }) ?: break
+            if (response.status == "empty") break
+            val track = response.track ?: continue
             tracks.add(track.toTrack())
             exclude.add(track.id)
         }

@@ -194,6 +194,19 @@ class WaveRepository(context: Context) {
         while (queue.size < count && attempts < maxAttempts) {
             attempts++
             try {
+                // Check if we are already rate limited before making the call
+                val lastHttpCode = IcmRepository.getLastHttpCode()
+                val lastErrCode = IcmRepository.getLastErrorCode()
+                if (lastHttpCode == 429 || lastErrCode == "rate_limited" || lastErrCode == "ip_temporarily_blocked") {
+                    Log.w(TAG, "Already rate limited (429/blocked). Skipping wave building to prevent IP bans.")
+                    break
+                }
+
+                // Add a small 150ms delay between consecutive requests to avoid burst rate limiting
+                if (attempts > 1) {
+                    kotlinx.coroutines.delay(150)
+                }
+
                 // Request the true personalized personal wave (seedTrackId = null)
                 // Use recentSkips from PlayerController to let the server adapt to recent skips!
                 val recentSkipsVal = com.liquidmusicglass.engine.PlayerController.consecutiveSkips
@@ -208,6 +221,14 @@ class WaveRepository(context: Context) {
                 // Robust fallback: if personal wave is empty (e.g. no server-side history/likes),
                 // we seed it with a random favorite from the local DB!
                 if (response == null || response.status == "empty") {
+                    // Check if response was null due to 429
+                    val code = IcmRepository.getLastHttpCode()
+                    val errorCode = IcmRepository.getLastErrorCode()
+                    if (code == 429 || errorCode == "rate_limited" || errorCode == "ip_temporarily_blocked") {
+                        Log.w(TAG, "Rate limit hit (429/blocked) during getWaveNext. Aborting queue building.")
+                        break
+                    }
+
                     val fallbackSeed = dao.getRandomFavoriteTrackId()
                     if (fallbackSeed != null) {
                         Log.d(TAG, "Personal wave empty, falling back to favorite seed: $fallbackSeed")
@@ -221,6 +242,12 @@ class WaveRepository(context: Context) {
                 }
 
                 if (response == null || response.status != "ok") {
+                    val code = IcmRepository.getLastHttpCode()
+                    val errorCode = IcmRepository.getLastErrorCode()
+                    if (code == 429 || errorCode == "rate_limited" || errorCode == "ip_temporarily_blocked") {
+                        Log.w(TAG, "Rate limit hit (429/blocked) during getWaveNext. Aborting queue building.")
+                        break
+                    }
                     Log.w(TAG, "Wave response status: ${response?.status ?: "null"}")
                     continue
                 }
