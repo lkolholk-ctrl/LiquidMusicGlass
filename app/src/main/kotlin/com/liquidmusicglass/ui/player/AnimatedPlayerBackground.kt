@@ -15,6 +15,12 @@ import androidx.compose.ui.unit.dp
 import com.liquidmusicglass.ui.glass.AlbumArtImage
 import com.liquidmusicglass.ui.glass.AlbumColors
 
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+
 import androidx.compose.ui.graphics.toArgb
 
 /**
@@ -26,6 +32,7 @@ import androidx.compose.ui.graphics.toArgb
  * 3. Gradient overlay для глубины
  *
  * Анимация (вращение/дрифт) убрана — фон статичный.
+ * Плавный переход (crossfade) цветов и изображений при смене песен.
  */
 @Composable
 fun AnimatedPlayerBackground(
@@ -36,66 +43,107 @@ fun AnimatedPlayerBackground(
     albumColors: AlbumColors,
     modifier: Modifier = Modifier
 ) {
-    val boostedVibrant = rememberSaturationBoost(albumColors.vibrant)
-    val boostedDominant = rememberSaturationBoost(albumColors.dominant)
-    val boostedMuted = rememberSaturationBoost(albumColors.muted)
-    val boostedLightVibrant = rememberSaturationBoost(albumColors.lightVibrant)
+    val baseVibrant = rememberSaturationBoost(albumColors.vibrant)
+    val baseDominant = rememberSaturationBoost(albumColors.dominant)
+    val baseMuted = rememberSaturationBoost(albumColors.muted)
+    val baseLightVibrant = rememberSaturationBoost(albumColors.lightVibrant)
+
+    val boostedVibrant by animateColorAsState(
+        targetValue = baseVibrant,
+        animationSpec = tween(durationMillis = 1000),
+        label = "boostedVibrant"
+    )
+    val boostedDominant by animateColorAsState(
+        targetValue = baseDominant,
+        animationSpec = tween(durationMillis = 1000),
+        label = "boostedDominant"
+    )
+    val boostedMuted by animateColorAsState(
+        targetValue = baseMuted,
+        animationSpec = tween(durationMillis = 1000),
+        label = "boostedMuted"
+    )
+    val boostedLightVibrant by animateColorAsState(
+        targetValue = baseLightVibrant,
+        animationSpec = tween(durationMillis = 1000),
+        label = "boostedLightVibrant"
+    )
+
+    data class ArtState(
+        val albumArtUri: Uri?,
+        val coverUrl: String?,
+        val audioFileUri: Uri?,
+        val albumId: Long
+    )
+    val artState = remember(albumArtUri, coverUrl, audioFileUri, albumId) {
+        ArtState(albumArtUri, coverUrl, audioFileUri, albumId)
+    }
 
     Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
 
-        // ── Layer 1: базовый слой, заполняет всё ──
-        AlbumArtImage(
-            uri = albumArtUri,
-            coverUrl = coverUrl,
-            audioFileUri = audioFileUri,
-            albumId = albumId,
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer {
-                    scaleX = 2.2f
-                    scaleY = 2.2f
-                    alpha = 0.70f
-                }
-                .blur(60.dp)
-        )
+        // ── Crossfade for static background images to prevent abrupt pops ──
+        Crossfade(
+            targetState = artState,
+            animationSpec = tween(durationMillis = 1000),
+            modifier = Modifier.fillMaxSize(),
+            label = "backgroundCrossfade"
+        ) { state ->
+            Box(modifier = Modifier.fillMaxSize()) {
+                // ── Layer 1: базовый слой, заполняет всё ──
+                AlbumArtImage(
+                    uri = state.albumArtUri,
+                    coverUrl = state.coverUrl,
+                    audioFileUri = state.audioFileUri,
+                    albumId = state.albumId,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            scaleX = 2.2f
+                            scaleY = 2.2f
+                            alpha = 0.70f
+                        }
+                        .blur(60.dp)
+                )
 
-        // ── Layer 2: средний слой ──
-        AlbumArtImage(
-            uri = albumArtUri,
-            coverUrl = coverUrl,
-            audioFileUri = audioFileUri,
-            albumId = albumId,
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer {
-                    scaleX = 1.5f
-                    scaleY = 1.5f
-                    alpha = 0.60f
-                }
-                .blur(50.dp)
-        )
+                // ── Layer 2: средний слой ──
+                AlbumArtImage(
+                    uri = state.albumArtUri,
+                    coverUrl = state.coverUrl,
+                    audioFileUri = state.audioFileUri,
+                    albumId = state.albumId,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            scaleX = 1.5f
+                            scaleY = 1.5f
+                            alpha = 0.60f
+                        }
+                        .blur(50.dp)
+                )
 
-        // ── Layer 3: яркий акцент ──
-        AlbumArtImage(
-            uri = albumArtUri,
-            coverUrl = coverUrl,
-            audioFileUri = audioFileUri,
-            albumId = albumId,
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer {
-                    scaleX = 1.1f
-                    scaleY = 1.1f
-                    alpha = 0.50f
-                }
-                .blur(40.dp)
-        )
+                // ── Layer 3: яркий акцент ──
+                AlbumArtImage(
+                    uri = state.albumArtUri,
+                    coverUrl = state.coverUrl,
+                    audioFileUri = state.audioFileUri,
+                    albumId = state.albumId,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            scaleX = 1.1f
+                            scaleY = 1.1f
+                            alpha = 0.50f
+                        }
+                        .blur(40.dp)
+                )
+            }
+        }
 
         // ── Saturation boost — цветной слой от palette ──
         Box(
