@@ -300,9 +300,12 @@ fun FullPlayer(
     ) {
         // ═══ All visual content captured by playerBackdrop for glass sheets ═══
         Box(modifier = Modifier.fillMaxSize().layerBackdrop(playerBackdrop)) {
-            // ═══ Liquid Aurora — анимированная аура (свой AGSL-шейдер, см. AuraBackground.kt).
-            // Старый Apple-style фон (AnimatedPlayerBackground) остался в коде — легко вернуть. ═══
-            AuraBackground(
+            // ═══ Apple Music style animated gradient background ═══
+            AnimatedPlayerBackground(
+                albumArtUri = albumArtUri,
+                coverUrl = coverUrl,
+                audioFileUri = audioFileUri,
+                albumId = albumId,
                 albumColors = albumColors,
                 modifier = Modifier.fillMaxSize()
             )
