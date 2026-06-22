@@ -361,14 +361,15 @@ fun LyricsScreen(
                                     glowColor = duetColor ?: resolvedColors.vibrant
                                 )
                                 // Точки ожидания во время инструментального проигрыша
-                                // после уже спетой строки.
+                                // после уже спетой строки — крупные, по центру.
                                 if (isCurrent && showGapDots) {
                                     Spacer(Modifier.height(16.dp))
-                                    WaitingDots(
-                                        dotColor = duetColor ?: Color.White,
-                                        dotSize = 10.dp,
-                                        spacing = 10.dp
-                                    )
+                                    Box(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        WaitingDots(dotColor = duetColor ?: Color.White)
+                                    }
                                 }
                             }
                         }
