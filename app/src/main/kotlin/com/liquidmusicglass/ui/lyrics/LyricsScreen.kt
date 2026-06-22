@@ -22,9 +22,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
@@ -175,6 +178,8 @@ fun LyricsScreen(
     val density = LocalDensity.current
     val configuration = LocalConfiguration.current
     val screenHeightPx = with(density) { configuration.screenHeightDp.dp.toPx() }
+    // Доступная ширина строки лирики (экран минус горизонтальные паддинги 24dp×2)
+    val lineMaxWidthPx = with(density) { (configuration.screenWidthDp.dp - 48.dp).toPx().toInt() }
 
     LaunchedEffect(currentLineIndex) {
         if (currentLineIndex >= 0) {
@@ -281,92 +286,51 @@ fun LyricsScreen(
                         }
 
                         itemsIndexed(lyrics.lines) { index, line ->
-                            val isCurrentLine = index == currentLineIndex
-                            val isPastLine = index < currentLineIndex
-                            val isUpcomingLine = index > currentLineIndex
+                            val isCurrent = index == currentLineIndex
+                            val isPast = index < currentLineIndex
 
-                            // Duet color detection
+                            // duet-цвет
                             val duetColor = when {
                                 !isDuet -> null
                                 line.text.startsWith("[M", ignoreCase = true) ||
-                                    line.text.contains(Regex("""^\[Male""", RegexOption.IGNORE_CASE)) ->
-                                    Color(0xFF4FC3F7) // Light blue for male
+                                    line.text.contains(Regex("""^\[Male""", RegexOption.IGNORE_CASE)) -> Color(0xFF4FC3F7)
                                 line.text.startsWith("[F", ignoreCase = true) ||
-                                    line.text.contains(Regex("""^\[Female""", RegexOption.IGNORE_CASE)) ->
-                                    Color(0xFFF48FB1) // Pink for female
-                                line.text.startsWith("[D", ignoreCase = true) ->
-                                    Color(0xFFFFF176) // Yellow for duet
+                                    line.text.contains(Regex("""^\[Female""", RegexOption.IGNORE_CASE)) -> Color(0xFFF48FB1)
+                                line.text.startsWith("[D", ignoreCase = true) -> Color(0xFFFFF176)
                                 else -> null
                             }
-
-                            val cleanText = line.text.replace(Regex("""\[(M|F|D|Male|Female|Duet):?\s*""", RegexOption.IGNORE_CASE), "")
-
-                            val distance = remember(currentLineIndex) { abs(index - currentLineIndex) }
-
-                            // Единая spring-анимация для всех строк — никакого staggered offset
-                            val lineAlpha by animateFloatAsState(
-                                targetValue = when {
-                                    isCurrentLine -> 1.0f
-                                    isPastLine -> 0.75f
-                                    else -> 0.50f
-                                },
-                                animationSpec = tween(durationMillis = 600),
-                                label = "lineAlpha"
+                            val cleanText = line.text.replace(
+                                Regex("""\[(M|F|D|Male|Female|Duet):?\s*""", RegexOption.IGNORE_CASE), ""
                             )
 
-                            // Убрано масштабирование активной строки — предотвращает вылет за экран
-                            val scale by animateFloatAsState(
-                                targetValue = 1.0f, // ВСЕГДА 1.0 — никакого scale
-                                animationSpec = spring(
-                                    dampingRatio = Spring.DampingRatioNoBouncy,
-                                    stiffness = Spring.StiffnessLow
-                                ),
-                                label = "lineScale"
+                            // прогресс заливки: прошлое = залито, текущая = sweep, будущее = пусто
+                            val fillProgress = when {
+                                isPast -> 1f
+                                isCurrent -> currentLineProgress
+                                else -> 0f
+                            }
+
+                            val base = duetColor ?: Color.White
+                            val sungColor by animateColorAsState(
+                                targetValue = base.copy(alpha = if (isCurrent) 1f else 0.55f),
+                                animationSpec = tween(durationMillis = 180),
+                                label = "sung"
                             )
+                            val unsungColor = base.copy(alpha = 0.30f)
 
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 24.dp, vertical = 10.dp)
-                                    .graphicsLayer {
-                                        scaleX = scale
-                                        scaleY = scale
-                                        alpha = lineAlpha
-                                    },
+                                    .padding(horizontal = 24.dp, vertical = 10.dp),
                                 contentAlignment = Alignment.CenterStart
                             ) {
-                                // Строка целиком: белая если текущая, полупрозрачная если нет
-                                val targetTextColor = when {
-                                    isCurrentLine -> duetColor ?: Color.White
-                                    isPastLine -> (duetColor ?: Color.White).copy(alpha = 0.70f)
-                                    else -> (duetColor ?: Color.White).copy(alpha = 0.45f)
-                                }
-
-                                val textColor by animateColorAsState(
-                                    targetValue = targetTextColor,
-                                    animationSpec = tween(durationMillis = 600),
-                                    label = "textColor"
-                                )
-
-                                Text(
+                                LyricLineSweep(
                                     text = cleanText,
-                                    color = textColor,
-                                    style = TextStyle(
-                                        fontSize = if (isCurrentLine) 32.sp else 30.sp,
-                                        fontWeight = if (isCurrentLine) FontWeight.Bold else FontWeight.SemiBold,
-                                        textAlign = TextAlign.Start,
-                                        lineHeight = 44.sp,
-                                        shadow = androidx.compose.ui.graphics.Shadow(
-                                            color = Color.Black.copy(alpha = 0.85f),
-                                            offset = Offset(0f, 2f),
-                                            blurRadius = 8f
-                                        ),
-                                        platformStyle = PlatformTextStyle(includeFontPadding = false)
-                                    ),
-                                    modifier = Modifier.fillMaxWidth(),
-                                    maxLines = 3,
-                                    softWrap = true,
-                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                    fillProgress = fillProgress,
+                                    sungColor = sungColor,
+                                    unsungColor = unsungColor,
+                                    isActive = isCurrent,
+                                    maxWidthPx = lineMaxWidthPx
                                 )
                             }
                         }
@@ -399,6 +363,87 @@ fun LyricsScreen(
                     maxLines = 1
                 )
             }
+        }
+    }
+}
+
+/**
+ * Line-level караоке-sweep v2 — корректно под перенос строк.
+ *
+ * Рисуем текст дважды: снизу inactive, сверху active, обрезанный [clipPath]
+ * по визуальным рядам в порядке чтения (пройденные ряды — целиком, текущий —
+ * до курсора, будущие — пусто). Одна непрерывная волна, без «подстрок».
+ */
+@Composable
+private fun LyricLineSweep(
+    text: String,
+    fillProgress: Float,
+    sungColor: Color,
+    unsungColor: Color,
+    isActive: Boolean,
+    maxWidthPx: Int
+) {
+    if (text.isEmpty()) return
+
+    val measurer = rememberTextMeasurer()
+    val style = TextStyle(
+        fontSize = if (isActive) 32.sp else 30.sp,
+        fontWeight = if (isActive) FontWeight.Bold else FontWeight.SemiBold,
+        lineHeight = 44.sp,
+        textAlign = TextAlign.Start,
+        shadow = androidx.compose.ui.graphics.Shadow(
+            color = Color.Black.copy(alpha = 0.85f),
+            offset = Offset(0f, 2f),
+            blurRadius = 8f
+        ),
+        platformStyle = PlatformTextStyle(includeFontPadding = false)
+    )
+
+    val layout = remember(text, style, maxWidthPx) {
+        measurer.measure(
+            text = text,
+            style = style,
+            constraints = Constraints(maxWidth = maxWidthPx),
+            maxLines = 3,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+        )
+    }
+
+    val p = fillProgress.coerceIn(0f, 1f)
+    val wDp = with(LocalDensity.current) { layout.size.width.toDp() }
+    val hDp = with(LocalDensity.current) { layout.size.height.toDp() }
+
+    Canvas(modifier = Modifier.size(wDp, hDp)) {
+        // 1) база — весь текст неактивным цветом
+        drawText(layout, color = unsungColor)
+        if (p <= 0f) return@Canvas
+
+        // 2) активный текст, обрезанный по «спетой» области в порядке чтения
+        if (p >= 1f) {
+            drawText(layout, color = sungColor)
+            return@Canvas
+        }
+
+        val charOffset = (p * text.length).toInt().coerceIn(0, text.length)
+        val clip = Path()
+        for (i in 0 until layout.lineCount) {
+            val lineStart = layout.getLineStart(i)
+            val lineEnd = layout.getLineEnd(i, visibleEnd = true)
+            val top = layout.getLineTop(i)
+            val bottom = layout.getLineBottom(i)
+            val left = layout.getLineLeft(i)
+            when {
+                charOffset >= lineEnd ->
+                    clip.addRect(Rect(left, top, layout.getLineRight(i), bottom))
+                charOffset <= lineStart -> { /* ряд ещё не начат */ }
+                else -> {
+                    val x = layout.getHorizontalPosition(charOffset, usePrimaryDirection = true)
+                    clip.addRect(Rect(left, top, x, bottom))
+                }
+            }
+        }
+        clipPath(clip) {
+            drawText(layout, color = sungColor)
         }
     }
 }

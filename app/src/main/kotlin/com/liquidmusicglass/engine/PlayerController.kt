@@ -121,7 +121,13 @@ object PlayerController {
     fun getSmoothPositionMs(): Long {
         if (!lastIsPlaying) return lastPlayerPositionMs
         val elapsed = SystemClock.elapsedRealtime() - lastSyncTimeMs
-        return lastPlayerPositionMs + elapsed
+        return lastPlayerPositionMs + (elapsed * _playbackSpeed.value).toLong()
+    }
+
+    /** Переякорить интерполяцию на текущей сглаженной позиции (play/pause/seek/speed). */
+    private fun reanchorSmoothPosition() {
+        lastPlayerPositionMs = getSmoothPositionMs()
+        lastSyncTimeMs = SystemClock.elapsedRealtime()
     }
 
     private val _durationMs = MutableStateFlow(0L)
@@ -157,6 +163,8 @@ object PlayerController {
     var audioServiceRef: AudioService? = null
 
     fun setPlaybackSpeed(speed: Float) {
+        // re-anchor at current speed before switching, so position doesn't jump
+        reanchorSmoothPosition()
         _playbackSpeed.value = speed.coerceIn(0.5f, 2.0f)
         audioServiceRef?.setPlaybackSpeed(_playbackSpeed.value)
     }
@@ -509,10 +517,15 @@ object PlayerController {
             getPlayer(appContext ?: return@launch)?.seekTo(safePosition)
             _currentPositionMs.value = safePosition
             lastPositionMs = safePosition
+            // re-anchor smooth position to the new seek target
+            lastPlayerPositionMs = safePosition
+            lastSyncTimeMs = SystemClock.elapsedRealtime()
         }
     }
 
     fun setPlaying(playing: Boolean) {
+        // re-anchor smooth position at the play/pause transition (uses old state)
+        reanchorSmoothPosition()
         _isPlaying.value = playing
         lastIsPlaying = playing
         if (!playing && _isBuffering.value) {
