@@ -86,7 +86,7 @@ android {
         }
     }
 
-    ndkVersion = "27.2.12479018"
+    ndkVersion = "26.3.11579264"
 
     buildFeatures {
         compose = true
