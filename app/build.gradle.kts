@@ -19,6 +19,12 @@ android {
         versionCode = 20260530
         versionName = "2026.05.30 pre-release1 gsm"
 
+        // Build native libs only for arm64-v8a (faster builds, smaller APK).
+        // Note: won't run on 32-bit (armeabi-v7a) or x86/x86_64 emulators.
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
+
         // Read ICM API key from local.properties (GitHub Secret in CI)
         // Fallback to native .so (JNI) at runtime for maximum protection
         val icmApiKey = run {
