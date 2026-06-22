@@ -62,9 +62,9 @@ fun BottomBar(
 
     val items = remember {
         listOf(
-            BottomNavItem(Icons.Rounded.Home, "Главная", 0),
-            BottomNavItem(Icons.AutoMirrored.Rounded.PlaylistPlay, "Плейлисты", 2),
-            BottomNavItem(Icons.Rounded.Person, "Профиль", 3)
+            BottomNavItem(Icons.Rounded.Home, "Home", 0),
+            BottomNavItem(Icons.AutoMirrored.Rounded.PlaylistPlay, "Playlists", 2),
+            BottomNavItem(Icons.Rounded.Person, "Profile", 3)
         )
     }
 

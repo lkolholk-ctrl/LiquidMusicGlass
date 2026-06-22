@@ -56,12 +56,12 @@ import kotlin.math.sin
 data class WaveOrbPreset(val label: String, val color: Color)
 
 val WAVE_ORB_PRESETS = listOf(
-    WaveOrbPreset("Прогрессив-хаус", Color(0xFF3B6FE0)),
-    WaveOrbPreset("Бегаю под летние треки", Color(0xFF2FB24A)),
-    WaveOrbPreset("Спокойный вечер", Color(0xFF17A2A2)),
-    WaveOrbPreset("Хочется инди", Color(0xFF7A5BE0)),
-    WaveOrbPreset("В дороге", Color(0xFFE07B2F)),
-    WaveOrbPreset("Танцпол", Color(0xFFE0405F))
+    WaveOrbPreset("Progressive house", Color(0xFF3B6FE0)),
+    WaveOrbPreset("Summer running", Color(0xFF2FB24A)),
+    WaveOrbPreset("Calm evening", Color(0xFF17A2A2)),
+    WaveOrbPreset("Feeling indie", Color(0xFF7A5BE0)),
+    WaveOrbPreset("On the road", Color(0xFFE07B2F)),
+    WaveOrbPreset("Dancefloor", Color(0xFFE0405F))
 )
 
 // ── tuning ──

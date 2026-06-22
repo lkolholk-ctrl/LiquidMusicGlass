@@ -235,7 +235,10 @@ fun AppRoot() {
                 } else {
                     WaveHomeScreen(
                         onNavigateToSearch = { selectedIndex = 1 },
-                        onOpenPlayer = { animateExpand() }
+                        onOpenPlayer = { animateExpand() },
+                        onNavigateToAlbum = { detailAlbumId = it },
+                        onNavigateToArtist = { detailArtistId = it },
+                        onNavigateToPlaylist = { playlistDetailId = it }
                     )
                 }
                 1 -> SearchScreen(
