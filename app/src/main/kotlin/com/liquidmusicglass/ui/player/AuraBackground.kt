@@ -18,6 +18,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ShaderBrush
+import com.liquidmusicglass.engine.AudioReactor
 import com.liquidmusicglass.ui.glass.AlbumColors
 
 /**
@@ -41,6 +42,9 @@ uniform half3  uColorBg;
 uniform half3  uColorA;
 uniform half3  uColorB;
 uniform half3  uColorC;
+uniform float  uLow;
+uniform float  uMid;
+uniform float  uHigh;
 
 float hash(float2 p) {
     p = fract(p * float2(123.34, 456.21));
@@ -81,17 +85,19 @@ half4 main(float2 fragCoord) {
                       fbm(p + float2(5.2, -t)));
     float2 r = float2(fbm(p + 3.0 * q + float2(1.7, 9.2) + t * 0.6),
                       fbm(p + 3.0 * q + float2(8.3, 2.8) - t * 0.6));
-    float f = fbm(p + 2.4 * r);
+    float f = fbm(p + (2.4 + uMid * 1.2) * r);
 
     // перетекающий цвет из палитры
     half3 col = uColorBg;
     col = mix(col, uColorA, clamp(f * 1.7 - 0.1, 0.0, 1.0));
     col = mix(col, uColorB, clamp(length(r) * 0.65, 0.0, 1.0));
-    col = mix(col, uColorC, clamp(q.x * q.x * 1.5, 0.0, 1.0));
+    col = mix(col, uColorC, clamp(q.x * q.x * 1.5 + uHigh * 0.5, 0.0, 1.0));
 
     // мягкий подъём яркости к верхней зоне, затемнение к низу (читаемость текста)
     float topGlow = smoothstep(0.95, 0.18, uv.y);
     col *= mix(0.55, 1.18, topGlow);
+    // бас подсвечивает ауру — «дыхание» под музыку
+    col *= (1.0 + uLow * 0.35);
     col = mix(col, uColorBg, smoothstep(0.52, 1.0, uv.y) * 0.85);
 
     return half4(col, 1.0);
@@ -139,6 +145,9 @@ private fun AuraShaderBackground(albumColors: AlbumColors, modifier: Modifier) {
                 shader.setFloatUniform("uColorA", a.red, a.green, a.blue)
                 shader.setFloatUniform("uColorB", b.red, b.green, b.blue)
                 shader.setFloatUniform("uColorC", c.red, c.green, c.blue)
+                shader.setFloatUniform("uLow", AudioReactor.low)
+                shader.setFloatUniform("uMid", AudioReactor.mid)
+                shader.setFloatUniform("uHigh", AudioReactor.high)
                 drawRect(brush)
             },
     )
@@ -166,26 +175,30 @@ private fun AuraGradientFallback(albumColors: AlbumColors, modifier: Modifier) {
                 val w = size.width
                 val h = size.height
                 val tau = (2.0 * Math.PI).toFloat()
+                // Бас слегка раздувает и подсвечивает пятна
+                val low = AudioReactor.low.coerceIn(0f, 1f)
+                val rBoost = 1f + low * 0.22f
+                val aBoost = 1f + low * 0.45f
                 fun pt(seed: Float, sx: Float, sy: Float) = androidx.compose.ui.geometry.Offset(
                     w * (0.5f + 0.35f * kotlin.math.cos(tau * (phase + seed)) * sx),
                     h * (0.42f + 0.30f * kotlin.math.sin(tau * (phase + seed)) * sy),
                 )
                 drawRect(
                     Brush.radialGradient(
-                        listOf(a.copy(alpha = 0.55f), Color.Transparent),
-                        center = pt(0.0f, 1f, 1f), radius = w * 0.9f,
+                        listOf(a.copy(alpha = (0.55f * aBoost).coerceAtMost(1f)), Color.Transparent),
+                        center = pt(0.0f, 1f, 1f), radius = w * 0.9f * rBoost,
                     )
                 )
                 drawRect(
                     Brush.radialGradient(
-                        listOf(b.copy(alpha = 0.45f), Color.Transparent),
-                        center = pt(0.33f, -1f, 1f), radius = w * 0.8f,
+                        listOf(b.copy(alpha = (0.45f * aBoost).coerceAtMost(1f)), Color.Transparent),
+                        center = pt(0.33f, -1f, 1f), radius = w * 0.8f * rBoost,
                     )
                 )
                 drawRect(
                     Brush.radialGradient(
-                        listOf(c.copy(alpha = 0.40f), Color.Transparent),
-                        center = pt(0.66f, 1f, -1f), radius = w * 0.7f,
+                        listOf(c.copy(alpha = (0.40f * aBoost).coerceAtMost(1f)), Color.Transparent),
+                        center = pt(0.66f, 1f, -1f), radius = w * 0.7f * rBoost,
                     )
                 )
                 drawRect(

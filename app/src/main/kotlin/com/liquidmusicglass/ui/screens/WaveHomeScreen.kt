@@ -65,6 +65,7 @@ import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.ui.glass.AlbumArtImage
 import com.liquidmusicglass.ui.glass.AlbumColors
 import com.liquidmusicglass.ui.glass.rememberAlbumColors
+import com.liquidmusicglass.ui.player.AuraBackground
 import com.liquidmusicglass.ui.viewmodel.HomeViewModel
 import kotlin.math.cos
 import kotlin.math.sin
@@ -100,22 +101,10 @@ fun WaveHomeScreen(
     val track = currentTrack
     val isFavorite = track?.id?.let { favoriteIds.contains(it) } == true
 
-    // Bass-reactive pulse (0..1) from the audio processor, smoothed per frame.
-    var pulse by remember { mutableFloatStateOf(0f) }
-    LaunchedEffect(Unit) {
-        var current = 0f
-        while (true) {
-            withFrameNanos { }
-            val target = if (PlayerController.isPlaying.value) AudioReactor.level else 0f
-            current += (target - current) * 0.18f
-            pulse = current
-        }
-    }
-
     Box(modifier = Modifier.fillMaxSize()) {
 
-        // ── Живой градиент-фон ──
-        WaveGradientBackground(colors = albumColors, pulse = pulse)
+        // ── Живой фон-аура (свой AGSL-шейдер, реагирует на музыку) ──
+        AuraBackground(albumColors = albumColors, modifier = Modifier.fillMaxSize())
 
         Column(
             modifier = Modifier
@@ -389,125 +378,9 @@ private fun PresetOrb(preset: WavePreset, onClick: () -> Unit) {
     }
 }
 
-@Composable
-private fun WaveGradientBackground(colors: AlbumColors, pulse: Float = 0f) {
-    // Один цвет-«герой» из обложки → яркое ядро + оттенки той же гаммы.
-    val primary = pickPrimary(colors)
-    val core by animateColorAsState(lerp(primary, Color.White, 0.32f), tween(1200), label = "core")
-    val mid by animateColorAsState(primary, tween(1200), label = "mid")
-    val sideA by animateColorAsState(primary.shiftHsv(hue = 14f, valMul = 0.95f), tween(1200), label = "sideA")
-    val sideB by animateColorAsState(primary.shiftHsv(hue = -14f, satMul = 0.90f), tween(1200), label = "sideB")
-    val base by animateColorAsState(lerp(primary, Color.Black, 0.88f), tween(1200), label = "base")
-
-    val transition = rememberInfiniteTransition(label = "wave-bg")
-    val t by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = TWO_PI,
-        animationSpec = infiniteRepeatable(tween(20000, easing = LinearEasing)),
-        label = "t"
-    )
-
-    Canvas(modifier = Modifier.fillMaxSize()) {
-        val w = size.width
-        val h = size.height
-        drawRect(base)
-
-        fun blob(
-            color: Color,
-            baseX: Float,
-            baseY: Float,
-            phase: Float,
-            radiusFactor: Float,
-            alpha: Float,
-            driftX: Float = 0.12f,
-            driftY: Float = 0.08f
-        ) {
-            val cx = w * baseX + sin(t + phase) * w * driftX
-            val cy = h * baseY + cos(t * 0.7f + phase) * h * driftY
-            val radius = w * radiusFactor
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(color.copy(alpha = alpha), Color.Transparent),
-                    center = Offset(cx, cy),
-                    radius = radius
-                ),
-                radius = radius,
-                center = Offset(cx, cy),
-                blendMode = BlendMode.Screen
-            )
-        }
-
-        // Bass-reactive boosts for the core (swell + brighten on beats)
-        val p = pulse.coerceIn(0f, 1f)
-
-        // Broad ambient glow in the upper area
-        blob(mid, 0.50f, 0.28f, 0f, 1.25f + p * 0.10f, (0.55f + p * 0.12f).coerceAtMost(1f))
-        // Organic side blobs (same family) for a smoky, non-uniform feel
-        blob(sideA, 0.30f, 0.20f, 2.0f, 0.85f, 0.45f, driftX = 0.16f, driftY = 0.10f)
-        blob(sideB, 0.74f, 0.30f, 4.1f, 0.80f, 0.42f, driftX = 0.16f, driftY = 0.10f)
-        // Hot bright core behind the title — concentrated luminous peak
-        // (stacked draws build up toward near-white via Screen blend)
-        blob(core, 0.50f, 0.23f, 1.0f, 0.52f + p * 0.18f, (0.78f + p * 0.18f).coerceAtMost(1f), driftX = 0.06f, driftY = 0.05f)
-        blob(core, 0.50f, 0.23f, 1.0f, 0.30f + p * 0.12f, (0.65f + p * 0.22f).coerceAtMost(1f), driftX = 0.06f, driftY = 0.05f)
-
-        // Strong fade to near-black in the lower half for contrast
-        drawRect(
-            brush = Brush.verticalGradient(
-                colors = listOf(
-                    Color.Transparent,
-                    Color.Black.copy(alpha = 0.35f),
-                    Color.Black.copy(alpha = 0.92f)
-                ),
-                startY = h * 0.38f,
-                endY = h
-            )
-        )
-    }
-}
-
-/**
- * Усиливает насыщенность/яркость цвета. Возвращает [Color.Unspecified],
- * если цвет слишком тёмный или серый — тогда подставляется яркий дефолт.
- */
-private fun Color.vivify(): Color {
-    val hsv = FloatArray(3)
-    android.graphics.Color.colorToHSV(this.toArgb(), hsv)
-    if (hsv[2] < 0.12f || hsv[1] < 0.12f) return Color.Unspecified
-    hsv[1] = (hsv[1] * 1.7f).coerceIn(0.55f, 1f)
-    hsv[2] = hsv[2].coerceIn(0.55f, 0.95f)
-    return Color(android.graphics.Color.HSVToColor(hsv))
-}
-
-/** Выбирает один насыщенный цвет-«герой» из палитры обложки. */
-private fun pickPrimary(colors: AlbumColors): Color {
-    for (c in listOf(colors.vibrant, colors.dominant, colors.lightVibrant, colors.muted)) {
-        val v = c.vivify()
-        if (v.isSpecified) return v
-    }
-    return WAVE_FALLBACK_COLORS[0]
-}
-
-/** Сдвигает цвет по HSV — для производных оттенков той же гаммы. */
-private fun Color.shiftHsv(hue: Float = 0f, satMul: Float = 1f, valMul: Float = 1f): Color {
-    val hsv = FloatArray(3)
-    android.graphics.Color.colorToHSV(this.toArgb(), hsv)
-    hsv[0] = (hsv[0] + hue + 360f) % 360f
-    hsv[1] = (hsv[1] * satMul).coerceIn(0f, 1f)
-    hsv[2] = (hsv[2] * valMul).coerceIn(0f, 1f)
-    return Color(android.graphics.Color.HSVToColor(hsv))
-}
-
 private data class WavePreset(val label: String, val color: Color)
 
 private val WaveAccent = Color(0xFFFFE000)
-
-private const val TWO_PI = 6.2831855f
-
-private val WAVE_FALLBACK_COLORS = listOf(
-    Color(0xFFE5314E),
-    Color(0xFF8A2BE2),
-    Color(0xFF2E6BFF)
-)
 
 private val WAVE_PRESETS = listOf(
     WavePreset("Прогрессив-хаус", Color(0xFF3B6FE0)),
