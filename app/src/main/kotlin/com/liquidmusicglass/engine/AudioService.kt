@@ -20,7 +20,10 @@ import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.CommandButton
 import androidx.media3.session.DefaultMediaNotificationProvider
@@ -405,7 +408,23 @@ class AudioService : MediaSessionService() {
             .setBufferDurationsMs(30_000, 60_000, 2_500, 5_000)
             .build()
 
+        // Renderers factory with a transparent bass-analysis audio processor.
+        // It does not alter the audio, only measures low-frequency energy for
+        // the reactive glow on the "Моя волна" screen.
+        val renderersFactory = object : DefaultRenderersFactory(this) {
+            override fun buildAudioSink(
+                context: Context,
+                enableFloatOutput: Boolean,
+                enableAudioTrackPlaybackParameters: Boolean
+            ): AudioSink {
+                return DefaultAudioSink.Builder(context)
+                    .setAudioProcessors(arrayOf(BassAudioProcessor()))
+                    .build()
+            }
+        }
+
         return ExoPlayer.Builder(this)
+            .setRenderersFactory(renderersFactory)
             .setMediaSourceFactory(mediaSourceFactory)
             .setLoadControl(loadControl)
             .build()

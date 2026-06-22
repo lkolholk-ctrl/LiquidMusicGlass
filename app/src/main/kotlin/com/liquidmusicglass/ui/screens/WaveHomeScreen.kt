@@ -35,9 +35,13 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -56,6 +60,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.liquidmusicglass.engine.AudioReactor
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.ui.glass.AlbumArtImage
 import com.liquidmusicglass.ui.glass.AlbumColors
@@ -95,10 +100,22 @@ fun WaveHomeScreen(
     val track = currentTrack
     val isFavorite = track?.id?.let { favoriteIds.contains(it) } == true
 
+    // Bass-reactive pulse (0..1) from the audio processor, smoothed per frame.
+    var pulse by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(Unit) {
+        var current = 0f
+        while (true) {
+            withFrameNanos { }
+            val target = if (PlayerController.isPlaying.value) AudioReactor.level else 0f
+            current += (target - current) * 0.18f
+            pulse = current
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
 
         // ── Живой градиент-фон ──
-        WaveGradientBackground(colors = albumColors)
+        WaveGradientBackground(colors = albumColors, pulse = pulse)
 
         Column(
             modifier = Modifier
@@ -373,7 +390,7 @@ private fun PresetOrb(preset: WavePreset, onClick: () -> Unit) {
 }
 
 @Composable
-private fun WaveGradientBackground(colors: AlbumColors) {
+private fun WaveGradientBackground(colors: AlbumColors, pulse: Float = 0f) {
     // Один цвет-«герой» из обложки → яркое ядро + оттенки той же гаммы.
     val primary = pickPrimary(colors)
     val core by animateColorAsState(lerp(primary, Color.White, 0.32f), tween(1200), label = "core")
@@ -420,15 +437,18 @@ private fun WaveGradientBackground(colors: AlbumColors) {
             )
         }
 
+        // Bass-reactive boosts for the core (swell + brighten on beats)
+        val p = pulse.coerceIn(0f, 1f)
+
         // Broad ambient glow in the upper area
-        blob(mid, 0.50f, 0.28f, 0f, 1.25f, 0.55f)
+        blob(mid, 0.50f, 0.28f, 0f, 1.25f + p * 0.10f, (0.55f + p * 0.12f).coerceAtMost(1f))
         // Organic side blobs (same family) for a smoky, non-uniform feel
         blob(sideA, 0.30f, 0.20f, 2.0f, 0.85f, 0.45f, driftX = 0.16f, driftY = 0.10f)
         blob(sideB, 0.74f, 0.30f, 4.1f, 0.80f, 0.42f, driftX = 0.16f, driftY = 0.10f)
         // Hot bright core behind the title — concentrated luminous peak
         // (stacked draws build up toward near-white via Screen blend)
-        blob(core, 0.50f, 0.23f, 1.0f, 0.52f, 0.78f, driftX = 0.06f, driftY = 0.05f)
-        blob(core, 0.50f, 0.23f, 1.0f, 0.30f, 0.65f, driftX = 0.06f, driftY = 0.05f)
+        blob(core, 0.50f, 0.23f, 1.0f, 0.52f + p * 0.18f, (0.78f + p * 0.18f).coerceAtMost(1f), driftX = 0.06f, driftY = 0.05f)
+        blob(core, 0.50f, 0.23f, 1.0f, 0.30f + p * 0.12f, (0.65f + p * 0.22f).coerceAtMost(1f), driftX = 0.06f, driftY = 0.05f)
 
         // Strong fade to near-black in the lower half for contrast
         drawRect(
