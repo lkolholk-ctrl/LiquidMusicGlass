@@ -31,12 +31,27 @@ android {
         buildConfigField("String", "ICM_API_KEY", "\"$icmApiKey\"")
     }
 
+    // Resolve a signing secret from the environment first (CI), then from
+    // local.properties for local builds. Never hardcode credentials here.
+    fun signingSecret(envName: String, localPropName: String): String {
+        System.getenv(envName)?.takeIf { it.isNotBlank() }?.let { return it }
+        val f = rootProject.file("local.properties")
+        if (f.exists()) {
+            val prefix = "$localPropName="
+            f.readLines().find { it.startsWith(prefix) }
+                ?.removePrefix(prefix)?.trim()
+                ?.takeIf { it.isNotBlank() }
+                ?.let { return it }
+        }
+        return ""
+    }
+
     signingConfigs {
         create("release") {
             storeFile = file(System.getenv("KEYSTORE_PATH") ?: "release-key.jks")
-            storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "St@skrasikov1"
-            keyAlias = System.getenv("KEY_ALIAS") ?: "release"
-            keyPassword = System.getenv("KEY_PASSWORD") ?: "St@skrasikov1"
+            storePassword = signingSecret("KEYSTORE_PASSWORD", "KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("KEY_ALIAS")?.takeIf { it.isNotBlank() } ?: "release"
+            keyPassword = signingSecret("KEY_PASSWORD", "KEY_PASSWORD")
         }
     }
 

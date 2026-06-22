@@ -37,10 +37,6 @@ object IcmApiFileLogger {
         try {
             logFile?.appendText(line)
         } catch (_: Exception) {}
-        try {
-            val publicLogFile = File("/storage/emulated/0/Download/icm_api_log.txt")
-            publicLogFile.appendText(line)
-        } catch (_: Exception) {}
         // Also echo to system log
         when (level) {
             "D" -> android.util.Log.d(tag, message)
@@ -60,7 +56,6 @@ object IcmApiFileLogger {
 
     fun clear() {
         try { logFile?.writeText("") } catch (_: Exception) {}
-        try { File("/storage/emulated/0/Download/icm_api_log.txt").writeText("") } catch (_: Exception) {}
     }
 }
 
