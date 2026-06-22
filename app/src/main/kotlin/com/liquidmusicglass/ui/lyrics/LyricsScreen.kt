@@ -161,11 +161,14 @@ fun LyricsScreen(
         }
     }
 
-    // High-frequency frame-synced ticker for butter-smooth animation
-    LaunchedEffect(isPlaying) {
-        if (isPlaying) {
-            while (isActive) {
-                withFrameMillis { _ ->
+    // High-frequency frame-synced ticker for butter-smooth animation.
+    // Цикл живёт всё время (не пересоздаётся на смене isPlaying) — состояние
+    // воспроизведения проверяется ВНУТРИ кадра, чтобы не терять кадры на
+    // рестарте корутины при паузе/возобновлении.
+    LaunchedEffect(Unit) {
+        while (isActive) {
+            withFrameMillis { _ ->
+                if (PlayerController.isPlaying.value) {
                     smoothPositionMs = PlayerController.getSmoothPositionMs()
                     timeProcessor?.updatePosition(smoothPositionMs)
                 }
