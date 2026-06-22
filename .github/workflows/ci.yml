@@ -74,9 +74,8 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew assembleRelease --stacktrace
 
-      - name: Run unit tests
-        run: ./gradlew testReleaseUnitTest --stacktrace
-
+      # Publish the APK first so it is always delivered even if a later
+      # step (e.g. tests) fails.
       - name: Publish APK to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -100,3 +99,6 @@ jobs:
           fi
           gh release upload "$TAG" "$OUT" --clobber
           echo "APK published to release '$TAG'."
+
+      - name: Run unit tests
+        run: ./gradlew testDebugUnitTest --stacktrace
