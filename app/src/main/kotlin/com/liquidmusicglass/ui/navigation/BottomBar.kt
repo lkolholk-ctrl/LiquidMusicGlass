@@ -28,7 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.font.FontFamily
+import com.liquidmusicglass.ui.theme.AppFontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -140,7 +140,7 @@ private fun BottomTab(
             text = item.label,
             color = color,
             fontSize = 10.sp,
-            fontFamily = FontFamily.SansSerif,
+            fontFamily = AppFontFamily,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
         )
     }

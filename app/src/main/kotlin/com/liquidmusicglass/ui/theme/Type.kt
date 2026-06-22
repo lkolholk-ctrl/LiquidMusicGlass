@@ -4,42 +4,53 @@ import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import com.liquidmusicglass.R
 
 // ═══════════════════════════════════════════════════════════
-//  JetBrains Mono Font Family
+//  Golos Text — основной шрифт приложения (вариативный, OFL).
+//  Близкий открытый аналог Yandex Sans с поддержкой кириллицы.
 // ═══════════════════════════════════════════════════════════
 
-val JetBrainsMonoFontFamily = FontFamily(
-    Font(R.font.jetbrains_mono_regular, FontWeight.Normal),
-    Font(R.font.jetbrains_mono_bold, FontWeight.Bold)
+private fun golos(weight: Int) = Font(
+    resId = R.font.golos_text,
+    weight = FontWeight(weight),
+    variationSettings = FontVariation.Settings(FontVariation.weight(weight))
+)
+
+val AppFontFamily = FontFamily(
+    golos(400),
+    golos(500),
+    golos(600),
+    golos(700),
+    golos(900)
 )
 
 // ═══════════════════════════════════════════════════════════
-//  Typography — all styles use JetBrains Mono
+//  Typography — все стили используют Golos Text
 // ═══════════════════════════════════════════════════════════
 
 val LiquidTypography = Typography(
     // Display styles — large hero text
     displayLarge = TextStyle(
-        fontFamily = JetBrainsMonoFontFamily,
-        fontWeight = FontWeight.Normal,
+        fontFamily = AppFontFamily,
+        fontWeight = FontWeight.Black,
         fontSize = 57.sp,
         lineHeight = 64.sp,
         letterSpacing = (-0.02).sp
     ),
     displayMedium = TextStyle(
-        fontFamily = JetBrainsMonoFontFamily,
-        fontWeight = FontWeight.Normal,
+        fontFamily = AppFontFamily,
+        fontWeight = FontWeight.Black,
         fontSize = 45.sp,
         lineHeight = 52.sp,
         letterSpacing = (-0.02).sp
     ),
     displaySmall = TextStyle(
-        fontFamily = JetBrainsMonoFontFamily,
-        fontWeight = FontWeight.Normal,
+        fontFamily = AppFontFamily,
+        fontWeight = FontWeight.Bold,
         fontSize = 36.sp,
         lineHeight = 44.sp,
         letterSpacing = (-0.02).sp
@@ -47,21 +58,21 @@ val LiquidTypography = Typography(
 
     // Headline styles — section headers
     headlineLarge = TextStyle(
-        fontFamily = JetBrainsMonoFontFamily,
+        fontFamily = AppFontFamily,
         fontWeight = FontWeight.Bold,
         fontSize = 32.sp,
         lineHeight = 40.sp,
         letterSpacing = (-0.02).sp
     ),
     headlineMedium = TextStyle(
-        fontFamily = JetBrainsMonoFontFamily,
+        fontFamily = AppFontFamily,
         fontWeight = FontWeight.Bold,
         fontSize = 28.sp,
         lineHeight = 36.sp,
         letterSpacing = (-0.02).sp
     ),
     headlineSmall = TextStyle(
-        fontFamily = JetBrainsMonoFontFamily,
+        fontFamily = AppFontFamily,
         fontWeight = FontWeight.Bold,
         fontSize = 24.sp,
         lineHeight = 32.sp,
@@ -70,22 +81,22 @@ val LiquidTypography = Typography(
 
     // Title styles — card titles, list headers
     titleLarge = TextStyle(
-        fontFamily = JetBrainsMonoFontFamily,
+        fontFamily = AppFontFamily,
         fontWeight = FontWeight.Bold,
         fontSize = 22.sp,
         lineHeight = 28.sp,
         letterSpacing = (-0.02).sp
     ),
     titleMedium = TextStyle(
-        fontFamily = JetBrainsMonoFontFamily,
-        fontWeight = FontWeight.Bold,
+        fontFamily = AppFontFamily,
+        fontWeight = FontWeight.SemiBold,
         fontSize = 16.sp,
         lineHeight = 24.sp,
         letterSpacing = (-0.02).sp
     ),
     titleSmall = TextStyle(
-        fontFamily = JetBrainsMonoFontFamily,
-        fontWeight = FontWeight.Bold,
+        fontFamily = AppFontFamily,
+        fontWeight = FontWeight.SemiBold,
         fontSize = 14.sp,
         lineHeight = 20.sp,
         letterSpacing = (-0.02).sp
@@ -93,47 +104,47 @@ val LiquidTypography = Typography(
 
     // Body styles — primary readable text
     bodyLarge = TextStyle(
-        fontFamily = JetBrainsMonoFontFamily,
+        fontFamily = AppFontFamily,
         fontWeight = FontWeight.Normal,
         fontSize = 16.sp,
         lineHeight = 24.sp,
-        letterSpacing = (-0.02).sp
+        letterSpacing = (-0.01).sp
     ),
     bodyMedium = TextStyle(
-        fontFamily = JetBrainsMonoFontFamily,
+        fontFamily = AppFontFamily,
         fontWeight = FontWeight.Normal,
         fontSize = 14.sp,
         lineHeight = 22.sp,
-        letterSpacing = (-0.02).sp
+        letterSpacing = (-0.01).sp
     ),
     bodySmall = TextStyle(
-        fontFamily = JetBrainsMonoFontFamily,
+        fontFamily = AppFontFamily,
         fontWeight = FontWeight.Normal,
         fontSize = 12.sp,
         lineHeight = 18.sp,
-        letterSpacing = (-0.02).sp
+        letterSpacing = (-0.01).sp
     ),
 
     // Label styles — captions, badges, metadata
     labelLarge = TextStyle(
-        fontFamily = JetBrainsMonoFontFamily,
-        fontWeight = FontWeight.Normal,
+        fontFamily = AppFontFamily,
+        fontWeight = FontWeight.Medium,
         fontSize = 14.sp,
         lineHeight = 20.sp,
-        letterSpacing = (-0.02).sp
+        letterSpacing = (-0.01).sp
     ),
     labelMedium = TextStyle(
-        fontFamily = JetBrainsMonoFontFamily,
-        fontWeight = FontWeight.Normal,
+        fontFamily = AppFontFamily,
+        fontWeight = FontWeight.Medium,
         fontSize = 12.sp,
         lineHeight = 18.sp,
-        letterSpacing = (-0.02).sp
+        letterSpacing = (-0.01).sp
     ),
     labelSmall = TextStyle(
-        fontFamily = JetBrainsMonoFontFamily,
-        fontWeight = FontWeight.Normal,
+        fontFamily = AppFontFamily,
+        fontWeight = FontWeight.Medium,
         fontSize = 11.sp,
         lineHeight = 16.sp,
-        letterSpacing = (-0.02).sp
+        letterSpacing = (-0.01).sp
     )
 )

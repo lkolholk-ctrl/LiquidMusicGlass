@@ -59,7 +59,7 @@ import com.liquidmusicglass.engine.AudioDownloadManager
 import com.liquidmusicglass.ui.glass.GlassDialog
 import com.liquidmusicglass.ui.glass.GlassDialogButton
 import com.liquidmusicglass.ui.screens.camp.CampSelectorScreen
-import com.liquidmusicglass.ui.theme.JetBrainsMonoFontFamily
+import com.liquidmusicglass.ui.theme.AppFontFamily
 import com.liquidmusicglass.ui.theme.LiquidTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -190,7 +190,7 @@ fun ProfileScreen(
                     ) {
                         Text(
                             text = displayName,
-                            fontFamily = JetBrainsMonoFontFamily,
+                            fontFamily = AppFontFamily,
                             color = lc.textPrimary,
                             fontSize = 22.sp,
                             fontWeight = FontWeight.Bold,
@@ -232,7 +232,7 @@ fun ProfileScreen(
                         val daysLeftText = if (sub != null && sub.daysLeft > 0) " • ${sub.daysLeft} days left" else ""
                         Text(
                             text = "$planLabel • Until $expiryText$daysLeftText",
-                            fontFamily = JetBrainsMonoFontFamily,
+                            fontFamily = AppFontFamily,
                             color = lc.textSecondary,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium,
@@ -250,7 +250,7 @@ fun ProfileScreen(
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = "Region: $displayRegion ($regionCode)",
-                            fontFamily = JetBrainsMonoFontFamily,
+                            fontFamily = AppFontFamily,
                             color = lc.textSecondary,
                             fontSize = 12.sp,
                             letterSpacing = 0.3.sp
@@ -258,7 +258,7 @@ fun ProfileScreen(
                     } else {
                         Text(
                             text = "Free Plan",
-                            fontFamily = JetBrainsMonoFontFamily,
+                            fontFamily = AppFontFamily,
                             color = lc.textSecondary,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium,
@@ -276,7 +276,7 @@ fun ProfileScreen(
             item {
                 Text(
                     text = "SETTINGS",
-                    fontFamily = JetBrainsMonoFontFamily,
+                    fontFamily = AppFontFamily,
                     color = lc.textSecondary,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
@@ -336,7 +336,7 @@ fun ProfileScreen(
             item {
                 Text(
                     text = "DANGER ZONE",
-                    fontFamily = JetBrainsMonoFontFamily,
+                    fontFamily = AppFontFamily,
                     color = AppleRed,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
@@ -363,7 +363,7 @@ fun ProfileScreen(
             item {
                 Text(
                     text = "Liquid Music Glass v1.0",
-                    fontFamily = JetBrainsMonoFontFamily,
+                    fontFamily = AppFontFamily,
                     color = lc.textTertiary,
                     fontSize = 10.sp,
                     textAlign = TextAlign.Center,
@@ -424,14 +424,14 @@ private fun SettingRowNavigable(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = label,
-                fontFamily = JetBrainsMonoFontFamily,
+                fontFamily = AppFontFamily,
                 color = LiquidTheme.colors.textPrimary,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Medium
             )
             Text(
                 text = value,
-                fontFamily = JetBrainsMonoFontFamily,
+                fontFamily = AppFontFamily,
                 color = LiquidTheme.colors.textSecondary,
                 fontSize = 12.sp
             )
@@ -479,7 +479,7 @@ private fun SettingRowAction(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = label,
-                fontFamily = JetBrainsMonoFontFamily,
+                fontFamily = AppFontFamily,
                 color = tint,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Medium
@@ -488,7 +488,7 @@ private fun SettingRowAction(
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = subtitle,
-                    fontFamily = JetBrainsMonoFontFamily,
+                    fontFamily = AppFontFamily,
                     color = LiquidTheme.colors.textSecondary,
                     fontSize = 12.sp
                 )
@@ -536,14 +536,14 @@ private fun SimpleSubscriptionCard(
             Column {
                 Text(
                     text = name,
-                    fontFamily = JetBrainsMonoFontFamily,
+                    fontFamily = AppFontFamily,
                     color = LiquidTheme.colors.textPrimary,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium
                 )
                 Text(
                     text = "Valid until $validUntil",
-                    fontFamily = JetBrainsMonoFontFamily,
+                    fontFamily = AppFontFamily,
                     color = LiquidTheme.colors.textSecondary,
                     fontSize = 11.sp
                 )
@@ -609,14 +609,14 @@ private fun SubscriptionDetailCard(
             Column {
                 Text(
                     text = planLabel,
-                    fontFamily = JetBrainsMonoFontFamily,
+                    fontFamily = AppFontFamily,
                     color = LiquidTheme.colors.textPrimary,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium
                 )
                 Text(
                     text = "Valid until $expiryText$daysLeftText",
-                    fontFamily = JetBrainsMonoFontFamily,
+                    fontFamily = AppFontFamily,
                     color = LiquidTheme.colors.textSecondary,
                     fontSize = 11.sp
                 )
@@ -627,7 +627,7 @@ private fun SubscriptionDetailCard(
             Spacer(modifier = Modifier.height(12.dp))
             Text(
                 text = "Active Storefronts:",
-                fontFamily = JetBrainsMonoFontFamily,
+                fontFamily = AppFontFamily,
                 color = LiquidTheme.colors.textSecondary,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.SemiBold,
@@ -652,7 +652,7 @@ private fun SubscriptionDetailCard(
                             Spacer(modifier = Modifier.width(6.dp))
                              Text(
                                  text = "${region.name} (${region.code.uppercase()})",
-                                 fontFamily = JetBrainsMonoFontFamily,
+                                 fontFamily = AppFontFamily,
                                  color = LiquidTheme.colors.textPrimary.copy(alpha = 0.75f),
                                  fontSize = 10.sp,
                                  fontWeight = FontWeight.Medium

@@ -50,7 +50,7 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
+import com.liquidmusicglass.ui.theme.AppFontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -121,7 +121,7 @@ fun WaveHomeScreen(
                         color = Color.White,
                         fontSize = 46.sp,
                         fontWeight = FontWeight.Black,
-                        fontFamily = FontFamily.SansSerif,
+                        fontFamily = AppFontFamily,
                         textAlign = TextAlign.Center
                     )
                     Spacer(Modifier.height(40.dp))
@@ -137,7 +137,7 @@ fun WaveHomeScreen(
                     color = Color.White,
                     fontSize = 40.sp,
                     fontWeight = FontWeight.Black,
-                    fontFamily = FontFamily.SansSerif,
+                    fontFamily = AppFontFamily,
                     textAlign = TextAlign.Center,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -194,7 +194,7 @@ fun WaveHomeScreen(
                             color = Color.White,
                             fontSize = 15.sp,
                             fontWeight = FontWeight.SemiBold,
-                            fontFamily = FontFamily.SansSerif,
+                            fontFamily = AppFontFamily,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             textAlign = TextAlign.Center
@@ -281,7 +281,7 @@ private fun WaveTopBar(onSearch: () -> Unit) {
             color = WaveAccent,
             fontSize = 18.sp,
             fontWeight = FontWeight.Black,
-            fontFamily = FontFamily.SansSerif,
+            fontFamily = AppFontFamily,
             modifier = Modifier.align(Alignment.Center)
         )
 
@@ -364,7 +364,7 @@ private fun PresetOrb(preset: WavePreset, onClick: () -> Unit) {
             color = Color.White,
             fontSize = 13.sp,
             fontWeight = FontWeight.SemiBold,
-            fontFamily = FontFamily.SansSerif,
+            fontFamily = AppFontFamily,
             textAlign = TextAlign.Center,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis
