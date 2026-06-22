@@ -1,6 +1,7 @@
 package com.liquidmusicglass.ui.theme
 
 import androidx.compose.material3.Typography
+import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
@@ -14,6 +15,7 @@ import com.liquidmusicglass.R
 //  Близкий открытый аналог Yandex Sans с поддержкой кириллицы.
 // ═══════════════════════════════════════════════════════════
 
+@OptIn(ExperimentalTextApi::class)
 private fun golos(weight: Int) = Font(
     resId = R.font.golos_text,
     weight = FontWeight(weight),
