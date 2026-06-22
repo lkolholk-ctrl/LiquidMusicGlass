@@ -1,0 +1,428 @@
+package com.liquidmusicglass.ui.screens
+
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.FavoriteBorder
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.liquidmusicglass.engine.PlayerController
+import com.liquidmusicglass.ui.glass.AlbumArtImage
+import com.liquidmusicglass.ui.glass.AlbumColors
+import com.liquidmusicglass.ui.glass.GlassKit
+import com.liquidmusicglass.ui.glass.rememberAlbumColors
+import com.liquidmusicglass.ui.viewmodel.HomeViewModel
+import kotlin.math.cos
+import kotlin.math.sin
+
+/**
+ * "Моя волна" — главный экран в стиле Яндекс Музыки.
+ *
+ * Состояния:
+ *  - idle (ничего не играет): большой заголовок + круглая кнопка Play, запускающая волну;
+ *  - playing: имя артиста, обложка и стеклянная панель управления (пауза/название/лайк).
+ *
+ * Фон — живой жидкий градиент, цвета берутся из обложки текущего трека.
+ * Снизу — горизонтальный ряд стилизованных «шаров»-пресетов.
+ */
+@Composable
+fun WaveHomeScreen(
+    onNavigateToSearch: () -> Unit = {}
+) {
+    val context = LocalContext.current
+    val viewModel = remember { HomeViewModel() }
+
+    val currentTrack by PlayerController.currentTrack.collectAsState()
+    val isPlaying by PlayerController.isPlaying.collectAsState()
+    val favoriteIds by PlayerController.favoriteIds.collectAsState()
+    val isBuildingWave by viewModel.isBuildingWave.collectAsState()
+
+    val backdrop = rememberLayerBackdrop()
+    val albumColors = rememberAlbumColors(currentTrack?.displayArtUri, currentTrack?.coverUrl)
+
+    val track = currentTrack
+    val isFavorite = track?.id?.let { favoriteIds.contains(it) } == true
+
+    Box(modifier = Modifier.fillMaxSize()) {
+
+        // ── Живой градиент-фон (захватывается backdrop'ом для стекла) ──
+        Box(modifier = Modifier.fillMaxSize().layerBackdrop(backdrop)) {
+            WaveGradientBackground(colors = albumColors)
+        }
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+        ) {
+            WaveTopBar(onSearch = onNavigateToSearch)
+
+            // ── Центральная сцена ──
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                if (track == null) {
+                    Text(
+                        text = "Моя волна",
+                        color = Color.White,
+                        fontSize = 44.sp,
+                        fontWeight = FontWeight.Black,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(Modifier.height(40.dp))
+                    BigPlayButton(
+                        loading = isBuildingWave,
+                        onClick = { viewModel.buildWaveQueue(context) }
+                    )
+                } else {
+                    Text(
+                        text = track.artist,
+                        color = Color.White,
+                        fontSize = 40.sp,
+                        fontWeight = FontWeight.Black,
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(Modifier.height(28.dp))
+                    AlbumArtImage(
+                        uri = track.displayArtUri,
+                        coverUrl = track.coverUrl,
+                        albumId = track.albumId,
+                        contentDescription = track.title,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .size(184.dp)
+                            .clip(RoundedCornerShape(28.dp))
+                    )
+                }
+            }
+
+            // ── Стеклянная панель управления (только когда есть трек) ──
+            if (track != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    GlassKit.Circle(
+                        backdrop = backdrop,
+                        modifier = Modifier
+                            .size(56.dp)
+                            .clickable { PlayerController.togglePlayPause(context) }
+                    ) {
+                        Box(Modifier.size(56.dp), contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                contentDescription = if (isPlaying) "Пауза" else "Играть",
+                                tint = Color.White,
+                                modifier = Modifier.size(26.dp)
+                            )
+                        }
+                    }
+                    GlassKit.Pill(
+                        backdrop = backdrop,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(56.dp)
+                    ) {
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .height(56.dp)
+                                .padding(horizontal = 16.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = track.title,
+                                color = Color.White,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                    GlassKit.Circle(
+                        backdrop = backdrop,
+                        modifier = Modifier
+                            .size(56.dp)
+                            .clickable { PlayerController.toggleFavorite(track.id) }
+                    ) {
+                        Box(Modifier.size(56.dp), contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Rounded.FavoriteBorder,
+                                contentDescription = "Нравится",
+                                tint = if (isFavorite) Color(0xFFFF4D67) else Color.White,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(20.dp))
+
+            // ── Ряд пресетов-«шаров» ──
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(WAVE_PRESETS) { preset ->
+                    PresetOrb(
+                        preset = preset,
+                        onClick = { viewModel.buildWaveQueue(context) }
+                    )
+                }
+            }
+
+            // Запас снизу под мини-плеер и навбар
+            Spacer(Modifier.height(120.dp))
+        }
+    }
+}
+
+@Composable
+private fun WaveTopBar(onSearch: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(56.dp)
+            .padding(horizontal = 16.dp)
+    ) {
+        // Лого
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .size(40.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(
+                    Brush.linearGradient(listOf(Color(0xFFFF2D9B), Color(0xFFB14BFF)))
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.PlayArrow,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(22.dp)
+            )
+        }
+
+        Text(
+            text = "Моя волна",
+            color = WaveAccent,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Black,
+            modifier = Modifier.align(Alignment.Center)
+        )
+
+        Icon(
+            imageVector = Icons.Rounded.Search,
+            contentDescription = "Поиск",
+            tint = Color.White,
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .size(26.dp)
+                .clickable { onSearch() }
+        )
+    }
+}
+
+@Composable
+private fun BigPlayButton(loading: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(96.dp)
+            .clip(CircleShape)
+            .background(WaveAccent)
+            .clickable(enabled = !loading) { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        if (loading) {
+            CircularProgressIndicator(
+                color = Color.Black,
+                strokeWidth = 3.dp,
+                modifier = Modifier.size(34.dp)
+            )
+        } else {
+            Icon(
+                imageVector = Icons.Rounded.PlayArrow,
+                contentDescription = "Слушать",
+                tint = Color.Black,
+                modifier = Modifier.size(48.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun PresetOrb(preset: WavePreset, onClick: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .width(120.dp)
+            .clickable { onClick() },
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Canvas(modifier = Modifier.size(96.dp)) {
+            val base = preset.color
+            val light = lerp(base, Color.White, 0.45f)
+            val dark = lerp(base, Color.Black, 0.55f)
+            val r = size.minDimension / 2f
+            val center = Offset(size.width / 2f, size.height / 2f)
+
+            // Тело сферы
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(light, base, dark),
+                    center = Offset(size.width * 0.36f, size.height * 0.30f),
+                    radius = size.minDimension * 0.95f
+                ),
+                radius = r,
+                center = center
+            )
+            // Глянцевый блик
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(Color.White.copy(alpha = 0.55f), Color.Transparent),
+                    center = Offset(size.width * 0.34f, size.height * 0.26f),
+                    radius = size.minDimension * 0.34f
+                ),
+                radius = r,
+                center = center
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = preset.label,
+            color = Color.White,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            textAlign = TextAlign.Center,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+private fun WaveGradientBackground(colors: AlbumColors) {
+    val c1 by animateColorAsState(targetValue = colors.vibrant, animationSpec = tween(1200), label = "c1")
+    val c2 by animateColorAsState(targetValue = colors.dominant, animationSpec = tween(1200), label = "c2")
+    val c3 by animateColorAsState(targetValue = colors.muted, animationSpec = tween(1200), label = "c3")
+
+    val transition = rememberInfiniteTransition(label = "wave-bg")
+    val t by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = TWO_PI,
+        animationSpec = infiniteRepeatable(tween(16000, easing = LinearEasing)),
+        label = "t"
+    )
+
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        val w = size.width
+        val h = size.height
+        drawRect(Color(0xFF060606))
+
+        fun blob(color: Color, baseX: Float, baseY: Float, phase: Float, radius: Float, alpha: Float) {
+            val cx = w * baseX + sin(t + phase) * w * 0.12f
+            val cy = h * baseY + cos(t * 0.8f + phase) * h * 0.08f
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(color.copy(alpha = alpha), Color.Transparent),
+                    center = Offset(cx, cy),
+                    radius = radius
+                ),
+                radius = radius,
+                center = Offset(cx, cy),
+                blendMode = BlendMode.Screen
+            )
+        }
+
+        blob(c1, 0.35f, 0.34f, 0f, w * 0.95f, 0.55f)
+        blob(c2, 0.70f, 0.46f, 2f, w * 0.85f, 0.45f)
+        blob(c3, 0.50f, 0.64f, 4f, w * 0.90f, 0.40f)
+
+        // Затемнение снизу для читаемости текста и пресетов
+        drawRect(
+            brush = Brush.verticalGradient(
+                colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.55f)),
+                startY = h * 0.45f,
+                endY = h
+            )
+        )
+    }
+}
+
+private data class WavePreset(val label: String, val color: Color)
+
+private val WaveAccent = Color(0xFFFFE000)
+
+private const val TWO_PI = 6.2831855f
+
+private val WAVE_PRESETS = listOf(
+    WavePreset("Прогрессив-хаус", Color(0xFF3B6FE0)),
+    WavePreset("Бегаю под летние треки", Color(0xFF2FB24A)),
+    WavePreset("Спокойный вечер", Color(0xFF17A2A2)),
+    WavePreset("Хочется инди", Color(0xFF5B5BE0)),
+    WavePreset("В дороге", Color(0xFFE07B2F)),
+    WavePreset("Танцпол", Color(0xFFE0405F))
+)

@@ -61,6 +61,7 @@ import com.liquidmusicglass.ui.navigation.BottomBar
 import com.liquidmusicglass.ui.player.FullPlayer
 import com.liquidmusicglass.ui.player.MiniPlayer
 import com.liquidmusicglass.ui.screens.HomeScreen
+import com.liquidmusicglass.ui.screens.WaveHomeScreen
 import com.liquidmusicglass.ui.screens.SearchScreen
 import com.liquidmusicglass.ui.screens.LibraryScreen
 import com.liquidmusicglass.ui.screens.AlbumDetailScreen
@@ -224,12 +225,18 @@ fun AppRoot() {
 
             // ── Main screens ──
             when (selectedIndex) {
-                0 -> HomeScreen(
-                    onNavigateToAlbum = { detailAlbumId = it },
-                    onNavigateToArtist = { detailArtistId = it },
-                    onNavigateToPlaylist = { playlistDetailId = it },
-                    onNavigateToYouTube = { youtubeSearchOpen = true }
-                )
+                0 -> if (currentCamp is com.liquidmusicglass.camp.MusicCamp.Youtube) {
+                    HomeScreen(
+                        onNavigateToAlbum = { detailAlbumId = it },
+                        onNavigateToArtist = { detailArtistId = it },
+                        onNavigateToPlaylist = { playlistDetailId = it },
+                        onNavigateToYouTube = { youtubeSearchOpen = true }
+                    )
+                } else {
+                    WaveHomeScreen(
+                        onNavigateToSearch = { selectedIndex = 1 }
+                    )
+                }
                 1 -> SearchScreen(
                     onNavigateToAlbum = { detailAlbumId = it },
                     onNavigateToArtist = { detailArtistId = it }
