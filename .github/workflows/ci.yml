@@ -19,8 +19,11 @@ concurrency:
 jobs:
   build:
     name: Build & Test (Debug)
-    runs-on: self-hosted
-    timeout-minutes: 30
+    # GitHub-hosted runner ships a base Android SDK and ANDROID_HOME; the
+    # self-hosted runner has no SDK configured (the cause of the previous
+    # "SDK location not found" failures).
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     steps:
       - name: Checkout code
@@ -31,6 +34,19 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK packages (platform, build-tools, NDK, CMake)
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-36" \
+            "build-tools;36.1.0" \
+            "ndk;27.2.12479018" \
+            "cmake;3.22.1"
 
       - name: Make gradlew executable
         run: chmod +x gradlew
