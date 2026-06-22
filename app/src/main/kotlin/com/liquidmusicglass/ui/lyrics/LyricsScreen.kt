@@ -60,6 +60,12 @@ import kotlin.math.min
 /** Минимальная длина «инструментального» проигрыша между строками для показа точек ожидания. */
 private const val INSTRUMENTAL_GAP_MS = 4000L
 
+/** Насколько высоко поднимать активную строку: доля высоты экрана от верха (0.25–0.35 — верхняя треть). */
+private const val ACTIVE_LINE_TOP_BIAS = 0.28f
+
+/** Высота зоны заголовка со скрим-градиентом (плотная часть закрывает название+артиста). */
+private val HEADER_SCRIM_HEIGHT = 140.dp
+
 /**
  * Полноэкранный караоке-экран лирики (Apple Music style).
  *
@@ -213,9 +219,9 @@ fun LyricsScreen(
 
     LaunchedEffect(currentLineIndex) {
         if (currentLineIndex >= 0) {
-            // Поднимаем активную строку заметно ВЫШЕ центра (~18% от высоты)
+            // Поднимаем активную строку в верхнюю треть (см. ACTIVE_LINE_TOP_BIAS)
             val targetIndex = currentLineIndex.coerceAtMost((lyrics.lines.size - 1).coerceAtLeast(0))
-            val aboveCenterOffset = (screenHeightPx * 0.18f - with(density) { 40.dp.toPx() }).toInt()
+            val aboveCenterOffset = (screenHeightPx * ACTIVE_LINE_TOP_BIAS).toInt()
             listState.animateScrollToItem(
                 index = targetIndex,
                 scrollOffset = -aboveCenterOffset
@@ -382,6 +388,27 @@ fun LyricsScreen(
                     }
                 }
             }
+
+            // ── Градиент-скрим под заголовком ──
+            // Плотный вверху → прозрачный книзу, цвет берём из палитры обложки
+            // (тот же тёмный базовый цвет, что тинтует ауру) — чтобы подложка
+            // жила в тон фону, а переход к лирике был мягким, без плашки/границы.
+            val headerScrimColor = resolvedColors.darkMuted
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(HEADER_SCRIM_HEIGHT)
+                    .align(Alignment.TopCenter)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                headerScrimColor.copy(alpha = 0.95f),
+                                headerScrimColor.copy(alpha = 0.75f),
+                                Color.Transparent
+                            )
+                        )
+                    )
+            )
 
             // ── Header: track info ──
             Column(
