@@ -83,10 +83,16 @@ half4 main(float2 fragCoord) {
     float2 p = float2(uv.x * asp, uv.y) * 3.4;
     float t = uTime * 0.04;
 
+    // Ограниченное вихревое движение вместо линейного сдвига —
+    // дым «бурлит» на месте, без прямых полос, ползущих с краёв.
+    float2 d1 = float2(sin(t), cos(t * 0.8)) * 0.6;
+    float2 d2 = float2(cos(t * 0.9), sin(t * 1.1)) * 0.6;
+    float2 d3 = float2(sin(t * 0.7 + 1.3), cos(t * 1.2 + 0.5)) * 0.5;
+
     // три декоррелированных потока (двойной domain-warp) → мультицвет
-    float w1 = fbm(p + float2(0.0, t));
-    float w2 = fbm(float2(p.x * 1.3 + 5.2 + 0.8 * w1, p.y * 1.3 - t + 0.8 * w1));
-    float ff = fbm(float2(p.x + 1.4 * w1 + 0.3 * t, p.y + 1.4 * w2));
+    float w1 = fbm(p + d1);
+    float w2 = fbm(float2(p.x * 1.3 + 5.2 + 0.8 * w1, p.y * 1.3 + 0.8 * w1) + d2);
+    float ff = fbm(float2(p.x + 1.4 * w1, p.y + 1.4 * w2) + d3);
 
     half3 col = uColorBg;
     col = mix(col, uColorA, smoothstep(0.40, 0.63, ff) * 0.92 * uIntensity);
