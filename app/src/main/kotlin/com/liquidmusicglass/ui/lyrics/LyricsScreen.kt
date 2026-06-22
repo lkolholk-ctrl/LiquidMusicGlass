@@ -422,29 +422,36 @@ private fun LyricLineSweep(
         drawText(layout, color = unsungColor)
         if (p <= 0f) return@Canvas
 
-        // 2) активный текст, обрезанный по «спетой» области в порядке чтения
+        // 2) активный текст, обрезанный по «спетой» области в порядке чтения.
+        //    Заливка считается НЕПРЕРЫВНО по суммарной ширине рядов (sub-pixel),
+        //    а не по целым символам — поэтому плавно, без «лесенки».
         if (p >= 1f) {
             drawText(layout, color = sungColor)
             return@Canvas
         }
 
-        val charOffset = (p * text.length).toInt().coerceIn(0, text.length)
-        val clip = Path()
+        var totalWidth = 0f
         for (i in 0 until layout.lineCount) {
-            val lineStart = layout.getLineStart(i)
-            val lineEnd = layout.getLineEnd(i, visibleEnd = true)
+            totalWidth += layout.getLineRight(i) - layout.getLineLeft(i)
+        }
+        val swept = p * totalWidth
+
+        val clip = Path()
+        var acc = 0f
+        for (i in 0 until layout.lineCount) {
+            val left = layout.getLineLeft(i)
+            val right = layout.getLineRight(i)
             val top = layout.getLineTop(i)
             val bottom = layout.getLineBottom(i)
-            val left = layout.getLineLeft(i)
+            val w = right - left
             when {
-                charOffset >= lineEnd ->
-                    clip.addRect(Rect(left, top, layout.getLineRight(i), bottom))
-                charOffset <= lineStart -> { /* ряд ещё не начат */ }
-                else -> {
-                    val x = layout.getHorizontalPosition(charOffset, usePrimaryDirection = true)
-                    clip.addRect(Rect(left, top, x, bottom))
-                }
+                swept >= acc + w ->                     // ряд пройден целиком
+                    clip.addRect(Rect(left, top, right, bottom))
+                swept <= acc -> { /* ряд ещё не начат */ }
+                else ->                                  // текущий ряд — до позиции (плавно)
+                    clip.addRect(Rect(left, top, left + (swept - acc), bottom))
             }
+            acc += w
         }
         clipPath(clip) {
             drawText(layout, color = sungColor)
