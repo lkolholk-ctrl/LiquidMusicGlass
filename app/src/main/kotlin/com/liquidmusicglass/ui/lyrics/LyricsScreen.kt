@@ -46,6 +46,7 @@ import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.ui.glass.AlbumArtImage
 import com.liquidmusicglass.ui.glass.AlbumColors
 import com.liquidmusicglass.ui.glass.rememberAlbumColors
+import com.liquidmusicglass.ui.theme.AppFontFamily
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -334,7 +335,8 @@ fun LyricsScreen(
                                     sungColor = sungColor,
                                     unsungColor = unsungColor,
                                     isActive = isCurrent,
-                                    maxWidthPx = lineMaxWidthPx
+                                    maxWidthPx = lineMaxWidthPx,
+                                    glowColor = duetColor ?: resolvedColors.vibrant
                                 )
                             }
                         }
@@ -385,7 +387,8 @@ private fun LyricLineSweep(
     sungColor: Color,
     unsungColor: Color,
     isActive: Boolean,
-    maxWidthPx: Int
+    maxWidthPx: Int,
+    glowColor: Color
 ) {
     if (text.isEmpty()) return
 
@@ -393,6 +396,7 @@ private fun LyricLineSweep(
     val style = TextStyle(
         fontSize = if (isActive) 32.sp else 30.sp,
         fontWeight = if (isActive) FontWeight.Bold else FontWeight.SemiBold,
+        fontFamily = AppFontFamily,
         lineHeight = 44.sp,
         textAlign = TextAlign.Start,
         shadow = androidx.compose.ui.graphics.Shadow(
@@ -418,6 +422,18 @@ private fun LyricLineSweep(
     val hDp = with(LocalDensity.current) { layout.size.height.toDp() }
 
     Canvas(modifier = Modifier.size(wDp, hDp)) {
+        // 0) гло-подсветка под активной строкой (палитровый цвет + мягкий ореол)
+        if (isActive) {
+            drawText(
+                textLayoutResult = layout,
+                color = glowColor.copy(alpha = 0.45f),
+                shadow = androidx.compose.ui.graphics.Shadow(
+                    color = glowColor.copy(alpha = 0.55f),
+                    offset = Offset(0f, 0f),
+                    blurRadius = 26f
+                )
+            )
+        }
         // 1) база — весь текст неактивным цветом
         drawText(layout, color = unsungColor)
         if (p <= 0f) return@Canvas
