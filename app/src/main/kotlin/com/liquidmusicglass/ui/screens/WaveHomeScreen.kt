@@ -131,7 +131,7 @@ fun WaveHomeScreen(
                     )
                 }
             } else {
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.weight(0.8f))
                 Text(
                     text = track.artist,
                     color = Color.White,
@@ -160,7 +160,7 @@ fun WaveHomeScreen(
                     )
                 }
 
-                Spacer(Modifier.weight(1f))
+                Spacer(Modifier.height(20.dp))
 
                 Row(
                     modifier = Modifier
@@ -210,6 +210,8 @@ fun WaveHomeScreen(
                         )
                     }
                 }
+
+                Spacer(Modifier.weight(1f))
             }
 
             Spacer(Modifier.height(22.dp))
