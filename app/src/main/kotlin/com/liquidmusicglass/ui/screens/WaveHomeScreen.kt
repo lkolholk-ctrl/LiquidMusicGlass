@@ -56,12 +56,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.kyant.backdrop.backdrops.layerBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.ui.glass.AlbumArtImage
 import com.liquidmusicglass.ui.glass.AlbumColors
-import com.liquidmusicglass.ui.glass.GlassKit
 import com.liquidmusicglass.ui.glass.rememberAlbumColors
 import com.liquidmusicglass.ui.viewmodel.HomeViewModel
 import kotlin.math.cos
@@ -72,15 +69,18 @@ import kotlin.math.sin
  *
  * Состояния:
  *  - idle (ничего не играет): большой заголовок + круглая кнопка Play;
- *  - playing: имя артиста, обложка и стеклянная панель управления.
+ *  - playing: имя артиста, обложка и плоская панель управления.
  *
- * Фон — живой жидкий градиент: цвета берутся из обложки текущего трека,
- * принудительно насыщаются, а на тусклых обложках заменяются ярким
- * дефолтом, чтобы экран никогда не был чёрным.
+ * Стекло намеренно не используется (тяжёлый блюр лагает на устройствах) —
+ * контролы плоские, фон рисуется одним Canvas.
+ *
+ * Тап по обложке или панели с названием открывает полноэкранный плеер
+ * через [onOpenPlayer].
  */
 @Composable
 fun WaveHomeScreen(
-    onNavigateToSearch: () -> Unit = {}
+    onNavigateToSearch: () -> Unit = {},
+    onOpenPlayer: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val viewModel = remember { HomeViewModel() }
@@ -90,7 +90,6 @@ fun WaveHomeScreen(
     val favoriteIds by PlayerController.favoriteIds.collectAsState()
     val isBuildingWave by viewModel.isBuildingWave.collectAsState()
 
-    val backdrop = rememberLayerBackdrop()
     val albumColors = rememberAlbumColors(currentTrack?.displayArtUri, currentTrack?.coverUrl)
 
     val track = currentTrack
@@ -98,10 +97,8 @@ fun WaveHomeScreen(
 
     Box(modifier = Modifier.fillMaxSize()) {
 
-        // ── Живой градиент-фон (захватывается backdrop'ом для стекла) ──
-        Box(modifier = Modifier.fillMaxSize().layerBackdrop(backdrop)) {
-            WaveGradientBackground(colors = albumColors)
-        }
+        // ── Живой градиент-фон ──
+        WaveGradientBackground(colors = albumColors)
 
         Column(
             modifier = Modifier
@@ -159,6 +156,7 @@ fun WaveHomeScreen(
                         modifier = Modifier
                             .size(216.dp)
                             .clip(RoundedCornerShape(28.dp))
+                            .clickable { onOpenPlayer() }
                     )
                 }
 
@@ -171,60 +169,45 @@ fun WaveHomeScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    GlassKit.Circle(
-                        backdrop = backdrop,
-                        modifier = Modifier
-                            .size(56.dp)
-                            .clickable { PlayerController.togglePlayPause(context) }
-                    ) {
-                        Box(Modifier.size(56.dp), contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                                contentDescription = if (isPlaying) "Пауза" else "Играть",
-                                tint = Color.White,
-                                modifier = Modifier.size(26.dp)
-                            )
-                        }
+                    // Play / pause
+                    FlatCircleButton(onClick = { PlayerController.togglePlayPause(context) }) {
+                        Icon(
+                            imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                            contentDescription = if (isPlaying) "Пауза" else "Играть",
+                            tint = Color.White,
+                            modifier = Modifier.size(26.dp)
+                        )
                     }
-                    GlassKit.Pill(
-                        backdrop = backdrop,
+                    // Title — opens full player
+                    Box(
                         modifier = Modifier
                             .weight(1f)
                             .height(56.dp)
+                            .clip(RoundedCornerShape(28.dp))
+                            .background(Color.White.copy(alpha = 0.12f))
+                            .clickable { onOpenPlayer() }
+                            .padding(horizontal = 16.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Box(
-                            Modifier
-                                .fillMaxWidth()
-                                .height(56.dp)
-                                .padding(horizontal = 16.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = track.title,
-                                color = Color.White,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                fontFamily = FontFamily.SansSerif,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                textAlign = TextAlign.Center
-                            )
-                        }
+                        Text(
+                            text = track.title,
+                            color = Color.White,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            fontFamily = FontFamily.SansSerif,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            textAlign = TextAlign.Center
+                        )
                     }
-                    GlassKit.Circle(
-                        backdrop = backdrop,
-                        modifier = Modifier
-                            .size(56.dp)
-                            .clickable { PlayerController.toggleFavorite(track.id) }
-                    ) {
-                        Box(Modifier.size(56.dp), contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Rounded.FavoriteBorder,
-                                contentDescription = "Нравится",
-                                tint = if (isFavorite) Color(0xFFFF4D67) else Color.White,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
+                    // Like
+                    FlatCircleButton(onClick = { PlayerController.toggleFavorite(track.id) }) {
+                        Icon(
+                            imageVector = Icons.Rounded.FavoriteBorder,
+                            contentDescription = "Нравится",
+                            tint = if (isFavorite) Color(0xFFFF4D67) else Color.White,
+                            modifier = Modifier.size(24.dp)
+                        )
                     }
                 }
             }
@@ -245,9 +228,23 @@ fun WaveHomeScreen(
                 }
             }
 
-            // Запас снизу под мини-плеер и навбар
-            Spacer(Modifier.height(108.dp))
+            // Запас снизу под навбар
+            Spacer(Modifier.height(96.dp))
         }
+    }
+}
+
+@Composable
+private fun FlatCircleButton(onClick: () -> Unit, content: @Composable () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(56.dp)
+            .clip(CircleShape)
+            .background(Color.White.copy(alpha = 0.12f))
+            .clickable { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        content()
     }
 }
 
@@ -375,8 +372,6 @@ private fun PresetOrb(preset: WavePreset, onClick: () -> Unit) {
 
 @Composable
 private fun WaveGradientBackground(colors: AlbumColors) {
-    // Bright fallbacks used when the album palette is too dark/desaturated,
-    // so the background is never just black.
     val targets = remember(colors) {
         val raw = listOf(colors.vibrant, colors.dominant, colors.lightVibrant)
         raw.mapIndexed { i, c -> c.vivify().takeOrElse { WAVE_FALLBACK_COLORS[i] } }
@@ -420,7 +415,6 @@ private fun WaveGradientBackground(colors: AlbumColors) {
         blob(c2, 0.72f, 0.42f, 2.1f, 0.95f, 0.70f)
         blob(c3, 0.50f, 0.66f, 4.2f, 1.00f, 0.60f)
 
-        // Затемнение снизу для читаемости пресетов и панели управления
         drawRect(
             brush = Brush.verticalGradient(
                 colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.50f)),
@@ -433,8 +427,7 @@ private fun WaveGradientBackground(colors: AlbumColors) {
 
 /**
  * Усиливает насыщенность/яркость цвета. Возвращает [Color.Unspecified],
- * если цвет слишком тёмный или серый — тогда вызывающий код подставит
- * яркий дефолт.
+ * если цвет слишком тёмный или серый — тогда подставляется яркий дефолт.
  */
 private fun Color.vivify(): Color {
     val hsv = FloatArray(3)
@@ -452,9 +445,9 @@ private val WaveAccent = Color(0xFFFFE000)
 private const val TWO_PI = 6.2831855f
 
 private val WAVE_FALLBACK_COLORS = listOf(
-    Color(0xFFE5314E), // тёплый красно-розовый
-    Color(0xFF8A2BE2), // фиолетовый
-    Color(0xFF2E6BFF)  // синий
+    Color(0xFFE5314E),
+    Color(0xFF8A2BE2),
+    Color(0xFF2E6BFF)
 )
 
 private val WAVE_PRESETS = listOf(
