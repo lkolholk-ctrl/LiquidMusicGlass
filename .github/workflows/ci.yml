@@ -8,7 +8,6 @@ on:
     branches-ignore:
       - main
       - master
-  pull_request:
   workflow_dispatch:
 
 # Cancel superseded runs for the same ref to save runner time.
@@ -79,12 +78,15 @@ jobs:
         with:
           name: LiquidMusicGlass-Release
           path: app/build/outputs/apk/release/*.apk
-          retention-days: 14
+          retention-days: 5
+          overwrite: true
 
+      # Test reports only when something failed, to keep artifact storage low.
       - name: Upload test reports
-        if: always()
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: unit-test-reports
           path: app/build/reports/tests/
-          retention-days: 7
+          retention-days: 3
+          overwrite: true
