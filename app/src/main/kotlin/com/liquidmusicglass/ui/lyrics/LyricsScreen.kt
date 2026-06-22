@@ -57,6 +57,9 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
+/** Минимальная длина «инструментального» проигрыша между строками для показа точек ожидания. */
+private const val INSTRUMENTAL_GAP_MS = 4000L
+
 /**
  * Полноэкранный караоке-экран лирики (Apple Music style).
  *
@@ -176,6 +179,25 @@ fun LyricsScreen(
     // Получаем слова текущей строки для пословного караоке
     val currentWords = remember(currentLineIndex, smoothPositionMs) {
         timeProcessor?.getCurrentLineWords() ?: emptyList()
+    }
+
+    // ── Инструментальный проигрыш: текущая строка уже спета, а до следующей
+    // ещё далеко → показываем «waiting»-точки и не торопим заливку.
+    // Конец вокала строки оцениваем тем же капом, что и прогресс строки
+    // (LyricsTimeProcessor), т.к. в LRC хранится только время начала строки.
+    val showGapDots = remember(currentLineIndex, smoothPositionMs, lyrics) {
+        if (!lyrics.isSynced || currentLineIndex < 0 || currentLineIndex >= lyrics.lines.size) {
+            return@remember false
+        }
+        val lineStart = lyrics.lines[currentLineIndex].timeMs
+        val nextStart = lyrics.lines.getOrNull(currentLineIndex + 1)?.timeMs ?: return@remember false
+        val wordCount = lyrics.lines[currentLineIndex].text
+            .split(" ").count { it.isNotBlank() }.coerceAtLeast(1)
+        val rawDuration = (nextStart - lineStart).coerceAtLeast(1L)
+        val cappedDuration = minOf(rawDuration, (wordCount * 700L).coerceAtLeast(1500L))
+        val vocalEnd = lineStart + cappedDuration
+        // Проигрыш считается «инструментальным», только если он заметно длинный.
+        (nextStart - vocalEnd) >= INSTRUMENTAL_GAP_MS && smoothPositionMs in vocalEnd..nextStart
     }
 
     // ── Auto-scroll с fluid gliding ──
@@ -323,11 +345,11 @@ fun LyricsScreen(
                             )
                             val unsungColor = base.copy(alpha = 0.30f)
 
-                            Box(
+                            Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(horizontal = 24.dp, vertical = 10.dp),
-                                contentAlignment = Alignment.CenterStart
+                                horizontalAlignment = Alignment.Start
                             ) {
                                 LyricLineSweep(
                                     text = cleanText,
@@ -338,6 +360,16 @@ fun LyricsScreen(
                                     maxWidthPx = lineMaxWidthPx,
                                     glowColor = duetColor ?: resolvedColors.vibrant
                                 )
+                                // Точки ожидания во время инструментального проигрыша
+                                // после уже спетой строки.
+                                if (isCurrent && showGapDots) {
+                                    Spacer(Modifier.height(16.dp))
+                                    WaitingDots(
+                                        dotColor = duetColor ?: Color.White,
+                                        dotSize = 10.dp,
+                                        spacing = 10.dp
+                                    )
+                                }
                             }
                         }
 
