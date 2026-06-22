@@ -374,19 +374,19 @@ private fun PresetOrb(preset: WavePreset, onClick: () -> Unit) {
 
 @Composable
 private fun WaveGradientBackground(colors: AlbumColors) {
-    // Один цвет-«герой» из обложки → производные оттенки той же гаммы,
-    // чтобы фон был однотонным свечением (как у Яндекса), без чужих цветов.
+    // Один цвет-«герой» из обложки → яркое ядро + оттенки той же гаммы.
     val primary = pickPrimary(colors)
-    val c1 by animateColorAsState(primary, tween(1200), label = "c1")
-    val c2 by animateColorAsState(primary.shiftHsv(hue = 12f, valMul = 0.82f), tween(1200), label = "c2")
-    val c3 by animateColorAsState(primary.shiftHsv(hue = -12f, satMul = 0.92f), tween(1200), label = "c3")
-    val base by animateColorAsState(lerp(primary, Color.Black, 0.82f), tween(1200), label = "base")
+    val core by animateColorAsState(lerp(primary, Color.White, 0.32f), tween(1200), label = "core")
+    val mid by animateColorAsState(primary, tween(1200), label = "mid")
+    val sideA by animateColorAsState(primary.shiftHsv(hue = 14f, valMul = 0.95f), tween(1200), label = "sideA")
+    val sideB by animateColorAsState(primary.shiftHsv(hue = -14f, satMul = 0.90f), tween(1200), label = "sideB")
+    val base by animateColorAsState(lerp(primary, Color.Black, 0.88f), tween(1200), label = "base")
 
     val transition = rememberInfiniteTransition(label = "wave-bg")
     val t by transition.animateFloat(
         initialValue = 0f,
         targetValue = TWO_PI,
-        animationSpec = infiniteRepeatable(tween(18000, easing = LinearEasing)),
+        animationSpec = infiniteRepeatable(tween(20000, easing = LinearEasing)),
         label = "t"
     )
 
@@ -395,9 +395,18 @@ private fun WaveGradientBackground(colors: AlbumColors) {
         val h = size.height
         drawRect(base)
 
-        fun blob(color: Color, baseX: Float, baseY: Float, phase: Float, radiusFactor: Float, alpha: Float) {
-            val cx = w * baseX + sin(t + phase) * w * 0.14f
-            val cy = h * baseY + cos(t * 0.7f + phase) * h * 0.10f
+        fun blob(
+            color: Color,
+            baseX: Float,
+            baseY: Float,
+            phase: Float,
+            radiusFactor: Float,
+            alpha: Float,
+            driftX: Float = 0.12f,
+            driftY: Float = 0.08f
+        ) {
+            val cx = w * baseX + sin(t + phase) * w * driftX
+            val cy = h * baseY + cos(t * 0.7f + phase) * h * driftY
             val radius = w * radiusFactor
             drawCircle(
                 brush = Brush.radialGradient(
@@ -411,14 +420,25 @@ private fun WaveGradientBackground(colors: AlbumColors) {
             )
         }
 
-        blob(c1, 0.30f, 0.30f, 0f, 1.05f, 0.85f)
-        blob(c2, 0.72f, 0.42f, 2.1f, 0.95f, 0.70f)
-        blob(c3, 0.50f, 0.66f, 4.2f, 1.00f, 0.60f)
+        // Broad ambient glow in the upper area
+        blob(mid, 0.50f, 0.28f, 0f, 1.25f, 0.55f)
+        // Organic side blobs (same family) for a smoky, non-uniform feel
+        blob(sideA, 0.30f, 0.20f, 2.0f, 0.85f, 0.45f, driftX = 0.16f, driftY = 0.10f)
+        blob(sideB, 0.74f, 0.30f, 4.1f, 0.80f, 0.42f, driftX = 0.16f, driftY = 0.10f)
+        // Hot bright core behind the title — concentrated luminous peak
+        // (stacked draws build up toward near-white via Screen blend)
+        blob(core, 0.50f, 0.23f, 1.0f, 0.52f, 0.78f, driftX = 0.06f, driftY = 0.05f)
+        blob(core, 0.50f, 0.23f, 1.0f, 0.30f, 0.65f, driftX = 0.06f, driftY = 0.05f)
 
+        // Strong fade to near-black in the lower half for contrast
         drawRect(
             brush = Brush.verticalGradient(
-                colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.50f)),
-                startY = h * 0.5f,
+                colors = listOf(
+                    Color.Transparent,
+                    Color.Black.copy(alpha = 0.35f),
+                    Color.Black.copy(alpha = 0.92f)
+                ),
+                startY = h * 0.38f,
                 endY = h
             )
         )
