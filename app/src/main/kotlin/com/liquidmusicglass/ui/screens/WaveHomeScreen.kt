@@ -45,8 +45,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.isSpecified
 import androidx.compose.ui.graphics.lerp
-import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -372,15 +372,13 @@ private fun PresetOrb(preset: WavePreset, onClick: () -> Unit) {
 
 @Composable
 private fun WaveGradientBackground(colors: AlbumColors) {
-    val targets = remember(colors) {
-        val raw = listOf(colors.vibrant, colors.dominant, colors.lightVibrant)
-        raw.mapIndexed { i, c -> c.vivify().takeOrElse { WAVE_FALLBACK_COLORS[i] } }
-    }
-
-    val c1 by animateColorAsState(targets[0], tween(1200), label = "c1")
-    val c2 by animateColorAsState(targets[1], tween(1200), label = "c2")
-    val c3 by animateColorAsState(targets[2], tween(1200), label = "c3")
-    val base by animateColorAsState(lerp(targets[0], Color.Black, 0.80f), tween(1200), label = "base")
+    // Один цвет-«герой» из обложки → производные оттенки той же гаммы,
+    // чтобы фон был однотонным свечением (как у Яндекса), без чужих цветов.
+    val primary = pickPrimary(colors)
+    val c1 by animateColorAsState(primary, tween(1200), label = "c1")
+    val c2 by animateColorAsState(primary.shiftHsv(hue = 12f, valMul = 0.82f), tween(1200), label = "c2")
+    val c3 by animateColorAsState(primary.shiftHsv(hue = -12f, satMul = 0.92f), tween(1200), label = "c3")
+    val base by animateColorAsState(lerp(primary, Color.Black, 0.82f), tween(1200), label = "base")
 
     val transition = rememberInfiniteTransition(label = "wave-bg")
     val t by transition.animateFloat(
@@ -435,6 +433,25 @@ private fun Color.vivify(): Color {
     if (hsv[2] < 0.12f || hsv[1] < 0.12f) return Color.Unspecified
     hsv[1] = (hsv[1] * 1.7f).coerceIn(0.55f, 1f)
     hsv[2] = hsv[2].coerceIn(0.55f, 0.95f)
+    return Color(android.graphics.Color.HSVToColor(hsv))
+}
+
+/** Выбирает один насыщенный цвет-«герой» из палитры обложки. */
+private fun pickPrimary(colors: AlbumColors): Color {
+    for (c in listOf(colors.vibrant, colors.dominant, colors.lightVibrant, colors.muted)) {
+        val v = c.vivify()
+        if (v.isSpecified) return v
+    }
+    return WAVE_FALLBACK_COLORS[0]
+}
+
+/** Сдвигает цвет по HSV — для производных оттенков той же гаммы. */
+private fun Color.shiftHsv(hue: Float = 0f, satMul: Float = 1f, valMul: Float = 1f): Color {
+    val hsv = FloatArray(3)
+    android.graphics.Color.colorToHSV(this.toArgb(), hsv)
+    hsv[0] = (hsv[0] + hue + 360f) % 360f
+    hsv[1] = (hsv[1] * satMul).coerceIn(0f, 1f)
+    hsv[2] = (hsv[2] * valMul).coerceIn(0f, 1f)
     return Color(android.graphics.Color.HSVToColor(hsv))
 }
 
