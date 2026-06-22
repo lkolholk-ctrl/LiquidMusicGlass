@@ -220,24 +220,15 @@ fun WaveHomeScreen(
                 Spacer(Modifier.weight(1f))
             }
 
-            Spacer(Modifier.height(22.dp))
+            Spacer(Modifier.height(8.dp))
 
-            // ── Ряд пресетов-«шаров» ──
-            LazyRow(
-                modifier = Modifier.fillMaxWidth(),
-                contentPadding = PaddingValues(horizontal = 20.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(WAVE_PRESETS) { preset ->
-                    PresetOrb(
-                        preset = preset,
-                        onClick = { viewModel.buildWaveQueue(context) }
-                    )
-                }
-            }
+            // ── Карусель аврора-капель (мудовые пресеты) ──
+            WaveOrbCarousel(
+                onSelect = { viewModel.buildWaveQueue(context) }
+            )
 
             // Запас снизу под навбар
-            Spacer(Modifier.height(96.dp))
+            Spacer(Modifier.height(72.dp))
         }
     }
 }
@@ -330,63 +321,4 @@ private fun BigPlayButton(loading: Boolean, onClick: () -> Unit) {
     }
 }
 
-@Composable
-private fun PresetOrb(preset: WavePreset, onClick: () -> Unit) {
-    Column(
-        modifier = Modifier
-            .width(120.dp)
-            .clickable { onClick() },
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Canvas(modifier = Modifier.size(96.dp)) {
-            val base = preset.color
-            val light = lerp(base, Color.White, 0.45f)
-            val dark = lerp(base, Color.Black, 0.55f)
-            val r = size.minDimension / 2f
-            val center = Offset(size.width / 2f, size.height / 2f)
-
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(light, base, dark),
-                    center = Offset(size.width * 0.36f, size.height * 0.30f),
-                    radius = size.minDimension * 0.95f
-                ),
-                radius = r,
-                center = center
-            )
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(Color.White.copy(alpha = 0.55f), Color.Transparent),
-                    center = Offset(size.width * 0.34f, size.height * 0.26f),
-                    radius = size.minDimension * 0.34f
-                ),
-                radius = r,
-                center = center
-            )
-        }
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = preset.label,
-            color = Color.White,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.SemiBold,
-            fontFamily = AppFontFamily,
-            textAlign = TextAlign.Center,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis
-        )
-    }
-}
-
-private data class WavePreset(val label: String, val color: Color)
-
 private val WaveAccent = Color(0xFFFFE000)
-
-private val WAVE_PRESETS = listOf(
-    WavePreset("Прогрессив-хаус", Color(0xFF3B6FE0)),
-    WavePreset("Бегаю под летние треки", Color(0xFF2FB24A)),
-    WavePreset("Спокойный вечер", Color(0xFF17A2A2)),
-    WavePreset("Хочется инди", Color(0xFF5B5BE0)),
-    WavePreset("В дороге", Color(0xFFE07B2F)),
-    WavePreset("Танцпол", Color(0xFFE0405F))
-)
