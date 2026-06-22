@@ -1,8 +1,9 @@
 name: CI
 
-# Builds a signed RELEASE APK and runs unit tests on every branch push
-# (except the release branches handled by build-release.yml) and on PRs,
-# so the artifact can be installed and tested directly.
+# Builds a signed RELEASE APK on every branch push (except the release
+# branches handled by build-release.yml) and publishes it to a per-branch
+# GitHub Release, so it can be downloaded and tested directly without
+# touching the (limited) Actions artifact storage.
 on:
   push:
     branches-ignore:
@@ -14,6 +15,10 @@ on:
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
+
+# Needed for the gh CLI to create/update Releases with GITHUB_TOKEN.
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -72,21 +77,26 @@ jobs:
       - name: Run unit tests
         run: ./gradlew testReleaseUnitTest --stacktrace
 
-      - name: Upload release APK
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: LiquidMusicGlass-Release
-          path: app/build/outputs/apk/release/*.apk
-          retention-days: 5
-          overwrite: true
+      - name: Publish APK to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          SAFE="${GITHUB_REF_NAME//\//-}"
+          TAG="ci-${SAFE}"
+          APK="$(ls app/build/outputs/apk/release/*.apk | head -n1)"
+          OUT="LiquidMusicGlass-${SAFE}.apk"
+          cp "$APK" "$OUT"
+          echo "Built: $APK -> $OUT"
 
-      # Test reports only when something failed, to keep artifact storage low.
-      - name: Upload test reports
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: unit-test-reports
-          path: app/build/reports/tests/
-          retention-days: 3
-          overwrite: true
+          # Create the rolling per-branch pre-release if it does not exist yet,
+          # then upload the APK, overwriting any previous asset.
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --title "CI build · ${GITHUB_REF_NAME}" \
+              --notes "Automated CI build from ${GITHUB_SHA}" \
+              --prerelease \
+              --target "${GITHUB_SHA}"
+          fi
+          gh release upload "$TAG" "$OUT" --clobber
+          echo "APK published to release '$TAG'."
