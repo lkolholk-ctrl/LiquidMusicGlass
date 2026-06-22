@@ -147,10 +147,14 @@ fun LyricsScreen(
     val isPlaying by PlayerController.isPlaying.collectAsState()
     var smoothPositionMs by remember { mutableLongStateOf(0L) }
 
-    // Sync with coarse position when it changes (seek, track change)
+    // Sync with coarse position only when paused — во время игры позицией
+    // владеет покадровый тикер (getSmoothPositionMs), иначе грубые апдейты
+    // дёргали бы плавный sweep.
     LaunchedEffect(currentPositionMs) {
-        smoothPositionMs = currentPositionMs
-        timeProcessor?.updatePosition(smoothPositionMs)
+        if (!isPlaying) {
+            smoothPositionMs = currentPositionMs
+            timeProcessor?.updatePosition(currentPositionMs)
+        }
     }
 
     // High-frequency frame-synced ticker for butter-smooth animation
