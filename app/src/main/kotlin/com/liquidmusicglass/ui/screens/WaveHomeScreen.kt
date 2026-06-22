@@ -46,8 +46,11 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.takeOrElse
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -68,11 +71,12 @@ import kotlin.math.sin
  * "Моя волна" — главный экран в стиле Яндекс Музыки.
  *
  * Состояния:
- *  - idle (ничего не играет): большой заголовок + круглая кнопка Play, запускающая волну;
- *  - playing: имя артиста, обложка и стеклянная панель управления (пауза/название/лайк).
+ *  - idle (ничего не играет): большой заголовок + круглая кнопка Play;
+ *  - playing: имя артиста, обложка и стеклянная панель управления.
  *
- * Фон — живой жидкий градиент, цвета берутся из обложки текущего трека.
- * Снизу — горизонтальный ряд стилизованных «шаров»-пресетов.
+ * Фон — живой жидкий градиент: цвета берутся из обложки текущего трека,
+ * принудительно насыщаются, а на тусклых обложках заменяются ярким
+ * дефолтом, чтобы экран никогда не был чёрным.
  */
 @Composable
 fun WaveHomeScreen(
@@ -106,21 +110,21 @@ fun WaveHomeScreen(
         ) {
             WaveTopBar(onSearch = onNavigateToSearch)
 
-            // ── Центральная сцена ──
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                if (track == null) {
+            if (track == null) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
                     Text(
                         text = "Моя волна",
                         color = Color.White,
-                        fontSize = 44.sp,
+                        fontSize = 46.sp,
                         fontWeight = FontWeight.Black,
+                        fontFamily = FontFamily.SansSerif,
                         textAlign = TextAlign.Center
                     )
                     Spacer(Modifier.height(40.dp))
@@ -128,17 +132,24 @@ fun WaveHomeScreen(
                         loading = isBuildingWave,
                         onClick = { viewModel.buildWaveQueue(context) }
                     )
-                } else {
-                    Text(
-                        text = track.artist,
-                        color = Color.White,
-                        fontSize = 40.sp,
-                        fontWeight = FontWeight.Black,
-                        textAlign = TextAlign.Center,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(Modifier.height(28.dp))
+                }
+            } else {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = track.artist,
+                    color = Color.White,
+                    fontSize = 40.sp,
+                    fontWeight = FontWeight.Black,
+                    fontFamily = FontFamily.SansSerif,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp)
+                )
+                Spacer(Modifier.height(24.dp))
+                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                     AlbumArtImage(
                         uri = track.displayArtUri,
                         coverUrl = track.coverUrl,
@@ -146,14 +157,13 @@ fun WaveHomeScreen(
                         contentDescription = track.title,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier
-                            .size(184.dp)
+                            .size(216.dp)
                             .clip(RoundedCornerShape(28.dp))
                     )
                 }
-            }
 
-            // ── Стеклянная панель управления (только когда есть трек) ──
-            if (track != null) {
+                Spacer(Modifier.weight(1f))
+
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -194,6 +204,7 @@ fun WaveHomeScreen(
                                 color = Color.White,
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.SemiBold,
+                                fontFamily = FontFamily.SansSerif,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 textAlign = TextAlign.Center
@@ -218,7 +229,7 @@ fun WaveHomeScreen(
                 }
             }
 
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(22.dp))
 
             // ── Ряд пресетов-«шаров» ──
             LazyRow(
@@ -235,7 +246,7 @@ fun WaveHomeScreen(
             }
 
             // Запас снизу под мини-плеер и навбар
-            Spacer(Modifier.height(120.dp))
+            Spacer(Modifier.height(108.dp))
         }
     }
 }
@@ -248,7 +259,6 @@ private fun WaveTopBar(onSearch: () -> Unit) {
             .height(56.dp)
             .padding(horizontal = 16.dp)
     ) {
-        // Лого
         Box(
             modifier = Modifier
                 .align(Alignment.CenterStart)
@@ -272,6 +282,7 @@ private fun WaveTopBar(onSearch: () -> Unit) {
             color = WaveAccent,
             fontSize = 18.sp,
             fontWeight = FontWeight.Black,
+            fontFamily = FontFamily.SansSerif,
             modifier = Modifier.align(Alignment.Center)
         )
 
@@ -329,7 +340,6 @@ private fun PresetOrb(preset: WavePreset, onClick: () -> Unit) {
             val r = size.minDimension / 2f
             val center = Offset(size.width / 2f, size.height / 2f)
 
-            // Тело сферы
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(light, base, dark),
@@ -339,7 +349,6 @@ private fun PresetOrb(preset: WavePreset, onClick: () -> Unit) {
                 radius = r,
                 center = center
             )
-            // Глянцевый блик
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(Color.White.copy(alpha = 0.55f), Color.Transparent),
@@ -356,6 +365,7 @@ private fun PresetOrb(preset: WavePreset, onClick: () -> Unit) {
             color = Color.White,
             fontSize = 13.sp,
             fontWeight = FontWeight.SemiBold,
+            fontFamily = FontFamily.SansSerif,
             textAlign = TextAlign.Center,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis
@@ -365,26 +375,35 @@ private fun PresetOrb(preset: WavePreset, onClick: () -> Unit) {
 
 @Composable
 private fun WaveGradientBackground(colors: AlbumColors) {
-    val c1 by animateColorAsState(targetValue = colors.vibrant, animationSpec = tween(1200), label = "c1")
-    val c2 by animateColorAsState(targetValue = colors.dominant, animationSpec = tween(1200), label = "c2")
-    val c3 by animateColorAsState(targetValue = colors.muted, animationSpec = tween(1200), label = "c3")
+    // Bright fallbacks used when the album palette is too dark/desaturated,
+    // so the background is never just black.
+    val targets = remember(colors) {
+        val raw = listOf(colors.vibrant, colors.dominant, colors.lightVibrant)
+        raw.mapIndexed { i, c -> c.vivify().takeOrElse { WAVE_FALLBACK_COLORS[i] } }
+    }
+
+    val c1 by animateColorAsState(targets[0], tween(1200), label = "c1")
+    val c2 by animateColorAsState(targets[1], tween(1200), label = "c2")
+    val c3 by animateColorAsState(targets[2], tween(1200), label = "c3")
+    val base by animateColorAsState(lerp(targets[0], Color.Black, 0.80f), tween(1200), label = "base")
 
     val transition = rememberInfiniteTransition(label = "wave-bg")
     val t by transition.animateFloat(
         initialValue = 0f,
         targetValue = TWO_PI,
-        animationSpec = infiniteRepeatable(tween(16000, easing = LinearEasing)),
+        animationSpec = infiniteRepeatable(tween(18000, easing = LinearEasing)),
         label = "t"
     )
 
     Canvas(modifier = Modifier.fillMaxSize()) {
         val w = size.width
         val h = size.height
-        drawRect(Color(0xFF060606))
+        drawRect(base)
 
-        fun blob(color: Color, baseX: Float, baseY: Float, phase: Float, radius: Float, alpha: Float) {
-            val cx = w * baseX + sin(t + phase) * w * 0.12f
-            val cy = h * baseY + cos(t * 0.8f + phase) * h * 0.08f
+        fun blob(color: Color, baseX: Float, baseY: Float, phase: Float, radiusFactor: Float, alpha: Float) {
+            val cx = w * baseX + sin(t + phase) * w * 0.14f
+            val cy = h * baseY + cos(t * 0.7f + phase) * h * 0.10f
+            val radius = w * radiusFactor
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(color.copy(alpha = alpha), Color.Transparent),
@@ -397,19 +416,33 @@ private fun WaveGradientBackground(colors: AlbumColors) {
             )
         }
 
-        blob(c1, 0.35f, 0.34f, 0f, w * 0.95f, 0.55f)
-        blob(c2, 0.70f, 0.46f, 2f, w * 0.85f, 0.45f)
-        blob(c3, 0.50f, 0.64f, 4f, w * 0.90f, 0.40f)
+        blob(c1, 0.30f, 0.30f, 0f, 1.05f, 0.85f)
+        blob(c2, 0.72f, 0.42f, 2.1f, 0.95f, 0.70f)
+        blob(c3, 0.50f, 0.66f, 4.2f, 1.00f, 0.60f)
 
-        // Затемнение снизу для читаемости текста и пресетов
+        // Затемнение снизу для читаемости пресетов и панели управления
         drawRect(
             brush = Brush.verticalGradient(
-                colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.55f)),
-                startY = h * 0.45f,
+                colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.50f)),
+                startY = h * 0.5f,
                 endY = h
             )
         )
     }
+}
+
+/**
+ * Усиливает насыщенность/яркость цвета. Возвращает [Color.Unspecified],
+ * если цвет слишком тёмный или серый — тогда вызывающий код подставит
+ * яркий дефолт.
+ */
+private fun Color.vivify(): Color {
+    val hsv = FloatArray(3)
+    android.graphics.Color.colorToHSV(this.toArgb(), hsv)
+    if (hsv[2] < 0.12f || hsv[1] < 0.12f) return Color.Unspecified
+    hsv[1] = (hsv[1] * 1.7f).coerceIn(0.55f, 1f)
+    hsv[2] = hsv[2].coerceIn(0.55f, 0.95f)
+    return Color(android.graphics.Color.HSVToColor(hsv))
 }
 
 private data class WavePreset(val label: String, val color: Color)
@@ -417,6 +450,12 @@ private data class WavePreset(val label: String, val color: Color)
 private val WaveAccent = Color(0xFFFFE000)
 
 private const val TWO_PI = 6.2831855f
+
+private val WAVE_FALLBACK_COLORS = listOf(
+    Color(0xFFE5314E), // тёплый красно-розовый
+    Color(0xFF8A2BE2), // фиолетовый
+    Color(0xFF2E6BFF)  // синий
+)
 
 private val WAVE_PRESETS = listOf(
     WavePreset("Прогрессив-хаус", Color(0xFF3B6FE0)),
