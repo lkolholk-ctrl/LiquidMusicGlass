@@ -10,6 +10,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -44,9 +45,7 @@ uniform half3  uColorBg;
 uniform half3  uColorA;
 uniform half3  uColorB;
 uniform half3  uColorC;
-uniform float  uLow;
-uniform float  uMid;
-uniform float  uHigh;
+uniform float  uBass;   // сглаженная огибающая баса 0..1 (без вспышек)
 
 float hash2(float2 p) {
     float px = fract(p.x * 0.3183099 + 0.1) * 17.0;
@@ -81,7 +80,10 @@ half4 main(float2 fragCoord) {
     float2 uv = fragCoord / uResolution;
     float asp = uResolution.x / uResolution.y;
     float2 p = float2(uv.x * asp, uv.y) * 3.4;
-    float t = uTime * 0.04;
+    // лёгкое «дыхание»: на басу дым слегка расширяется (узкая амплитуда)
+    p *= (1.0 - uBass * 0.04);
+    // на басу завихрение клубится живее, на тихом — замирает (плавно, без скачков)
+    float t = uTime * 0.04 * (1.0 + uBass * 0.6);
 
     // Ограниченное вихревое движение вместо линейного сдвига —
     // дым «бурлит» на месте, без прямых полос, ползущих с краёв.
@@ -97,17 +99,41 @@ half4 main(float2 fragCoord) {
     half3 col = uColorBg;
     col = mix(col, uColorA, smoothstep(0.40, 0.63, ff) * 0.92 * uIntensity);
     col = mix(col, uColorB, smoothstep(0.40, 0.63, w1) * 0.78 * uIntensity);
-    col = mix(col, uColorC, clamp(smoothstep(0.42, 0.66, w2) * 0.70 * uIntensity + uHigh * 0.25, 0.0, 1.0));
+    col = mix(col, uColorC, clamp(smoothstep(0.42, 0.66, w2) * 0.70 * uIntensity, 0.0, 1.0));
 
     // лёгкая вертикальная форма: чуть ярче к верху, мягче к фону у низа (читаемость)
     col *= mix(0.82, 1.05, 1.0 - smoothstep(0.1, 1.0, uv.y));
-    // бас подсвечивает ауру — «дыхание» под музыку
-    col *= (1.0 + uLow * 0.30 + uMid * 0.10);
+    // мягкое «дыхание» яркости под бас: УЗКИЙ диапазон ±13%, через сглаженную
+    // огибающую — без вспышек/морганий (безопасно для фотосенситивности)
+    col *= (1.0 + uBass * 0.13);
     col = mix(col, uColorBg, smoothstep(0.62, 1.0, uv.y) * 0.62);
 
     return half4(col, 1.0);
 }
 """
+
+// ── Envelope follower баса (анти-вспышки) ──
+// Раздельные атака/спад: дым плавно надувается и опадает, без покадровых
+// скачков яркости. Это и есть защита от стробоскопа/фотосенситивных триггеров.
+private const val BASS_ATTACK = 0.15f
+private const val BASS_RELEASE = 0.06f
+
+/**
+ * Сглаженный уровень баса 0..1 как [State]. Сырой [AudioReactor.low] прогоняется
+ * через огибающую с инерцией — в шейдер уходит ОДНО плавное число (uBass).
+ */
+@Composable
+private fun rememberSmoothedBass(): State<Float> = produceState(0f) {
+    var s = 0f
+    while (true) {
+        withInfiniteAnimationFrameMillis {
+            val target = AudioReactor.low.coerceIn(0f, 1f)
+            val rate = if (target > s) BASS_ATTACK else BASS_RELEASE
+            s += (target - s) * rate
+            value = s
+        }
+    }
+}
 
 @Composable
 fun AuraBackground(
@@ -140,6 +166,9 @@ private fun AuraShaderBackground(albumColors: AlbumColors, intensity: Float, mod
         }
     }
 
+    // одно сглаженное число баса в шейдер — гонит скорость варпа/дыхание/яркость
+    val bass by rememberSmoothedBass()
+
     Box(
         modifier
             .fillMaxSize()
@@ -152,9 +181,7 @@ private fun AuraShaderBackground(albumColors: AlbumColors, intensity: Float, mod
                 shader.setFloatUniform("uColorA", a.red, a.green, a.blue)
                 shader.setFloatUniform("uColorB", b.red, b.green, b.blue)
                 shader.setFloatUniform("uColorC", c.red, c.green, c.blue)
-                shader.setFloatUniform("uLow", AudioReactor.low)
-                shader.setFloatUniform("uMid", AudioReactor.mid)
-                shader.setFloatUniform("uHigh", AudioReactor.high)
+                shader.setFloatUniform("uBass", bass)
                 drawRect(brush)
             },
     )
@@ -174,6 +201,9 @@ private fun AuraGradientFallback(albumColors: AlbumColors, modifier: Modifier) {
         }
     }
 
+    // та же сглаженная огибающая баса — мягкое дыхание, без вспышек
+    val bass by rememberSmoothedBass()
+
     Box(
         modifier
             .fillMaxSize()
@@ -182,10 +212,9 @@ private fun AuraGradientFallback(albumColors: AlbumColors, modifier: Modifier) {
                 val w = size.width
                 val h = size.height
                 val tau = (2.0 * Math.PI).toFloat()
-                // Бас слегка раздувает и подсвечивает пятна
-                val low = AudioReactor.low.coerceIn(0f, 1f)
-                val rBoost = 1f + low * 0.22f
-                val aBoost = 1f + low * 0.45f
+                // Бас слегка раздувает/подсвечивает пятна — УЗКО (±10..12%), без морганий
+                val rBoost = 1f + bass * 0.10f
+                val aBoost = 1f + bass * 0.12f
                 fun pt(seed: Float, sx: Float, sy: Float) = androidx.compose.ui.geometry.Offset(
                     w * (0.5f + 0.35f * kotlin.math.cos(tau * (phase + seed)) * sx),
                     h * (0.42f + 0.30f * kotlin.math.sin(tau * (phase + seed)) * sy),
