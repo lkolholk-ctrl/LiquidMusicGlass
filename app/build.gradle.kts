@@ -68,8 +68,9 @@ android {
             // Debug uses auto-generated debug signing
         }
         release {
-            isMinifyEnabled = true
-            isShrinkResources = true
+            // TODO: ВРЕМЕННО для ускорения отладочных сборок — вернуть оба в true.
+            isMinifyEnabled = false
+            isShrinkResources = false
             isDebuggable = false
             isJniDebuggable = false
             vcsInfo.include = false
