@@ -45,6 +45,13 @@ fun LyricsBackground(
     val baseDominant = rememberSaturationBoost(albumColors.dominant, saturationBoost)
     val baseMuted = rememberSaturationBoost(albumColors.muted, saturationBoost)
 
+    // Насыщенный базовый цвет фона из обложки (+сатурация/+яркость, как у Apple).
+    val bgColor by animateColorAsState(
+        targetValue = boostedCoverColor(albumColors.vibrant),
+        animationSpec = tween(durationMillis = 1000),
+        label = "lyricsBgColor"
+    )
+
     val boostedVibrant by animateColorAsState(
         targetValue = baseVibrant,
         animationSpec = tween(durationMillis = 1000),
@@ -71,7 +78,8 @@ fun LyricsBackground(
         ArtState(albumArtUri, coverUrl, audioFileUri, albumId)
     }
 
-    Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
+    // База — НАСЫЩЕННЫЙ цвет обложки (никакого серого/чёрного оверлея поверх).
+    Box(modifier = modifier.fillMaxSize().background(bgColor)) {
         // ── Crossfade for static background image to prevent abrupt pops ──
         Crossfade(
             targetState = artState,
@@ -79,7 +87,7 @@ fun LyricsBackground(
             modifier = Modifier.fillMaxSize(),
             label = "lyricsBackgroundCrossfade"
         ) { state ->
-            // ── Layer 1: размытая обложка ──
+            // ── Layer 1: размытая обложка (лёгкая фактура поверх насыщенной базы) ──
             AlbumArtImage(
                 uri = state.albumArtUri,
                 coverUrl = state.coverUrl,
@@ -92,23 +100,23 @@ fun LyricsBackground(
                     .graphicsLayer {
                         scaleX = 1.8f
                         scaleY = 1.8f
-                        alpha = 0.75f
+                        alpha = 0.45f
                     }
                     .blur(LyricsTimeProcessor.BACKGROUND_BLUR_DP.dp)
             )
         }
 
-        // ── Layer 2: HSV-boosted цветовой слой ──
+        // ── Layer 2: насыщенный цветовой градиент (глубина, без серого) ──
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(
                     Brush.verticalGradient(
                         colorStops = arrayOf(
-                            0.00f to boostedVibrant.copy(alpha = 0.45f),
-                            0.35f to boostedDominant.copy(alpha = 0.40f),
-                            0.65f to boostedMuted.copy(alpha = 0.45f),
-                            1.00f to boostedVibrant.copy(alpha = 0.40f)
+                            0.00f to boostedVibrant.copy(alpha = 0.55f),
+                            0.40f to boostedDominant.copy(alpha = 0.45f),
+                            0.75f to boostedMuted.copy(alpha = 0.50f),
+                            1.00f to boostedVibrant.copy(alpha = 0.50f)
                         )
                     )
                 )
@@ -121,44 +129,40 @@ fun LyricsBackground(
                 .background(
                     Brush.horizontalGradient(
                         colorStops = arrayOf(
-                            0.00f to boostedVibrant.copy(alpha = 0.30f),
+                            0.00f to boostedVibrant.copy(alpha = 0.28f),
                             0.50f to Color.Transparent,
-                            1.00f to boostedMuted.copy(alpha = 0.25f)
+                            1.00f to boostedMuted.copy(alpha = 0.24f)
                         )
                     )
                 )
         )
 
-        // ── Scrim 1: чёрная маска (глубина) ──
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.55f))
-        )
-
-        // ── Scrim 2: белая маска (глянцевое свечение) ──
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.White.copy(alpha = 0.02f))
-        )
-
-        // ── Bottom gradient для читаемости текста ──
+        // ── Лёгкое затемнение только у нижней кромки (под навбар), без серой плёнки ──
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(
                     Brush.verticalGradient(
                         colorStops = arrayOf(
-                            0.00f to Color.Black.copy(alpha = 0.25f),
-                            0.40f to Color.Transparent,
-                            0.60f to Color.Black.copy(alpha = 0.25f),
-                            1.00f to Color.Black.copy(alpha = 0.55f)
+                            0.75f to Color.Transparent,
+                            1.00f to Color.Black.copy(alpha = 0.28f)
                         )
                     )
                 )
         )
     }
+}
+
+/**
+ * Насыщенный цвет обложки для фона/шапки: +30% сатурации и +30% яркости
+ * (но не вымывая в пастель). Используется и фоном лирики, и скрим-шапкой.
+ */
+fun boostedCoverColor(color: Color): Color {
+    val hsv = FloatArray(3)
+    android.graphics.Color.colorToHSV(color.toArgb(), hsv)
+    hsv[1] = (hsv[1] * 1.3f).coerceAtMost(1f)
+    hsv[2] = (hsv[2] * 1.3f).coerceAtMost(0.85f)
+    return Color(android.graphics.Color.HSVToColor(hsv))
 }
 
 @Composable

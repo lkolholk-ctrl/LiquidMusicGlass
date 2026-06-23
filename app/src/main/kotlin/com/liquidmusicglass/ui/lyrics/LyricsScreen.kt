@@ -64,7 +64,7 @@ private const val INSTRUMENTAL_GAP_MS = 4000L
 private const val ACTIVE_LINE_TOP_BIAS = 0.28f
 
 /** Высота зоны заголовка со скрим-градиентом (плотная часть закрывает название+артиста). */
-private val HEADER_SCRIM_HEIGHT = 140.dp
+private val HEADER_SCRIM_HEIGHT = 170.dp
 
 /**
  * Полноэкранный караоке-экран лирики (Apple Music style).
@@ -390,10 +390,10 @@ fun LyricsScreen(
             }
 
             // ── Градиент-скрим под заголовком ──
-            // Плотный вверху → прозрачный книзу. Цвет — доминирующий цвет
-            // обложки (тот же источник, что тинтует ауру/фон). darkMuted брать
-            // нельзя: на части обложек он выделяется серым и скрим «умирает».
-            val headerScrimColor = resolvedColors.dominant
+            // Плотный от самого верха (под статусбаром) → прозрачный вниз.
+            // Цвет — тот же НАСЫЩЕННЫЙ цвет обложки, что и фон лирики
+            // (boostedCoverColor от vibrant), никакого серого/чёрного.
+            val headerScrimColor = boostedCoverColor(resolvedColors.vibrant)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -402,8 +402,8 @@ fun LyricsScreen(
                     .background(
                         Brush.verticalGradient(
                             colors = listOf(
-                                headerScrimColor.copy(alpha = 0.95f),
-                                headerScrimColor.copy(alpha = 0.75f),
+                                headerScrimColor.copy(alpha = 0.92f),
+                                headerScrimColor.copy(alpha = 0.65f),
                                 Color.Transparent
                             )
                         )
