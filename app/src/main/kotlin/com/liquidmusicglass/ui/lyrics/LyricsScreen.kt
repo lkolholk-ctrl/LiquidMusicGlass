@@ -184,6 +184,13 @@ fun LyricsScreen(
     // Цикл живёт всё время (не пересоздаётся на смене isPlaying) — состояние
     // воспроизведения проверяется ВНУТРИ кадра, чтобы не терять кадры на
     // рестарте корутины при паузе/возобновлении.
+    //
+    // ВАЖНО: тикер запускается с ключом Unit и держит первую лямбду, поэтому
+    // напрямую он бы замкнул timeProcessor на момент старта (часто ещё null,
+    // пока лирика грузится). rememberUpdatedState даёт всегда СВЕЖУЮ ссылку на
+    // процессор — иначе закрас не полз бы с первого открытия.
+    val currentProcessor by rememberUpdatedState(timeProcessor)
+
     LaunchedEffect(Unit) {
         dbgTickerStarted = true
         var dbgFrame = 0
@@ -193,13 +200,13 @@ fun LyricsScreen(
                 val livePos = PlayerController.getSmoothPositionMs()
                 if (playing) {
                     smoothPositionMs = livePos
-                    timeProcessor?.updatePosition(smoothPositionMs)
+                    currentProcessor?.updatePosition(smoothPositionMs)
                 }
                 // Обновляем экранный дебаг ~раз в 6 кадров (читаемо, без мельтешения).
                 if (dbgFrame++ % 6 == 0) {
                     dbgTick = "tick pos=$livePos play=$playing " +
-                        "line=${timeProcessor?.currentLineIndex?.value} " +
-                        "prog=${((timeProcessor?.currentLineProgress?.value ?: 0f) * 100).toInt()}%"
+                        "line=${currentProcessor?.currentLineIndex?.value} " +
+                        "prog=${((currentProcessor?.currentLineProgress?.value ?: 0f) * 100).toInt()}%"
                 }
             }
         }
