@@ -81,9 +81,10 @@ half4 main(float2 fragCoord) {
     float asp = uResolution.x / uResolution.y;
     float2 p = float2(uv.x * asp, uv.y) * 3.4;
     // лёгкое «дыхание»: на басу дым слегка расширяется (узкая амплитуда)
-    p *= (1.0 - uBass * 0.04);
-    // на басу завихрение клубится живее, на тихом — замирает (плавно, без скачков)
-    float t = uTime * 0.04 * (1.0 + uBass * 0.6);
+    p *= (1.0 - uBass * 0.03);
+    // uTime — это УЖЕ проинтегрированная на CPU фаза (база + лёгкий басовый
+    // прирост скорости), поэтому здесь просто линейно, без скачков фазы.
+    float t = uTime * 0.04;
 
     // Ограниченное вихревое движение вместо линейного сдвига —
     // дым «бурлит» на месте, без прямых полос, ползущих с краёв.
@@ -160,13 +161,27 @@ private fun AuraShaderBackground(albumColors: AlbumColors, intensity: Float, mod
     val b by animateColorAsState(albumColors.dominant, tween(900), label = "auraB")
     val c by animateColorAsState(albumColors.lightVibrant, tween(900), label = "auraC")
 
+    // Фаза анимации интегрируется на CPU: базовая скорость + ЛЁГКИЙ басовый
+    // прирост (≤ +30%), накапливаемый по dt. Так скорость плавно «оживает» на
+    // басу без скачков фазы (умножать накопленное uTime на бас — НЕЛЬЗЯ).
     val timeSec by produceState(0f) {
+        var phase = 0f
+        var s = 0f
+        var lastMs = 0L
         while (true) {
-            withInfiniteAnimationFrameMillis { value = it / 1000f }
+            withInfiniteAnimationFrameMillis { ms ->
+                val dt = if (lastMs == 0L) 0f else ((ms - lastMs).coerceIn(0L, 64L)) / 1000f
+                lastMs = ms
+                val target = AudioReactor.low.coerceIn(0f, 1f)
+                val rate = if (target > s) BASS_ATTACK else BASS_RELEASE
+                s += (target - s) * rate
+                phase += dt * (1f + s * 0.30f)
+                value = phase
+            }
         }
     }
 
-    // одно сглаженное число баса в шейдер — гонит скорость варпа/дыхание/яркость
+    // одно сглаженное число баса в шейдер — дыхание/яркость (узко, безопасно)
     val bass by rememberSmoothedBass()
 
     Box(
