@@ -6,7 +6,6 @@
 
 - [ ] `PROTECTION_ENABLED = true` в `MainActivity.kt` (сейчас `false` — security-проверки root/emulator/Frida/подпись отключены).
 - [ ] R8/минификация: `isMinifyEnabled = true` и `isShrinkResources = true` в `app/build.gradle.kts` (release) — сейчас оба `false`.
-- [ ] Убрать `lyrdbg`-оверлей и его состояние (`dbgOpen/dbgTick/dbgTickerStarted`) из `LyricsScreen.kt`.
 
 ---
 

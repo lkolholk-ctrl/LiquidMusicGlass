@@ -9,7 +9,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -22,7 +21,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
@@ -169,17 +167,6 @@ fun LyricsScreen(
         }
     }
 
-    // ── lyrdbg: ЭКРАННЫЙ дебаг бага «первого тыка» (видно прямо в лирике) ──
-    // TODO: убрать lyrdbg-оверлей и состояние после диагностики.
-    var dbgOpen by remember { mutableStateOf("OPEN …") }
-    var dbgTick by remember { mutableStateOf("tick …") }
-    var dbgTickerStarted by remember { mutableStateOf(false) }
-
-    LaunchedEffect(Unit) {
-        dbgOpen = "OPEN pos=${PlayerController.getSmoothPositionMs()} " +
-            "play=${PlayerController.isPlaying.value} synced=${lyrics.isSynced} track=$resolvedTrackId"
-    }
-
     // High-frequency frame-synced ticker for butter-smooth animation.
     // Цикл живёт всё время (не пересоздаётся на смене isPlaying) — состояние
     // воспроизведения проверяется ВНУТРИ кадра, чтобы не терять кадры на
@@ -192,21 +179,11 @@ fun LyricsScreen(
     val currentProcessor by rememberUpdatedState(timeProcessor)
 
     LaunchedEffect(Unit) {
-        dbgTickerStarted = true
-        var dbgFrame = 0
         while (isActive) {
             withFrameMillis { _ ->
-                val playing = PlayerController.isPlaying.value
-                val livePos = PlayerController.getSmoothPositionMs()
-                if (playing) {
-                    smoothPositionMs = livePos
+                if (PlayerController.isPlaying.value) {
+                    smoothPositionMs = PlayerController.getSmoothPositionMs()
                     currentProcessor?.updatePosition(smoothPositionMs)
-                }
-                // Обновляем экранный дебаг ~раз в 6 кадров (читаемо, без мельтешения).
-                if (dbgFrame++ % 6 == 0) {
-                    dbgTick = "tick pos=$livePos play=$playing " +
-                        "line=${currentProcessor?.currentLineIndex?.value} " +
-                        "prog=${((currentProcessor?.currentLineProgress?.value ?: 0f) * 100).toInt()}%"
                 }
             }
         }
@@ -461,25 +438,6 @@ fun LyricsScreen(
                     fontSize = 13.sp,
                     maxLines = 1
                 )
-            }
-
-            // ── lyrdbg: ЭКРАННЫЙ дебаг-оверлей (внизу). TODO: убрать после диагностики ──
-            Column(
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(12.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color.Black.copy(alpha = 0.6f))
-                    .padding(horizontal = 10.dp, vertical = 8.dp)
-            ) {
-                Text(
-                    text = "ticker=${if (dbgTickerStarted) "ON" else "OFF"}",
-                    color = Color(0xFFFFE000),
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(text = dbgOpen, color = Color.White, fontSize = 11.sp)
-                Text(text = dbgTick, color = Color.White, fontSize = 11.sp)
             }
         }
     }
