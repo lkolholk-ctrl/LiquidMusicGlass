@@ -80,8 +80,9 @@ half4 main(float2 fragCoord) {
     float2 uv = fragCoord / uResolution;
     float asp = uResolution.x / uResolution.y;
     float2 p = float2(uv.x * asp, uv.y) * 3.4;
-    // лёгкое «дыхание»: на басу дым слегка расширяется (узкая амплитуда)
-    p *= (1.0 - uBass * 0.03);
+    // ГЛАВНЫЙ эффект — «вдох»: на басу дым пухнет (масштаб +~8%), на тихом
+    // опадает. Плавно (uBass — сглаженная огибающая с медленным спадом).
+    p *= (1.0 - uBass * 0.08);
     // uTime — это УЖЕ проинтегрированная на CPU фаза (база + лёгкий басовый
     // прирост скорости), поэтому здесь просто линейно, без скачков фазы.
     float t = uTime * 0.04;
@@ -104,9 +105,9 @@ half4 main(float2 fragCoord) {
 
     // лёгкая вертикальная форма: чуть ярче к верху, мягче к фону у низа (читаемость)
     col *= mix(0.82, 1.05, 1.0 - smoothstep(0.1, 1.0, uv.y));
-    // мягкое «дыхание» яркости под бас: УЗКИЙ диапазон ±13%, через сглаженную
-    // огибающую — без вспышек/морганий (безопасно для фотосенситивности)
-    col *= (1.0 + uBass * 0.13);
+    // лёгкая поддержка яркостью (вторично, вдох — главный): узко +~10%,
+    // через сглаженную огибающую — без вспышек (безопасно для фотосенситивности)
+    col *= (1.0 + uBass * 0.10);
     col = mix(col, uColorBg, smoothstep(0.62, 1.0, uv.y) * 0.62);
 
     return half4(col, 1.0);
@@ -114,10 +115,18 @@ half4 main(float2 fragCoord) {
 """
 
 // ── Envelope follower баса (анти-вспышки) ──
-// Раздельные атака/спад: дым плавно надувается и опадает, без покадровых
-// скачков яркости. Это и есть защита от стробоскопа/фотосенситивных триггеров.
-private const val BASS_ATTACK = 0.15f
-private const val BASS_RELEASE = 0.06f
+// Раздельные атака/спад + кап на шаг за кадр: дым плавно надувается и МЕДЛЕННО
+// опадает после удара, без покадровых скачков. Защита от стробоскопа.
+private const val BASS_ATTACK = 0.12f      // подъём
+private const val BASS_RELEASE = 0.04f     // спад — медленнее, чтоб дым плавно успокаивался
+private const val BASS_MAX_STEP = 0.035f   // кап: насколько параметр может прыгнуть за кадр
+
+/** Один шаг огибающей с раздельной атакой/спадом и капом скорости изменения. */
+private fun advanceBass(current: Float, target: Float): Float {
+    val rate = if (target > current) BASS_ATTACK else BASS_RELEASE
+    val step = ((target - current) * rate).coerceIn(-BASS_MAX_STEP, BASS_MAX_STEP)
+    return (current + step).coerceIn(0f, 1f)
+}
 
 /**
  * Сглаженный уровень баса 0..1 как [State]. Сырой [AudioReactor.low] прогоняется
@@ -128,9 +137,7 @@ private fun rememberSmoothedBass(): State<Float> = produceState(0f) {
     var s = 0f
     while (true) {
         withInfiniteAnimationFrameMillis {
-            val target = AudioReactor.low.coerceIn(0f, 1f)
-            val rate = if (target > s) BASS_ATTACK else BASS_RELEASE
-            s += (target - s) * rate
+            s = advanceBass(s, AudioReactor.low.coerceIn(0f, 1f))
             value = s
         }
     }
@@ -161,9 +168,10 @@ private fun AuraShaderBackground(albumColors: AlbumColors, intensity: Float, mod
     val b by animateColorAsState(albumColors.dominant, tween(900), label = "auraB")
     val c by animateColorAsState(albumColors.lightVibrant, tween(900), label = "auraC")
 
-    // Фаза анимации интегрируется на CPU: базовая скорость + ЛЁГКИЙ басовый
-    // прирост (≤ +30%), накапливаемый по dt. Так скорость плавно «оживает» на
-    // басу без скачков фазы (умножать накопленное uTime на бас — НЕЛЬЗЯ).
+    // Фаза анимации интегрируется на CPU: базовая (НЕнулевая) скорость + узкий
+    // басовый прирост ≤ +15% (множитель 1.0..1.15), накапливаемый по dt. Дым
+    // всегда спокойно движется сам, бас лишь чуть подкручивает — без «стоп→турбо»
+    // и без скачков фазы (умножать накопленное uTime на бас — НЕЛЬЗЯ).
     val timeSec by produceState(0f) {
         var phase = 0f
         var s = 0f
@@ -172,10 +180,8 @@ private fun AuraShaderBackground(albumColors: AlbumColors, intensity: Float, mod
             withInfiniteAnimationFrameMillis { ms ->
                 val dt = if (lastMs == 0L) 0f else ((ms - lastMs).coerceIn(0L, 64L)) / 1000f
                 lastMs = ms
-                val target = AudioReactor.low.coerceIn(0f, 1f)
-                val rate = if (target > s) BASS_ATTACK else BASS_RELEASE
-                s += (target - s) * rate
-                phase += dt * (1f + s * 0.30f)
+                s = advanceBass(s, AudioReactor.low.coerceIn(0f, 1f))
+                phase += dt * (1f + s * 0.15f)
                 value = phase
             }
         }
