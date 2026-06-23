@@ -42,6 +42,10 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+// TODO: ВРЕМЕННО для отладки бага «лирика не ползёт с первого тыка». Вернуть true
+// и убрать lyrdbg-логи в LyricsScreen после диагностики.
+private const val PROTECTION_ENABLED = false
+
 class MainActivity : ComponentActivity() {
 
     private val authScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -122,7 +126,8 @@ class MainActivity : ComponentActivity() {
         val compromiseReason = mutableStateOf("")
 
         // Security checks: Root, Emulator, Frida, Debugger, Xposed environment verification
-        authScope.launch {
+        // ВРЕМЕННО отключено флагом PROTECTION_ENABLED (см. TODO у объявления флага).
+        if (PROTECTION_ENABLED) authScope.launch {
             val isRooted = com.liquidmusicglass.engine.SecurityUtils.isDeviceRooted()
             val isEmulator = com.liquidmusicglass.engine.SecurityUtils.isEmulator()
 

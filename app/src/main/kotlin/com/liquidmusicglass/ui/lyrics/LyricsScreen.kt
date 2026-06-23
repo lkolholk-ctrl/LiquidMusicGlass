@@ -167,15 +167,33 @@ fun LyricsScreen(
         }
     }
 
+    // lyrdbg: момент ОТКРЫТИЯ экрана — что отдаёт smooth-позиция и якорь.
+    // TODO: убрать lyrdbg-логи после диагностики бага «первого тыка».
+    LaunchedEffect(Unit) {
+        android.util.Log.d(
+            "lyrdbg",
+            "OPEN pos=${PlayerController.getSmoothPositionMs()} play=${PlayerController.isPlaying.value} track=$resolvedTrackId synced=${lyrics.isSynced}"
+        )
+    }
+
     // High-frequency frame-synced ticker for butter-smooth animation.
     // Цикл живёт всё время (не пересоздаётся на смене isPlaying) — состояние
     // воспроизведения проверяется ВНУТРИ кадра, чтобы не терять кадры на
     // рестарте корутины при паузе/возобновлении.
     LaunchedEffect(Unit) {
+        android.util.Log.d("lyrdbg", "ticker-start")
+        var dbgFrame = 0
         while (isActive) {
             withFrameMillis { _ ->
                 if (PlayerController.isPlaying.value) {
                     smoothPositionMs = PlayerController.getSmoothPositionMs()
+                    // lyrdbg: логируем не каждый кадр, а раз в ~30 кадров, чтоб не спамить.
+                    if (dbgFrame++ % 30 == 0) {
+                        android.util.Log.d(
+                            "lyrdbg",
+                            "tick pos=$smoothPositionMs play=${PlayerController.isPlaying.value} line=${timeProcessor?.currentLineIndex?.value}"
+                        )
+                    }
                     timeProcessor?.updatePosition(smoothPositionMs)
                 }
             }
