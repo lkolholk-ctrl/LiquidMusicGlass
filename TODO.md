@@ -1,5 +1,15 @@
 # TODO
 
+## ⛔ ВЕРНУТЬ ПЕРЕД РЕЛИЗОМ — временно отключено ради скорости отладочных сборок
+
+На время отладки вся защита и оптимизация выключены (НЕ оставлять в финале!):
+
+- [ ] `PROTECTION_ENABLED = true` в `MainActivity.kt` (сейчас `false` — security-проверки root/emulator/Frida/подпись отключены).
+- [ ] R8/минификация: `isMinifyEnabled = true` и `isShrinkResources = true` в `app/build.gradle.kts` (release) — сейчас оба `false`.
+- [ ] Убрать `lyrdbg`-оверлей и его состояние (`dbgOpen/dbgTick/dbgTickerStarted`) из `LyricsScreen.kt`.
+
+---
+
 Отложенные задачи по безопасности (подробности — в `REVIEW.md`).
 
 ## 🔴 Критично
