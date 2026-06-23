@@ -511,11 +511,6 @@ private fun LyricLineSweep(
         fontFamily = AppFontFamily,
         lineHeight = 44.sp,
         textAlign = TextAlign.Start,
-        shadow = androidx.compose.ui.graphics.Shadow(
-            color = Color.Black.copy(alpha = 0.85f),
-            offset = Offset(0f, 2f),
-            blurRadius = 8f
-        ),
         platformStyle = PlatformTextStyle(includeFontPadding = false)
     )
 
