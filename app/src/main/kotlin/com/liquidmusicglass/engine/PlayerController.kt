@@ -1038,6 +1038,33 @@ object PlayerController {
         }
     }
 
+    /**
+     * «Волна по треку» (станция, как у Яндекса): строит очередь вокруг [seedTrack]
+     * через ICM `wave/next?seed_track_id`, ставит сам трек первым и продолжает
+     * похожими; авто-рефилл держит ту же станцию по seed.
+     */
+    fun startTrackWave(context: Context, seedTrack: Track) {
+        ioScope.launch {
+            val repo = com.liquidmusicglass.data.local.WaveRepository.getInstance(context)
+            val station = repo.buildWaveQueue(seedTrackId = seedTrack.id)
+            val queue = if (station.isEmpty()) {
+                listOf(seedTrack)
+            } else {
+                buildList {
+                    add(seedTrack)
+                    addAll(station.filter { it.id != seedTrack.id })
+                }
+            }
+            playFromList(
+                context = context,
+                tracks = queue,
+                startIndex = 0,
+                autoRefillType = "WAVE",
+                seedTrackId = seedTrack.id
+            )
+        }
+    }
+
     fun setFavoriteIds(ids: Set<String>) { _favoriteIds.value = ids }
     fun isFavorite(trackId: String): Boolean = _favoriteIds.value.contains(trackId)
 
