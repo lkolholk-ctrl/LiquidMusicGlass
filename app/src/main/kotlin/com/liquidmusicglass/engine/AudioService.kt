@@ -855,8 +855,13 @@ class AudioService : MediaSessionService() {
 
         android.util.Log.d("AudioService", "[PREFETCH] Exclude list: ${excludeIds.size} tracks (${recentIds.size} recent, ${skippedIds.size} highly skipped)")
 
-        // 4. Read mood/genre from EndlessPlaybackEngine context
+        // 4. Read station context from EndlessPlaybackEngine.
+        // ВАЖНО: если это станция по треку/муду (seedTrackId задан) — продолжаем ИМЕННО
+        // её через seed_track_id, БЕЗ mood/genre. Раньше этот префетч игнорировал seed и
+        // тянул персональную/жанровую волну — из-за этого после первых нормальных треков
+        // станции в очередь сыпался мусор не в тему.
         val engineContext = PlayerController.waveRefillContext.value
+        val seedTrackId = engineContext?.seedTrackId
         val mood = engineContext?.mood
         val genre = engineContext?.genre
         val onboardingGenres = com.liquidmusicglass.engine.AppSettings.onboardingGenres.value
@@ -865,7 +870,7 @@ class AudioService : MediaSessionService() {
         } else {
             genre
         }
-        android.util.Log.d("AudioService", "[PREFETCH] Context: mood=$mood, genre=$genre, seedGenre=$seedGenre")
+        android.util.Log.d("AudioService", "[PREFETCH] Context: seedTrack=$seedTrackId, mood=$mood, genre=$genre, seedGenre=$seedGenre")
 
         // 5. Fetch wave tracks with recursive filtering (Step 4)
         var attempts = 0
@@ -874,15 +879,18 @@ class AudioService : MediaSessionService() {
             attempts++
             val needed = PREFETCH_BATCH_SIZE - tracks.size
             android.util.Log.d("AudioService", "[PREFETCH] Fetching attempt $attempts, needed $needed tracks...")
-            
+
             val batch = mutableListOf<Track>()
             repeat(needed) {
                 try {
                     val response = com.liquidmusicglass.api.icm.IcmRepository.getWaveNext(
+                        seedTrackId = seedTrackId,
                         exclude = excludeIds.toList().takeIf { it.isNotEmpty() },
                         recentSkips = com.liquidmusicglass.engine.PlayerController.consecutiveSkips,
-                        mood = mood,
-                        genre = seedGenre
+                        // Станция по seed-треку чище без mood/genre — сервер сам
+                        // подбирает похожее. mood/genre оставляем только для персональной волны.
+                        mood = if (seedTrackId == null) mood else null,
+                        genre = if (seedTrackId == null) seedGenre else null
                     )
 
                     if (response == null || response.status != "ok") {
