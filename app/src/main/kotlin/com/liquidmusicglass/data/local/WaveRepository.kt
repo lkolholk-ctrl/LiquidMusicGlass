@@ -218,27 +218,10 @@ class WaveRepository(context: Context) {
                     genre = null
                 )
 
-                // Фолбэк ТОЛЬКО для персональной волны: если у сервера пока нет истории/лайков,
-                // подмешиваем случайный лайк как seed. Для мудовой станции фолбэка нет.
-                if ((response == null || response.status == "empty") && seedTrackId == null) {
-                    val code = IcmRepository.getLastHttpCode()
-                    val errorCode = IcmRepository.getLastErrorCode()
-                    if (code == 429 || errorCode == "rate_limited" || errorCode == "ip_temporarily_blocked") {
-                        Log.w(TAG, "Rate limit hit (429/blocked) during getWaveNext. Aborting queue building.")
-                        break
-                    }
-
-                    val fallbackSeed = dao.getRandomFavoriteTrackId()
-                    if (fallbackSeed != null) {
-                        Log.d(TAG, "Personal wave empty, falling back to favorite seed: $fallbackSeed")
-                        response = IcmRepository.getWaveNext(
-                            seedTrackId = fallbackSeed,
-                            exclude = excludeIds.toList().takeIf { it.isNotEmpty() },
-                            recentSkips = recentSkipsVal,
-                            genre = null
-                        )
-                    }
-                }
+                // Никакого «случайного лайка» как seed (это и была «херня»): по доке
+                // пустая персональная волна = у сервера нет seed-артистов/лайков, и
+                // правильная реакция — ОНБОРДИНГ (его триггерит ViewModel по пустому
+                // результату), а не подмена рандомной станцией.
 
                 if (response == null || response.status != "ok") {
                     val code = IcmRepository.getLastHttpCode()

@@ -92,6 +92,7 @@ fun WaveHomeScreen(
     val isPlaying by PlayerController.isPlaying.collectAsState()
     val favoriteIds by PlayerController.favoriteIds.collectAsState()
     val isBuildingWave by viewModel.isBuildingWave.collectAsState()
+    val needsOnboarding by viewModel.needsOnboarding.collectAsState()
     val recentlyPlayed by PlayerController.recentlyPlayed.collectAsState()
     val homeContent by viewModel.homeContent.collectAsState()
     val charts by viewModel.charts.collectAsState()
@@ -320,6 +321,18 @@ fun WaveHomeScreen(
                     Spacer(Modifier.height(28.dp))
                 }
             }
+        }
+
+        // ── Онбординг волны: показываем, когда персональная волна пуста и юзер
+        // ещё не выбрал стартовых артистов (по доке: empty wave → wave/onboarding). ──
+        if (needsOnboarding) {
+            WaveOnboardingScreen(
+                onComplete = {
+                    viewModel.clearOnboardingFlag()
+                    viewModel.buildWaveQueue(context)
+                },
+                onDismiss = { viewModel.clearOnboardingFlag() }
+            )
         }
     }
 }

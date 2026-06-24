@@ -52,6 +52,12 @@ class HomeViewModel : ViewModel() {
     private val _isBuildingWave = MutableStateFlow(false)
     val isBuildingWave: StateFlow<Boolean> = _isBuildingWave
 
+    // Пустая персональная волна → по доке нужен онбординг (выбор seed-артистов).
+    private val _needsOnboarding = MutableStateFlow(false)
+    val needsOnboarding: StateFlow<Boolean> = _needsOnboarding
+
+    fun clearOnboardingFlag() { _needsOnboarding.value = false }
+
     private val _topGenres = MutableStateFlow<List<String>>(emptyList())
     val topGenres: StateFlow<List<String>> = _topGenres
 
@@ -166,13 +172,22 @@ class HomeViewModel : ViewModel() {
                 _waveTracks.value = tracks
 
                 if (tracks.isNotEmpty()) {
-                    // Start playback
                     PlayerController.playFromList(
                         context = context,
                         tracks = tracks,
                         startIndex = 0,
                         autoRefillType = "WAVE"
                     )
+                } else {
+                    // Пусто → по доке: у сервера нет seed-артистов/лайков. Если онбординг
+                    // ещё не пройден — показываем выбор артистов (персонализация стартует
+                    // только после него). Иначе просто молчим.
+                    val onboarded = try {
+                        IcmRepository.getWaveOnboarding()?.completed ?: false
+                    } catch (_: Exception) {
+                        false
+                    }
+                    if (!onboarded) _needsOnboarding.value = true
                 }
             } catch (_: Exception) {
                 _error.value = "Failed to build wave"
