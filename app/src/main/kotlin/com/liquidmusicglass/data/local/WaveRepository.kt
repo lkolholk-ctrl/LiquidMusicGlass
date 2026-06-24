@@ -259,19 +259,16 @@ class WaveRepository(context: Context) {
                     }
                 }
 
-                // Resolve stream URL and add — без фейковой разметки жанра (она портила
-                // персонализацию, засоряя локальную историю жанров).
+                // Добавляем трек как есть (uri = byicloud.online/track/<id>). НЕ резолвим
+                // стрим-URL заранее: при воспроизведении StreamingDataSource всё равно
+                // резолвит свежий URL по id (resolveStreamUrlSync). Ранний getStreamUrl —
+                // это лишний сетевой round-trip на каждый трек (удваивает время сборки
+                // волны и «запекает» подписанный URL, который к моменту проигрывания
+                // может уже протухнуть). Нестримящиеся треки авто-скипаются плеером.
                 val track = waveTrack.toTrack()
-                val streamUrl = IcmRepository.getStreamUrl(track.id, source = track.source)
-
-                if (streamUrl != null) {
-                    queue.add(track.copy(uri = android.net.Uri.parse(streamUrl)))
-                    excludeIds.add(trackId)
-                    Log.d(TAG, "Added wave track: ${track.title} by ${track.artist}")
-                } else {
-                    Log.w(TAG, "Failed to resolve stream URL for $trackId, skipping")
-                    excludeIds.add(trackId)
-                }
+                queue.add(track)
+                excludeIds.add(trackId)
+                Log.d(TAG, "Added wave track: ${track.title} by ${track.artist}")
 
             } catch (e: Exception) {
                 Log.e(TAG, "Error fetching wave track", e)

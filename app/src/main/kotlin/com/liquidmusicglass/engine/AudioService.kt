@@ -902,21 +902,13 @@ class AudioService : MediaSessionService() {
                         return@repeat
                     }
 
-                    // Pre-validate: resolve stream URL
-                    val streamUrl = com.liquidmusicglass.api.icm.IcmRepository.getStreamUrl(
-                        waveTrack.id,
-                        source = waveTrack.source
-                    )
-
-                    if (streamUrl != null) {
-                        val track = waveTrack.toTrack().copy(
-                            uri = Uri.parse(streamUrl)
-                        )
-                        batch.add(track)
-                        excludeIds.add(waveTrack.id)
-                    } else {
-                        excludeIds.add(waveTrack.id)
-                    }
+                    // НЕ резолвим стрим-URL заранее: StreamingDataSource резолвит свежий
+                    // URL по id при воспроизведении. Ранний getStreamUrl — лишний сетевой
+                    // round-trip на каждый трек (удваивает префетч и «запекает» URL, который
+                    // может протухнуть к моменту проигрывания). Битые треки авто-скипаются.
+                    val track = waveTrack.toTrack()
+                    batch.add(track)
+                    excludeIds.add(waveTrack.id)
                 } catch (e: Exception) {
                     android.util.Log.e("AudioService", "[PREFETCH] Fetch loop error: ${e.message}")
                 }
