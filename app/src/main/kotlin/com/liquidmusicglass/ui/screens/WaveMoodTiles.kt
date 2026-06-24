@@ -105,32 +105,31 @@ float fbm(float2 p) {
     return v;
 }
 
-float hash1(float2 p) {
-    return fract(sin(dot(p, float2(12.9898, 78.233))) * 43758.5453);
+// Interleaved Gradient Noise — дешёвый и очень эффективный антибандинг-дизер.
+float ign(float2 p) {
+    return fract(52.9829189 * fract(dot(p, float2(0.06711056, 0.00583715))));
 }
 
 half4 main(float2 fragCoord) {
     float2 uv = fragCoord / uResolution;
     float t = uTime * 0.12;                       // медленно, «дышаще»
+    float asp = uResolution.x / uResolution.y;
 
-    // перелив: диагональная база + мягкий шумовой домен-варп + лёгкая синусоида
-    float n = fbm(uv * 2.0 + float2(t * 0.35, -t * 0.22));
+    // перелив: диагональная база + мягкий шумовой домен-варп + лёгкая синусоида.
+    // Цвет считаем во float-точности, чтобы не плодить ступени.
+    float n = fbm(uv * 2.2 + float2(t * 0.35, -t * 0.22));
     float g = uv.x * 0.55 + uv.y * 0.45;
-    float mixf = clamp(g + (n - 0.5) * 0.55 + 0.12 * sin(t + g * 3.0), 0.0, 1.0);
-    // джиттер фактора смешивания — ломает КОНТУРНЫЕ полосы в самом градиенте
-    mixf += (hash1(fragCoord * 1.7) - 0.5) * 0.012;
-    half3 col = mix(uColorA, uColorB, mixf);
+    float mixf = clamp(g + (n - 0.5) * 0.42 + 0.12 * sin(t + g * 3.0), 0.0, 1.0);
+    float3 col = mix(float3(uColorA), float3(uColorB), mixf);
 
-    // второй слой — тонкий шум для глубины/бликов (не перегружая)
-    float hi = fbm(uv * 4.5 + t * 0.15);
-    col += (hi - 0.5) * 0.06;
+    // мелкое зерно (глубина + физически ломает банды лучше, чем линии-маска)
+    float grain = fbm(float2(uv.x * asp, uv.y) * 9.0 + t * 0.2);
+    col += (grain - 0.5) * 0.05;
 
-    // TPDF-дизеринг (~1.5 LSB): два независимых хэша → ломаем 8-битную ступенчатость
-    float r1 = hash1(fragCoord);
-    float r2 = hash1(fragCoord + float2(37.0, 17.0));
-    col += (r1 + r2 - 1.0) * (1.5 / 255.0);
+    // IGN-дизер ~2 LSB — добивает 8-битную ступенчатость градиента
+    col += (ign(fragCoord) - 0.5) * (2.0 / 255.0);
 
-    return half4(col, 1.0);
+    return half4(half3(col), 1.0);
 }
 """
 
