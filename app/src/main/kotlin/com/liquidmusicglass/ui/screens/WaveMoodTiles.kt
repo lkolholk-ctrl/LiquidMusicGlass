@@ -1,17 +1,13 @@
 package com.liquidmusicglass.ui.screens
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
+import android.graphics.RuntimeShader
+import android.os.Build
+import androidx.compose.animation.core.withInfiniteAnimationFrameMillis
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
@@ -20,7 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -30,6 +26,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
@@ -67,25 +64,81 @@ val WAVE_MOODS = listOf(
 private const val TILE_DP = 168
 private const val TAU = (2.0 * PI).toFloat()
 
+// Скорость медленного «дыхания» узора (доля фазы 0..1 в секунду).
+private const val PATTERN_SPEED = 0.07f
+
 /**
- * Горизонтальный ряд крупных мудовых плиток с анимированным узором и переливом
- * цветов. Тап по плитке строит волну выбранного настроения через [onSelect].
+ * AGSL-шейдер плитки: медленный перелив между двумя цветами муда (домен-варп
+ * шумом) + лёгкий шумовой слой для ГЛУБИНЫ/бликов. Всё на GPU — недорого даже
+ * для нескольких плиток в ряду. API 33+; ниже — CPU-градиент-фолбэк.
+ */
+private const val TILE_AGSL = """
+uniform float2 uResolution;
+uniform float  uTime;
+uniform half3  uColorA;
+uniform half3  uColorB;
+
+float hash(float2 p) {
+    p = fract(p * float2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x * p.y);
+}
+float vnoise(float2 p) {
+    float2 i = floor(p);
+    float2 f = fract(p);
+    float2 u = f * f * (3.0 - 2.0 * f);
+    float a = hash(i);
+    float b = hash(i + float2(1.0, 0.0));
+    float c = hash(i + float2(0.0, 1.0));
+    float d = hash(i + float2(1.0, 1.0));
+    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+float fbm(float2 p) {
+    float v = 0.0;
+    float amp = 0.5;
+    for (int i = 0; i < 3; i++) {
+        v += amp * vnoise(p);
+        p = p * 2.0 + float2(1.7, 9.2);
+        amp *= 0.5;
+    }
+    return v;
+}
+
+half4 main(float2 fragCoord) {
+    float2 uv = fragCoord / uResolution;
+    float t = uTime * 0.12;                       // медленно, «дышаще»
+
+    // перелив: диагональная база + мягкий шумовой домен-варп + лёгкая синусоида
+    float n = fbm(uv * 2.0 + float2(t * 0.35, -t * 0.22));
+    float g = uv.x * 0.55 + uv.y * 0.45;
+    float mixf = clamp(g + (n - 0.5) * 0.55 + 0.12 * sin(t + g * 3.0), 0.0, 1.0);
+    half3 col = mix(uColorA, uColorB, mixf);
+
+    // второй слой — тонкий шум для глубины/бликов (не перегружая)
+    float hi = fbm(uv * 4.5 + t * 0.15);
+    col += (hi - 0.5) * 0.06;
+
+    return half4(col, 1.0);
+}
+"""
+
+/**
+ * Горизонтальный ряд крупных мудовых плиток. Перелив+глубина — шейдером (GPU),
+ * свой узор — сверху. Анимируются только ВИДИМЫЕ плитки: LazyRow уничтожает
+ * элементы за вьюпортом, поэтому их drawBehind не вызывается; время — один
+ * общий кадровый клок.
  */
 @Composable
 fun WaveMoodTiles(
     onSelect: (WaveMood) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val transition = rememberInfiniteTransition(label = "moodTiles")
-    val phase = transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 9000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "moodPhase"
-    )
+    // Единый кадровый клок (секунды). Один на весь ряд — не плодим корутины.
+    val timeSec = produceState(0f) {
+        while (true) {
+            withInfiniteAnimationFrameMillis { value = it / 1000f }
+        }
+    }
 
     LazyRow(
         modifier = modifier,
@@ -95,8 +148,8 @@ fun WaveMoodTiles(
         items(WAVE_MOODS, key = { it.label }) { mood ->
             MoodTile(
                 mood = mood,
-                phase = phase,
-                seed = WAVE_MOODS.indexOf(mood) * 0.17f,
+                timeSec = timeSec,
+                seed = WAVE_MOODS.indexOf(mood) * 1.7f,
                 onClick = { onSelect(mood) }
             )
         }
@@ -106,10 +159,16 @@ fun WaveMoodTiles(
 @Composable
 private fun MoodTile(
     mood: WaveMood,
-    phase: State<Float>,
+    timeSec: State<Float>,
     seed: Float,
     onClick: () -> Unit
 ) {
+    // Шейдер живёт только на API 33+. Создаётся один раз на плитку.
+    val shader = remember(mood) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) RuntimeShader(TILE_AGSL) else null
+    }
+    val shaderBrush = remember(shader) { shader?.let { ShaderBrush(it) } }
+
     Box(
         modifier = Modifier
             .size(TILE_DP.dp)
@@ -120,8 +179,46 @@ private fun MoodTile(
                 onClick = onClick
             )
             .drawBehind {
-                val p = (phase.value + seed) % 1f
-                drawMoodTile(mood, p)
+                val ts = timeSec.value                       // читаем здесь → редроу только видимых
+                val patternPhase = ((ts * PATTERN_SPEED) + seed * 0.13f) % 1f
+
+                if (shader != null && shaderBrush != null) {
+                    shader.setFloatUniform("uResolution", size.width, size.height)
+                    shader.setFloatUniform("uTime", ts + seed)       // сдвиг фазы у каждой плитки
+                    shader.setFloatUniform("uColorA", mood.colorA.red, mood.colorA.green, mood.colorA.blue)
+                    shader.setFloatUniform("uColorB", mood.colorB.red, mood.colorB.green, mood.colorB.blue)
+                    drawRect(shaderBrush)
+                } else {
+                    // CPU-фолбэк (<API33): медленно сдвигаемый диагональный градиент
+                    val shift = sin(patternPhase * TAU) * 0.5f
+                    drawRect(
+                        Brush.linearGradient(
+                            colors = listOf(mood.colorA, mood.colorB, mood.colorA),
+                            start = Offset(size.width * shift, 0f),
+                            end = Offset(size.width * (shift + 1f), size.height)
+                        )
+                    )
+                }
+
+                // ── узор (свой у каждого муда) ──
+                clipRect {
+                    when (mood.pattern) {
+                        MoodPattern.WAVES -> drawWaves(patternPhase, size.width, size.height)
+                        MoodPattern.DIAGONALS -> drawDiagonals(patternPhase, size.width, size.height)
+                        MoodPattern.CIRCLES -> drawCircles(patternPhase, size.width, size.height)
+                        MoodPattern.BLOBS -> drawBlobs(patternPhase, size.width, size.height, mood.colorB)
+                        MoodPattern.DOTS -> drawDots(patternPhase, size.width, size.height)
+                        MoodPattern.RINGS -> drawRings(patternPhase, size.width, size.height)
+                    }
+                }
+
+                // ── мягкий scrim к низу для читаемости подписи ──
+                drawRect(
+                    Brush.verticalGradient(
+                        0.45f to Color.Transparent,
+                        1.0f to Color.Black.copy(alpha = 0.35f)
+                    )
+                )
             }
             .padding(18.dp)
     ) {
@@ -136,42 +233,6 @@ private fun MoodTile(
             modifier = Modifier.align(Alignment.BottomStart)
         )
     }
-}
-
-/** Фон плитки: перелив (движущийся диагональный градиент) + узор + scrim под текст. */
-private fun DrawScope.drawMoodTile(mood: WaveMood, p: Float) {
-    val w = size.width
-    val h = size.height
-
-    // ── перелив цветов: 3-стоповый градиент, сдвигаемый по диагонали ──
-    val shift = (p * 2f - 1f) // -1..1
-    drawRect(
-        Brush.linearGradient(
-            colors = listOf(mood.colorA, mood.colorB, mood.colorA),
-            start = Offset(w * shift, 0f),
-            end = Offset(w * (shift + 1f), h)
-        )
-    )
-
-    // ── узор (свой у каждого муда) ──
-    clipRect {
-        when (mood.pattern) {
-            MoodPattern.WAVES -> drawWaves(p, w, h)
-            MoodPattern.DIAGONALS -> drawDiagonals(p, w, h)
-            MoodPattern.CIRCLES -> drawCircles(p, w, h)
-            MoodPattern.BLOBS -> drawBlobs(p, w, h, mood.colorB)
-            MoodPattern.DOTS -> drawDots(p, w, h)
-            MoodPattern.RINGS -> drawRings(p, w, h)
-        }
-    }
-
-    // ── мягкий scrim к низу для читаемости подписи ──
-    drawRect(
-        Brush.verticalGradient(
-            0.45f to Color.Transparent,
-            1.0f to Color.Black.copy(alpha = 0.35f)
-        )
-    )
 }
 
 private val LINE = Color.White.copy(alpha = 0.16f)
