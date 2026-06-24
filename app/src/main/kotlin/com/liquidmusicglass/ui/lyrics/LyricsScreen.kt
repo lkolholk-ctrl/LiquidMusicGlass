@@ -487,15 +487,16 @@ private fun LyricLineSweep(
     val hDp = with(LocalDensity.current) { layout.size.height.toDp() }
 
     Canvas(modifier = Modifier.size(wDp, hDp)) {
-        // 0) гло-подсветка под активной строкой (палитровый цвет + мягкий ореол)
+        // 0) гло-подсветка активной строки: цвет облегает текст. Блюр УЗКИЙ —
+        //    свечение хватает текст вплотную, без широких колец вокруг круглых букв.
         if (isActive) {
             drawText(
                 textLayoutResult = layout,
-                color = glowColor.copy(alpha = 0.45f),
+                color = glowColor.copy(alpha = 0.50f),
                 shadow = androidx.compose.ui.graphics.Shadow(
-                    color = glowColor.copy(alpha = 0.55f),
+                    color = glowColor.copy(alpha = 0.50f),
                     offset = Offset(0f, 0f),
-                    blurRadius = 26f
+                    blurRadius = 6f
                 )
             )
         }

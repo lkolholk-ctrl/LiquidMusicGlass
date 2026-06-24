@@ -114,12 +114,13 @@ half4 main(float2 fragCoord) {
 }
 """
 
-// ── Envelope follower баса (анти-вспышки) ──
-// Раздельные атака/спад + кап на шаг за кадр: дым плавно надувается и МЕДЛЕННО
-// опадает после удара, без покадровых скачков. Защита от стробоскопа.
-private const val BASS_ATTACK = 0.12f      // подъём
-private const val BASS_RELEASE = 0.04f     // спад — медленнее, чтоб дым плавно успокаивался
-private const val BASS_MAX_STEP = 0.035f   // кап: насколько параметр может прыгнуть за кадр
+// ── Envelope follower баса (анти-вспышки + анти-дёрганье) ──
+// Раздельные атака/спад + кап на шаг за кадр, плюс ВТОРАЯ ступень сглаживания
+// (каскад) — дым плавно КЛУБИТСЯ под бас, не дёргается покадрово.
+private const val BASS_ATTACK = 0.08f      // подъём — помягче, чтоб не «снэпало» на транзиентах
+private const val BASS_RELEASE = 0.035f    // спад — медленный, дым плавно успокаивается
+private const val BASS_MAX_STEP = 0.022f   // кап: макс. шаг параметра за кадр
+private const val BASS_STAGE2 = 0.15f      // вторая ступень low-pass поверх огибающей
 
 /** Один шаг огибающей с раздельной атакой/спадом и капом скорости изменения. */
 private fun advanceBass(current: Float, target: Float): Float {
@@ -130,15 +131,18 @@ private fun advanceBass(current: Float, target: Float): Float {
 
 /**
  * Сглаженный уровень баса 0..1 как [State]. Сырой [AudioReactor.low] прогоняется
- * через огибающую с инерцией — в шейдер уходит ОДНО плавное число (uBass).
+ * через КАСКАД: огибающая с инерцией → вторая ступень low-pass. В шейдер уходит
+ * одно очень плавное число (uBass) — клубление без рывков.
  */
 @Composable
 private fun rememberSmoothedBass(): State<Float> = produceState(0f) {
-    var s = 0f
+    var s1 = 0f
+    var s2 = 0f
     while (true) {
         withInfiniteAnimationFrameMillis {
-            s = advanceBass(s, AudioReactor.low.coerceIn(0f, 1f))
-            value = s
+            s1 = advanceBass(s1, AudioReactor.low.coerceIn(0f, 1f))
+            s2 += (s1 - s2) * BASS_STAGE2
+            value = s2
         }
     }
 }
@@ -174,14 +178,16 @@ private fun AuraShaderBackground(albumColors: AlbumColors, intensity: Float, mod
     // и без скачков фазы (умножать накопленное uTime на бас — НЕЛЬЗЯ).
     val timeSec by produceState(0f) {
         var phase = 0f
-        var s = 0f
+        var s1 = 0f
+        var s2 = 0f
         var lastMs = 0L
         while (true) {
             withInfiniteAnimationFrameMillis { ms ->
                 val dt = if (lastMs == 0L) 0f else ((ms - lastMs).coerceIn(0L, 64L)) / 1000f
                 lastMs = ms
-                s = advanceBass(s, AudioReactor.low.coerceIn(0f, 1f))
-                phase += dt * (1f + s * 0.15f)
+                s1 = advanceBass(s1, AudioReactor.low.coerceIn(0f, 1f))
+                s2 += (s1 - s2) * BASS_STAGE2
+                phase += dt * (1f + s2 * 0.15f)
                 value = phase
             }
         }
