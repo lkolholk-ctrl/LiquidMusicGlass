@@ -556,24 +556,23 @@ private fun WaveTopBar(onSearch: () -> Unit) {
 private fun BigPlayButton(loading: Boolean, onClick: () -> Unit) {
     Box(
         modifier = Modifier
-            .size(96.dp)
-            .clip(CircleShape)
-            .background(WaveAccent)
+            .size(132.dp)
             .clickable(enabled = !loading) { onClick() },
         contentAlignment = Alignment.Center
     ) {
         if (loading) {
             CircularProgressIndicator(
-                color = Color.Black,
+                color = WaveAccent,
                 strokeWidth = 3.dp,
-                modifier = Modifier.size(34.dp)
+                modifier = Modifier.size(48.dp)
             )
         } else {
+            // Просто большой треугольник, без круга/подложки
             Icon(
                 imageVector = Icons.Rounded.PlayArrow,
                 contentDescription = "Listen",
-                tint = Color.Black,
-                modifier = Modifier.size(48.dp)
+                tint = WaveAccent,
+                modifier = Modifier.size(124.dp)
             )
         }
     }
