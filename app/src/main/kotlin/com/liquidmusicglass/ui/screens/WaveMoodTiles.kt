@@ -117,14 +117,18 @@ half4 main(float2 fragCoord) {
     float n = fbm(uv * 2.0 + float2(t * 0.35, -t * 0.22));
     float g = uv.x * 0.55 + uv.y * 0.45;
     float mixf = clamp(g + (n - 0.5) * 0.55 + 0.12 * sin(t + g * 3.0), 0.0, 1.0);
+    // джиттер фактора смешивания — ломает КОНТУРНЫЕ полосы в самом градиенте
+    mixf += (hash1(fragCoord * 1.7) - 0.5) * 0.012;
     half3 col = mix(uColorA, uColorB, mixf);
 
     // второй слой — тонкий шум для глубины/бликов (не перегружая)
     float hi = fbm(uv * 4.5 + t * 0.15);
     col += (hi - 0.5) * 0.06;
 
-    // дизеринг: ломаем 8-битное квантование, чтобы не было ступенчатых полос
-    col += (hash1(fragCoord) - 0.5) * (1.0 / 255.0);
+    // TPDF-дизеринг (~1.5 LSB): два независимых хэша → ломаем 8-битную ступенчатость
+    float r1 = hash1(fragCoord);
+    float r2 = hash1(fragCoord + float2(37.0, 17.0));
+    col += (r1 + r2 - 1.0) * (1.5 / 255.0);
 
     return half4(col, 1.0);
 }
