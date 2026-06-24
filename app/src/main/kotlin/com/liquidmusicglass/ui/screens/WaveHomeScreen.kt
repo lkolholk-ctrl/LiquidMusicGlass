@@ -66,7 +66,7 @@ import kotlinx.coroutines.launch
  *
  * It is a single scrollable feed:
  *  - a wave hero (idle: big title + Play; playing: artist, cover and flat controls);
- *  - a rotating aurora-orb carousel of mood presets;
+ *  - a row of animated mood tiles (patterned, color-shifting);
  *  - content sections reusing [HomeViewModel] data (recently played, charts,
  *    new releases and recommendations).
  *
@@ -221,12 +221,13 @@ fun WaveHomeScreen(
                 }
             }
 
-            // ── Aurora-orb mood carousel ──
+            // ── Animated mood tiles ──
             item {
                 Spacer(Modifier.height(8.dp))
-                WaveOrbCarousel(
+                WaveMoodTiles(
                     onSelect = { viewModel.buildWaveQueue(context) }
                 )
+                Spacer(Modifier.height(8.dp))
             }
 
             // ── Recently played ──
