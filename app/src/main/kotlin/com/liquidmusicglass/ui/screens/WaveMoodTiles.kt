@@ -98,10 +98,15 @@ float fbm(float2 p) {
     float amp = 0.5;
     for (int i = 0; i < 3; i++) {
         v += amp * vnoise(p);
-        p = p * 2.0 + float2(1.7, 9.2);
+        // поворот координат между октавами — убивает осевые «полосы»
+        p = float2(0.8 * p.x + 0.6 * p.y, -0.6 * p.x + 0.8 * p.y) * 2.0;
         amp *= 0.5;
     }
     return v;
+}
+
+float hash1(float2 p) {
+    return fract(sin(dot(p, float2(12.9898, 78.233))) * 43758.5453);
 }
 
 half4 main(float2 fragCoord) {
@@ -117,6 +122,9 @@ half4 main(float2 fragCoord) {
     // второй слой — тонкий шум для глубины/бликов (не перегружая)
     float hi = fbm(uv * 4.5 + t * 0.15);
     col += (hi - 0.5) * 0.06;
+
+    // дизеринг: ломаем 8-битное квантование, чтобы не было ступенчатых полос
+    col += (hash1(fragCoord) - 0.5) * (1.0 / 255.0);
 
     return half4(col, 1.0);
 }
