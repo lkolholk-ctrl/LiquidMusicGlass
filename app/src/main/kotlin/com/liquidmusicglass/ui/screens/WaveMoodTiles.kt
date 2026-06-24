@@ -23,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -30,6 +31,7 @@ import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -184,13 +186,14 @@ private fun MoodTile(
 
                 // ── узор (свой у каждого муда) ──
                 clipRect {
+                    val a = mood.colorB
                     when (mood.pattern) {
-                        MoodPattern.WAVES -> drawWaves(patternPhase, size.width, size.height)
-                        MoodPattern.DIAGONALS -> drawDiagonals(patternPhase, size.width, size.height)
-                        MoodPattern.CIRCLES -> drawCircles(patternPhase, size.width, size.height)
-                        MoodPattern.BLOBS -> drawBlobs(patternPhase, size.width, size.height, mood.colorB)
-                        MoodPattern.DOTS -> drawDots(patternPhase, size.width, size.height)
-                        MoodPattern.RINGS -> drawRings(patternPhase, size.width, size.height)
+                        MoodPattern.WAVES -> drawWaves(patternPhase, size.width, size.height, a)
+                        MoodPattern.DIAGONALS -> drawDiagonals(patternPhase, size.width, size.height, a)
+                        MoodPattern.CIRCLES -> drawCircles(patternPhase, size.width, size.height, a)
+                        MoodPattern.BLOBS -> drawBlobs(patternPhase, size.width, size.height, a)
+                        MoodPattern.DOTS -> drawDots(patternPhase, size.width, size.height, a)
+                        MoodPattern.RINGS -> drawRings(patternPhase, size.width, size.height, a)
                     }
                 }
 
@@ -217,98 +220,139 @@ private fun MoodTile(
     }
 }
 
-private val LINE = Color.White.copy(alpha = 0.055f)
-private val LINE2 = Color.White.copy(alpha = 0.035f)
+/** Мягкое светящееся пятно (радиальный градиент → прозрачность). */
+private fun DrawScope.softGlow(center: Offset, radius: Float, color: Color, alpha: Float) {
+    if (radius <= 0f) return
+    drawCircle(
+        brush = Brush.radialGradient(
+            colors = listOf(color.copy(alpha = alpha), Color.Transparent),
+            center = center,
+            radius = radius
+        ),
+        radius = radius,
+        center = center
+    )
+}
 
-private fun DrawScope.drawWaves(p: Float, w: Float, h: Float) {
-    val amp = h * 0.07f
-    for (k in 0..3) {
+// ── WAVES: слоёные текучие волны со свечением (glow-обводка + яркое ядро) ──
+private fun DrawScope.drawWaves(p: Float, w: Float, h: Float, accent: Color) {
+    val rows = 6
+    for (k in 0 until rows) {
+        val yBase = h * (0.10f + k * 0.155f)
+        val amp = h * (0.045f + 0.02f * sin(k * 1.3f))
+        val freq = 1.3f + k * 0.18f
+        val phaseShift = p * TAU * (if (k % 2 == 0) 1f else -1f) + k * 0.7f
         val path = Path()
-        val yBase = h * (0.25f + k * 0.2f)
-        val phaseShift = p * TAU + k * 0.8f
         path.moveTo(0f, yBase)
         var x = 0f
         while (x <= w) {
-            val y = yBase + amp * sin(phaseShift + x / w * TAU * 1.6f)
+            val y = yBase + amp * sin(phaseShift + x / w * TAU * freq)
             path.lineTo(x, y)
-            x += w / 24f
+            x += w / 48f
         }
-        drawPath(path, if (k % 2 == 0) LINE else LINE2, style = Stroke(width = 3f))
+        val col = if (k % 2 == 0) Color.White else accent
+        drawPath(path, col.copy(alpha = 0.05f), style = Stroke(width = 12f))  // glow
+        drawPath(path, col.copy(alpha = 0.20f), style = Stroke(width = 2.2f)) // ядро
     }
 }
 
-private fun DrawScope.drawDiagonals(p: Float, w: Float, h: Float) {
-    val n = 9
-    val span = (w + h)
-    val gap = span / n
-    val off = (p * gap)
-    for (i in -1..n + 1) {
-        val s = i * gap + off
-        drawLine(
-            if (i % 2 == 0) LINE else LINE2,
-            start = Offset(s, 0f),
-            end = Offset(s - h, h),
-            strokeWidth = 6f
-        )
+// ── DIAGONALS: мягкие диагональные лучи света (широкие размытые полосы, не «штрихкод») ──
+private fun DrawScope.drawDiagonals(p: Float, w: Float, h: Float, accent: Color) {
+    rotate(degrees = -32f, pivot = Offset(w / 2f, h / 2f)) {
+        val count = 5
+        val band = w * 0.42f
+        val travel = w * 2.4f
+        for (i in -1..count) {
+            val cx = ((i + p) / count) * travel - w * 0.7f
+            val col = if (i % 2 == 0) Color.White else accent
+            drawRect(
+                brush = Brush.horizontalGradient(
+                    0f to Color.Transparent,
+                    0.5f to col.copy(alpha = 0.08f),
+                    1f to Color.Transparent,
+                    startX = cx - band / 2f,
+                    endX = cx + band / 2f
+                ),
+                topLeft = Offset(cx - band / 2f, -h),
+                size = Size(band, h * 3f)
+            )
+        }
     }
 }
 
-private fun DrawScope.drawCircles(p: Float, w: Float, h: Float) {
-    val c = Offset(w * 0.72f, h * 0.30f)
-    val maxR = w * 0.95f
-    val n = 5
+// ── CIRCLES: рябь по воде — расходящиеся кольца со свечением + мягкое ядро ──
+private fun DrawScope.drawCircles(p: Float, w: Float, h: Float, accent: Color) {
+    val c = Offset(w * 0.74f, h * 0.26f)
+    val maxR = w * 1.15f
+    val n = 7
     for (i in 0 until n) {
         val frac = ((i.toFloat() / n) + p) % 1f
         val r = frac * maxR
-        val alpha = (1f - frac) * 0.22f
-        drawCircle(Color.White.copy(alpha = alpha), radius = r, center = c, style = Stroke(width = 4f))
+        val fade = (1f - frac)
+        val col = if (i % 2 == 0) Color.White else accent
+        drawCircle(col.copy(alpha = fade * 0.16f), radius = r, center = c, style = Stroke(width = 2.5f + fade * 4f))
     }
+    softGlow(c, w * 0.30f, Color.White, 0.12f)
 }
 
+// ── BLOBS: слоёные дрейфующие световые сгустки + мелкие яркие блики ──
 private fun DrawScope.drawBlobs(p: Float, w: Float, h: Float, accent: Color) {
-    fun blob(seed: Float, baseX: Float, baseY: Float, rad: Float, color: Color) {
+    fun blob(seed: Float, bx: Float, by: Float, rad: Float, color: Color, alpha: Float) {
         val a = (p + seed) * TAU
-        val cx = w * baseX + w * 0.12f * cos(a)
-        val cy = h * baseY + h * 0.12f * sin(a * 1.1f)
-        drawCircle(
-            Brush.radialGradient(
-                colors = listOf(color.copy(alpha = 0.35f), Color.Transparent),
-                center = Offset(cx, cy),
-                radius = w * rad
-            ),
-            radius = w * rad,
-            center = Offset(cx, cy)
-        )
+        val cx = w * bx + w * 0.12f * cos(a)
+        val cy = h * by + h * 0.12f * sin(a * 1.1f)
+        softGlow(Offset(cx, cy), w * rad, color, alpha)
     }
-    blob(0.0f, 0.30f, 0.35f, 0.42f, Color.White)
-    blob(0.5f, 0.70f, 0.55f, 0.38f, accent)
+    blob(0.00f, 0.30f, 0.34f, 0.46f, Color.White, 0.16f)
+    blob(0.33f, 0.72f, 0.52f, 0.40f, accent, 0.24f)
+    blob(0.66f, 0.46f, 0.80f, 0.34f, Color.White, 0.12f)
+    // мелкие яркие блики
+    for (i in 0 until 3) {
+        val a = (p * (1f + i * 0.3f) + i * 0.4f) * TAU
+        val cx = w * (0.25f + 0.25f * i) + w * 0.06f * cos(a)
+        val cy = h * (0.3f + 0.18f * i) + h * 0.06f * sin(a)
+        softGlow(Offset(cx, cy), w * 0.07f, Color.White, 0.5f)
+    }
 }
 
-private fun DrawScope.drawDots(p: Float, w: Float, h: Float) {
-    val cols = 5
-    val rows = 5
+// ── DOTS: боке — мягкие крупные пятна позади + сетка мерцающих точек ──
+private fun DrawScope.drawDots(p: Float, w: Float, h: Float, accent: Color) {
+    // крупное мягкое боке позади
+    for (i in 0 until 4) {
+        val a = (p + i * 0.27f) * TAU
+        val cx = w * (0.2f + 0.2f * i) + w * 0.08f * cos(a)
+        val cy = h * (0.25f + 0.18f * i) + h * 0.08f * sin(a * 1.2f)
+        softGlow(Offset(cx, cy), w * 0.16f, if (i % 2 == 0) Color.White else accent, 0.10f)
+    }
+    // сетка точек с мерцанием (простые круги — дёшево, без аллокаций на кадр)
+    val cols = 6
+    val rows = 6
     val r = w * 0.022f
     for (gy in 0 until rows) {
         for (gx in 0 until cols) {
             val x = w * (gx + 0.5f) / cols
             val y = h * (gy + 0.5f) / rows
-            val tw = sin(p * TAU + (gx + gy) * 0.6f) * 0.5f + 0.5f
+            val tw = sin(p * TAU + (gx + gy) * 0.55f) * 0.5f + 0.5f
             drawCircle(Color.White.copy(alpha = 0.10f + tw * 0.22f), radius = r * (0.7f + tw * 0.6f), center = Offset(x, y))
         }
     }
 }
 
-private fun DrawScope.drawRings(p: Float, w: Float, h: Float) {
+// ── RINGS: пульсирующие звуковые кольца из двух центров, со свечением ──
+private fun DrawScope.drawRings(p: Float, w: Float, h: Float, accent: Color) {
     val centers = listOf(
-        Offset(w * 0.30f, h * 0.32f),
-        Offset(w * 0.74f, h * 0.62f)
+        Offset(w * 0.28f, h * 0.30f) to Color.White,
+        Offset(w * 0.76f, h * 0.64f) to accent
     )
-    for ((idx, c) in centers.withIndex()) {
-        val n = 4
+    for ((idx, pair) in centers.withIndex()) {
+        val (c, col) = pair
+        val n = 5
         for (i in 0 until n) {
             val frac = ((i.toFloat() / n) + p + idx * 0.4f) % 1f
-            val r = frac * w * 0.6f
-            drawCircle(Color.White.copy(alpha = (1f - frac) * 0.20f), radius = r, center = c, style = Stroke(width = 5f))
+            val r = frac * w * 0.72f
+            val fade = (1f - frac)
+            drawCircle(col.copy(alpha = fade * 0.18f), radius = r, center = c, style = Stroke(width = 2.5f + fade * 4.5f))
         }
+        softGlow(c, w * 0.14f, col, 0.18f)
     }
 }
