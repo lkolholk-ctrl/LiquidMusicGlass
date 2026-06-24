@@ -133,9 +133,10 @@ class EndlessPlaybackEngine(
                             } else emptyList()
                         }
                         else -> {
-                            // Default ICM wave refill
+                            // ICM wave refill. seedTrackId != null → продолжаем мудовую станцию
+                            // тем же жанром; null → персональная волна.
                             val waveRepo = com.liquidmusicglass.data.local.WaveRepository.getInstance(ctx)
-                            waveRepo.buildWaveQueue(count = REFILL_BATCH_SIZE)
+                            waveRepo.buildWaveQueue(count = REFILL_BATCH_SIZE, seedTrackId = refillCtx?.seedTrackId)
                         }
                     }
                 } else {

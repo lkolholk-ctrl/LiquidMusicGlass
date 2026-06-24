@@ -173,12 +173,12 @@ class WaveRepository(context: Context) {
      * 
      * Uses random favorite seeds, applies ban filters and skipRatio filters, and heuristic genre tagging.
      */
-    suspend fun buildWaveQueue(count: Int = 5): List<Track> = withContext(Dispatchers.IO) {
-        Log.d(TAG, "Building wave queue with custom Favorite seeding & Ban Filters")
+    suspend fun buildWaveQueue(count: Int = 5, seedTrackId: String? = null): List<Track> = withContext(Dispatchers.IO) {
+        Log.d(TAG, "Building wave queue (seed=${seedTrackId ?: "personal"})")
 
         val queue = mutableListOf<Track>()
         val excludeIds = mutableSetOf<String>()
-        
+
         // Get recent track IDs to exclude from wave
         val recentIds = try {
             playbackDao.getRecentTrackIds(50)
@@ -207,21 +207,20 @@ class WaveRepository(context: Context) {
                     kotlinx.coroutines.delay(150)
                 }
 
-                // Request the true personalized personal wave (seedTrackId = null)
-                // Use recentSkips from PlayerController to let the server adapt to recent skips!
+                // seedTrackId == null → персональная волна (подстраивается под юзера сервером:
+                // лайки / completion / skip-streak). Иначе — станция вокруг seed-трека (мудовая плитка).
                 val recentSkipsVal = com.liquidmusicglass.engine.PlayerController.consecutiveSkips
-                
+
                 var response = IcmRepository.getWaveNext(
-                    seedTrackId = null,
+                    seedTrackId = seedTrackId,
                     exclude = excludeIds.toList().takeIf { it.isNotEmpty() },
                     recentSkips = recentSkipsVal,
                     genre = null
                 )
 
-                // Robust fallback: if personal wave is empty (e.g. no server-side history/likes),
-                // we seed it with a random favorite from the local DB!
-                if (response == null || response.status == "empty") {
-                    // Check if response was null due to 429
+                // Фолбэк ТОЛЬКО для персональной волны: если у сервера пока нет истории/лайков,
+                // подмешиваем случайный лайк как seed. Для мудовой станции фолбэка нет.
+                if ((response == null || response.status == "empty") && seedTrackId == null) {
                     val code = IcmRepository.getLastHttpCode()
                     val errorCode = IcmRepository.getLastErrorCode()
                     if (code == 429 || errorCode == "rate_limited" || errorCode == "ip_temporarily_blocked") {
@@ -248,6 +247,8 @@ class WaveRepository(context: Context) {
                         Log.w(TAG, "Rate limit hit (429/blocked) during getWaveNext. Aborting queue building.")
                         break
                     }
+                    // Пустая станция (нет кандидатов) — прекращаем, чтоб не крутить вхолостую.
+                    if (response?.status == "empty") break
                     Log.w(TAG, "Wave response status: ${response?.status ?: "null"}")
                     continue
                 }
@@ -258,52 +259,32 @@ class WaveRepository(context: Context) {
                 }
 
                 val trackId = waveTrack.id
-                val title = waveTrack.title
-                val artist = waveTrack.artist ?: "Unknown Artist"
 
-                // ── 1. HARD BAN FILTER: Excluding CIS trash music (Case-Insensitive) ──
-                val tLower = title.lowercase()
-                val aLower = artist.lowercase()
-                val badWords = listOf("кишлак", "soda luv", "face", "принц", "рэп", "rap")
-                if (badWords.any { tLower.contains(it) || aLower.contains(it) }) {
-                    Log.d(TAG, "Ban Filter: Blocked trash track $trackId ($title by $artist)")
-                    excludeIds.add(trackId)
-                    continue
-                }
-
-                // ── 2. HARD FILTER: Check skipRatio in local Room DB track_stats ──
+                // Единственный локальный фильтр — ПЕРСОНАЛЬНЫЙ: если юзер стабильно скипает
+                // этот трек (skipRatio > 70% за ≥2 показа), не предлагаем снова. Никаких
+                // жанровых банов — волна подстраивается под то, что юзер реально слушает.
                 val stats = playbackDao.getTrackStat(trackId)
                 if (stats != null) {
                     val total = stats.playCount + stats.skippedCount
                     if (total >= 2) {
                         val skipRatio = stats.skippedCount.toFloat() / total.toFloat()
                         if (skipRatio > 0.70f) {
-                            Log.d(TAG, "Hard Filter: Excluding $trackId ($title) due to high skipRatio=$skipRatio")
+                            Log.d(TAG, "Skip-filter: excluding $trackId (skipRatio=$skipRatio)")
                             excludeIds.add(trackId)
                             continue
                         }
                     }
                 }
 
-                // Resolve stream URL for the wave track
+                // Resolve stream URL and add — без фейковой разметки жанра (она портила
+                // персонализацию, засоряя локальную историю жанров).
                 val track = waveTrack.toTrack()
                 val streamUrl = IcmRepository.getStreamUrl(track.id, source = track.source)
-                
-                if (streamUrl != null) {
-                    // ── 3. HEURISTIC GENRE TAGGING ──
-                    val resolvedGenre = when {
-                        tLower.contains("mix") || tLower.contains("remix") -> "Tech House"
-                        aLower.contains("dj") -> "House"
-                        else -> "Electronic"
-                    }
 
-                    val resolvedTrack = track.copy(
-                        uri = android.net.Uri.parse(streamUrl),
-                        genre = resolvedGenre
-                    )
-                    queue.add(resolvedTrack)
+                if (streamUrl != null) {
+                    queue.add(track.copy(uri = android.net.Uri.parse(streamUrl)))
                     excludeIds.add(trackId)
-                    Log.d(TAG, "Added wave track: $title by $artist resolved with genre=$resolvedGenre")
+                    Log.d(TAG, "Added wave track: ${track.title} by ${track.artist}")
                 } else {
                     Log.w(TAG, "Failed to resolve stream URL for $trackId, skipping")
                     excludeIds.add(trackId)

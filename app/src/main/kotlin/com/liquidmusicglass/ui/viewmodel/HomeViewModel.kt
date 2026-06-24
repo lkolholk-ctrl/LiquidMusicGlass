@@ -183,6 +183,45 @@ class HomeViewModel : ViewModel() {
     }
 
     /**
+     * Builds a mood/genre "station": finds a representative seed track for [query]
+     * via search, then builds a wave around it (wave/next?seed_track_id). Auto-refill
+     * continues the same station via the stored seed.
+     */
+    fun buildMoodWave(context: Context, query: String) {
+        if (_isBuildingWave.value) return
+        _isBuildingWave.value = true
+
+        viewModelScope.launch {
+            try {
+                // Репрезентативный seed-трек жанра/настроения.
+                val seedId = try {
+                    IcmRepository.searchTracks(query, limit = 5).firstOrNull()?.id
+                } catch (_: Exception) {
+                    null
+                }
+
+                val repo = WaveRepository(context)
+                val tracks = repo.buildWaveQueue(seedTrackId = seedId)
+                _waveTracks.value = tracks
+
+                if (tracks.isNotEmpty()) {
+                    PlayerController.playFromList(
+                        context = context,
+                        tracks = tracks,
+                        startIndex = 0,
+                        autoRefillType = "WAVE",
+                        seedTrackId = seedId
+                    )
+                }
+            } catch (_: Exception) {
+                _error.value = "Failed to build wave"
+            } finally {
+                _isBuildingWave.value = false
+            }
+        }
+    }
+
+    /**
      * Stops the "My Wave" playback.
      */
     fun stopWave() {

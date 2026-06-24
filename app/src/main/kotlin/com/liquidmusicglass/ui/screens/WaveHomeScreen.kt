@@ -101,8 +101,11 @@ fun WaveHomeScreen(
     val track = currentTrack
     val isFavorite = track?.id?.let { favoriteIds.contains(it) } == true
 
-    val newReleasesBlock = remember(homeContent) { homeContent?.blocks?.find { it.type == "new_releases" } }
-    val recommendationsBlock = remember(homeContent) { homeContent?.blocks?.find { it.type == "recommendations" } }
+    // Все смысловые блоки home-контента (popular / banners / new_releases /
+    // recommendations …). Чарты идут отдельной секцией из viewModel.charts.
+    val homeBlocks = remember(homeContent) {
+        homeContent?.blocks?.filter { it.type != "charts" && it.items.isNotEmpty() } ?: emptyList()
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
 
@@ -225,7 +228,7 @@ fun WaveHomeScreen(
             item {
                 Spacer(Modifier.height(8.dp))
                 WaveMoodTiles(
-                    onSelect = { viewModel.buildWaveQueue(context) }
+                    onSelect = { mood -> viewModel.buildMoodWave(context, mood.query) }
                 )
                 Spacer(Modifier.height(8.dp))
             }
@@ -255,28 +258,35 @@ fun WaveHomeScreen(
                 }
             }
 
-            // ── New releases ──
-            newReleasesBlock?.let { block ->
-                if (block.items.isNotEmpty()) {
-                    item {
-                        WaveSectionHeader(block.title)
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = 20.dp),
-                            horizontalArrangement = Arrangement.spacedBy(14.dp)
-                        ) {
-                            items(block.items, key = { "new_${it.id}" }) { homeItem ->
-                                WaveTrackCard(
-                                    title = homeItem.title,
-                                    subtitle = homeItem.displayArtist,
-                                    coverUrl = homeItem.cover,
-                                    onClick = {
-                                        homeItem.collectionId?.let(onNavigateToAlbum)
+            // ── Home-блоки (popular / banners / new_releases / recommendations …) ──
+            homeBlocks.forEach { block ->
+                item(key = "block_${block.id}") {
+                    WaveSectionHeader(block.title)
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 20.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        items(block.items, key = { "${block.id}_${it.id}" }) { homeItem ->
+                            WaveTrackCard(
+                                title = homeItem.title,
+                                subtitle = homeItem.displayArtist,
+                                coverUrl = homeItem.cover,
+                                onClick = {
+                                    // Есть альбом → открываем альбом; иначе играем трек.
+                                    val cid = homeItem.collectionId
+                                    if (!cid.isNullOrBlank()) {
+                                        onNavigateToAlbum(cid)
+                                    } else {
+                                        val t = homeItem.toWaveTrack()
+                                        scope.launch {
+                                            resolveStreamUrl(t)?.let { PlayerController.playNext(it, context) }
+                                        }
                                     }
-                                )
-                            }
+                                }
+                            )
                         }
-                        Spacer(Modifier.height(28.dp))
                     }
+                    Spacer(Modifier.height(28.dp))
                 }
             }
 
@@ -308,37 +318,6 @@ fun WaveHomeScreen(
                         }
                     }
                     Spacer(Modifier.height(28.dp))
-                }
-            }
-
-            // ── Recommendations ──
-            recommendationsBlock?.let { block ->
-                if (block.items.isNotEmpty()) {
-                    item {
-                        WaveSectionHeader(block.title)
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = 20.dp),
-                            horizontalArrangement = Arrangement.spacedBy(14.dp)
-                        ) {
-                            items(block.items, key = { "rec_${it.id}" }) { homeItem ->
-                                WaveTrackCard(
-                                    title = homeItem.title,
-                                    subtitle = homeItem.displayArtist,
-                                    coverUrl = homeItem.cover,
-                                    onClick = {
-                                        val recTrack = homeItem.toWaveTrack()
-                                        scope.launch {
-                                            val resolved = resolveStreamUrl(recTrack)
-                                            if (resolved != null) {
-                                                PlayerController.playNext(resolved, context)
-                                            }
-                                        }
-                                    }
-                                )
-                            }
-                        }
-                        Spacer(Modifier.height(28.dp))
-                    }
                 }
             }
         }

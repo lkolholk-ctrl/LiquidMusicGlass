@@ -51,16 +51,18 @@ data class WaveMood(
     val label: String,
     val colorA: Color,
     val colorB: Color,
-    val pattern: MoodPattern
+    val pattern: MoodPattern,
+    /** Поисковый запрос для seed-трека станции этого настроения. */
+    val query: String
 )
 
 val WAVE_MOODS = listOf(
-    WaveMood("Progressive house", Color(0xFF3B6FE0), Color(0xFF7B5BFF), MoodPattern.WAVES),
-    WaveMood("Summer running", Color(0xFF2FB24A), Color(0xFFB6E05A), MoodPattern.DIAGONALS),
-    WaveMood("Calm evening", Color(0xFF12808C), Color(0xFF36C6C0), MoodPattern.CIRCLES),
-    WaveMood("Feeling indie", Color(0xFF7A4BE0), Color(0xFFE05BD0), MoodPattern.BLOBS),
-    WaveMood("On the road", Color(0xFFE07B2F), Color(0xFFF5C24B), MoodPattern.DOTS),
-    WaveMood("Dancefloor", Color(0xFFE0405F), Color(0xFFFF7AB0), MoodPattern.RINGS),
+    WaveMood("Progressive house", Color(0xFF3B6FE0), Color(0xFF7B5BFF), MoodPattern.WAVES, "progressive house"),
+    WaveMood("Summer running", Color(0xFF2FB24A), Color(0xFFB6E05A), MoodPattern.DIAGONALS, "running workout pop"),
+    WaveMood("Calm evening", Color(0xFF12808C), Color(0xFF36C6C0), MoodPattern.CIRCLES, "calm chill evening"),
+    WaveMood("Feeling indie", Color(0xFF7A4BE0), Color(0xFFE05BD0), MoodPattern.BLOBS, "indie"),
+    WaveMood("On the road", Color(0xFFE07B2F), Color(0xFFF5C24B), MoodPattern.DOTS, "road trip rock"),
+    WaveMood("Dancefloor", Color(0xFFE0405F), Color(0xFFFF7AB0), MoodPattern.RINGS, "dance edm hits"),
 )
 
 private const val TILE_DP = 168
