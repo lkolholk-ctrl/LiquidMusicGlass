@@ -247,8 +247,8 @@ private fun MoodTile(
     }
 }
 
-private val LINE = Color.White.copy(alpha = 0.16f)
-private val LINE2 = Color.White.copy(alpha = 0.10f)
+private val LINE = Color.White.copy(alpha = 0.055f)
+private val LINE2 = Color.White.copy(alpha = 0.035f)
 
 private fun DrawScope.drawWaves(p: Float, w: Float, h: Float) {
     val amp = h * 0.07f
