@@ -173,11 +173,20 @@ class WaveRepository(context: Context) {
      * 
      * Uses random favorite seeds, applies ban filters and skipRatio filters, and heuristic genre tagging.
      */
-    suspend fun buildWaveQueue(count: Int = 5, seedTrackId: String? = null): List<Track> = withContext(Dispatchers.IO) {
-        Log.d(TAG, "Building wave queue (seed=${seedTrackId ?: "personal"})")
+    suspend fun buildWaveQueue(
+        count: Int = 5,
+        seedTrackId: String? = null,
+        exclude: Collection<String> = emptyList()
+    ): List<Track> = withContext(Dispatchers.IO) {
+        Log.d(TAG, "Building wave queue (seed=${seedTrackId ?: "personal"}, exclude=${exclude.size})")
 
         val queue = mutableListOf<Track>()
         val excludeIds = mutableSetOf<String>()
+
+        // Anti-repeat: caller-supplied IDs (текущая очередь + уже игравшие в этой волне).
+        excludeIds.addAll(exclude)
+        // seed-трек никогда не должен попасть в станцию повторно
+        seedTrackId?.let { excludeIds.add(it) }
 
         // Get recent track IDs to exclude from wave
         val recentIds = try {

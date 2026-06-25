@@ -102,6 +102,8 @@ object PlayerController {
     private var playbackStartTimeMs: Long = 0L
     private var totalPlayedMs: Long = 0L
     private var lastPositionMs: Long = 0L
+    // Индекс трека, для которого уже запущена предзагрузка следующего (раз на трек).
+    private var preloadDoneForIndex: Int = -1
 
     // ── Consecutive Skips ──
     private var _consecutiveSkips = 0
@@ -283,13 +285,18 @@ object PlayerController {
     fun addTracksToQueue(newTracks: List<Track>) {
         if (newTracks.isEmpty()) return
         mainScope.launch {
-            queue = queue + newTracks
+            // Anti-repeat: не добавляем то, что уже есть в очереди (защита от дублей,
+            // даже если сервер/refill вернул пересекающийся трек).
+            val existingIds = queue.mapTo(HashSet()) { it.id }
+            val fresh = newTracks.filterNot { it.id in existingIds }
+            if (fresh.isEmpty()) return@launch
+            queue = queue + fresh
             _queueFlow.value = queue
-            
+
             withContext(Dispatchers.Main) {
                 val player = controller ?: appContext?.let { getPlayer(it) }
                 player?.let { p ->
-                    val mediaItems = newTracks.map { track ->
+                    val mediaItems = fresh.map { track ->
                         buildMediaItem(track, track.uri)
                     }
                     p.addMediaItems(mediaItems)
@@ -429,7 +436,7 @@ object PlayerController {
                         }
                     }
 
-                    prefetchAhead(context, startIndex, depth = 10)
+                    prefetchAhead(context, startIndex, depth = 3)
                 }
                 is StreamResult.Error -> {
                     android.util.Log.e("PlayerController", "Stream error for ${startTrack.id}: ${startStreamResult.code}")
@@ -563,6 +570,19 @@ object PlayerController {
                 totalPlayedMs += delta
             }
             lastPositionMs = positionMs
+
+            // ── Предзагрузка следующего трека за настраиваемые N секунд до конца ──
+            // Когда до конца остаётся ≤ preloadLeadSeconds — заранее резолвим/прогреваем
+            // следующие треки, чтобы переход был без паузы. Один раз на трек.
+            val effDur = if (durationMs > 0L) durationMs else _durationMs.value
+            if (effDur > 0L && preloadDoneForIndex != currentIndex) {
+                val remaining = effDur - positionMs
+                val leadMs = AppSettings.preloadLeadSeconds.value * 1000L
+                if (remaining in 1..leadMs) {
+                    preloadDoneForIndex = currentIndex
+                    appContext?.let { prefetchAhead(it, currentIndex, depth = 2) }
+                }
+            }
         }
     }
 
@@ -580,7 +600,9 @@ object PlayerController {
         _currentPositionMs.value = 0L
         
         resetPlaybackLogging(track.durationMs)
-        appContext?.let { prefetchAhead(it, index, depth = 5) }
+        // Только ближайший следующий — для мгновенного скипа. Более глубокая
+        // предзагрузка управляется настройкой «Preload next track» (по таймеру до конца).
+        appContext?.let { prefetchAhead(it, index, depth = 1) }
     }
 
     fun onTrackEnded() {
@@ -840,6 +862,7 @@ object PlayerController {
         playbackStartTimeMs = System.currentTimeMillis()
         totalPlayedMs = 0L
         lastPositionMs = 0L
+        preloadDoneForIndex = -1
     }
 
     private fun logPreviousTrack(track: Track, playedMs: Long) {
@@ -1077,6 +1100,31 @@ object PlayerController {
                 autoRefillType = "WAVE",
                 seedTrackId = seedTrack.id
             )
+        }
+    }
+
+    /**
+     * Волна по артисту. API не имеет seed_artist_id, поэтому берём топ-трек артиста как
+     * seed и строим вокруг него станцию (≈ радио по артисту, как у Яндекса).
+     */
+    fun startArtistWave(context: Context, artistId: String, artistName: String? = null) {
+        ioScope.launch {
+            val seed = try {
+                com.liquidmusicglass.api.icm.IcmRepository.getArtistTopTracks(artistId).firstOrNull()
+            } catch (_: Exception) {
+                null
+            }
+            if (seed == null) {
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(
+                        context,
+                        "Не удалось запустить волну по артисту",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                }
+                return@launch
+            }
+            startTrackWave(context, seed)
         }
     }
 
