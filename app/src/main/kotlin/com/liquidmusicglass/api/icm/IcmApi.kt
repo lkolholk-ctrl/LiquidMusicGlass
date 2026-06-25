@@ -93,11 +93,21 @@ class IcmApi private constructor() {
     }
 
     private val client by lazy {
+        // Явный Dispatcher: ограничиваем число одновременных запросов (всё идёт на
+        // один хост byicloud.online). Реальный темп держит IcmRateGate, а это —
+        // страховка от переполнения пула при залпах резолвов/префетча.
+        val dispatcher = okhttp3.Dispatcher().apply {
+            maxRequests = 12
+            maxRequestsPerHost = 8
+        }
         OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(10, TimeUnit.SECONDS)
             .writeTimeout(10, TimeUnit.SECONDS)
-            .retryOnConnectionFailure(true)
+            // Единая политика ретраев — только наш интерсептор. retryOnConnectionFailure
+            // выключаем, чтобы не было ДВОЙНЫХ (умножающихся) повторов.
+            .retryOnConnectionFailure(false)
+            .dispatcher(dispatcher)
             .connectionPool(okhttp3.ConnectionPool(5, 30, TimeUnit.SECONDS))
             .protocols(listOf(okhttp3.Protocol.HTTP_2, okhttp3.Protocol.HTTP_1_1))
             .addInterceptor { chain ->
@@ -108,16 +118,25 @@ class IcmApi private constructor() {
                 val maxRetries = 3
                 while (tryCount < maxRetries) {
                     try {
+                        // Закрываем предыдущий 5xx-ответ перед повтором (не течём телом).
+                        response?.close()
                         response = chain.proceed(request)
+                        // НИКОГДА не ретраим 4xx (в т.ч. 429) — повтор лишь усугубляет бан.
                         if (response.isSuccessful || response.code < 500) {
                             return@addInterceptor response
                         }
                         tryCount++
+                        if (tryCount < maxRetries) {
+                            // Экспоненциальный бэкофф + джиттер.
+                            val backoff = 250L * (1L shl (tryCount - 1)) + kotlin.random.Random.nextLong(0, 120)
+                            try { Thread.sleep(backoff) } catch (_: Exception) {}
+                        }
                     } catch (e: java.io.IOException) {
                         exception = e
                         tryCount++
                         if (tryCount >= maxRetries) throw e
-                        try { Thread.sleep(250L * tryCount) } catch (_: Exception) {}
+                        val backoff = 250L * (1L shl (tryCount - 1)) + kotlin.random.Random.nextLong(0, 120)
+                        try { Thread.sleep(backoff) } catch (_: Exception) {}
                     }
                 }
                 response ?: throw exception ?: java.io.IOException("Network error")
@@ -195,7 +214,14 @@ class IcmApi private constructor() {
         async: Boolean = false
     ): Result<T> {
         return withContext(Dispatchers.IO) {
+            // Circuit-breaker: пока активен бан — мгновенно фейлим, не выходя в сеть.
+            if (IcmRateGate.isBanned()) {
+                return@withContext Result.failure(
+                    IcmApiException(429, "rate-limited (local gate)", "ip_temporarily_blocked", null, IcmRateGate.bannedForSeconds().coerceAtLeast(1), null)
+                )
+            }
             try {
+                IcmRateGate.throttle()
                 val url = if (async) "$BASE_URL$endpoint?async=1" else "$BASE_URL$endpoint"
                 val request = buildRequest(url, method, body)
                 val response = client.newCall(request).execute()
@@ -232,6 +258,10 @@ class IcmApi private constructor() {
                         }
                         // Prefer the canonical HTTP Retry-After header, fall back to body field.
                         val retryAfterHeader = response.header("Retry-After")?.toIntOrNull()
+                        // 429 / блокировка → взводим circuit-breaker, чтобы остановить долбёжку.
+                        if (response.code == 429 || error?.error == "rate_limited" || error?.error == "ip_temporarily_blocked") {
+                            IcmRateGate.tripBan(retryAfterHeader ?: error?.retryAfter)
+                        }
                         Result.failure(IcmApiException(
                             response.code,
                             errorText,
@@ -254,7 +284,15 @@ class IcmApi private constructor() {
         body: String? = null,
         async: Boolean = false
     ): Result<T> {
+        // Circuit-breaker: пока активен бан — не выходим в сеть (важно для потока
+        // загрузчика ExoPlayer: не виснем на таймауте во время бана).
+        if (IcmRateGate.isBanned()) {
+            return Result.failure(
+                IcmApiException(429, "rate-limited (local gate)", "ip_temporarily_blocked", null, IcmRateGate.bannedForSeconds().coerceAtLeast(1), null)
+            )
+        }
         try {
+            IcmRateGate.throttleBlocking()
             val url = if (async) "$BASE_URL$endpoint?async=1" else "$BASE_URL$endpoint"
             val request = buildRequest(url, method, body)
             val response = client.newCall(request).execute()
@@ -282,6 +320,9 @@ class IcmApi private constructor() {
                         }
                     }
                     val retryAfterHeader = response.header("Retry-After")?.toIntOrNull()
+                    if (response.code == 429 || error?.error == "rate_limited" || error?.error == "ip_temporarily_blocked") {
+                        IcmRateGate.tripBan(retryAfterHeader ?: error?.retryAfter)
+                    }
                     Result.failure(IcmApiException(
                         response.code,
                         errorText,
