@@ -58,7 +58,11 @@ import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.StarBorder
+import androidx.compose.material.icons.rounded.ThumbUp
+import androidx.compose.material.icons.rounded.ThumbDown
 import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.Settings
 // import androidx.compose.material.icons.rounded.ThumbUp  // DISABLED
 // import androidx.compose.material.icons.rounded.ThumbDown // DISABLED
 import androidx.compose.material.icons.rounded.Download
@@ -174,11 +178,16 @@ fun FullPlayer(
     var showLyrics by remember { mutableStateOf(false) }
     var showArtistSheet by remember { mutableStateOf(false) }
     var showDebugPanel by remember { mutableStateOf(false) }
+    var showTrackMenu by remember { mutableStateOf(false) }
     val artistSheetState = rememberModalBottomSheetState(
         skipPartiallyExpanded = true
     )
-    // Wave feedback state: null = none, true = liked, false = disliked
-    var waveFeedback by remember { mutableStateOf<Boolean?>(null) }
+    val trackMenuSheetState = rememberModalBottomSheetState(
+        skipPartiallyExpanded = true
+    )
+    // Wave feedback state: null = none, true = liked, false = disliked.
+    // Keyed on trackId → сбрасывается при смене трека.
+    var waveFeedback by remember(trackId) { mutableStateOf<Boolean?>(null) }
     // Видимость контролов плеера. Когда открыта лирика — скрываются (как в Apple Music).
     // Тап по области лирики временно показывает их снова.
     var controlsVisible by remember { mutableStateOf(true) }
@@ -604,23 +613,17 @@ fun FullPlayer(
                             }
                         }
                     }
-                    // ThumbUp — DISABLED (wave feedback not connected yet)
-                    /*
+                    // 👍 More like this — wave/feedback (more_track + more_artist).
                     Box(
                         modifier = Modifier
                             .size(44.dp)
                             .pressScale {
                                 currentTrackObj?.let { track ->
+                                    waveFeedback = true
                                     scope.launch {
-                                        val previousFeedback = waveFeedback
-                                        waveFeedback = true
-                                        val feedbackType = if (track.artists.firstOrNull()?.id != null) {
-                                            "more_artist"
-                                        } else "more_track"
-                                        val value = track.artists.firstOrNull()?.id ?: track.id
-                                        val success = IcmRepository.sendWaveFeedback(feedbackType, value)
-                                        if (!success) {
-                                            waveFeedback = previousFeedback
+                                        IcmRepository.sendWaveFeedback("more_track", track.id)
+                                        track.artists.firstOrNull()?.id?.let {
+                                            IcmRepository.sendWaveFeedback("more_artist", it)
                                         }
                                     }
                                 }
@@ -635,29 +638,22 @@ fun FullPlayer(
                         )
                         Icon(
                             imageVector = Icons.Rounded.ThumbUp,
-                            contentDescription = null,
+                            contentDescription = "More like this",
                             tint = thumbUpTint,
                             modifier = Modifier.size(24.dp)
                         )
                     }
-                    */
-                    // ThumbDown — DISABLED (wave feedback not connected yet)
-                    /*
+                    // 👎 Less like this — wave/feedback (less_track + less_artist).
                     Box(
                         modifier = Modifier
                             .size(44.dp)
                             .pressScale {
                                 currentTrackObj?.let { track ->
+                                    waveFeedback = false
                                     scope.launch {
-                                        val previousFeedback = waveFeedback
-                                        waveFeedback = false
-                                        val feedbackType = if (track.artists.firstOrNull()?.id != null) {
-                                            "less_artist"
-                                        } else "less_track"
-                                        val value = track.artists.firstOrNull()?.id ?: track.id
-                                        val success = IcmRepository.sendWaveFeedback(feedbackType, value)
-                                        if (!success) {
-                                            waveFeedback = previousFeedback
+                                        IcmRepository.sendWaveFeedback("less_track", track.id)
+                                        track.artists.firstOrNull()?.id?.let {
+                                            IcmRepository.sendWaveFeedback("less_artist", it)
                                         }
                                     }
                                 }
@@ -672,16 +668,15 @@ fun FullPlayer(
                         )
                         Icon(
                             imageVector = Icons.Rounded.ThumbDown,
-                            contentDescription = null,
+                            contentDescription = "Less like this",
                             tint = thumbDownTint,
                             modifier = Modifier.size(24.dp)
                         )
                     }
-                    */
                     Box(
                         modifier = Modifier
                             .size(44.dp)
-                            .pressScale { onOpenSettings() },
+                            .pressScale { showTrackMenu = true },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
@@ -996,6 +991,87 @@ fun FullPlayer(
                                     .background(Color.White.copy(alpha = 0.10f))
                             )
                         }
+                    }
+                }
+            }
+        }
+
+        // ═══ Track options menu (Волна по треку / Настройки) ═══
+        if (showTrackMenu) {
+            ModalBottomSheet(
+                onDismissRequest = { showTrackMenu = false },
+                sheetState = trackMenuSheetState,
+                containerColor = Color(0xFF1C1C1E),
+                shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                        .padding(bottom = 32.dp)
+                ) {
+                    // Волна по треку (станция)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                val seed = currentTrackObj
+                                scope.launch {
+                                    trackMenuSheetState.hide()
+                                    showTrackMenu = false
+                                    seed?.let { PlayerController.startTrackWave(context, it) }
+                                }
+                            }
+                            .padding(vertical = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.GraphicEq,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Text(
+                            text = "Wave from this track",
+                            color = Color.White,
+                            fontSize = 17.sp,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(0.5.dp)
+                            .background(Color.White.copy(alpha = 0.10f))
+                    )
+                    // Настройки
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                scope.launch {
+                                    trackMenuSheetState.hide()
+                                    showTrackMenu = false
+                                    onOpenSettings()
+                                }
+                            }
+                            .padding(vertical = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Settings,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Text(
+                            text = "Settings",
+                            color = Color.White,
+                            fontSize = 17.sp,
+                            modifier = Modifier.weight(1f)
+                        )
                     }
                 }
             }

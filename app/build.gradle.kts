@@ -19,6 +19,12 @@ android {
         versionCode = 20260530
         versionName = "2026.05.30 pre-release1 gsm"
 
+        // Build native libs only for arm64-v8a (faster builds, smaller APK).
+        // Note: won't run on 32-bit (armeabi-v7a) or x86/x86_64 emulators.
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
+
         // Read ICM API key from local.properties (GitHub Secret in CI)
         // Fallback to native .so (JNI) at runtime for maximum protection
         val icmApiKey = run {
@@ -31,12 +37,27 @@ android {
         buildConfigField("String", "ICM_API_KEY", "\"$icmApiKey\"")
     }
 
+    // Resolve a signing secret from the environment first (CI), then from
+    // local.properties for local builds. Never hardcode credentials here.
+    fun signingSecret(envName: String, localPropName: String): String {
+        System.getenv(envName)?.takeIf { it.isNotBlank() }?.let { return it }
+        val f = rootProject.file("local.properties")
+        if (f.exists()) {
+            val prefix = "$localPropName="
+            f.readLines().find { it.startsWith(prefix) }
+                ?.removePrefix(prefix)?.trim()
+                ?.takeIf { it.isNotBlank() }
+                ?.let { return it }
+        }
+        return ""
+    }
+
     signingConfigs {
         create("release") {
             storeFile = file(System.getenv("KEYSTORE_PATH") ?: "release-key.jks")
-            storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "St@skrasikov1"
-            keyAlias = System.getenv("KEY_ALIAS") ?: "release"
-            keyPassword = System.getenv("KEY_PASSWORD") ?: "St@skrasikov1"
+            storePassword = signingSecret("KEYSTORE_PASSWORD", "KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("KEY_ALIAS")?.takeIf { it.isNotBlank() } ?: "release"
+            keyPassword = signingSecret("KEY_PASSWORD", "KEY_PASSWORD")
         }
     }
 
@@ -47,8 +68,9 @@ android {
             // Debug uses auto-generated debug signing
         }
         release {
-            isMinifyEnabled = true
-            isShrinkResources = true
+            // TODO: ВРЕМЕННО для ускорения отладочных сборок — вернуть оба в true.
+            isMinifyEnabled = false
+            isShrinkResources = false
             isDebuggable = false
             isJniDebuggable = false
             vcsInfo.include = false
@@ -71,7 +93,7 @@ android {
         }
     }
 
-    ndkVersion = "27.2.12479018"
+    ndkVersion = "26.3.11579264"
 
     buildFeatures {
         compose = true

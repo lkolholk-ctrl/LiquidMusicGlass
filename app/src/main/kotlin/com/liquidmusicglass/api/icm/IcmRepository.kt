@@ -149,6 +149,7 @@ object IcmRepository {
         result.exceptionOrNull()?.let {
             _lastException = it as? Exception
             _lastError.value = it.message
+            _lastApiException.value = it as? IcmApiException
         }
         return result.getOrNull()
     }
@@ -1065,7 +1066,8 @@ object IcmRepository {
     ): String? {
         var attempts = 0
         while (attempts < maxAttempts) {
-            delay(pending.pollAfterSeconds * 1000L)
+            if (IcmRateGate.isBanned()) return null
+            delay(pending.pollAfterSeconds.coerceAtLeast(1) * 1000L)
             val pollResult = api.pollAsyncJob(pending.jobId)
             pollResult.getOrNull()?.let { ready ->
                 if (ready.status == "ready") {
@@ -1089,7 +1091,8 @@ object IcmRepository {
     ): IcmAsyncTrackReady? {
         var attempts = 0
         while (attempts < maxAttempts) {
-            delay(pending.pollAfterSeconds * 1000L)
+            if (IcmRateGate.isBanned()) return null
+            delay(pending.pollAfterSeconds.coerceAtLeast(1) * 1000L)
             val pollResult = api.pollAsyncJob(pending.jobId)
             pollResult.getOrNull()?.let { ready ->
                 if (ready.status == "ready") {

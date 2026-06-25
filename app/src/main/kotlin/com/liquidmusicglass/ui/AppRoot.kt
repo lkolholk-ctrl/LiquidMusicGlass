@@ -61,6 +61,7 @@ import com.liquidmusicglass.ui.navigation.BottomBar
 import com.liquidmusicglass.ui.player.FullPlayer
 import com.liquidmusicglass.ui.player.MiniPlayer
 import com.liquidmusicglass.ui.screens.HomeScreen
+import com.liquidmusicglass.ui.screens.WaveHomeScreen
 import com.liquidmusicglass.ui.screens.SearchScreen
 import com.liquidmusicglass.ui.screens.LibraryScreen
 import com.liquidmusicglass.ui.screens.AlbumDetailScreen
@@ -224,12 +225,23 @@ fun AppRoot() {
 
             // ── Main screens ──
             when (selectedIndex) {
-                0 -> HomeScreen(
-                    onNavigateToAlbum = { detailAlbumId = it },
-                    onNavigateToArtist = { detailArtistId = it },
-                    onNavigateToPlaylist = { playlistDetailId = it },
-                    onNavigateToYouTube = { youtubeSearchOpen = true }
-                )
+                0 -> if (currentCamp is com.liquidmusicglass.camp.MusicCamp.Youtube) {
+                    HomeScreen(
+                        onNavigateToAlbum = { detailAlbumId = it },
+                        onNavigateToArtist = { detailArtistId = it },
+                        onNavigateToPlaylist = { playlistDetailId = it },
+                        onNavigateToYouTube = { youtubeSearchOpen = true }
+                    )
+                } else {
+                    WaveHomeScreen(
+                        onNavigateToSearch = { selectedIndex = 1 },
+                        onOpenPlayer = { animateExpand() },
+                        onNavigateToAlbum = { detailAlbumId = it },
+                        onNavigateToArtist = { detailArtistId = it },
+                        onNavigateToPlaylist = { playlistDetailId = it },
+                        onOpenAuth = { authOpen = true }
+                    )
+                }
                 1 -> SearchScreen(
                     onNavigateToAlbum = { detailAlbumId = it },
                     onNavigateToArtist = { detailArtistId = it }
@@ -353,112 +365,14 @@ fun AppRoot() {
                         translationY = bottomBarTranslateY
                         alpha = bottomBarAlpha
                     }
-                    .pointerInput(Unit) {
-                        detectVerticalDragGestures(
-                            onVerticalDrag = { change, dragAmount ->
-                                change.consume()
-                                if (screenHeightPx > 0f) {
-                                    val delta = -dragAmount / screenHeightPx
-                                    scope.launch {
-                                        expandProgress.snapTo(
-                                            (expandProgress.value + delta).coerceIn(0f, 1f)
-                                        )
-                                    }
-                                }
-                            },
-                            onDragEnd = {
-                                if (expandProgress.value > 0.15f) animateExpand()
-                                else animateCollapse()
-                            },
-                            onDragCancel = { animateCollapse() }
-                        )
-                    }
+                    .background(
+                        if (LiquidTheme.colors.isDark) Color(0xFF0D0D0F) else Color(0xFFF2F2F4)
+                    )
             ) {
-                val mergedShape = RoundedCornerShape(22.dp)
-                val lc = LiquidTheme.colors
-
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(0.92f)
-                        .align(Alignment.CenterHorizontally)
-                        .drawBackdrop(
-                            backdrop = rootBackdrop,
-                            shape = { mergedShape },
-                            effects = {
-                                vibrancy()
-                                blur(6.dp.toPx())
-                                lens(
-                                    refractionHeight = 24.dp.toPx(),
-                                    refractionAmount = 40.dp.toPx(),
-                                    chromaticAberration = true
-                                )
-                            },
-                            highlight = {
-                                Highlight.Ambient
-                            },
-                            shadow = {
-                                Shadow(
-                                    radius = 12.dp,
-                                    color = Color.Black.copy(alpha = 0.25f)
-                                )
-                            },
-                            innerShadow = {
-                                InnerShadow(
-                                    radius = 8.dp,
-                                    alpha = 0.35f
-                                )
-                            },
-                            onDrawSurface = {
-                                drawRect(lc.bottomBarTint)
-                                drawRect(
-                                    color = Color.White.copy(alpha = 0.15f),
-                                    style = Stroke(width = 0.8.dp.toPx())
-                                )
-                            }
-                        )
-                        .padding(vertical = 4.dp)
-                ) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .graphicsLayer { alpha = miniAlpha },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            MiniPlayer(
-                                trackTitle = trackTitle,
-                                artistName = artistName,
-                                isPlaying = isPlaying,
-                                albumArtUri = currentTrack?.displayArtUri,
-                                coverUrl = currentTrack?.coverUrl,
-                                backdrop = rootBackdrop,
-                                drawBackground = false,
-                                onExpand = { animateExpand() },
-                                onPlayPause = { PlayerController.togglePlayPause(context) },
-                                onSkipNext = { PlayerController.skipNext(context) }
-                            )
-                        }
-
-                        Spacer(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(0.5.dp)
-                                .background(Color.White.copy(alpha = 0.12f))
-                        )
-
-                        BottomBar(
-                            selectedIndex = selectedIndex,
-                            onItemSelected = { selectedIndex = it; AppSettings.setLastScreen(it) },
-                            backdrop = rootBackdrop,
-                            drawBackground = false
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
+                BottomBar(
+                    selectedIndex = selectedIndex,
+                    onItemSelected = { selectedIndex = it; AppSettings.setLastScreen(it) }
+                )
 
                 Spacer(
                     modifier = Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)

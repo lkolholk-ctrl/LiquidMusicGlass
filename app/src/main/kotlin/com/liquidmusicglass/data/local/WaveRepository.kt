@@ -173,12 +173,21 @@ class WaveRepository(context: Context) {
      * 
      * Uses random favorite seeds, applies ban filters and skipRatio filters, and heuristic genre tagging.
      */
-    suspend fun buildWaveQueue(count: Int = 5): List<Track> = withContext(Dispatchers.IO) {
-        Log.d(TAG, "Building wave queue with custom Favorite seeding & Ban Filters")
+    suspend fun buildWaveQueue(
+        count: Int = 5,
+        seedTrackId: String? = null,
+        exclude: Collection<String> = emptyList()
+    ): List<Track> = withContext(Dispatchers.IO) {
+        Log.d(TAG, "Building wave queue (seed=${seedTrackId ?: "personal"}, exclude=${exclude.size})")
 
         val queue = mutableListOf<Track>()
         val excludeIds = mutableSetOf<String>()
-        
+
+        // Anti-repeat: caller-supplied IDs (текущая очередь + уже игравшие в этой волне).
+        excludeIds.addAll(exclude)
+        // seed-трек никогда не должен попасть в станцию повторно
+        seedTrackId?.let { excludeIds.add(it) }
+
         // Get recent track IDs to exclude from wave
         val recentIds = try {
             playbackDao.getRecentTrackIds(50)
@@ -207,39 +216,21 @@ class WaveRepository(context: Context) {
                     kotlinx.coroutines.delay(150)
                 }
 
-                // Request the true personalized personal wave (seedTrackId = null)
-                // Use recentSkips from PlayerController to let the server adapt to recent skips!
+                // seedTrackId == null → персональная волна (подстраивается под юзера сервером:
+                // лайки / completion / skip-streak). Иначе — станция вокруг seed-трека (мудовая плитка).
                 val recentSkipsVal = com.liquidmusicglass.engine.PlayerController.consecutiveSkips
-                
+
                 var response = IcmRepository.getWaveNext(
-                    seedTrackId = null,
+                    seedTrackId = seedTrackId,
                     exclude = excludeIds.toList().takeIf { it.isNotEmpty() },
                     recentSkips = recentSkipsVal,
                     genre = null
                 )
 
-                // Robust fallback: if personal wave is empty (e.g. no server-side history/likes),
-                // we seed it with a random favorite from the local DB!
-                if (response == null || response.status == "empty") {
-                    // Check if response was null due to 429
-                    val code = IcmRepository.getLastHttpCode()
-                    val errorCode = IcmRepository.getLastErrorCode()
-                    if (code == 429 || errorCode == "rate_limited" || errorCode == "ip_temporarily_blocked") {
-                        Log.w(TAG, "Rate limit hit (429/blocked) during getWaveNext. Aborting queue building.")
-                        break
-                    }
-
-                    val fallbackSeed = dao.getRandomFavoriteTrackId()
-                    if (fallbackSeed != null) {
-                        Log.d(TAG, "Personal wave empty, falling back to favorite seed: $fallbackSeed")
-                        response = IcmRepository.getWaveNext(
-                            seedTrackId = fallbackSeed,
-                            exclude = excludeIds.toList().takeIf { it.isNotEmpty() },
-                            recentSkips = recentSkipsVal,
-                            genre = null
-                        )
-                    }
-                }
+                // Никакого «случайного лайка» как seed (это и была «херня»): по доке
+                // пустая персональная волна = у сервера нет seed-артистов/лайков, и
+                // правильная реакция — ОНБОРДИНГ (его триггерит ViewModel по пустому
+                // результату), а не подмена рандомной станцией.
 
                 if (response == null || response.status != "ok") {
                     val code = IcmRepository.getLastHttpCode()
@@ -248,6 +239,8 @@ class WaveRepository(context: Context) {
                         Log.w(TAG, "Rate limit hit (429/blocked) during getWaveNext. Aborting queue building.")
                         break
                     }
+                    // Пустая станция (нет кандидатов) — прекращаем, чтоб не крутить вхолостую.
+                    if (response?.status == "empty") break
                     Log.w(TAG, "Wave response status: ${response?.status ?: "null"}")
                     continue
                 }
@@ -258,56 +251,33 @@ class WaveRepository(context: Context) {
                 }
 
                 val trackId = waveTrack.id
-                val title = waveTrack.title
-                val artist = waveTrack.artist ?: "Unknown Artist"
 
-                // ── 1. HARD BAN FILTER: Excluding CIS trash music (Case-Insensitive) ──
-                val tLower = title.lowercase()
-                val aLower = artist.lowercase()
-                val badWords = listOf("кишлак", "soda luv", "face", "принц", "рэп", "rap")
-                if (badWords.any { tLower.contains(it) || aLower.contains(it) }) {
-                    Log.d(TAG, "Ban Filter: Blocked trash track $trackId ($title by $artist)")
-                    excludeIds.add(trackId)
-                    continue
-                }
-
-                // ── 2. HARD FILTER: Check skipRatio in local Room DB track_stats ──
+                // Единственный локальный фильтр — ПЕРСОНАЛЬНЫЙ: если юзер стабильно скипает
+                // этот трек (skipRatio > 70% за ≥2 показа), не предлагаем снова. Никаких
+                // жанровых банов — волна подстраивается под то, что юзер реально слушает.
                 val stats = playbackDao.getTrackStat(trackId)
                 if (stats != null) {
                     val total = stats.playCount + stats.skippedCount
                     if (total >= 2) {
                         val skipRatio = stats.skippedCount.toFloat() / total.toFloat()
                         if (skipRatio > 0.70f) {
-                            Log.d(TAG, "Hard Filter: Excluding $trackId ($title) due to high skipRatio=$skipRatio")
+                            Log.d(TAG, "Skip-filter: excluding $trackId (skipRatio=$skipRatio)")
                             excludeIds.add(trackId)
                             continue
                         }
                     }
                 }
 
-                // Resolve stream URL for the wave track
+                // Добавляем трек как есть (uri = byicloud.online/track/<id>). НЕ резолвим
+                // стрим-URL заранее: при воспроизведении StreamingDataSource всё равно
+                // резолвит свежий URL по id (resolveStreamUrlSync). Ранний getStreamUrl —
+                // это лишний сетевой round-trip на каждый трек (удваивает время сборки
+                // волны и «запекает» подписанный URL, который к моменту проигрывания
+                // может уже протухнуть). Нестримящиеся треки авто-скипаются плеером.
                 val track = waveTrack.toTrack()
-                val streamUrl = IcmRepository.getStreamUrl(track.id, source = track.source)
-                
-                if (streamUrl != null) {
-                    // ── 3. HEURISTIC GENRE TAGGING ──
-                    val resolvedGenre = when {
-                        tLower.contains("mix") || tLower.contains("remix") -> "Tech House"
-                        aLower.contains("dj") -> "House"
-                        else -> "Electronic"
-                    }
-
-                    val resolvedTrack = track.copy(
-                        uri = android.net.Uri.parse(streamUrl),
-                        genre = resolvedGenre
-                    )
-                    queue.add(resolvedTrack)
-                    excludeIds.add(trackId)
-                    Log.d(TAG, "Added wave track: $title by $artist resolved with genre=$resolvedGenre")
-                } else {
-                    Log.w(TAG, "Failed to resolve stream URL for $trackId, skipping")
-                    excludeIds.add(trackId)
-                }
+                queue.add(track)
+                excludeIds.add(trackId)
+                Log.d(TAG, "Added wave track: ${track.title} by ${track.artist}")
 
             } catch (e: Exception) {
                 Log.e(TAG, "Error fetching wave track", e)

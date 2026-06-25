@@ -85,7 +85,8 @@ object IcmAuthRepository {
             .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
             .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
             .writeTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
-            .retryOnConnectionFailure(true)
+            // Единая политика ретраев — только наш интерсептор (без двойных повторов).
+            .retryOnConnectionFailure(false)
             .addInterceptor { chain ->
                 val request = chain.request()
                 var response: okhttp3.Response? = null
@@ -95,20 +96,24 @@ object IcmAuthRepository {
                 while (tryCount < maxRetries) {
                     try {
                         response = chain.proceed(request)
+                        // Никогда не ретраим 4xx (в т.ч. 429).
                         if (response.isSuccessful || response.code < 500) {
                             return@addInterceptor response
                         }
-                        // Server error (5xx) — retry
+                        // Server error (5xx) — retry с бэкоффом + джиттером.
                         tryCount++
                         if (tryCount >= maxRetries) {
                             return@addInterceptor response
                         }
                         response.close()
+                        val backoff = 500L * (1L shl (tryCount - 1)) + kotlin.random.Random.nextLong(0, 150)
+                        try { Thread.sleep(backoff) } catch (_: Exception) {}
                     } catch (e: java.io.IOException) {
                         exception = e
                         tryCount++
                         if (tryCount >= maxRetries) throw e
-                        try { Thread.sleep(500L * tryCount) } catch (_: Exception) {}
+                        val backoff = 500L * (1L shl (tryCount - 1)) + kotlin.random.Random.nextLong(0, 150)
+                        try { Thread.sleep(backoff) } catch (_: Exception) {}
                     }
                 }
                 response ?: throw exception ?: java.io.IOException("Network error")

@@ -1,6 +1,7 @@
 package com.liquidmusicglass.ui.theme
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -172,8 +173,13 @@ fun LiquidMusicGlassTheme(
     ) {
         MaterialTheme(
             colorScheme = materialScheme,
-            typography = LiquidTypography,
-            content = content
-        )
+            typography = LiquidTypography
+        ) {
+            // Bare Text() without an explicit style also inherits Golos Text.
+            CompositionLocalProvider(
+                LocalTextStyle provides LocalTextStyle.current.copy(fontFamily = AppFontFamily),
+                content = content
+            )
+        }
     }
 }

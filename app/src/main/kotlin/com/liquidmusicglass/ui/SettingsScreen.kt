@@ -157,6 +157,28 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(28.dp))
 
+            // PRELOAD NEXT TRACK
+            SectionLabel("PRELOAD NEXT TRACK")
+
+            val preloadLead by AppSettings.preloadLeadSeconds.collectAsState()
+            PlainCard {
+                Column(modifier = Modifier.padding(vertical = 6.dp)) {
+                    PreloadSelector(
+                        options = listOf(30, 45, 60, 75, 90),
+                        selectedSeconds = preloadLead,
+                        onSelect = { AppSettings.setPreloadLeadSeconds(it) }
+                    )
+                    Text(
+                        text = "How early to preload the next track before the current one ends",
+                        color = lc.textSecondary,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(28.dp))
+
             // STREAM QUALITY
             SectionLabel("STREAM QUALITY")
 
@@ -465,6 +487,53 @@ private fun SettingsActionItem(
             tint = LiquidTheme.colors.iconDefault,
             modifier = Modifier.size(20.dp)
         )
+    }
+}
+
+@Composable
+private fun PreloadSelector(
+    options: List<Int>,
+    selectedSeconds: Int,
+    onSelect: (Int) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        options.forEach { sec ->
+            val isSelected = selectedSeconds == sec
+            val isDark = LiquidTheme.colors.isDark
+            val itemBg = if (isSelected) AppleRed else (if (isDark) Color(0xFF1C1C1E) else Color(0xFFE5E5EA))
+            val unselectedTextColor = if (isDark) Color.White.copy(alpha = 0.45f) else Color.Black.copy(alpha = 0.45f)
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(36.dp)
+                    .background(itemBg, RoundedCornerShape(50))
+                    .clip(RoundedCornerShape(50))
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = { onSelect(sec) }
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                val textColor by animateColorAsState(
+                    targetValue = if (isSelected) Color.White else unselectedTextColor,
+                    animationSpec = tween(200),
+                    label = "preloadText"
+                )
+                Text(
+                    text = "${sec}s",
+                    color = textColor,
+                    fontSize = 13.sp,
+                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+                )
+            }
+        }
     }
 }
 

@@ -53,6 +53,8 @@ import com.liquidmusicglass.data.local.WaveRepository
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.Track
 import com.liquidmusicglass.ui.glass.AlbumArtImage
+import com.liquidmusicglass.ui.glass.rememberAlbumColors
+import com.liquidmusicglass.ui.player.AuraBackground
 import com.liquidmusicglass.ui.theme.LiquidTheme
 import com.liquidmusicglass.ui.viewmodel.HomeViewModel
 import kotlinx.coroutines.launch
@@ -204,6 +206,8 @@ fun HomeScreen(
     val allTracks by PlayerController.queueFlow.collectAsState()
     val recentlyPlayed by PlayerController.recentlyPlayed.collectAsState()
     val currentTrack by PlayerController.currentTrack.collectAsState()
+    // Цвета для фона-ауры — из обложки текущего трека (подстраивается под трек).
+    val auraColors = rememberAlbumColors(uri = null, coverUrl = currentTrack?.coverUrl)
     val favoriteIds by PlayerController.favoriteIds.collectAsState()
     val favoriteTracks = remember(allTracks, favoriteIds) {
         allTracks.filter { it.id in favoriteIds }
@@ -542,6 +546,8 @@ fun HomeScreen(
     }
 
     Box(modifier = Modifier.fillMaxSize().background(LiquidTheme.colors.settingsBackground)) {
+        // Фон-аура (Liquid Aurora) — первым слоем, фиксирована; контент скроллится поверх.
+        AuraBackground(albumColors = auraColors, modifier = Modifier.fillMaxSize())
         Column(
             modifier = Modifier
                 .fillMaxSize()

@@ -185,11 +185,15 @@ class LyricsTimeProcessor(
         _pastWords.value = past
         _currentWords.value = current
 
-        // Вычисляем прогресс для всей строки целиком (0f..1f)
+        // Прогресс всей строки (0f..1f). Длительность КАПАЕМ оценкой по числу
+        // слов: слова раньше растягиваются до начала следующей строки, поэтому
+        // без капа заливка медленно «ползла» во время паузы/инструментала.
         val lineStartMs = allWords[range.first].startMs
         val lineEndMs = allWords[range.last].endMs
-        val lineDuration = (lineEndMs - lineStartMs).coerceAtLeast(1L)
-        val rawLineProgress = (safePosition - lineStartMs).toFloat() / lineDuration.toFloat()
+        val rawDuration = (lineEndMs - lineStartMs).coerceAtLeast(1L)
+        val wordCount = (range.last - range.first + 1).coerceAtLeast(1)
+        val cappedDuration = minOf(rawDuration, (wordCount * 700L).coerceAtLeast(1500L))
+        val rawLineProgress = (safePosition - lineStartMs).toFloat() / cappedDuration.toFloat()
         _currentLineProgress.value = LYRIC_PROGRESS_INTERPOLATOR.getInterpolation(
             rawLineProgress.coerceIn(0f, 1f)
         )

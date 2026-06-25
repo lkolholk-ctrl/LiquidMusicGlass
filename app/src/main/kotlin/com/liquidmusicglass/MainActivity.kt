@@ -42,6 +42,10 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+// TODO: ВРЕМЕННО для отладки бага «лирика не ползёт с первого тыка». Вернуть true
+// и убрать lyrdbg-логи в LyricsScreen после диагностики.
+private const val PROTECTION_ENABLED = false
+
 class MainActivity : ComponentActivity() {
 
     private val authScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -51,13 +55,21 @@ class MainActivity : ComponentActivity() {
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         private var wasOffline = true
+        private var reconnectJob: kotlinx.coroutines.Job? = null
 
         override fun onAvailable(network: Network) {
-            if (wasOffline && IcmAuthRepository.isLoggedIn.value) {
-                wasOffline = false
-                authScope.launch {
+            if (!wasOffline) return
+            wasOffline = false
+            // Debounce: на флапающей мобильной сети onAvailable может прийти много раз —
+            // ждём 1.5с стабильности и делаем ОДИН рефетч + ретрай зависшего плеера,
+            // вместо залпа запросов на каждое срабатывание.
+            reconnectJob?.cancel()
+            reconnectJob = authScope.launch {
+                kotlinx.coroutines.delay(1500)
+                if (IcmAuthRepository.isLoggedIn.value) {
                     IcmAuthRepository.fetchUserData()
                 }
+                PlayerController.retryCurrentIfStalled(applicationContext)
             }
         }
 
@@ -122,30 +134,19 @@ class MainActivity : ComponentActivity() {
         val compromiseReason = mutableStateOf("")
 
         // Security checks: Root, Emulator, Frida, Debugger, Xposed environment verification
-        authScope.launch {
-            val logFile = java.io.File("/storage/emulated/0/Download/security_log.txt")
-            val logContent = StringBuilder()
-            logContent.append("=== SECURITY DIAGNOSTICS START ===\n")
-            logContent.append("Timestamp: ${System.currentTimeMillis()}\n")
-            
+        // ВРЕМЕННО отключено флагом PROTECTION_ENABLED (см. TODO у объявления флага).
+        if (PROTECTION_ENABLED) authScope.launch {
             val isRooted = com.liquidmusicglass.engine.SecurityUtils.isDeviceRooted()
-            logContent.append("isDeviceRooted: $isRooted\n")
-            
             val isEmulator = com.liquidmusicglass.engine.SecurityUtils.isEmulator()
-            logContent.append("isEmulator: $isEmulator\n")
-            
-            val threats = try { com.liquidmusicglass.security.NativeSecurity.nativeSecurityCheck() } catch (e: Throwable) {
-                logContent.append("nativeSecurityCheck error: ${e.message}\n")
+
+            val threats = try { com.liquidmusicglass.security.NativeSecurity.nativeSecurityCheck() } catch (_: Throwable) {
                 -1
             }
-            logContent.append("threats: $threats\n")
-            
-            val hooksSafe = try { com.liquidmusicglass.security.NativeSecurity.nativeCheckHooks() } catch (e: Throwable) {
-                logContent.append("nativeCheckHooks error: ${e.message}\n")
+
+            val hooksSafe = try { com.liquidmusicglass.security.NativeSecurity.nativeCheckHooks() } catch (_: Throwable) {
                 false
             }
-            logContent.append("hooksSafe: $hooksSafe\n")
-            
+
             var signatureValid = true
             var sigHashGot = 0u
             try {
@@ -169,33 +170,19 @@ class MainActivity : ComponentActivity() {
                         hash = hash * 31 + (b.toInt() and 0xFF)
                     }
                     sigHashGot = hash.toUInt()
-                    logContent.append("sigHashGot (Kotlin): $sigHashGot\n")
-                    
                     signatureValid = com.liquidmusicglass.security.NativeSecurity.nativeVerifySignature(sigBytes)
-                    logContent.append("signatureValid (C++): $signatureValid\n")
-                } else {
-                    logContent.append("signatures is empty\n")
                 }
-            } catch (e: Throwable) {
-                logContent.append("signature validation exception: ${e.message}\n")
+            } catch (_: Throwable) {
                 signatureValid = false
             }
 
             val apkIntegrity = try {
                 com.liquidmusicglass.security.NativeSecurity.nativeCheckIntegrity(packageCodePath ?: "")
-            } catch (e: Throwable) {
-                logContent.append("nativeCheckIntegrity error: ${e.message}\n")
+            } catch (_: Throwable) {
                 false
             }
-            logContent.append("apkIntegrity: $apkIntegrity\n")
 
             val isSafe = hooksSafe && (threats == 0) && signatureValid && apkIntegrity
-            logContent.append("isSafe: $isSafe\n")
-            logContent.append("=== SECURITY DIAGNOSTICS END ===\n")
-            
-            try {
-                logFile.writeText(logContent.toString())
-            } catch (_: Throwable) {}
 
             if (isRooted || isEmulator || !isSafe) {
                 val reasons = mutableListOf<String>()

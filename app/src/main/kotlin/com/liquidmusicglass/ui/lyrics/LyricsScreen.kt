@@ -22,9 +22,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
@@ -43,6 +46,7 @@ import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.ui.glass.AlbumArtImage
 import com.liquidmusicglass.ui.glass.AlbumColors
 import com.liquidmusicglass.ui.glass.rememberAlbumColors
+import com.liquidmusicglass.ui.theme.AppFontFamily
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -52,6 +56,15 @@ import androidx.compose.ui.text.PlatformTextStyle
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
+
+/** Минимальная длина «инструментального» проигрыша между строками для показа точек ожидания. */
+private const val INSTRUMENTAL_GAP_MS = 4000L
+
+/** Насколько высоко поднимать активную строку: доля высоты экрана от верха (0.25–0.35 — верхняя треть). */
+private const val ACTIVE_LINE_TOP_BIAS = 0.28f
+
+/** Высота зоны заголовка со скрим-градиентом (плотная часть закрывает название+артиста). */
+private val HEADER_SCRIM_HEIGHT = 170.dp
 
 /**
  * Полноэкранный караоке-экран лирики (Apple Music style).
@@ -144,19 +157,33 @@ fun LyricsScreen(
     val isPlaying by PlayerController.isPlaying.collectAsState()
     var smoothPositionMs by remember { mutableLongStateOf(0L) }
 
-    // Sync with coarse position when it changes (seek, track change)
+    // Sync with coarse position only when paused — во время игры позицией
+    // владеет покадровый тикер (getSmoothPositionMs), иначе грубые апдейты
+    // дёргали бы плавный sweep.
     LaunchedEffect(currentPositionMs) {
-        smoothPositionMs = currentPositionMs
-        timeProcessor?.updatePosition(smoothPositionMs)
+        if (!isPlaying) {
+            smoothPositionMs = currentPositionMs
+            timeProcessor?.updatePosition(currentPositionMs)
+        }
     }
 
-    // High-frequency frame-synced ticker for butter-smooth animation
-    LaunchedEffect(isPlaying) {
-        if (isPlaying) {
-            while (isActive) {
-                withFrameMillis { _ ->
+    // High-frequency frame-synced ticker for butter-smooth animation.
+    // Цикл живёт всё время (не пересоздаётся на смене isPlaying) — состояние
+    // воспроизведения проверяется ВНУТРИ кадра, чтобы не терять кадры на
+    // рестарте корутины при паузе/возобновлении.
+    //
+    // ВАЖНО: тикер запускается с ключом Unit и держит первую лямбду, поэтому
+    // напрямую он бы замкнул timeProcessor на момент старта (часто ещё null,
+    // пока лирика грузится). rememberUpdatedState даёт всегда СВЕЖУЮ ссылку на
+    // процессор — иначе закрас не полз бы с первого открытия.
+    val currentProcessor by rememberUpdatedState(timeProcessor)
+
+    LaunchedEffect(Unit) {
+        while (isActive) {
+            withFrameMillis { _ ->
+                if (PlayerController.isPlaying.value) {
                     smoothPositionMs = PlayerController.getSmoothPositionMs()
-                    timeProcessor?.updatePosition(smoothPositionMs)
+                    currentProcessor?.updatePosition(smoothPositionMs)
                 }
             }
         }
@@ -170,17 +197,38 @@ fun LyricsScreen(
         timeProcessor?.getCurrentLineWords() ?: emptyList()
     }
 
+    // ── Инструментальный проигрыш: текущая строка уже спета, а до следующей
+    // ещё далеко → показываем «waiting»-точки и не торопим заливку.
+    // Конец вокала строки оцениваем тем же капом, что и прогресс строки
+    // (LyricsTimeProcessor), т.к. в LRC хранится только время начала строки.
+    val showGapDots = remember(currentLineIndex, smoothPositionMs, lyrics) {
+        if (!lyrics.isSynced || currentLineIndex < 0 || currentLineIndex >= lyrics.lines.size) {
+            return@remember false
+        }
+        val lineStart = lyrics.lines[currentLineIndex].timeMs
+        val nextStart = lyrics.lines.getOrNull(currentLineIndex + 1)?.timeMs ?: return@remember false
+        val wordCount = lyrics.lines[currentLineIndex].text
+            .split(" ").count { it.isNotBlank() }.coerceAtLeast(1)
+        val rawDuration = (nextStart - lineStart).coerceAtLeast(1L)
+        val cappedDuration = minOf(rawDuration, (wordCount * 700L).coerceAtLeast(1500L))
+        val vocalEnd = lineStart + cappedDuration
+        // Проигрыш считается «инструментальным», только если он заметно длинный.
+        (nextStart - vocalEnd) >= INSTRUMENTAL_GAP_MS && smoothPositionMs in vocalEnd..nextStart
+    }
+
     // ── Auto-scroll с fluid gliding ──
     val listState = rememberLazyListState()
     val density = LocalDensity.current
     val configuration = LocalConfiguration.current
     val screenHeightPx = with(density) { configuration.screenHeightDp.dp.toPx() }
+    // Доступная ширина строки лирики (экран минус горизонтальные паддинги 24dp×2)
+    val lineMaxWidthPx = with(density) { (configuration.screenWidthDp.dp - 48.dp).toPx().toInt() }
 
     LaunchedEffect(currentLineIndex) {
         if (currentLineIndex >= 0) {
-            // Поднимаем активную строку заметно ВЫШЕ центра (~18% от высоты)
+            // Поднимаем активную строку в верхнюю треть (см. ACTIVE_LINE_TOP_BIAS)
             val targetIndex = currentLineIndex.coerceAtMost((lyrics.lines.size - 1).coerceAtLeast(0))
-            val aboveCenterOffset = (screenHeightPx * 0.18f - with(density) { 40.dp.toPx() }).toInt()
+            val aboveCenterOffset = (screenHeightPx * ACTIVE_LINE_TOP_BIAS).toInt()
             listState.animateScrollToItem(
                 index = targetIndex,
                 scrollOffset = -aboveCenterOffset
@@ -281,93 +329,64 @@ fun LyricsScreen(
                         }
 
                         itemsIndexed(lyrics.lines) { index, line ->
-                            val isCurrentLine = index == currentLineIndex
-                            val isPastLine = index < currentLineIndex
-                            val isUpcomingLine = index > currentLineIndex
+                            val isCurrent = index == currentLineIndex
+                            val isPast = index < currentLineIndex
 
-                            // Duet color detection
+                            // duet-цвет
                             val duetColor = when {
                                 !isDuet -> null
                                 line.text.startsWith("[M", ignoreCase = true) ||
-                                    line.text.contains(Regex("""^\[Male""", RegexOption.IGNORE_CASE)) ->
-                                    Color(0xFF4FC3F7) // Light blue for male
+                                    line.text.contains(Regex("""^\[Male""", RegexOption.IGNORE_CASE)) -> Color(0xFF4FC3F7)
                                 line.text.startsWith("[F", ignoreCase = true) ||
-                                    line.text.contains(Regex("""^\[Female""", RegexOption.IGNORE_CASE)) ->
-                                    Color(0xFFF48FB1) // Pink for female
-                                line.text.startsWith("[D", ignoreCase = true) ->
-                                    Color(0xFFFFF176) // Yellow for duet
+                                    line.text.contains(Regex("""^\[Female""", RegexOption.IGNORE_CASE)) -> Color(0xFFF48FB1)
+                                line.text.startsWith("[D", ignoreCase = true) -> Color(0xFFFFF176)
                                 else -> null
                             }
-
-                            val cleanText = line.text.replace(Regex("""\[(M|F|D|Male|Female|Duet):?\s*""", RegexOption.IGNORE_CASE), "")
-
-                            val distance = remember(currentLineIndex) { abs(index - currentLineIndex) }
-
-                            // Единая spring-анимация для всех строк — никакого staggered offset
-                            val lineAlpha by animateFloatAsState(
-                                targetValue = when {
-                                    isCurrentLine -> 1.0f
-                                    isPastLine -> 0.75f
-                                    else -> 0.50f
-                                },
-                                animationSpec = tween(durationMillis = 600),
-                                label = "lineAlpha"
+                            val cleanText = line.text.replace(
+                                Regex("""\[(M|F|D|Male|Female|Duet):?\s*""", RegexOption.IGNORE_CASE), ""
                             )
 
-                            // Убрано масштабирование активной строки — предотвращает вылет за экран
-                            val scale by animateFloatAsState(
-                                targetValue = 1.0f, // ВСЕГДА 1.0 — никакого scale
-                                animationSpec = spring(
-                                    dampingRatio = Spring.DampingRatioNoBouncy,
-                                    stiffness = Spring.StiffnessLow
-                                ),
-                                label = "lineScale"
-                            )
+                            // прогресс заливки: прошлое = залито, текущая = sweep, будущее = пусто
+                            val fillProgress = when {
+                                isPast -> 1f
+                                isCurrent -> currentLineProgress
+                                else -> 0f
+                            }
 
-                            Box(
+                            val base = duetColor ?: Color.White
+                            val sungColor by animateColorAsState(
+                                targetValue = base.copy(alpha = if (isCurrent) 1f else 0.55f),
+                                animationSpec = tween(durationMillis = 180),
+                                label = "sung"
+                            )
+                            val unsungColor = base.copy(alpha = 0.30f)
+
+                            Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 24.dp, vertical = 10.dp)
-                                    .graphicsLayer {
-                                        scaleX = scale
-                                        scaleY = scale
-                                        alpha = lineAlpha
-                                    },
-                                contentAlignment = Alignment.CenterStart
+                                    .padding(horizontal = 24.dp, vertical = 10.dp),
+                                horizontalAlignment = Alignment.Start
                             ) {
-                                // Строка целиком: белая если текущая, полупрозрачная если нет
-                                val targetTextColor = when {
-                                    isCurrentLine -> duetColor ?: Color.White
-                                    isPastLine -> (duetColor ?: Color.White).copy(alpha = 0.70f)
-                                    else -> (duetColor ?: Color.White).copy(alpha = 0.45f)
-                                }
-
-                                val textColor by animateColorAsState(
-                                    targetValue = targetTextColor,
-                                    animationSpec = tween(durationMillis = 600),
-                                    label = "textColor"
-                                )
-
-                                Text(
+                                LyricLineSweep(
                                     text = cleanText,
-                                    color = textColor,
-                                    style = TextStyle(
-                                        fontSize = if (isCurrentLine) 32.sp else 30.sp,
-                                        fontWeight = if (isCurrentLine) FontWeight.Bold else FontWeight.SemiBold,
-                                        textAlign = TextAlign.Start,
-                                        lineHeight = 44.sp,
-                                        shadow = androidx.compose.ui.graphics.Shadow(
-                                            color = Color.Black.copy(alpha = 0.85f),
-                                            offset = Offset(0f, 2f),
-                                            blurRadius = 8f
-                                        ),
-                                        platformStyle = PlatformTextStyle(includeFontPadding = false)
-                                    ),
-                                    modifier = Modifier.fillMaxWidth(),
-                                    maxLines = 3,
-                                    softWrap = true,
-                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                    fillProgress = fillProgress,
+                                    sungColor = sungColor,
+                                    unsungColor = unsungColor,
+                                    isActive = isCurrent,
+                                    maxWidthPx = lineMaxWidthPx,
+                                    glowColor = duetColor ?: resolvedColors.vibrant
                                 )
+                                // Точки ожидания во время инструментального проигрыша
+                                // после уже спетой строки — крупные, по центру.
+                                if (isCurrent && showGapDots) {
+                                    Spacer(Modifier.height(16.dp))
+                                    Box(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        WaitingDots(dotColor = duetColor ?: Color.White)
+                                    }
+                                }
                             }
                         }
 
@@ -376,6 +395,27 @@ fun LyricsScreen(
                     }
                 }
             }
+
+            // ── Градиент-скрим под заголовком ──
+            // Плотный от самого верха (под статусбаром) → прозрачный вниз.
+            // Цвет — тот же НАСЫЩЕННЫЙ цвет обложки, что и фон лирики
+            // (boostedCoverColor от vibrant), никакого серого/чёрного.
+            val headerScrimColor = boostedCoverColor(resolvedColors.vibrant)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(HEADER_SCRIM_HEIGHT)
+                    .align(Alignment.TopCenter)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                headerScrimColor.copy(alpha = 0.92f),
+                                headerScrimColor.copy(alpha = 0.65f),
+                                Color.Transparent
+                            )
+                        )
+                    )
+            )
 
             // ── Header: track info ──
             Column(
@@ -399,6 +439,104 @@ fun LyricsScreen(
                     maxLines = 1
                 )
             }
+        }
+    }
+}
+
+/**
+ * Line-level караоке-sweep v2 — корректно под перенос строк.
+ *
+ * Рисуем текст дважды: снизу inactive, сверху active, обрезанный [clipPath]
+ * по визуальным рядам в порядке чтения (пройденные ряды — целиком, текущий —
+ * до курсора, будущие — пусто). Одна непрерывная волна, без «подстрок».
+ */
+@Composable
+private fun LyricLineSweep(
+    text: String,
+    fillProgress: Float,
+    sungColor: Color,
+    unsungColor: Color,
+    isActive: Boolean,
+    maxWidthPx: Int,
+    glowColor: Color
+) {
+    if (text.isEmpty()) return
+
+    val measurer = rememberTextMeasurer()
+    val style = TextStyle(
+        fontSize = if (isActive) 32.sp else 30.sp,
+        fontWeight = if (isActive) FontWeight.Bold else FontWeight.SemiBold,
+        fontFamily = AppFontFamily,
+        lineHeight = 44.sp,
+        textAlign = TextAlign.Start,
+        platformStyle = PlatformTextStyle(includeFontPadding = false)
+    )
+
+    val layout = remember(text, style, maxWidthPx) {
+        measurer.measure(
+            text = text,
+            style = style,
+            constraints = Constraints(maxWidth = maxWidthPx),
+            maxLines = 3,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+        )
+    }
+
+    val p = fillProgress.coerceIn(0f, 1f)
+    val wDp = with(LocalDensity.current) { layout.size.width.toDp() }
+    val hDp = with(LocalDensity.current) { layout.size.height.toDp() }
+
+    Canvas(modifier = Modifier.size(wDp, hDp)) {
+        // 0) гло-подсветка активной строки: цвет облегает текст. Блюр УЗКИЙ —
+        //    свечение хватает текст вплотную, без широких колец вокруг круглых букв.
+        if (isActive) {
+            drawText(
+                textLayoutResult = layout,
+                color = glowColor.copy(alpha = 0.50f),
+                shadow = androidx.compose.ui.graphics.Shadow(
+                    color = glowColor.copy(alpha = 0.50f),
+                    offset = Offset(0f, 0f),
+                    blurRadius = 6f
+                )
+            )
+        }
+        // 1) база — весь текст неактивным цветом
+        drawText(layout, color = unsungColor)
+        if (p <= 0f) return@Canvas
+
+        // 2) активный текст, обрезанный по «спетой» области в порядке чтения.
+        //    Заливка считается НЕПРЕРЫВНО по суммарной ширине рядов (sub-pixel),
+        //    а не по целым символам — поэтому плавно, без «лесенки».
+        if (p >= 1f) {
+            drawText(layout, color = sungColor)
+            return@Canvas
+        }
+
+        var totalWidth = 0f
+        for (i in 0 until layout.lineCount) {
+            totalWidth += layout.getLineRight(i) - layout.getLineLeft(i)
+        }
+        val swept = p * totalWidth
+
+        val clip = Path()
+        var acc = 0f
+        for (i in 0 until layout.lineCount) {
+            val left = layout.getLineLeft(i)
+            val right = layout.getLineRight(i)
+            val top = layout.getLineTop(i)
+            val bottom = layout.getLineBottom(i)
+            val w = right - left
+            when {
+                swept >= acc + w ->                     // ряд пройден целиком
+                    clip.addRect(Rect(left, top, right, bottom))
+                swept <= acc -> { /* ряд ещё не начат */ }
+                else ->                                  // текущий ряд — до позиции (плавно)
+                    clip.addRect(Rect(left, top, left + (swept - acc), bottom))
+            }
+            acc += w
+        }
+        clipPath(clip) {
+            drawText(layout, color = sungColor)
         }
     }
 }

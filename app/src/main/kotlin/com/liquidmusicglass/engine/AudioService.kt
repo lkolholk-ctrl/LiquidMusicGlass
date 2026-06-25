@@ -20,7 +20,10 @@ import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.CommandButton
 import androidx.media3.session.DefaultMediaNotificationProvider
@@ -174,13 +177,13 @@ class AudioService : MediaSessionService() {
             }
             // Trigger LRU cache cleanup after track transition
             MediaCacheManager.onCacheUpdated()
-            
-            // ── INFINITE QUEUE PREFETCH ──
-            // When transitioning to a new track, check if we need more tracks.
-            // Prefetch when remaining items <= 3 to ensure seamless playback.
-            serviceScope.launch {
-                maybePrefetchWaveTracks()
-            }
+
+            // ── QUEUE AUTO-REFILL (single source of truth) ──
+            // Раньше здесь был отдельный префетч со своими фильтрами — он расходился с
+            // EndlessPlaybackEngine и подсыпал не-в-тему. Теперь оба триггера (этот
+            // service-listener и UI-bridge в PlayerController) идут в ОДИН движок;
+            // его lock + throttle дедуплицируют двойной вызов.
+            PlayerController.ensureWaveRefill()
         }
 
         override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
@@ -405,7 +408,23 @@ class AudioService : MediaSessionService() {
             .setBufferDurationsMs(30_000, 60_000, 2_500, 5_000)
             .build()
 
+        // Renderers factory with a transparent bass-analysis audio processor.
+        // It does not alter the audio, only measures low-frequency energy for
+        // the reactive glow on the "Моя волна" screen.
+        val renderersFactory = object : DefaultRenderersFactory(this) {
+            override fun buildAudioSink(
+                context: Context,
+                enableFloatOutput: Boolean,
+                enableAudioTrackPlaybackParameters: Boolean
+            ): AudioSink {
+                return DefaultAudioSink.Builder(context)
+                    .setAudioProcessors(arrayOf(BassAudioProcessor()))
+                    .build()
+            }
+        }
+
         return ExoPlayer.Builder(this)
+            .setRenderersFactory(renderersFactory)
             .setMediaSourceFactory(mediaSourceFactory)
             .setLoadControl(loadControl)
             .build()
@@ -711,239 +730,6 @@ class AudioService : MediaSessionService() {
             .build()
 
         session.setCustomLayout(ImmutableList.of(favoriteButton, forceStopButton, downloadButton))
-    }
-
-    // ═══════════════════════════════════════════════════════════
-    //  INFINITE QUEUE PREFETCH
-    // ═══════════════════════════════════════════════════════════
-
-    /** Tracks currently being prefetched to avoid duplicate requests */
-    private val isPrefetching = AtomicBoolean(false)
-    private var lastPrefetchTime = 0L
-    private val PREFETCH_COOLDOWN_MS = 5000L
-    private val PREFETCH_BATCH_SIZE = 5
-    private val PREFETCH_THRESHOLD = 3
-
-    /**
-     * Checks if the queue is running low and prefetches more wave tracks.
-     * Called from onMediaItemTransition when user is listening to wave radio.
-     */
-    private suspend fun maybePrefetchWaveTracks() {
-        // Only prefetch for wave/global playback context
-        if (PlayerController.playbackContext !is PlaybackContext.Global) {
-            return
-        }
-
-        // Check if we're already prefetching
-        if (isPrefetching.get()) {
-            android.util.Log.d("AudioService", "[PREFETCH] Already prefetching, skip")
-            return
-        }
-
-        // Check cooldown to avoid spamming
-        val now = System.currentTimeMillis()
-        if (now - lastPrefetchTime < PREFETCH_COOLDOWN_MS) {
-            android.util.Log.d("AudioService", "[PREFETCH] Cooldown active, skip")
-            return
-        }
-
-        // Check remaining tracks on Main thread (ExoPlayer API)
-        val remaining = withContext(Dispatchers.Main) {
-            val total = player.mediaItemCount
-            val current = player.currentMediaItemIndex
-            if (total > 0 && current >= 0) (total - current - 1) else 0
-        }
-
-        android.util.Log.d("AudioService", "[PREFETCH] Remaining tracks: $remaining, threshold: $PREFETCH_THRESHOLD")
-
-        if (remaining > PREFETCH_THRESHOLD) {
-            return
-        }
-
-        // Acquire prefetch lock
-        if (!isPrefetching.compareAndSet(false, true)) {
-            return
-        }
-
-        lastPrefetchTime = now
-
-        try {
-            android.util.Log.d("AudioService", "[PREFETCH] Starting wave track prefetch...")
-
-            // Fetch wave tracks with de-duplication
-            val newTracks = fetchWaveTracksWithDedup()
-
-            if (newTracks.isNotEmpty()) {
-                // Build MediaItems and add to queue on Main thread
-                val mediaItems = newTracks.map { track ->
-                    buildMediaItemForPrefetch(track)
-                }
-
-                withContext(Dispatchers.Main) {
-                    player.addMediaItems(mediaItems)
-                    currentQueueItems = currentQueueItems + mediaItems
-                    com.liquidmusicglass.engine.PlayerController.addTracksFromService(newTracks, mediaItems)
-                    android.util.Log.d("AudioService", "[PREFETCH] Added ${mediaItems.size} tracks to queue and synced with PlayerController. Total=${player.mediaItemCount}")
-                }
-            } else {
-                android.util.Log.w("AudioService", "[PREFETCH] No tracks fetched")
-            }
-        } catch (e: Exception) {
-            android.util.Log.e("AudioService", "[PREFETCH] Error: ${e.message}", e)
-        } finally {
-            isPrefetching.set(false)
-        }
-    }
-
-    /**
-     * Fetches wave tracks from ICM API with Room-based de-duplication.
-     * Filters out recently played and highly skipped tracks.
-     */
-    private suspend fun fetchWaveTracksWithDedup(): List<Track> {
-        val tracks = mutableListOf<Track>()
-        val excludeIds = mutableSetOf<String>()
-
-        val db = AppDatabase.getInstance(this@AudioService)
-        val playbackHistoryDao = db.playbackHistoryDao()
-
-        // 1. Get currently queued track IDs
-        val queuedIds = withContext(Dispatchers.Main) {
-            (0 until player.mediaItemCount).mapNotNull { i ->
-                player.getMediaItemAt(i).mediaId
-            }
-        }
-        excludeIds.addAll(queuedIds)
-
-        // 2. Get recently played track IDs from Room (last 200)
-        val recentIds = try {
-            playbackHistoryDao.getRecentTrackIds(200)
-        } catch (e: Exception) {
-            android.util.Log.w("AudioService", "[PREFETCH] Failed to get recent track IDs: ${e.message}")
-            emptyList()
-        }
-        excludeIds.addAll(recentIds)
-
-        // 3. Get highly skipped tracks from Room (skipCount >= 2)
-        val skippedIds = try {
-            playbackHistoryDao.getMostSkipped(50)
-                .filter { it.skippedCount >= 2 }
-                .map { it.trackId }
-        } catch (e: Exception) {
-            android.util.Log.w("AudioService", "[PREFETCH] Failed to get skipped tracks: ${e.message}")
-            emptyList()
-        }
-        excludeIds.addAll(skippedIds)
-
-        android.util.Log.d("AudioService", "[PREFETCH] Exclude list: ${excludeIds.size} tracks (${recentIds.size} recent, ${skippedIds.size} highly skipped)")
-
-        // 4. Read mood/genre from EndlessPlaybackEngine context
-        val engineContext = PlayerController.waveRefillContext.value
-        val mood = engineContext?.mood
-        val genre = engineContext?.genre
-        val onboardingGenres = com.liquidmusicglass.engine.AppSettings.onboardingGenres.value
-        val seedGenre = if (recentIds.isEmpty() && onboardingGenres.isNotEmpty()) {
-            onboardingGenres.random()
-        } else {
-            genre
-        }
-        android.util.Log.d("AudioService", "[PREFETCH] Context: mood=$mood, genre=$genre, seedGenre=$seedGenre")
-
-        // 5. Fetch wave tracks with recursive filtering (Step 4)
-        var attempts = 0
-        val maxAttempts = 3
-        while (tracks.size < PREFETCH_BATCH_SIZE && attempts < maxAttempts) {
-            attempts++
-            val needed = PREFETCH_BATCH_SIZE - tracks.size
-            android.util.Log.d("AudioService", "[PREFETCH] Fetching attempt $attempts, needed $needed tracks...")
-            
-            val batch = mutableListOf<Track>()
-            repeat(needed) {
-                try {
-                    val response = com.liquidmusicglass.api.icm.IcmRepository.getWaveNext(
-                        exclude = excludeIds.toList().takeIf { it.isNotEmpty() },
-                        recentSkips = com.liquidmusicglass.engine.PlayerController.consecutiveSkips,
-                        mood = mood,
-                        genre = seedGenre
-                    )
-
-                    if (response == null || response.status != "ok") {
-                        return@repeat
-                    }
-
-                    val waveTrack = response.track ?: return@repeat
-
-                    // --- Strict Room Filtering Layer ---
-                    val stat = playbackHistoryDao.getTrackStat(waveTrack.id)
-                    val playedRecently = stat != null && (System.currentTimeMillis() - stat.lastPlayedTimestamp < 2 * 60 * 60 * 1000L)
-                    val isTrash = stat != null && stat.skippedCount >= 2
-
-                    if (playedRecently || isTrash) {
-                        android.util.Log.w("AudioService", "[PREFETCH] FILTERED OUT: ${waveTrack.title} (playedRecently=$playedRecently, isTrash=$isTrash)")
-                        excludeIds.add(waveTrack.id)
-                        return@repeat
-                    }
-
-                    // Pre-validate: resolve stream URL
-                    val streamUrl = com.liquidmusicglass.api.icm.IcmRepository.getStreamUrl(
-                        waveTrack.id,
-                        source = waveTrack.source
-                    )
-
-                    if (streamUrl != null) {
-                        val track = waveTrack.toTrack().copy(
-                            uri = Uri.parse(streamUrl)
-                        )
-                        batch.add(track)
-                        excludeIds.add(waveTrack.id)
-                    } else {
-                        excludeIds.add(waveTrack.id)
-                    }
-                } catch (e: Exception) {
-                    android.util.Log.e("AudioService", "[PREFETCH] Fetch loop error: ${e.message}")
-                }
-            }
-            
-            if (batch.isEmpty()) {
-                break
-            }
-            tracks.addAll(batch)
-        }
-
-        android.util.Log.d("AudioService", "[PREFETCH] Completed dedup fetch. Got ${tracks.size} clean tracks after $attempts attempts.")
-        return tracks
-    }
-
-    /**
-     * Builds a MediaItem for prefetched wave tracks.
-     * Uses the same logic as PlayerController.buildMediaItem.
-     */
-    private fun buildMediaItemForPrefetch(track: Track): MediaItem {
-        val mediaUri = if (track.isOnlineTrack && track.uri.scheme != "file") {
-            Uri.Builder()
-                .scheme(StreamingDataSource.SCHEME_LIQUID)
-                .authority("track")
-                .appendQueryParameter(StreamingDataSource.PARAM_TRACK_ID, track.id)
-                .appendQueryParameter(StreamingDataSource.PARAM_URL, track.uri.toString())
-                .build()
-        } else {
-            track.uri
-        }
-
-        val metaBuilder = MediaMetadata.Builder()
-            .setTitle(track.title)
-            .setArtist(track.artist)
-            .setAlbumArtist(track.artist)
-            .setArtworkUri(track.displayArtUri)
-
-        if (track.durationMs > 0) {
-            metaBuilder.setDurationMs(track.durationMs)
-        }
-
-        return MediaItem.Builder()
-            .setMediaId(track.id)
-            .setUri(mediaUri)
-            .setMediaMetadata(metaBuilder.build())
-            .build()
     }
 
     companion object {

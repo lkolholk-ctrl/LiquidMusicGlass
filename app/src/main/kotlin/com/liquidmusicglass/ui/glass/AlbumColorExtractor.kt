@@ -71,6 +71,27 @@ private fun boostDarkColor(color: Int, minBrightness: Float = 0.15f): Color {
     }
 }
 
+/**
+ * Жёсткий нижний порог яркости. В отличие от [boostDarkColor] (мультипликативный —
+ * на чисто-чёрном даёт чёрное), здесь АДДИТИВНЫЙ подъём: pure black поднимается до
+ * видимого нейтрального тона, а у цветных обложек сохраняется оттенок. Применяется
+ * ко ВСЕМ полям [AlbumColors], чтобы чёрно-серые обложки (напр. ч/б каверы) не
+ * превращали ауру-дым и прочие Palette-зависимые элементы в чёрный экран.
+ */
+private fun withMinBrightness(color: Color, floor: Float): Color {
+    val r = color.red
+    val g = color.green
+    val b = color.blue
+    val brightness = (r + g + b) / 3f
+    if (brightness >= floor) return color
+    val lift = floor - brightness
+    return Color(
+        red = (r + lift).coerceIn(0f, 1f),
+        green = (g + lift).coerceIn(0f, 1f),
+        blue = (b + lift).coerceIn(0f, 1f)
+    )
+}
+
 @Composable
 fun rememberAlbumColors(uri: Uri?, coverUrl: String? = null): AlbumColors {
     val context = LocalContext.current
@@ -139,12 +160,16 @@ fun rememberAlbumColors(uri: Uri?, coverUrl: String? = null): AlbumColors {
                     else -> FALLBACK_MUTED
                 }
 
+                // Двухступенчато: сначала boostDarkColor (коррекция холодного/серого),
+                // затем АДДИТИВНЫЙ нижний порог — гарантирует видимый минимум яркости даже
+                // на чисто-чёрных каверах (darkMuted — база дыма — раньше шла вообще без
+                // обработки и давала чёрный фон).
                 AlbumColors(
-                    dominant = boostDarkColor(rawDominant, 0.10f),
-                    darkMuted = Color(rawDarkMuted),
-                    vibrant = boostDarkColor(bestVibrant, 0.12f),
-                    lightVibrant = boostDarkColor(rawLightVibrant, 0.15f),
-                    muted = boostDarkColor(rawMuted, 0.10f)
+                    dominant = withMinBrightness(boostDarkColor(rawDominant, 0.10f), 0.16f),
+                    darkMuted = withMinBrightness(Color(rawDarkMuted), 0.13f),
+                    vibrant = withMinBrightness(boostDarkColor(bestVibrant, 0.12f), 0.20f),
+                    lightVibrant = withMinBrightness(boostDarkColor(rawLightVibrant, 0.15f), 0.24f),
+                    muted = withMinBrightness(boostDarkColor(rawMuted, 0.10f), 0.16f)
                 )
             } catch (_: Exception) {
                 AlbumColors()

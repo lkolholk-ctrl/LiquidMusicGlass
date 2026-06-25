@@ -255,7 +255,7 @@ fun WaveOnboardingScreen(
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(
-                                text = "Личное радио недоступно",
+                                text = "Personal radio unavailable",
                                 color = LiquidTheme.colors.textPrimary,
                                 fontSize = 20.sp,
                                 fontWeight = FontWeight.Bold,
@@ -263,7 +263,7 @@ fun WaveOnboardingScreen(
                             )
                             Spacer(modifier = Modifier.height(12.dp))
                             Text(
-                                text = "Для работы Apple Music / ICM Music требуется партнерский API-ключ. Пожалуйста, укажите его в настройках профиля приложения.",
+                                text = "Apple Music / ICM Music requires a partner API key. Please set it up in the app's profile settings.",
                                 color = LiquidTheme.colors.textSecondary,
                                 fontSize = 14.sp,
                                 textAlign = TextAlign.Center,
@@ -275,7 +275,7 @@ fun WaveOnboardingScreen(
                                     onDismiss()
                                     android.widget.Toast.makeText(
                                         context,
-                                        "Вы можете настроить API-ключ в профиле пользователя",
+                                        "You can set up the API key in your user profile",
                                         android.widget.Toast.LENGTH_LONG
                                     ).show()
                                 },
@@ -283,7 +283,7 @@ fun WaveOnboardingScreen(
                                 colors = ButtonDefaults.buttonColors(containerColor = AppleRed),
                                 shape = RoundedCornerShape(12.dp)
                             ) {
-                                Text("Настроить API-ключ", color = Color.White, fontSize = 15.sp)
+                                Text("Set up API key", color = Color.White, fontSize = 15.sp)
                             }
                             Spacer(modifier = Modifier.height(10.dp))
                             Button(
@@ -297,7 +297,7 @@ fun WaveOnboardingScreen(
                                 ),
                                 shape = RoundedCornerShape(12.dp)
                             ) {
-                                Text("Закрыть", fontSize = 15.sp)
+                                Text("Close", fontSize = 15.sp)
                             }
                         }
                     }

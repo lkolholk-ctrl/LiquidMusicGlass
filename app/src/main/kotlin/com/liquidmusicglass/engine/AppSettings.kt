@@ -40,6 +40,11 @@ object AppSettings {
     private val _ignoreThresholdSec = MutableStateFlow(30f)
     val ignoreThresholdSec: StateFlow<Float> = _ignoreThresholdSec
 
+    // ── Preload next track (lead time before current track ends) ──
+    // За сколько секунд до конца трека начинать предзагрузку следующего. 30..90.
+    private val _preloadLeadSeconds = MutableStateFlow(60)
+    val preloadLeadSeconds: StateFlow<Int> = _preloadLeadSeconds
+
     // ── Player State ──
     private val _lastTrackIndex = MutableStateFlow(-1)
     val lastTrackIndex: StateFlow<Int> = _lastTrackIndex
@@ -125,6 +130,12 @@ object AppSettings {
     fun setIgnoreThreshold(sec: Float) {
         _ignoreThresholdSec.value = sec
         safePrefs()?.edit()?.putFloat("ignore_threshold", sec)?.apply()
+    }
+
+    fun setPreloadLeadSeconds(sec: Int) {
+        val clamped = sec.coerceIn(30, 90)
+        _preloadLeadSeconds.value = clamped
+        safePrefs()?.edit()?.putInt("preload_lead_seconds", clamped)?.apply()
     }
 
     fun setLastTrackIndex(index: Int) {
@@ -295,6 +306,7 @@ object AppSettings {
         _sleepTimerMinutes.value = p.getInt("sleep_timer", 0)
         _ignoreShortEnabled.value = p.getBoolean("ignore_short", false)
         _ignoreThresholdSec.value = p.getFloat("ignore_threshold", 30f)
+        _preloadLeadSeconds.value = p.getInt("preload_lead_seconds", 60).coerceIn(30, 90)
 
         _lastTrackIndex.value = p.getInt("last_track", -1)
         _lastPositionMs.value = p.getLong("last_position", 0L)

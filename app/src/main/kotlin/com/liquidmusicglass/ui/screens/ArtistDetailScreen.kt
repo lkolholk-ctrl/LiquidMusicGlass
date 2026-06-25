@@ -30,6 +30,7 @@ import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Shuffle
+import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -480,6 +481,32 @@ fun ArtistDetailScreen(
                                     Spacer(Modifier.width(6.dp))
                                     Text("Shuffle", color = LiquidTheme.colors.textPrimary, fontWeight = FontWeight.SemiBold)
                                 }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // Wave by artist — станция вокруг топ-трека артиста
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp)
+                                .height(44.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(if (LiquidTheme.colors.isDark) Color(0xFF1A1A1A) else Color(0xFFF2F2F7))
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null,
+                                    onClick = {
+                                        PlayerController.startArtistWave(context, artistId, artist?.name)
+                                    }
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Rounded.GraphicEq, null, tint = AppleRed, modifier = Modifier.size(20.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Artist wave", color = LiquidTheme.colors.textPrimary, fontWeight = FontWeight.SemiBold)
                             }
                         }
 

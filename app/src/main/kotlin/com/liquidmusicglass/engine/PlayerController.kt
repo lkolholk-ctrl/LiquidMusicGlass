@@ -20,6 +20,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -71,6 +72,16 @@ object PlayerController {
         getCompanionPlayer = { null }
     )
 
+    /**
+     * Единая точка входа для авто-дозаправки очереди волны. Безопасно дёргать из
+     * нескольких триггеров (UI-bridge и service-listener) — EndlessPlaybackEngine
+     * дедуплицирует через свой lock + throttle. Только для волны (Global).
+     */
+    fun ensureWaveRefill() {
+        if (_playbackContext !is PlaybackContext.Global) return
+        ioScope.launch { endlessEngine.checkAndRefillIfNeeded() }
+    }
+
     /** Public accessor for the endless engine's refill context (mood/genre) */
     val waveRefillContext: kotlinx.coroutines.flow.StateFlow<EndlessPlaybackEngine.RefillContext?>
         get() = endlessEngine.refillContext
@@ -78,6 +89,11 @@ object PlayerController {
     // ── Stream URL cache ──
     private val streamUrlCache = java.util.concurrent.ConcurrentHashMap<String, CachedStreamUrl>()
     private const val STREAM_CACHE_TTL_MS = 10 * 60 * 1000L
+
+    // In-flight резолвы: один и тот же трек резолвится максимум ОДНОЙ корутиной,
+    // остальные ждут тот же результат — без дублирующих POST /track (их раньше
+    // могло уходить 2-3 на трек: префетч + загрузчик + handleExpiredUrl).
+    private val inFlightResolves = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.Deferred<StreamResult>>()
 
     fun getValidCachedUri(trackId: String): Uri? {
         val now = System.currentTimeMillis()
@@ -92,6 +108,8 @@ object PlayerController {
     private var playbackStartTimeMs: Long = 0L
     private var totalPlayedMs: Long = 0L
     private var lastPositionMs: Long = 0L
+    // Индекс трека, для которого уже запущена предзагрузка следующего (раз на трек).
+    private var preloadDoneForIndex: Int = -1
 
     // ── Consecutive Skips ──
     private var _consecutiveSkips = 0
@@ -121,7 +139,13 @@ object PlayerController {
     fun getSmoothPositionMs(): Long {
         if (!lastIsPlaying) return lastPlayerPositionMs
         val elapsed = SystemClock.elapsedRealtime() - lastSyncTimeMs
-        return lastPlayerPositionMs + elapsed
+        return lastPlayerPositionMs + (elapsed * _playbackSpeed.value).toLong()
+    }
+
+    /** Переякорить интерполяцию на текущей сглаженной позиции (play/pause/seek/speed). */
+    private fun reanchorSmoothPosition() {
+        lastPlayerPositionMs = getSmoothPositionMs()
+        lastSyncTimeMs = SystemClock.elapsedRealtime()
     }
 
     private val _durationMs = MutableStateFlow(0L)
@@ -157,6 +181,8 @@ object PlayerController {
     var audioServiceRef: AudioService? = null
 
     fun setPlaybackSpeed(speed: Float) {
+        // re-anchor at current speed before switching, so position doesn't jump
+        reanchorSmoothPosition()
         _playbackSpeed.value = speed.coerceIn(0.5f, 2.0f)
         audioServiceRef?.setPlaybackSpeed(_playbackSpeed.value)
     }
@@ -265,13 +291,18 @@ object PlayerController {
     fun addTracksToQueue(newTracks: List<Track>) {
         if (newTracks.isEmpty()) return
         mainScope.launch {
-            queue = queue + newTracks
+            // Anti-repeat: не добавляем то, что уже есть в очереди (защита от дублей,
+            // даже если сервер/refill вернул пересекающийся трек).
+            val existingIds = queue.mapTo(HashSet()) { it.id }
+            val fresh = newTracks.filterNot { it.id in existingIds }
+            if (fresh.isEmpty()) return@launch
+            queue = queue + fresh
             _queueFlow.value = queue
-            
+
             withContext(Dispatchers.Main) {
                 val player = controller ?: appContext?.let { getPlayer(it) }
                 player?.let { p ->
-                    val mediaItems = newTracks.map { track ->
+                    val mediaItems = fresh.map { track ->
                         buildMediaItem(track, track.uri)
                     }
                     p.addMediaItems(mediaItems)
@@ -411,26 +442,17 @@ object PlayerController {
                         }
                     }
 
-                    prefetchAhead(context, startIndex, depth = 10)
+                    prefetchAhead(context, startIndex, depth = 3)
                 }
                 is StreamResult.Error -> {
                     android.util.Log.e("PlayerController", "Stream error for ${startTrack.id}: ${startStreamResult.code}")
                     withContext(Dispatchers.Main) {
                         _isBuffering.value = false
-                        android.widget.Toast.makeText(context, "Failed to resolve track: ${startStreamResult.message ?: startStreamResult.code}", android.widget.Toast.LENGTH_SHORT).show()
+                        val msg = com.liquidmusicglass.api.icm.icmUserMessage(0, startStreamResult.code)
+                        android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
                     }
                 }
             }
-
-            if (newContext is PlaybackContext.Global) {
-                launch {
-                    kotlinx.coroutines.delay(3000)
-                    endlessEngine.checkAndRefillIfNeeded()
-                }
-            }
-
-            // Pre-warm URL cache for upcoming tracks
-            prefetchAhead(context, startIndex, depth = 10)
         }
     }
 
@@ -509,10 +531,15 @@ object PlayerController {
             getPlayer(appContext ?: return@launch)?.seekTo(safePosition)
             _currentPositionMs.value = safePosition
             lastPositionMs = safePosition
+            // re-anchor smooth position to the new seek target
+            lastPlayerPositionMs = safePosition
+            lastSyncTimeMs = SystemClock.elapsedRealtime()
         }
     }
 
     fun setPlaying(playing: Boolean) {
+        // re-anchor smooth position at the play/pause transition (uses old state)
+        reanchorSmoothPosition()
         _isPlaying.value = playing
         lastIsPlaying = playing
         if (!playing && _isBuffering.value) {
@@ -540,6 +567,19 @@ object PlayerController {
                 totalPlayedMs += delta
             }
             lastPositionMs = positionMs
+
+            // ── Предзагрузка следующего трека за настраиваемые N секунд до конца ──
+            // Когда до конца остаётся ≤ preloadLeadSeconds — заранее резолвим/прогреваем
+            // следующие треки, чтобы переход был без паузы. Один раз на трек.
+            val effDur = if (durationMs > 0L) durationMs else _durationMs.value
+            if (effDur > 0L && preloadDoneForIndex != currentIndex) {
+                val remaining = effDur - positionMs
+                val leadMs = AppSettings.preloadLeadSeconds.value * 1000L
+                if (remaining in 1..leadMs) {
+                    preloadDoneForIndex = currentIndex
+                    appContext?.let { prefetchAhead(it, currentIndex, depth = 2) }
+                }
+            }
         }
     }
 
@@ -557,7 +597,9 @@ object PlayerController {
         _currentPositionMs.value = 0L
         
         resetPlaybackLogging(track.durationMs)
-        appContext?.let { prefetchAhead(it, index, depth = 5) }
+        // Только ближайший следующий — для мгновенного скипа. Более глубокая
+        // предзагрузка управляется настройкой «Preload next track» (по таймеру до конца).
+        appContext?.let { prefetchAhead(it, index, depth = 1) }
     }
 
     fun onTrackEnded() {
@@ -705,13 +747,30 @@ object PlayerController {
     private suspend fun resolveStreamUrl(trackId: String): StreamResult {
         val now = System.currentTimeMillis()
         val cached = streamUrlCache[trackId]
-
         if (cached != null && now < cached.expiresAtMs) {
             return StreamResult.Success(cached.uri)
         }
 
+        // Уже резолвится этот трек — присоединяемся к тому же результату.
+        inFlightResolves[trackId]?.let { return it.await() }
 
+        val deferred = ioScope.async(start = kotlinx.coroutines.CoroutineStart.LAZY) {
+            doResolveStreamUrl(trackId)
+        }
+        val winner = inFlightResolves.putIfAbsent(trackId, deferred) ?: deferred
+        if (winner !== deferred) {
+            // Проиграли гонку постановки — ждём чужой (уже запущенный) резолв.
+            return winner.await()
+        }
+        deferred.start()
+        return try {
+            deferred.await()
+        } finally {
+            inFlightResolves.remove(trackId, deferred)
+        }
+    }
 
+    private suspend fun doResolveStreamUrl(trackId: String): StreamResult {
         return try {
             withTimeout(15_000) {
                 val quality = getEffectiveQuality(trackId)
@@ -817,6 +876,7 @@ object PlayerController {
         playbackStartTimeMs = System.currentTimeMillis()
         totalPlayedMs = 0L
         lastPositionMs = 0L
+        preloadDoneForIndex = -1
     }
 
     private fun logPreviousTrack(track: Track, playedMs: Long) {
@@ -860,7 +920,12 @@ object PlayerController {
             }
         }
 
-        // Also log to ICM API wave playback
+        // Also log to ICM API wave playback.
+        // skipped=true — НЕГАТИВНЫЙ сигнал для волны. Шлём его ТОЛЬКО в контексте волны
+        // (Global): пролистывание трека в альбоме/плейлисте — это осознанная навигация,
+        // а не «меньше такого», и не должно портить персонализацию. Позитивный сигнал
+        // (completed) шлём в любом контексте — дослушанный трек = подтверждение вкуса.
+        val isWaveContext = _playbackContext is PlaybackContext.Global
         ioScope.launch {
             try {
                 IcmRepository.logWavePlayback(
@@ -868,7 +933,7 @@ object PlayerController {
                     playedSeconds = playedSec.toDouble(),
                     totalSeconds = durationSec.toDouble(),
                     completed = if (track.durationMs > 0L) playedMs >= 0.85f * track.durationMs else isCompleted,
-                    skipped = isSkippedForServer
+                    skipped = isSkippedForServer && isWaveContext
                 )
             } catch (_: Exception) {}
         }
@@ -1021,6 +1086,79 @@ object PlayerController {
                 repo.toggleFavorite(track)
             } else {
                 repo.toggleFavoriteById(trackId)
+            }
+        }
+    }
+
+    /**
+     * «Волна по треку» (станция, как у Яндекса): строит очередь вокруг [seedTrack]
+     * через ICM `wave/next?seed_track_id`, ставит сам трек первым и продолжает
+     * похожими; авто-рефилл держит ту же станцию по seed.
+     */
+    fun startTrackWave(context: Context, seedTrack: Track) {
+        ioScope.launch {
+            val repo = com.liquidmusicglass.data.local.WaveRepository.getInstance(context)
+            val station = repo.buildWaveQueue(seedTrackId = seedTrack.id)
+            val queue = if (station.isEmpty()) {
+                listOf(seedTrack)
+            } else {
+                buildList {
+                    add(seedTrack)
+                    addAll(station.filter { it.id != seedTrack.id })
+                }
+            }
+            playFromList(
+                context = context,
+                tracks = queue,
+                startIndex = 0,
+                autoRefillType = "WAVE",
+                seedTrackId = seedTrack.id
+            )
+        }
+    }
+
+    /**
+     * Волна по артисту. API не имеет seed_artist_id, поэтому берём топ-трек артиста как
+     * seed и строим вокруг него станцию (≈ радио по артисту, как у Яндекса).
+     */
+    fun startArtistWave(context: Context, artistId: String, artistName: String? = null) {
+        ioScope.launch {
+            val seed = try {
+                com.liquidmusicglass.api.icm.IcmRepository.getArtistTopTracks(artistId).firstOrNull()
+            } catch (_: Exception) {
+                null
+            }
+            if (seed == null) {
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(
+                        context,
+                        "Couldn't start artist wave",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                }
+                return@launch
+            }
+            startTrackWave(context, seed)
+        }
+    }
+
+    /**
+     * Вызывается при восстановлении сети. Если воспроизведение встало из-за ошибки сети
+     * (плеер ушёл в STATE_IDLE — в отличие от пользовательской паузы, где он остаётся
+     * READY), переподготавливаем текущий трек и продолжаем — без действий пользователя.
+     */
+    fun retryCurrentIfStalled(context: Context) {
+        ioScope.launch {
+            val player = getPlayer(context) ?: return@launch
+            withContext(Dispatchers.Main) {
+                if (_currentTrack.value != null &&
+                    player.mediaItemCount > 0 &&
+                    player.playbackState == Player.STATE_IDLE
+                ) {
+                    android.util.Log.d("PlayerController", "[NET] Network back — retrying stalled playback")
+                    player.prepare()
+                    player.play()
+                }
             }
         }
     }
