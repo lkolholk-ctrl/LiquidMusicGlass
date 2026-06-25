@@ -55,13 +55,21 @@ class MainActivity : ComponentActivity() {
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         private var wasOffline = true
+        private var reconnectJob: kotlinx.coroutines.Job? = null
 
         override fun onAvailable(network: Network) {
-            if (wasOffline && IcmAuthRepository.isLoggedIn.value) {
-                wasOffline = false
-                authScope.launch {
+            if (!wasOffline) return
+            wasOffline = false
+            // Debounce: на флапающей мобильной сети onAvailable может прийти много раз —
+            // ждём 1.5с стабильности и делаем ОДИН рефетч + ретрай зависшего плеера,
+            // вместо залпа запросов на каждое срабатывание.
+            reconnectJob?.cancel()
+            reconnectJob = authScope.launch {
+                kotlinx.coroutines.delay(1500)
+                if (IcmAuthRepository.isLoggedIn.value) {
                     IcmAuthRepository.fetchUserData()
                 }
+                PlayerController.retryCurrentIfStalled(applicationContext)
             }
         }
 

@@ -149,6 +149,7 @@ object IcmRepository {
         result.exceptionOrNull()?.let {
             _lastException = it as? Exception
             _lastError.value = it.message
+            _lastApiException.value = it as? IcmApiException
         }
         return result.getOrNull()
     }

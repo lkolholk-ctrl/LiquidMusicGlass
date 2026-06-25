@@ -448,7 +448,8 @@ object PlayerController {
                     android.util.Log.e("PlayerController", "Stream error for ${startTrack.id}: ${startStreamResult.code}")
                     withContext(Dispatchers.Main) {
                         _isBuffering.value = false
-                        android.widget.Toast.makeText(context, "Failed to resolve track: ${startStreamResult.message ?: startStreamResult.code}", android.widget.Toast.LENGTH_SHORT).show()
+                        val msg = com.liquidmusicglass.api.icm.icmUserMessage(0, startStreamResult.code)
+                        android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
                     }
                 }
             }
@@ -1138,6 +1139,27 @@ object PlayerController {
                 return@launch
             }
             startTrackWave(context, seed)
+        }
+    }
+
+    /**
+     * Вызывается при восстановлении сети. Если воспроизведение встало из-за ошибки сети
+     * (плеер ушёл в STATE_IDLE — в отличие от пользовательской паузы, где он остаётся
+     * READY), переподготавливаем текущий трек и продолжаем — без действий пользователя.
+     */
+    fun retryCurrentIfStalled(context: Context) {
+        ioScope.launch {
+            val player = getPlayer(context) ?: return@launch
+            withContext(Dispatchers.Main) {
+                if (_currentTrack.value != null &&
+                    player.mediaItemCount > 0 &&
+                    player.playbackState == Player.STATE_IDLE
+                ) {
+                    android.util.Log.d("PlayerController", "[NET] Network back — retrying stalled playback")
+                    player.prepare()
+                    player.play()
+                }
+            }
         }
     }
 

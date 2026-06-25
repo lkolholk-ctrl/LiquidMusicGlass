@@ -104,7 +104,7 @@ class HomeViewModel : ViewModel() {
                 }
             }
 
-            _error.value = lastException?.message ?: "Failed to load home content"
+            _error.value = com.liquidmusicglass.api.icm.icmUserMessage(lastException)
             if (_homeContent.value == null) {
                 _homeContent.value = IcmHomeResponse(blocks = emptyList())
             }

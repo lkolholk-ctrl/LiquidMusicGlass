@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.liquidmusicglass.api.icm.IcmAuthRepository
 import com.liquidmusicglass.api.icm.IcmRepository
+import com.liquidmusicglass.api.icm.icmUserMessage
 import com.liquidmusicglass.api.icm.IcmSearchItem
 import com.liquidmusicglass.api.icm.IcmSearchSource
 import com.liquidmusicglass.api.icm.IcmWaveOnboardingArtist
@@ -125,10 +126,11 @@ class SearchViewModel : ViewModel() {
                 val result = IcmRepository.searchAll(q, source = _selectedSource.value)
                 _searchResults.value = result?.items ?: emptyList()
                 if (result == null) {
-                    _error.value = IcmRepository.lastError.value ?: "Search failed"
+                    // Человекочитаемое сообщение вместо сырого JSON тела ответа.
+                    _error.value = icmUserMessage(IcmRepository.lastApiException.value)
                 }
             } catch (e: Exception) {
-                _error.value = e.message ?: "Search error"
+                _error.value = icmUserMessage(e)
             } finally {
                 _isLoading.value = false
             }
