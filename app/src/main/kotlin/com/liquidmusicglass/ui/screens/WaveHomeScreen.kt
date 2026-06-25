@@ -50,7 +50,6 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.liquidmusicglass.api.icm.IcmChart
 import com.liquidmusicglass.api.icm.IcmHomeItem
-import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.api.icm.toTrack
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.Track
@@ -59,7 +58,6 @@ import com.liquidmusicglass.ui.glass.rememberAlbumColors
 import com.liquidmusicglass.ui.player.AuraBackground
 import com.liquidmusicglass.ui.theme.AppFontFamily
 import com.liquidmusicglass.ui.viewmodel.HomeViewModel
-import kotlinx.coroutines.launch
 
 /**
  * "My Wave" — the main screen, our own take on the Yandex-Music style feed.
@@ -86,7 +84,6 @@ fun WaveHomeScreen(
 ) {
     val context = LocalContext.current
     val viewModel = remember { HomeViewModel() }
-    val scope = androidx.compose.runtime.rememberCoroutineScope()
 
     LaunchedEffect(Unit) { viewModel.loadHomeContent() }
 
@@ -255,7 +252,7 @@ fun WaveHomeScreen(
                                 subtitle = recent.artist,
                                 uri = recent.displayArtUri,
                                 coverUrl = recent.coverUrl,
-                                onClick = { PlayerController.playNext(recent, context) }
+                                onClick = { PlayerController.playFromList(context, listOf(recent)) }
                             )
                         }
                     }
@@ -282,10 +279,11 @@ fun WaveHomeScreen(
                                     if (!cid.isNullOrBlank()) {
                                         onNavigateToAlbum(cid)
                                     } else {
+                                        // playFromList сам резолвит стрим начального трека,
+                                        // показывает Toast при ошибке и не зависит от гонки
+                                        // mediaItemCount в playNext — трек реально стартует.
                                         val t = homeItem.toWaveTrack()
-                                        scope.launch {
-                                            resolveStreamUrl(t)?.let { PlayerController.playNext(it, context) }
-                                        }
+                                        PlayerController.playFromList(context, listOf(t))
                                     }
                                 }
                             )
@@ -375,15 +373,10 @@ private fun IcmHomeItem.toWaveTrack(): Track = Track(
     uri = Uri.parse("https://byicloud.online/track/$id"),
     durationMs = durationMs,
     albumId = collectionId?.hashCode()?.toLong() ?: -1L,
-    coverUrl = cover
+    coverUrl = cover,
+    // без source резолвер стрима не знал, откуда тянуть (apple/vk) → трек не грузился
+    source = source
 )
-
-private suspend fun resolveStreamUrl(track: Track): Track? = try {
-    val url = IcmRepository.getStreamUrl(track.id, source = track.source)
-    if (url != null) track.copy(uri = Uri.parse(url)) else null
-} catch (_: Exception) {
-    null
-}
 
 @Composable
 private fun WaveSectionHeader(title: String) {

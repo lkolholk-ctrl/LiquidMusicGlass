@@ -14,6 +14,7 @@ import com.google.common.util.concurrent.MoreExecutors
 import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.api.icm.IcmTrackResponse
 import com.liquidmusicglass.data.local.WaveRepository
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -48,8 +49,17 @@ sealed class PlaybackContext {
  */
 object PlayerController {
 
-    private val ioScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    private val mainScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    // Любое необработанное исключение в корутине воспроизведения раньше валило
+    // всё приложение (у scope только SupervisorJob, без обработчика). Теперь —
+    // логируем, снимаем индикатор загрузки и живём дальше: тап по треку,
+    // который не смог стартовать, больше не крашит приложение.
+    private val crashGuard = CoroutineExceptionHandler { _, e ->
+        android.util.Log.e("VOIDPIXEL_MEDIA", "Unhandled playback coroutine error", e)
+        _isBuffering.value = false
+    }
+
+    private val ioScope = CoroutineScope(Dispatchers.IO + SupervisorJob() + crashGuard)
+    private val mainScope = CoroutineScope(Dispatchers.Main + SupervisorJob() + crashGuard)
 
     private var appContext: Context? = null
     val context: Context? get() = appContext
