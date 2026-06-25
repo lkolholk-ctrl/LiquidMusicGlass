@@ -342,23 +342,23 @@ fun WaveHomeScreen(
         if (needsLink) {
             androidx.compose.material3.AlertDialog(
                 onDismissRequest = { viewModel.clearLinkFlag() },
-                title = { Text("Подключи Telegram") },
+                title = { Text("Connect Telegram") },
                 text = {
                     Text(
-                        "Чтобы «Моя волна» подстраивалась под тебя, войди через Telegram. " +
-                        "Без привязки сервер отдаёт общие рекомендации."
+                        "Sign in with Telegram so My Wave can adapt to you. " +
+                        "Without linking, the server returns generic recommendations."
                     )
                 },
                 confirmButton = {
                     androidx.compose.material3.TextButton(onClick = {
                         viewModel.clearLinkFlag()
                         onOpenAuth()
-                    }) { Text("Войти") }
+                    }) { Text("Sign in") }
                 },
                 dismissButton = {
                     androidx.compose.material3.TextButton(onClick = {
                         viewModel.clearLinkFlag()
-                    }) { Text("Позже") }
+                    }) { Text("Later") }
                 }
             )
         }

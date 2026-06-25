@@ -169,7 +169,7 @@ fun SettingsScreen(
                         onSelect = { AppSettings.setPreloadLeadSeconds(it) }
                     )
                     Text(
-                        text = "За сколько секунд до конца трека подгружать следующий",
+                        text = "How early to preload the next track before the current one ends",
                         color = lc.textSecondary,
                         fontSize = 12.sp,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)

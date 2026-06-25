@@ -1131,7 +1131,7 @@ object PlayerController {
                 withContext(Dispatchers.Main) {
                     android.widget.Toast.makeText(
                         context,
-                        "Не удалось запустить волну по артисту",
+                        "Couldn't start artist wave",
                         android.widget.Toast.LENGTH_SHORT
                     ).show()
                 }
