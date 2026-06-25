@@ -31,6 +31,13 @@ import kotlin.math.max
  */
 object VadLyricsEngine {
 
+    /**
+     * Глобальный выключатель VAD. Сейчас ВЫКЛЮЧЕН: модель на проигрышах не помогла,
+     * закрас лирики переведён на сегментно-пунктуационную модель в LyricsTimeProcessor.
+     * Код и ассеты оставлены для будущего включения. start() при false — no-op.
+     */
+    const val ENABLED = false
+
     // ─── Константы из vad_meta.json ───
     private const val SR = 44100
     private const val N_FFT = 1024
@@ -128,6 +135,7 @@ object VadLyricsEngine {
     /** Включить VAD: запускает воркер (загрузка модели идёт В ВОРКЕРЕ, не на main). */
     @Synchronized
     fun start(context: Context) {
+        if (!ENABLED) return        // VAD выключен флагом
         VocalState.enabled = true
         if (running) return
         resetDsp()
