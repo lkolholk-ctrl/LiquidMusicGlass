@@ -45,6 +45,7 @@ import com.liquidmusicglass.engine.LyricsParser
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.ui.glass.AlbumArtImage
 import com.liquidmusicglass.ui.glass.AlbumColors
+import com.liquidmusicglass.engine.vad.VadLyricsEngine
 import com.liquidmusicglass.ui.glass.rememberAlbumColors
 import com.liquidmusicglass.ui.theme.AppFontFamily
 import kotlinx.coroutines.Dispatchers
@@ -152,6 +153,15 @@ fun LyricsScreen(
     LaunchedEffect(resolvedTrackId) {
         timeProcessor?.reset()
     }
+
+    // ── VAD-лирики: модель крутится только пока открыт экран лирики с синхро-текстом.
+    // start() поднимает VocalState.enabled → BassAudioProcessor начинает кормить FFT-тап.
+    val isSyncedLyrics = lyrics.isSynced
+    DisposableEffect(isSyncedLyrics) {
+        if (isSyncedLyrics) VadLyricsEngine.start(context)
+        onDispose { VadLyricsEngine.stop() }
+    }
+    val isInterlude by timeProcessor?.isInterlude?.collectAsState() ?: remember { mutableStateOf(false) }
 
     // ── Smooth 60/120 FPS position ticker ──
     val isPlaying by PlayerController.isPlaying.collectAsState()
@@ -376,9 +386,10 @@ fun LyricsScreen(
                                     maxWidthPx = lineMaxWidthPx,
                                     glowColor = duetColor ?: resolvedColors.vibrant
                                 )
-                                // Точки ожидания во время инструментального проигрыша
-                                // после уже спетой строки — крупные, по центру.
-                                if (isCurrent && showGapDots) {
+                                // Точки ожидания во время инструментального проигрыша:
+                                // либо по LRC-зазору (showGapDots), либо по VAD-модели
+                                // (isInterlude — ловит проигрыши, которых нет в таймингах).
+                                if (isCurrent && (showGapDots || isInterlude)) {
                                     Spacer(Modifier.height(16.dp))
                                     Box(
                                         modifier = Modifier.fillMaxWidth(),

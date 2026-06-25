@@ -4,6 +4,8 @@ import androidx.media3.common.C
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.audio.BaseAudioProcessor
 import androidx.media3.common.util.UnstableApi
+import com.liquidmusicglass.engine.vad.VadLyricsEngine
+import com.liquidmusicglass.engine.vad.VocalState
 import java.nio.ByteBuffer
 import kotlin.math.sqrt
 
@@ -95,6 +97,14 @@ class BassAudioProcessor : BaseAudioProcessor() {
             AudioReactor.low = envLow
             AudioReactor.mid = envMid
             AudioReactor.high = envHigh
+        }
+
+        // ── VAD-лирики: переиспользуем ТОТ ЖЕ PCM-тап (никакого второго source).
+        // shorts.get(index) — абсолютный доступ, позиция inputBuffer не сдвинута,
+        // поэтому ниже звук копируется в выход целиком как обычно. ──
+        if (VocalState.enabled) {
+            shorts.rewind()
+            VadLyricsEngine.feed(shorts, channels, inputAudioFormat.sampleRate)
         }
 
         // ── Передаём звук дальше без изменений ──

@@ -5,6 +5,7 @@ import androidx.compose.runtime.Stable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import com.liquidmusicglass.engine.LyricsParser
+import com.liquidmusicglass.engine.vad.VocalState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -60,6 +61,13 @@ class LyricsTimeProcessor(
 
     private val _currentLineIndex = MutableStateFlow(-1)
     val currentLineIndex: StateFlow<Int> = _currentLineIndex.asStateFlow()
+
+    /**
+     * Идёт ли сейчас инструментал/проигрыш по данным VAD-модели.
+     * Пока true — заливка слов заморожена, UI показывает «Waiting».
+     */
+    private val _isInterlude = MutableStateFlow(false)
+    val isInterlude: StateFlow<Boolean> = _isInterlude.asStateFlow()
 
     /** Monotonic cursor: индекс текущего слова во flat-списке всех слов. */
     private var currentWordIndex: Int = 0
@@ -117,6 +125,15 @@ class LyricsTimeProcessor(
      */
     fun updatePosition(positionMs: Long) {
         if (!lyrics.isSynced || allWords.isEmpty()) return
+
+        // ── VAD-гейт: на проигрыше (нет вокала) замораживаем заливку и курсор,
+        // показываем «Waiting». lastProcessedPositionMs НЕ трогаем — когда вокал
+        // вернётся, скачок > порога вызовет binary-search re-seek на нужное слово. ──
+        if (VocalState.enabled && !VocalState.isVocal) {
+            if (!_isInterlude.value) _isInterlude.value = true
+            return
+        }
+        if (_isInterlude.value) _isInterlude.value = false
 
         // Детекция ручной перемотки: если скачок > 500мс — сбрасываем курсор
         val isSeek = lastProcessedPositionMs >= 0 &&
@@ -258,6 +275,7 @@ class LyricsTimeProcessor(
         _currentLineProgress.value = 0f
         _pastWords.value = emptyList()
         _currentWords.value = emptyList()
+        _isInterlude.value = false
     }
 
     data class WordToken(
