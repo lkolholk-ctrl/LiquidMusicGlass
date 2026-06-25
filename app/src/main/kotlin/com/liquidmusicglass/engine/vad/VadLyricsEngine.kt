@@ -17,7 +17,8 @@ import kotlin.math.max
  *   PCM(mono,44100) → кадр N_FFT=1024 (hop=512), окно Ханна → |rFFT|² (513)
  *   → mel = MEL_FB(64×513)·power → logmel = power_to_db(ref=max, top_db=80)
  *   → norm = (logmel - MEAN)/STD → окно из WIN=15 кадров → TFLite → p(вокал)
- *   → скользящее среднее SMOOTH_FRAMES=5 → порог VOCAL_THRESHOLD=0.3.
+ *   → скользящее среднее SMOOTH_FRAMES=9 → гистерезис (вход <0.2 / выход >0.4)
+ *   + минимальная длительность проигрыша 1.5с (короткие провалы p — шум).
  *
  * FFT берётся из того же PCM-тапа, что и бас-дым ([com.liquidmusicglass.engine.BassAudioProcessor]),
  * а не из Android Visualizer.getFft (8-бит/AGC/512 бинов — не 1:1).
@@ -39,8 +40,16 @@ object VadLyricsEngine {
     private const val WIN = 15
     private const val MEAN = -24.79964516243778f
     private const val STD = 18.677518706818976f
-    private const val VOCAL_THRESHOLD = 0.3f
-    private const val SMOOTH_FRAMES = 5
+    private const val SMOOTH_FRAMES = 9        // скользящее среднее p (8–10), не дёргается
+
+    // Гистерезис: вход в «проигрыш» по низкому порогу, выход — по высокому.
+    // Между 0.2 и 0.4 состояние не меняется → нет дребезга у порога.
+    private const val ENTER_INSTRUMENTAL = 0.2f
+    private const val EXIT_INSTRUMENTAL = 0.4f
+    // Минимальная длительность проигрыша: короткие провалы p — шум, игнорим.
+    private const val MIN_INTERLUDE_MS = 1500f
+    private const val FRAME_MS = HOP * 1000f / SR   // ≈11.61мс на кадр (hop=512@44100)
+
     private const val TOP_DB = 80f
     private const val AMIN = 1e-10f                 // librosa power_to_db amin
     private const val LOG10 = 2.302585092994046f    // ln(10), для 10*log10 = 10/ln10 * ln
@@ -59,6 +68,10 @@ object VadLyricsEngine {
     private val smooth = FloatArray(SMOOTH_FRAMES)
     private var smoothIdx = 0
     private var smoothCount = 0
+
+    // Состояние машины «вокал/проигрыш» (гистерезис + минимальная длительность).
+    private var instrumental = false
+    private var belowFrames = 0
 
     // TFLite I/O (переиспользуемые)
     private val inputBuf: ByteBuffer =
@@ -146,6 +159,7 @@ object VadLyricsEngine {
         frameFilled = 0
         window.clear()
         smoothIdx = 0; smoothCount = 0
+        instrumental = false; belowFrames = 0
         rsCursor = 0.0; rsInCount = 0L; rsPrev = 0f
         ringHead = ringTail
     }
@@ -270,15 +284,32 @@ object VadLyricsEngine {
         }
         val p = output[0][0].coerceIn(0f, 1f)
 
-        // Скользящее среднее по SMOOTH_FRAMES.
+        // Скользящее среднее по SMOOTH_FRAMES — решение по сглаженному, не по сырому p.
         smooth[smoothIdx] = p
         smoothIdx = (smoothIdx + 1) % SMOOTH_FRAMES
         if (smoothCount < SMOOTH_FRAMES) smoothCount++
         var sum = 0f
         for (i in 0 until smoothCount) sum += smooth[i]
         val avg = sum / smoothCount
-
         VocalState.pVocal = avg
-        VocalState.isVocal = avg >= VOCAL_THRESHOLD
+
+        // Машина состояний: гистерезис + минимальная длительность проигрыша.
+        if (!instrumental) {
+            // Вокал сейчас. Уходим в проигрыш только если p держится ниже ENTER
+            // дольше MIN_INTERLUDE_MS (короткие провалы — шум, игнорим).
+            if (avg < ENTER_INSTRUMENTAL) {
+                belowFrames++
+                if (belowFrames * FRAME_MS >= MIN_INTERLUDE_MS) instrumental = true
+            } else {
+                belowFrames = 0
+            }
+        } else {
+            // Проигрыш сейчас. Возвращаемся к вокалу сразу, как p превысил EXIT.
+            if (avg > EXIT_INSTRUMENTAL) {
+                instrumental = false
+                belowFrames = 0
+            }
+        }
+        VocalState.isVocal = !instrumental
     }
 }

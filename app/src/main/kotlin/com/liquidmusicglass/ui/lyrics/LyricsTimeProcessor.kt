@@ -126,12 +126,26 @@ class LyricsTimeProcessor(
     fun updatePosition(positionMs: Long) {
         if (!lyrics.isSynced || allWords.isEmpty()) return
 
-        // ── VAD-гейт: на проигрыше (нет вокала) замораживаем заливку и курсор,
-        // показываем «Waiting». lastProcessedPositionMs НЕ трогаем — когда вокал
-        // вернётся, скачок > порога вызовет binary-search re-seek на нужное слово. ──
+        // ── VAD-гейт: на проигрыше (нет вокала) замораживаем курсор/заливку и
+        // показываем «Waiting». ВАЖНО (#4): гейт срабатывает ТОЛЬКО когда текущая
+        // строка уже допета (мы в зазоре до следующей) — VAD управляет паузами
+        // МЕЖДУ строками, но НЕ рвёт заливку на середине строки.
+        // lastProcessedPositionMs не трогаем — при возврате вокала скачок > порога
+        // даст binary-search re-seek на нужное слово. ──
         if (VocalState.enabled && !VocalState.isVocal) {
-            if (!_isInterlude.value) _isInterlude.value = true
-            return
+            val ci = _currentLineIndex.value
+            if (ci in lineWordRanges.indices) {
+                val range = lineWordRanges[ci]
+                val lineStart = allWords[range.first].startMs
+                val lineEnd = allWords[range.last].endMs
+                val rawDuration = (lineEnd - lineStart).coerceAtLeast(1L)
+                val wordCount = (range.last - range.first + 1).coerceAtLeast(1)
+                val cappedEnd = lineStart + minOf(rawDuration, (wordCount * 700L).coerceAtLeast(1500L))
+                if (positionMs >= cappedEnd) {
+                    if (!_isInterlude.value) _isInterlude.value = true
+                    return
+                }
+            }
         }
         if (_isInterlude.value) _isInterlude.value = false
 
