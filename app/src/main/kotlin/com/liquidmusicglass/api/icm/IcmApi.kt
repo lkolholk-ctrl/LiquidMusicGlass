@@ -112,15 +112,25 @@ class IcmApi private constructor() {
             .protocols(listOf(okhttp3.Protocol.HTTP_2, okhttp3.Protocol.HTTP_1_1))
             .addInterceptor { chain ->
                 val request = chain.request()
+                // «Быстрый» путь (sync-резолв на потоке ExoPlayer): короткий таймаут и
+                // 1 попытка — загрузчик не должен висеть до 30с.
+                val fast = request.header("X-LMG-Fast") == "1"
+                // Внутренний маркер на сервер не отправляем.
+                val outRequest = if (fast) request.newBuilder().removeHeader("X-LMG-Fast").build() else request
+                val activeChain = if (fast) {
+                    chain.withConnectTimeout(5, TimeUnit.SECONDS)
+                        .withReadTimeout(5, TimeUnit.SECONDS)
+                        .withWriteTimeout(5, TimeUnit.SECONDS)
+                } else chain
                 var response: okhttp3.Response? = null
                 var exception: java.io.IOException? = null
                 var tryCount = 0
-                val maxRetries = 3
+                val maxRetries = if (fast) 1 else 3
                 while (tryCount < maxRetries) {
                     try {
                         // Закрываем предыдущий 5xx-ответ перед повтором (не течём телом).
                         response?.close()
-                        response = chain.proceed(request)
+                        response = activeChain.proceed(outRequest)
                         // НИКОГДА не ретраим 4xx (в т.ч. 429) — повтор лишь усугубляет бан.
                         if (response.isSuccessful || response.code < 500) {
                             return@addInterceptor response
@@ -173,11 +183,18 @@ class IcmApi private constructor() {
         return response.header("X-Request-Id")
     }
 
-    private fun buildRequest(url: String, method: String = "GET", body: String? = null): Request {
+    private fun buildRequest(url: String, method: String = "GET", body: String? = null, fast: Boolean = false): Request {
         val builder = Request.Builder()
             .url(url)
             .header("User-Agent", "LiquidMusicGlass/1.0")
             .header("Accept", "application/json")
+
+        // Помечаем «быстрые» вызовы (sync-резолв на потоке загрузчика ExoPlayer):
+        // интерсептор даст им короткий таймаут и НИ ОДНОГО ретрая, чтобы загрузчик
+        // не висел до 30с при медленном/банящем сервере.
+        if (fast) {
+            builder.header("X-LMG-Fast", "1")
+        }
 
         // Auth: session token for user-scoped endpoints (/me/*, wave, likes)
         sessionToken?.let {
@@ -294,7 +311,7 @@ class IcmApi private constructor() {
         try {
             IcmRateGate.throttleBlocking()
             val url = if (async) "$BASE_URL$endpoint?async=1" else "$BASE_URL$endpoint"
-            val request = buildRequest(url, method, body)
+            val request = buildRequest(url, method, body, fast = true)
             val response = client.newCall(request).execute()
 
             extractRequestId(response)?.let { onRequestId?.invoke(it) }
