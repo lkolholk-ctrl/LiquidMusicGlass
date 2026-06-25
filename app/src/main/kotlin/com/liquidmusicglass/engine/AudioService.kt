@@ -212,11 +212,20 @@ class AudioService : MediaSessionService() {
             val isExpiredUrl = error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS
                 && error.message?.contains("403") == true
 
-            if (isExpiredUrl) {
-                if (currentTrackId != null) {
+            if (isExpiredUrl && currentTrackId != null) {
+                // Не каждый 403 — протухшая подпись: source_not_allowed/региональный
+                // 403 вернётся снова с тем же источником. Раньше re-resolve шёл в обход
+                // счётчика и зацикливался. Ограничиваем число пере-резолвов на трек.
+                if (currentTrackId != lastErrorTrackId) {
+                    lastErrorTrackId = currentTrackId
+                    errorRetryCount = 0
+                }
+                if (errorRetryCount < 2) {
+                    errorRetryCount++
                     PlayerController.handleExpiredUrl(this@AudioService, currentTrackId)
                     return
                 }
+                // Пере-резолвы исчерпаны → проваливаемся в обычное восстановление/skip ниже.
             }
 
             // ── SOFT ERROR RECOVERY: retry up to 3 times on the SAME track, do NOT auto-skip ──

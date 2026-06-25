@@ -223,12 +223,14 @@ data class IcmArtistResponse(
 
 @Serializable
 data class IcmArtistSong(
-    val id: String,
-    val title: String,
-    val artist: String,
+    val id: String = "",
+    // Дефолты: один трек артиста без cover/artist раньше ронял парс ВСЕГО
+    // ответа артиста (топ-треки + дискография). coerceInputValues маппит null → "".
+    val title: String = "",
+    val artist: String = "",
     @SerialName("artistId") val artistId: String? = null,
     val artists: List<IcmMiniArtist> = emptyList(),
-    val cover: String,
+    val cover: String = "",
     @SerialName("albumName") val albumName: String? = null,
     @SerialName("isAlbum") val isAlbum: Boolean = false,
     @SerialName("is_explicit") val isExplicit: Boolean = false,
@@ -259,13 +261,14 @@ data class IcmMiniArtist(
 
 @Serializable
 data class IcmArtistAlbum(
-    val id: String,
-    val title: String,
-    val artist: String,
+    val id: String = "",
+    // Дефолты: одна строка дискографии без cover/title не должна ронять весь ответ артиста.
+    val title: String = "",
+    val artist: String = "",
     val artists: List<IcmMiniArtist> = emptyList(),
     val year: String? = null,
     val date: String? = null,
-    val cover: String,
+    val cover: String = "",
     val type: String? = null,
     @SerialName("isAlbum") val isAlbum: Boolean = false
 )
@@ -303,12 +306,14 @@ data class IcmChart(
 
 @Serializable
 data class IcmTrackMeta(
-    val id: String,
+    val id: String = "",
     @SerialName("collectionId") val collectionId: String? = null,
-    val title: String,
-    val artist: String,
-    val cover: String,
-    val duration: Long
+    // Дефолты: cover/duration часто отсутствуют у VK/secondary треков — раньше
+    // одно отсутствующее поле обнуляло весь ответ getTrackMeta.
+    val title: String = "",
+    val artist: String = "",
+    val cover: String = "",
+    val duration: Long = 0L
 )
 
 // ─── Playlist ───
@@ -884,8 +889,17 @@ data class IcmHomeItem(
     @SerialName("trackId") val trackId: String? = null,
     @SerialName("rank") val rank: Int? = null,
     @SerialName("subtitle") val subtitle: String? = null,
-    @SerialName("genre") val genre: String? = null
+    @SerialName("genre") val genre: String? = null,
+    // Тип сущности. Раньше его теряли при конвертации search→home, и UI решал
+    // «альбом или трек» по наличию collectionId — но трек по API ТОЖЕ несёт
+    // collectionId (id своего альбома), поэтому тап по треку открывал альбом.
+    @SerialName("isAlbum") val isAlbum: Boolean = false,
+    @SerialName("isArtist") val isArtist: Boolean = false
 ) {
+    /** Трек = не альбом и не артист (как в /search: оба флага false). */
+    val isTrack: Boolean
+        get() = !isAlbum && !isArtist
+
     val displayArtist: String
         get() = artist?.takeIf { it.isNotBlank() && it != "Исполнитель" }
             ?: artistName?.takeIf { it.isNotBlank() && it != "Исполнитель" }

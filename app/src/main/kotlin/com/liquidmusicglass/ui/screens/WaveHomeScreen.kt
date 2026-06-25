@@ -274,16 +274,20 @@ fun WaveHomeScreen(
                                 subtitle = homeItem.displayArtist,
                                 coverUrl = homeItem.cover,
                                 onClick = {
-                                    // Есть альбом → открываем альбом; иначе играем трек.
-                                    val cid = homeItem.collectionId
-                                    if (!cid.isNullOrBlank()) {
-                                        onNavigateToAlbum(cid)
-                                    } else {
-                                        // playFromList сам резолвит стрим начального трека,
-                                        // показывает Toast при ошибке и не зависит от гонки
-                                        // mediaItemCount в playNext — трек реально стартует.
-                                        val t = homeItem.toWaveTrack()
-                                        PlayerController.playFromList(context, listOf(t))
+                                    // Решение по ТИПУ сущности, а не по наличию collectionId
+                                    // (трек по API тоже несёт collectionId своего альбома).
+                                    when {
+                                        homeItem.isArtist ->
+                                            onNavigateToArtist(homeItem.artistId ?: homeItem.id)
+                                        homeItem.isAlbum ->
+                                            onNavigateToAlbum(homeItem.collectionId ?: homeItem.id)
+                                        else -> {
+                                            // playFromList сам резолвит стрим начального трека,
+                                            // показывает Toast при ошибке и не зависит от гонки
+                                            // mediaItemCount в playNext — трек реально стартует.
+                                            val t = homeItem.toWaveTrack()
+                                            PlayerController.playFromList(context, listOf(t))
+                                        }
                                     }
                                 }
                             )

@@ -325,7 +325,10 @@ object IcmRepository {
                             source = item.source,
                             collectionId = item.collectionId,
                             album = item.album,
-                            genre = if (genreTag) query else null
+                            genre = if (genreTag) query else null,
+                            // Сохраняем тип сущности, чтобы UI не угадывал по collectionId.
+                            isAlbum = item.isAlbum,
+                            isArtist = item.isArtist
                         )
                         transform?.let { homeItem = it(homeItem) }
                         items.add(homeItem)
