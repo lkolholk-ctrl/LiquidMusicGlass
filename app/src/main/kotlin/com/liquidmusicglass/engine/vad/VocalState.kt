@@ -12,6 +12,13 @@ object VocalState {
     @Volatile
     var enabled: Boolean = false
 
+    /**
+     * Выдаёт ли модель реальные вердикты прямо сейчас (накопилось окно и идёт
+     * инференс). Пока false — UI не доверяет VAD и падает на LRC-эвристику зазоров.
+     */
+    @Volatile
+    var producing: Boolean = false
+
     /** Сглаженная вероятность вокала 0..1 (скользящее среднее по SMOOTH_FRAMES). */
     @Volatile
     var pVocal: Float = 1f
@@ -27,5 +34,6 @@ object VocalState {
     fun reset() {
         pVocal = 1f
         isVocal = true
+        producing = false
     }
 }

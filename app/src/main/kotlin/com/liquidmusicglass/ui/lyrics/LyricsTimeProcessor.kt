@@ -48,6 +48,17 @@ class LyricsTimeProcessor(
 
         /** Порог скачка позиции для сброса курсора (ручная перемотка). */
         const val SEEK_JUMP_THRESHOLD_MS = 500L
+
+        /** Максимум на «визуальную» заливку слова — чтобы строка докрашивалась
+         * за разумное время, а не ползла весь проигрыш до следующей строки. */
+        const val MAX_WORD_FILL_MS = 700L
+
+        /** Минимальная длительность визуальной заливки всей строки. */
+        const val MIN_LINE_FILL_MS = 1500L
+
+        /** Какой разрыв между концом заливки строки и след. строкой считаем
+         * инструментальным проигрышем (для показа Waiting по VAD). */
+        const val INTERLUDE_GAP_MS = 1500L
     }
 
     private val _pastWords = MutableStateFlow<List<WordToken>>(emptyList())
@@ -91,19 +102,30 @@ class LyricsTimeProcessor(
             val lineStartMs = line.timeMs
             val lineEndMs = lyrics.lines.getOrNull(lineIdx + 1)?.timeMs
                 ?: (line.timeMs + 5000L)
+            val n = wordsInLine.size.coerceAtLeast(1)
+            // Растянутая длительность слова — задаёт ГРАНИЦЫ слова для курсора и
+            // принадлежности к строке (курсор остаётся на строке до старта следующей,
+            // поэтому в зазоре нет «бега вперёд»).
             val wordDuration = if (wordsInLine.isNotEmpty()) {
-                (lineEndMs - lineStartMs).coerceAtLeast(500L) / wordsInLine.size
+                (lineEndMs - lineStartMs).coerceAtLeast(500L) / n
             } else 500L
+            // Капнутая длительность ЗАЛИВКИ — слова докрашиваются за разумное время
+            // (≤700мс/слово), а не ползут весь проигрыш. Отвязана от границ курсора.
+            val cappedLineFill = minOf(
+                (lineEndMs - lineStartMs).coerceAtLeast(500L),
+                (n * MAX_WORD_FILL_MS).coerceAtLeast(MIN_LINE_FILL_MS)
+            )
+            val fillWordDuration = (cappedLineFill / n).coerceAtLeast(1L)
 
             val rangeStart = wordGlobalIdx
             for ((wordIdx, text) in wordsInLine.withIndex()) {
-                val startMs = lineStartMs + wordIdx * wordDuration
-                val endMs = lineStartMs + (wordIdx + 1) * wordDuration
                 words.add(
                     FlatWord(
                         text = text,
-                        startMs = startMs,
-                        endMs = endMs,
+                        startMs = lineStartMs + wordIdx * wordDuration,
+                        endMs = lineStartMs + (wordIdx + 1) * wordDuration,
+                        fillStartMs = lineStartMs + wordIdx * fillWordDuration,
+                        fillEndMs = lineStartMs + (wordIdx + 1) * fillWordDuration,
                         lineIndex = lineIdx,
                         wordIndexInLine = wordIdx
                     )
@@ -126,28 +148,10 @@ class LyricsTimeProcessor(
     fun updatePosition(positionMs: Long) {
         if (!lyrics.isSynced || allWords.isEmpty()) return
 
-        // ── VAD-гейт: на проигрыше (нет вокала) замораживаем курсор/заливку и
-        // показываем «Waiting». ВАЖНО (#4): гейт срабатывает ТОЛЬКО когда текущая
-        // строка уже допета (мы в зазоре до следующей) — VAD управляет паузами
-        // МЕЖДУ строками, но НЕ рвёт заливку на середине строки.
-        // lastProcessedPositionMs не трогаем — при возврате вокала скачок > порога
-        // даст binary-search re-seek на нужное слово. ──
-        if (VocalState.enabled && !VocalState.isVocal) {
-            val ci = _currentLineIndex.value
-            if (ci in lineWordRanges.indices) {
-                val range = lineWordRanges[ci]
-                val lineStart = allWords[range.first].startMs
-                val lineEnd = allWords[range.last].endMs
-                val rawDuration = (lineEnd - lineStart).coerceAtLeast(1L)
-                val wordCount = (range.last - range.first + 1).coerceAtLeast(1)
-                val cappedEnd = lineStart + minOf(rawDuration, (wordCount * 700L).coerceAtLeast(1500L))
-                if (positionMs >= cappedEnd) {
-                    if (!_isInterlude.value) _isInterlude.value = true
-                    return
-                }
-            }
-        }
-        if (_isInterlude.value) _isInterlude.value = false
+        // ВАЖНО: VAD здесь НЕ трогает заливку и курсор. Заливка идёт строго по
+        // (капнутым) таймингам LRC и всегда докрашивает строку до конца. VAD влияет
+        // ТОЛЬКО на флаг _isInterlude (Waiting в зазоре между строками), считаемый
+        // в самом конце метода.
 
         // Детекция ручной перемотки: если скачок > 500мс — сбрасываем курсор
         val isSeek = lastProcessedPositionMs >= 0 &&
@@ -185,6 +189,7 @@ class LyricsTimeProcessor(
             _pastWords.value = emptyList()
             _currentWords.value = emptyList()
             _currentLineProgress.value = 0f
+            _isInterlude.value = false
             return
         }
 
@@ -196,12 +201,12 @@ class LyricsTimeProcessor(
         for (idx in range) {
             val word = allWords[idx]
             when {
-                safePosition >= word.endMs -> {
+                safePosition >= word.fillEndMs -> {
                     past.add(word.toToken(progress = 1f))
                 }
-                safePosition in word.startMs..word.endMs -> {
-                    val rawProgress = (safePosition - word.startMs).toFloat() /
-                            (word.endMs - word.startMs).toFloat()
+                safePosition in word.fillStartMs..word.fillEndMs -> {
+                    val rawProgress = (safePosition - word.fillStartMs).toFloat() /
+                            (word.fillEndMs - word.fillStartMs).toFloat()
                     val interpolated = LYRIC_PROGRESS_INTERPOLATOR.getInterpolation(
                         rawProgress.coerceIn(0f, 1f)
                     )
@@ -216,18 +221,28 @@ class LyricsTimeProcessor(
         _pastWords.value = past
         _currentWords.value = current
 
-        // Прогресс всей строки (0f..1f). Длительность КАПАЕМ оценкой по числу
-        // слов: слова раньше растягиваются до начала следующей строки, поэтому
-        // без капа заливка медленно «ползла» во время паузы/инструментала.
-        val lineStartMs = allWords[range.first].startMs
-        val lineEndMs = allWords[range.last].endMs
-        val rawDuration = (lineEndMs - lineStartMs).coerceAtLeast(1L)
-        val wordCount = (range.last - range.first + 1).coerceAtLeast(1)
-        val cappedDuration = minOf(rawDuration, (wordCount * 700L).coerceAtLeast(1500L))
-        val rawLineProgress = (safePosition - lineStartMs).toFloat() / cappedDuration.toFloat()
+        // Прогресс всей строки (0f..1f) по КАПНУТОЙ заливке — совпадает с пословной
+        // заливкой выше (fillEnd), поэтому строка докрашивается ровно к lineFillEndMs.
+        val lineStartMs = allWords[range.first].fillStartMs
+        val lineFillEndMs = allWords[range.last].fillEndMs
+        val fillDuration = (lineFillEndMs - lineStartMs).coerceAtLeast(1L)
+        val rawLineProgress = (safePosition - lineStartMs).toFloat() / fillDuration.toFloat()
         _currentLineProgress.value = LYRIC_PROGRESS_INTERPOLATOR.getInterpolation(
             rawLineProgress.coerceIn(0f, 1f)
         )
+
+        // ── VAD Waiting (единственное, на что влияет VAD). Показываем ТОЛЬКО когда:
+        //   • строка уже полностью докрашена (pos >= lineFillEndMs),
+        //   • до следующей строки заметный разрыв (инструментал),
+        //   • мы ещё не дошли до следующей строки,
+        //   • и VAD устойчиво говорит «нет вокала» (сглаживание+гистерезис+1.5с в движке).
+        // Заливку это НЕ трогает — она уже завершена к этому моменту. ──
+        val nextLineStart = lyrics.lines.getOrNull(currentLine + 1)?.timeMs
+        val lineFullyDrawn = safePosition >= lineFillEndMs
+        val bigGap = nextLineStart != null && (nextLineStart - lineFillEndMs) >= INTERLUDE_GAP_MS
+        val beforeNextLine = nextLineStart == null || safePosition < nextLineStart
+        val vadInstrumental = VocalState.enabled && !VocalState.isVocal
+        _isInterlude.value = lineFullyDrawn && bigGap && beforeNextLine && vadInstrumental
     }
 
     /**
@@ -262,10 +277,11 @@ class LyricsTimeProcessor(
         return range.map { idx ->
             val word = allWords[idx]
             val safePosition = lastProcessedPositionMs
+            // Заливка слова по КАПНУТОМУ окну (как в updatePosition), не растянутому.
             val progress = when {
-                safePosition >= word.endMs -> 1f
-                safePosition <= word.startMs -> 0f
-                else -> (safePosition - word.startMs).toFloat() / (word.endMs - word.startMs).toFloat()
+                safePosition >= word.fillEndMs -> 1f
+                safePosition <= word.fillStartMs -> 0f
+                else -> (safePosition - word.fillStartMs).toFloat() / (word.fillEndMs - word.fillStartMs).toFloat()
             }
             word.toToken(progress = progress.coerceIn(0f, 1f))
         }
@@ -299,11 +315,19 @@ class LyricsTimeProcessor(
         val progress: Float = 0f
     )
 
-    /** Внутреннее представление слова с глобальными таймингами. */
+    /**
+     * Внутреннее представление слова.
+     * startMs/endMs — РАСТЯНУТЫЕ границы (до следующей строки): задают курсор и
+     *   принадлежность к строке (в зазоре курсор остаётся на строке — нет «бега вперёд»).
+     * fillStartMs/fillEndMs — КАПНУТОЕ окно ЗАЛИВКИ (≤700мс/слово): по нему красятся
+     *   слова, чтобы строка докрашивалась за разумное время, а не ползла весь проигрыш.
+     */
     private data class FlatWord(
         val text: String,
         val startMs: Long,
         val endMs: Long,
+        val fillStartMs: Long,
+        val fillEndMs: Long,
         val lineIndex: Int,
         val wordIndexInLine: Int
     ) {

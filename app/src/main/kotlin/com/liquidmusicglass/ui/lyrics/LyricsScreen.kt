@@ -226,6 +226,15 @@ fun LyricsScreen(
         (nextStart - vocalEnd) >= INSTRUMENTAL_GAP_MS && smoothPositionMs in vocalEnd..nextStart
     }
 
+    // Итоговый флаг Waiting. Когда VAD реально работает (производит вердикты) —
+    // решает ТОЛЬКО он (isInterlude: строка докрашена + зазор + нет вокала). Иначе
+    // (модель не загрузилась / окно ещё не накопилось) — падаем на LRC-эвристику.
+    val showWaiting = remember(isInterlude, showGapDots, smoothPositionMs) {
+        val vadLive = com.liquidmusicglass.engine.vad.VocalState.enabled &&
+                com.liquidmusicglass.engine.vad.VocalState.producing
+        if (vadLive) isInterlude else (isInterlude || showGapDots)
+    }
+
     // ── Auto-scroll с fluid gliding ──
     val listState = rememberLazyListState()
     val density = LocalDensity.current
@@ -386,10 +395,9 @@ fun LyricsScreen(
                                     maxWidthPx = lineMaxWidthPx,
                                     glowColor = duetColor ?: resolvedColors.vibrant
                                 )
-                                // Точки ожидания во время инструментального проигрыша:
-                                // либо по LRC-зазору (showGapDots), либо по VAD-модели
-                                // (isInterlude — ловит проигрыши, которых нет в таймингах).
-                                if (isCurrent && (showGapDots || isInterlude)) {
+                                // Точки ожидания во время инструментального проигрыша
+                                // (см. showWaiting: VAD решает, LRC-эвристика — fallback).
+                                if (isCurrent && showWaiting) {
                                     Spacer(Modifier.height(16.dp))
                                     Box(
                                         modifier = Modifier.fillMaxWidth(),

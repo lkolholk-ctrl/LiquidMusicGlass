@@ -311,5 +311,6 @@ object VadLyricsEngine {
             }
         }
         VocalState.isVocal = !instrumental
+        VocalState.producing = true
     }
 }
