@@ -150,16 +150,19 @@ data class IcmTrackResponse(
 @Serializable
 data class IcmAlbumResponse(
     val album: IcmAlbum,
-    val tracks: List<IcmAlbumTrack>
+    // tolerant: пропущенный/null tracks не должен ронять парс всего альбома
+    val tracks: List<IcmAlbumTrack> = emptyList()
 )
 
 @Serializable
 data class IcmAlbum(
-    val id: String,
-    val title: String,
-    val artist: String,
+    val id: String = "",
+    // Дефолты обязательны: если сервер не прислал title/artist/cover (часто у Apple/VK),
+    // без них kotlinx уронил бы парс ВСЕГО альбома → "Unknown Album · 0 tracks".
+    val title: String = "",
+    val artist: String = "",
     @SerialName("artistId") val artistId: String? = null,
-    val cover: String,
+    val cover: String = "",
     @SerialName("motionCoverUrl") val motionCoverUrl: String? = null,
     @SerialName("releaseDate") val releaseDate: String? = null,
     val year: String? = null,
@@ -170,11 +173,12 @@ data class IcmAlbum(
 
 @Serializable
 data class IcmAlbumTrack(
-    val id: String,
-    val title: String,
-    val artist: String,
+    val id: String = "",
+    val title: String = "",
+    val artist: String = "",
     @SerialName("artistId") val artistId: String? = null,
-    val cover: String,
+    // Дефолт: одна обложка-null на одном треке не должна ронять весь альбом.
+    val cover: String = "",
     @SerialName("collectionId") val collectionId: String? = null,
     @SerialName("is_explicit") val isExplicit: Boolean = false,
     @SerialName("isCustom") val isCustom: Boolean = false,

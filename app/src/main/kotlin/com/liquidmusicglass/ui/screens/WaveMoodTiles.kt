@@ -117,10 +117,14 @@ half4 main(float2 fragCoord) {
 @Composable
 fun WaveMoodTiles(
     onSelect: (WaveMood) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    animate: Boolean = true
 ) {
     // Единый кадровый клок (секунды). Один на весь ряд — не плодим корутины.
-    val timeSec = produceState(0f) {
+    // Замораживается, когда Home перекрыт оверлеем (см. AuraBackground): меньше
+    // нагрузки на RenderThread при переходах.
+    val timeSec = produceState(0f, animate) {
+        if (!animate) return@produceState
         while (true) {
             withInfiniteAnimationFrameMillis { value = it / 1000f }
         }

@@ -152,9 +152,10 @@ fun AuraBackground(
     albumColors: AlbumColors,
     modifier: Modifier = Modifier,
     intensity: Float = 0.78f,
+    animate: Boolean = true,
 ) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        AuraShaderBackground(albumColors, intensity, modifier)
+        AuraShaderBackground(albumColors, intensity, modifier, animate)
     } else {
         AuraGradientFallback(albumColors, modifier)
     }
@@ -162,7 +163,7 @@ fun AuraBackground(
 
 @RequiresApi(Build.VERSION_CODES.TIRAMISU)
 @Composable
-private fun AuraShaderBackground(albumColors: AlbumColors, intensity: Float, modifier: Modifier) {
+private fun AuraShaderBackground(albumColors: AlbumColors, intensity: Float, modifier: Modifier, animate: Boolean = true) {
     val shader = remember { RuntimeShader(AURA_AGSL) }
     val brush = remember { ShaderBrush(shader) }
 
@@ -176,7 +177,11 @@ private fun AuraShaderBackground(albumColors: AlbumColors, intensity: Float, mod
     // басовый прирост ≤ +15% (множитель 1.0..1.15), накапливаемый по dt. Дым
     // всегда спокойно движется сам, бас лишь чуть подкручивает — без «стоп→турбо»
     // и без скачков фазы (умножать накопленное uTime на бас — НЕЛЬЗЯ).
-    val timeSec by produceState(0f) {
+    // Когда экран перекрыт оверлеем (открыт альбом/плеер/настройки) — замораживаем
+    // тяжёлый AGSL-клок, чтобы не рисовать дым под другим экраном (это давало спайк
+    // RenderThread → ANR на слабых GPU). produceState перезапускается при смене animate.
+    val timeSec by produceState(0f, animate) {
+        if (!animate) return@produceState
         var phase = 0f
         var s1 = 0f
         var s2 = 0f

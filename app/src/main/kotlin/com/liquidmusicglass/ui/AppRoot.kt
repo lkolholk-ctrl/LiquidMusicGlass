@@ -239,7 +239,8 @@ fun AppRoot() {
                         onNavigateToAlbum = { detailAlbumId = it },
                         onNavigateToArtist = { detailArtistId = it },
                         onNavigateToPlaylist = { playlistDetailId = it },
-                        onOpenAuth = { authOpen = true }
+                        onOpenAuth = { authOpen = true },
+                        animationsActive = isHomeActive
                     )
                 }
                 1 -> SearchScreen(

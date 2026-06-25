@@ -82,6 +82,7 @@ fun WaveHomeScreen(
     onNavigateToArtist: (String) -> Unit = {},
     onNavigateToPlaylist: (String) -> Unit = {},
     onOpenAuth: () -> Unit = {},
+    animationsActive: Boolean = true,
 ) {
     val context = LocalContext.current
     val viewModel = remember { HomeViewModel() }
@@ -113,7 +114,7 @@ fun WaveHomeScreen(
     Box(modifier = Modifier.fillMaxSize()) {
 
         // ── Living aura background (own AGSL shader, reacts to the music) ──
-        AuraBackground(albumColors = albumColors, modifier = Modifier.fillMaxSize())
+        AuraBackground(albumColors = albumColors, modifier = Modifier.fillMaxSize(), animate = animationsActive)
 
         LazyColumn(
             modifier = Modifier
@@ -231,7 +232,8 @@ fun WaveHomeScreen(
             item {
                 Spacer(Modifier.height(8.dp))
                 WaveMoodTiles(
-                    onSelect = { mood -> viewModel.buildMoodWave(context, mood.query) }
+                    onSelect = { mood -> viewModel.buildMoodWave(context, mood.query) },
+                    animate = animationsActive
                 )
                 Spacer(Modifier.height(8.dp))
             }
