@@ -20,6 +20,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -88,6 +89,11 @@ object PlayerController {
     // ── Stream URL cache ──
     private val streamUrlCache = java.util.concurrent.ConcurrentHashMap<String, CachedStreamUrl>()
     private const val STREAM_CACHE_TTL_MS = 10 * 60 * 1000L
+
+    // In-flight резолвы: один и тот же трек резолвится максимум ОДНОЙ корутиной,
+    // остальные ждут тот же результат — без дублирующих POST /track (их раньше
+    // могло уходить 2-3 на трек: префетч + загрузчик + handleExpiredUrl).
+    private val inFlightResolves = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.Deferred<StreamResult>>()
 
     fun getValidCachedUri(trackId: String): Uri? {
         val now = System.currentTimeMillis()
@@ -446,16 +452,6 @@ object PlayerController {
                     }
                 }
             }
-
-            if (newContext is PlaybackContext.Global) {
-                launch {
-                    kotlinx.coroutines.delay(3000)
-                    endlessEngine.checkAndRefillIfNeeded()
-                }
-            }
-
-            // Pre-warm URL cache for upcoming tracks
-            prefetchAhead(context, startIndex, depth = 10)
         }
     }
 
@@ -750,13 +746,30 @@ object PlayerController {
     private suspend fun resolveStreamUrl(trackId: String): StreamResult {
         val now = System.currentTimeMillis()
         val cached = streamUrlCache[trackId]
-
         if (cached != null && now < cached.expiresAtMs) {
             return StreamResult.Success(cached.uri)
         }
 
+        // Уже резолвится этот трек — присоединяемся к тому же результату.
+        inFlightResolves[trackId]?.let { return it.await() }
 
+        val deferred = ioScope.async(start = kotlinx.coroutines.CoroutineStart.LAZY) {
+            doResolveStreamUrl(trackId)
+        }
+        val winner = inFlightResolves.putIfAbsent(trackId, deferred) ?: deferred
+        if (winner !== deferred) {
+            // Проиграли гонку постановки — ждём чужой (уже запущенный) резолв.
+            return winner.await()
+        }
+        deferred.start()
+        return try {
+            deferred.await()
+        } finally {
+            inFlightResolves.remove(trackId, deferred)
+        }
+    }
 
+    private suspend fun doResolveStreamUrl(trackId: String): StreamResult {
         return try {
             withTimeout(15_000) {
                 val quality = getEffectiveQuality(trackId)
