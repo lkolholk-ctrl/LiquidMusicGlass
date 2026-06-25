@@ -238,7 +238,8 @@ fun AppRoot() {
                         onOpenPlayer = { animateExpand() },
                         onNavigateToAlbum = { detailAlbumId = it },
                         onNavigateToArtist = { detailArtistId = it },
-                        onNavigateToPlaylist = { playlistDetailId = it }
+                        onNavigateToPlaylist = { playlistDetailId = it },
+                        onOpenAuth = { authOpen = true }
                     )
                 }
                 1 -> SearchScreen(

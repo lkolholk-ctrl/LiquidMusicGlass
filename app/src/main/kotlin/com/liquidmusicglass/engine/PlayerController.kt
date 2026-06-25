@@ -71,6 +71,16 @@ object PlayerController {
         getCompanionPlayer = { null }
     )
 
+    /**
+     * Единая точка входа для авто-дозаправки очереди волны. Безопасно дёргать из
+     * нескольких триггеров (UI-bridge и service-listener) — EndlessPlaybackEngine
+     * дедуплицирует через свой lock + throttle. Только для волны (Global).
+     */
+    fun ensureWaveRefill() {
+        if (_playbackContext !is PlaybackContext.Global) return
+        ioScope.launch { endlessEngine.checkAndRefillIfNeeded() }
+    }
+
     /** Public accessor for the endless engine's refill context (mood/genre) */
     val waveRefillContext: kotlinx.coroutines.flow.StateFlow<EndlessPlaybackEngine.RefillContext?>
         get() = endlessEngine.refillContext
@@ -873,7 +883,12 @@ object PlayerController {
             }
         }
 
-        // Also log to ICM API wave playback
+        // Also log to ICM API wave playback.
+        // skipped=true — НЕГАТИВНЫЙ сигнал для волны. Шлём его ТОЛЬКО в контексте волны
+        // (Global): пролистывание трека в альбоме/плейлисте — это осознанная навигация,
+        // а не «меньше такого», и не должно портить персонализацию. Позитивный сигнал
+        // (completed) шлём в любом контексте — дослушанный трек = подтверждение вкуса.
+        val isWaveContext = _playbackContext is PlaybackContext.Global
         ioScope.launch {
             try {
                 IcmRepository.logWavePlayback(
@@ -881,7 +896,7 @@ object PlayerController {
                     playedSeconds = playedSec.toDouble(),
                     totalSeconds = durationSec.toDouble(),
                     completed = if (track.durationMs > 0L) playedMs >= 0.85f * track.durationMs else isCompleted,
-                    skipped = isSkippedForServer
+                    skipped = isSkippedForServer && isWaveContext
                 )
             } catch (_: Exception) {}
         }

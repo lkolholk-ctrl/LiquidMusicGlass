@@ -81,6 +81,7 @@ fun WaveHomeScreen(
     onNavigateToAlbum: (String) -> Unit = {},
     onNavigateToArtist: (String) -> Unit = {},
     onNavigateToPlaylist: (String) -> Unit = {},
+    onOpenAuth: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val viewModel = remember { HomeViewModel() }
@@ -93,6 +94,7 @@ fun WaveHomeScreen(
     val favoriteIds by PlayerController.favoriteIds.collectAsState()
     val isBuildingWave by viewModel.isBuildingWave.collectAsState()
     val needsOnboarding by viewModel.needsOnboarding.collectAsState()
+    val needsLink by viewModel.needsLink.collectAsState()
     val recentlyPlayed by PlayerController.recentlyPlayed.collectAsState()
     val homeContent by viewModel.homeContent.collectAsState()
     val charts by viewModel.charts.collectAsState()
@@ -332,6 +334,32 @@ fun WaveHomeScreen(
                     viewModel.buildWaveQueue(context)
                 },
                 onDismiss = { viewModel.clearOnboardingFlag() }
+            )
+        }
+
+        // ── Гейт по TG-линку: без partner_user_id персонализации нет, поэтому вместо
+        // общей выдачи предлагаем залогиниться через Telegram. ──
+        if (needsLink) {
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { viewModel.clearLinkFlag() },
+                title = { Text("Подключи Telegram") },
+                text = {
+                    Text(
+                        "Чтобы «Моя волна» подстраивалась под тебя, войди через Telegram. " +
+                        "Без привязки сервер отдаёт общие рекомендации."
+                    )
+                },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(onClick = {
+                        viewModel.clearLinkFlag()
+                        onOpenAuth()
+                    }) { Text("Войти") }
+                },
+                dismissButton = {
+                    androidx.compose.material3.TextButton(onClick = {
+                        viewModel.clearLinkFlag()
+                    }) { Text("Позже") }
+                }
             )
         }
     }

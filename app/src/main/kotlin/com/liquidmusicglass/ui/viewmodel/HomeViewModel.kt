@@ -58,6 +58,16 @@ class HomeViewModel : ViewModel() {
 
     fun clearOnboardingFlag() { _needsOnboarding.value = false }
 
+    // Персонализация волны работает только при залинкованном TG-аккаунте
+    // (partner_user_id). Без него сервер отдаёт общую выдачу — это и есть «отсебятина».
+    private val _needsLink = MutableStateFlow(false)
+    val needsLink: StateFlow<Boolean> = _needsLink
+
+    fun clearLinkFlag() { _needsLink.value = false }
+
+    private fun isLinked(): Boolean =
+        !IcmAuthRepository.partnerUserId.value.isNullOrBlank()
+
     private val _topGenres = MutableStateFlow<List<String>>(emptyList())
     val topGenres: StateFlow<List<String>> = _topGenres
 
@@ -163,6 +173,7 @@ class HomeViewModel : ViewModel() {
      */
     fun buildWaveQueue(context: Context) {
         if (_isBuildingWave.value) return
+        if (!isLinked()) { _needsLink.value = true; return }
         _isBuildingWave.value = true
 
         viewModelScope.launch {
@@ -204,6 +215,7 @@ class HomeViewModel : ViewModel() {
      */
     fun buildMoodWave(context: Context, query: String) {
         if (_isBuildingWave.value) return
+        if (!isLinked()) { _needsLink.value = true; return }
         _isBuildingWave.value = true
 
         viewModelScope.launch {

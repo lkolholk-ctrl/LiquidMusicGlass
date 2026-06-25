@@ -58,6 +58,8 @@ import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.StarBorder
+import androidx.compose.material.icons.rounded.ThumbUp
+import androidx.compose.material.icons.rounded.ThumbDown
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Settings
@@ -183,8 +185,9 @@ fun FullPlayer(
     val trackMenuSheetState = rememberModalBottomSheetState(
         skipPartiallyExpanded = true
     )
-    // Wave feedback state: null = none, true = liked, false = disliked
-    var waveFeedback by remember { mutableStateOf<Boolean?>(null) }
+    // Wave feedback state: null = none, true = liked, false = disliked.
+    // Keyed on trackId → сбрасывается при смене трека.
+    var waveFeedback by remember(trackId) { mutableStateOf<Boolean?>(null) }
     // Видимость контролов плеера. Когда открыта лирика — скрываются (как в Apple Music).
     // Тап по области лирики временно показывает их снова.
     var controlsVisible by remember { mutableStateOf(true) }
@@ -610,23 +613,17 @@ fun FullPlayer(
                             }
                         }
                     }
-                    // ThumbUp — DISABLED (wave feedback not connected yet)
-                    /*
+                    // 👍 More like this — wave/feedback (more_track + more_artist).
                     Box(
                         modifier = Modifier
                             .size(44.dp)
                             .pressScale {
                                 currentTrackObj?.let { track ->
+                                    waveFeedback = true
                                     scope.launch {
-                                        val previousFeedback = waveFeedback
-                                        waveFeedback = true
-                                        val feedbackType = if (track.artists.firstOrNull()?.id != null) {
-                                            "more_artist"
-                                        } else "more_track"
-                                        val value = track.artists.firstOrNull()?.id ?: track.id
-                                        val success = IcmRepository.sendWaveFeedback(feedbackType, value)
-                                        if (!success) {
-                                            waveFeedback = previousFeedback
+                                        IcmRepository.sendWaveFeedback("more_track", track.id)
+                                        track.artists.firstOrNull()?.id?.let {
+                                            IcmRepository.sendWaveFeedback("more_artist", it)
                                         }
                                     }
                                 }
@@ -641,29 +638,22 @@ fun FullPlayer(
                         )
                         Icon(
                             imageVector = Icons.Rounded.ThumbUp,
-                            contentDescription = null,
+                            contentDescription = "More like this",
                             tint = thumbUpTint,
                             modifier = Modifier.size(24.dp)
                         )
                     }
-                    */
-                    // ThumbDown — DISABLED (wave feedback not connected yet)
-                    /*
+                    // 👎 Less like this — wave/feedback (less_track + less_artist).
                     Box(
                         modifier = Modifier
                             .size(44.dp)
                             .pressScale {
                                 currentTrackObj?.let { track ->
+                                    waveFeedback = false
                                     scope.launch {
-                                        val previousFeedback = waveFeedback
-                                        waveFeedback = false
-                                        val feedbackType = if (track.artists.firstOrNull()?.id != null) {
-                                            "less_artist"
-                                        } else "less_track"
-                                        val value = track.artists.firstOrNull()?.id ?: track.id
-                                        val success = IcmRepository.sendWaveFeedback(feedbackType, value)
-                                        if (!success) {
-                                            waveFeedback = previousFeedback
+                                        IcmRepository.sendWaveFeedback("less_track", track.id)
+                                        track.artists.firstOrNull()?.id?.let {
+                                            IcmRepository.sendWaveFeedback("less_artist", it)
                                         }
                                     }
                                 }
@@ -678,12 +668,11 @@ fun FullPlayer(
                         )
                         Icon(
                             imageVector = Icons.Rounded.ThumbDown,
-                            contentDescription = null,
+                            contentDescription = "Less like this",
                             tint = thumbDownTint,
                             modifier = Modifier.size(24.dp)
                         )
                     }
-                    */
                     Box(
                         modifier = Modifier
                             .size(44.dp)
