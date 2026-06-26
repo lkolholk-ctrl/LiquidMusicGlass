@@ -92,14 +92,6 @@ class IcmApi private constructor() {
         isLenient = true
     }
 
-    // НАСТОЯЩИЙ лимит конкурентности сетевых вызовов. OkHttp Dispatcher
-    // (maxRequests/maxRequestsPerHost) ограничивает ТОЛЬКО enqueue()-вызовы, а мы ходим
-    // через синхронный newCall().execute() — на него лимиты Dispatcher НЕ действуют.
-    // Поэтому без этого число одновременных коннектов было ничем не ограничено
-    // (в ANR-дампе — 258 висящих TLS). limitedParallelism(6): максимум 6 сетевых
-    // корутин одновременно, остальные ждут слот — пул больше не переполняется.
-    private val networkDispatcher = Dispatchers.IO.limitedParallelism(6)
-
     private val client by lazy {
         // Явный Dispatcher: ограничиваем число одновременных запросов (всё идёт на
         // один хост byicloud.online). Реальный темп держит IcmRateGate, а это —
@@ -116,7 +108,7 @@ class IcmApi private constructor() {
         OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
-            .writeTimeout(10, TimeUnit.SECONDS)
+            .writeTimeout(15, TimeUnit.SECONDS)
             // callTimeout ограничивает ВЕСЬ вызов (connect+TLS+retry+ответ). Раньше его
             // не было → зависший TLS-handshake держал поток до бесконечности и забивал
             // IO-пул (16 потоков в дампе ANR). Теперь любой вызов умрёт максимум за 30с.
@@ -265,9 +257,10 @@ class IcmApi private constructor() {
         body: String? = null,
         async: Boolean = false
     ): Result<T> {
-        // networkDispatcher (IO с limitedParallelism=6) — реальный потолок одновременных
-        // вызовов, т.к. синхронный execute() игнорирует лимиты OkHttp Dispatcher.
-        return withContext(networkDispatcher) {
+        // Обычный расширяемый Dispatchers.IO — НЕ limitedParallelism: при лежащей сети
+        // узкий лимит забивался висяками и вешал весь API. Число коннектов держим
+        // короткими таймаутами (callTimeout) + ограниченными ретраями, а не очередью.
+        return withContext(Dispatchers.IO) {
             // Circuit-breaker: пока активен бан — мгновенно фейлим, не выходя в сеть.
             if (IcmRateGate.isBanned()) {
                 return@withContext Result.failure(
