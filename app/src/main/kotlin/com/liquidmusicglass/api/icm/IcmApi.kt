@@ -92,6 +92,14 @@ class IcmApi private constructor() {
         isLenient = true
     }
 
+    // НАСТОЯЩИЙ лимит конкурентности сетевых вызовов. OkHttp Dispatcher
+    // (maxRequests/maxRequestsPerHost) ограничивает ТОЛЬКО enqueue()-вызовы, а мы ходим
+    // через синхронный newCall().execute() — на него лимиты Dispatcher НЕ действуют.
+    // Поэтому без этого число одновременных коннектов было ничем не ограничено
+    // (в ANR-дампе — 258 висящих TLS). limitedParallelism(6): максимум 6 сетевых
+    // корутин одновременно, остальные ждут слот — пул больше не переполняется.
+    private val networkDispatcher = Dispatchers.IO.limitedParallelism(6)
+
     private val client by lazy {
         // Явный Dispatcher: ограничиваем число одновременных запросов (всё идёт на
         // один хост byicloud.online). Реальный темп держит IcmRateGate, а это —
@@ -257,7 +265,9 @@ class IcmApi private constructor() {
         body: String? = null,
         async: Boolean = false
     ): Result<T> {
-        return withContext(Dispatchers.IO) {
+        // networkDispatcher (IO с limitedParallelism=6) — реальный потолок одновременных
+        // вызовов, т.к. синхронный execute() игнорирует лимиты OkHttp Dispatcher.
+        return withContext(networkDispatcher) {
             // Circuit-breaker: пока активен бан — мгновенно фейлим, не выходя в сеть.
             if (IcmRateGate.isBanned()) {
                 return@withContext Result.failure(

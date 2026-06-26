@@ -65,7 +65,7 @@ class MainActivity : ComponentActivity() {
                 // привязаны к старому маршруту и мертвы. Эвиктим пулы (ICM + обложки) и
                 // сбрасываем локальный бан — иначе приложение долбится в «трупы» и ничего
                 // не грузит, пока соединения сами не протухнут.
-                com.liquidmusicglass.api.icm.IcmApi.evictConnections()
+                com.liquidmusicglass.api.icm.IcmApi.getInstance().evictConnections()
                 (application as? App)?.evictImageConnections()
             }
             // Debounce: на флапающей мобильной сети onAvailable может прийти много раз —
