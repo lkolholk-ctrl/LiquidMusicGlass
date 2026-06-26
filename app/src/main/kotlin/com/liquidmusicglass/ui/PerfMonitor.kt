@@ -6,89 +6,54 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 
 /**
- * Глобальный детектор просадки FPS. Считает интервалы между кадрами через
- * [Choreographer] (main-поток) и при УСТОЙЧИВОЙ просадке поднимает флаг [degraded] —
- * тяжёлые эффекты (AGSL-аура, дым, мудовые карточки, blur, стекло) по нему деградируют
- * до дешёвых версий, чтобы RenderThread на слабом GPU успевал выдавать кадры.
+ * Одноразовый прогрев старта (НЕ деградация по FPS).
  *
- * ВОЗВРАТ ГАРАНТИРОВАН. Гистерезис ДВУСТОРОННИЙ и БЕЗ постоянных защёлок:
- *  - вход в degraded: [ENTER_SLOW_STREAK] подряд по-настоящему медленных кадров
- *    (устойчивая просадка, а не разовый хитч на переходе/декоде обложки);
- *  - выход из degraded: [EXIT_FAST_STREAK] подряд гладких кадров — ВСЕГДА, на любом
- *    кадре сессии. Как только GPU освободился, полные эффекты возвращаются.
+ * Первые [WARMUP_FRAMES] отрисованных кадров экран рисует ДЕШЁВЫЕ версии тяжёлых
+ * элементов (плоское стекло вместо blur/lens, упрощённый фон лирики), чтобы первый
+ * тяжёлый кадр на холодном старте не давил GPU и не возникал ANR. После того как
+ * экран отрисовался и стабилизировался, [degraded] ОДИН раз становится false и
+ * больше НИКОГДА не возвращается в true — эффекты включаются и работают постоянно.
  *
- * Раньше здесь была защёлка `jankProven`, которая после ПЕРВОЙ же просадки навсегда
- * блокировала выход — degraded залипал на всю сессию (AGSL-карточки и дым не
- * возвращались даже на флагмане). Защёлка удалена: стартовый ANR теперь снимается
- * отложенным/стаггер-прогревом самих шейдеров (см. WaveMoodTiles/AuraBackground),
- * а PerfMonitor отвечает только за временную деградацию с надёжным возвратом.
+ * Это принципиально не «деградация»: тут нет порогов FPS, нет гистерезиса, нет
+ * откатов. Раньше FPS-логика залипала в degraded и убирала эффекты насовсем —
+ * теперь это просто отложенный старт с гарантированным однократным включением.
  *
- * Анти-дребезг обеспечивает асимметрия порогов + сброс встречного счётчика: чтобы
- * перевернуть состояние, нужна УСТОЙЧИВАЯ серия в одну сторону; чередующиеся кадры
- * ни одну серию не накапливают, поэтому строб «градиент↔шейдер» по кадрам невозможен.
- *
- * Стартуем в degraded=TRUE (первые кадры дешёвые), затем — при гладком FPS —
- * быстро (~0.3–0.4с) возвращаемся к полному качеству.
+ * Дым и AGSL-мудкарточки прогреваются ОТДЕЛЬНО, по своему расписанию в самих
+ * композаблах (через withFrameNanos), чтобы тяжёлые компиляции шейдеров легли на
+ * РАЗНЫЕ кадры, а не все разом в момент включения.
  *
  * [degraded] — Compose-состояние: чтение в @Composable триггерит рекомпозицию.
  * Пишется только из Choreographer-колбэка (main-поток).
  */
 object PerfMonitor {
 
-    // true = дешёвые версии эффектов. Стартуем так, чтобы первый кадр был лёгким;
-    // при гладком FPS гарантированно возвращаемся в false (полные эффекты).
+    // true = идёт стартовый прогрев (дешёвые версии стекла). Однократно → false.
     var degraded by mutableStateOf(true)
         private set
 
-    private const val SLOW_FRAME_MS = 40L      // >~25 fps — кадр реально «медленный»
-    private const val ENTER_SLOW_STREAK = 18   // ~0.3с устойчивой просадки → деградация
-    private const val EXIT_FAST_STREAK = 24    // ~0.4с гладких кадров → возврат к полному
-    // Огромный интервал = приложение было свёрнуто/простаивало (vsync не шёл). Это НЕ
-    // просадка рендера — сбрасываем счётчики, чтобы не уронить в degraded после простоя.
-    private const val IDLE_GAP_MS = 200L
+    // ~16 отрисованных кадров (~0.27с при 60 Гц) — экран успел появиться и осесть.
+    private const val WARMUP_FRAMES = 16
 
-    private var lastFrameNs = 0L
-    private var slowStreak = 0
-    private var fastStreak = 0
+    private var frameCount = 0
     private var started = false
 
-    private val frameCallback = Choreographer.FrameCallback { now -> onFrame(now) }
+    private val frameCallback = Choreographer.FrameCallback { onFrame() }
 
-    /** Запустить мониторинг (идемпотентно). Вызывать на main-потоке. */
+    /** Запустить прогрев (идемпотентно). Вызывать на main-потоке. */
     fun start() {
         if (started) return
         started = true
         Choreographer.getInstance().postFrameCallback(frameCallback)
     }
 
-    private fun onFrame(now: Long) {
-        if (lastFrameNs != 0L) {
-            val deltaMs = (now - lastFrameNs) / 1_000_000L
-            when {
-                deltaMs > IDLE_GAP_MS -> {
-                    // Простой/возврат из фона — нейтральный кадр, не считаем за просадку.
-                    slowStreak = 0
-                    fastStreak = 0
-                }
-                deltaMs > SLOW_FRAME_MS -> {
-                    slowStreak++
-                    fastStreak = 0
-                }
-                else -> {
-                    fastStreak++
-                    slowStreak = 0
-                }
+    private fun onFrame() {
+        if (degraded) {
+            frameCount++
+            if (frameCount >= WARMUP_FRAMES) {
+                degraded = false
+                return // прогрев завершён — больше кадры не считаем, колбэк не перепостим
             }
-
-            if (degraded) {
-                // Гладкий FPS набран — возвращаем полные эффекты (всегда, без защёлок).
-                if (fastStreak >= EXIT_FAST_STREAK) degraded = false
-            } else {
-                // Устойчивая просадка — временно упрощаем.
-                if (slowStreak >= ENTER_SLOW_STREAK) degraded = true
-            }
+            Choreographer.getInstance().postFrameCallback(frameCallback)
         }
-        lastFrameNs = now
-        Choreographer.getInstance().postFrameCallback(frameCallback)
     }
 }

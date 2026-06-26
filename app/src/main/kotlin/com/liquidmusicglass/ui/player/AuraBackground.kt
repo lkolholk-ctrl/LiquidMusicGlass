@@ -17,8 +17,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
-import kotlinx.coroutines.delay
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -151,13 +151,16 @@ private fun rememberSmoothedBass(): State<Float> = produceState(0f) {
     }
 }
 
-// Тяжёлый AGSL-дым НЕ монтируется на первом кадре экрана: первые ~280мс рисуем
-// дешёвый статичный градиент, и только потом подключаем шейдер. Это снимает
-// компиляцию/линковку fbm-программы (6 октав) с критического пути первого кадра —
-// именно одновременная линковка ауры + всех мудовых плиток давала ANR на старте
-// My Wave (uptime ~0.47с) даже на флагмане. Аура и плитки прогреваются в РАЗНЫХ
-// кадрах (у плиток свой стаггер), так что RenderThread линкует по одной программе.
-private const val AURA_WARMUP_MS = 280L
+// Тяжёлый AGSL-дым НЕ монтируется на первых кадрах экрана: пока экран не отрисовал
+// AURA_WARMUP_FRAMES кадров — рисуем дешёвый статичный градиент, и только потом
+// подключаем fbm-шейдер (6 октав). Это снимает компиляцию/линковку fbm-программы с
+// критического пути холодного старта (именно одновременная линковка ауры + плиток
+// давала ANR на старте My Wave даже на флагмане). Аура и плитки прогреваются в
+// РАЗНЫХ кадрах (у плиток свой стаггер), так что линковка идёт по одной программе.
+//
+// Это ОТЛОЖЕННЫЙ СТАРТ, а НЕ деградация: дым включается через ~полсекунды после
+// открытия экрана и работает ПОСТОЯННО (не пропадает, не зависит от FPS).
+private const val AURA_WARMUP_FRAMES = 24  // ~0.4с отрисованных кадров
 
 @Composable
 fun AuraBackground(
@@ -166,18 +169,12 @@ fun AuraBackground(
     intensity: Float = 0.78f,
     animate: Boolean = true,
 ) {
-    val degraded = com.liquidmusicglass.ui.PerfMonitor.degraded
     val tiramisu = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
 
-    // Отложенный монтаж тяжёлого фона. degraded (слабый GPU доказан просадкой) —
-    // не монтируем вовсе. Иначе: первый кадр статичный, шейдер через AURA_WARMUP_MS.
     var heavyArmed by remember { mutableStateOf(false) }
-    LaunchedEffect(degraded) {
-        if (degraded) {
-            heavyArmed = false
-            return@LaunchedEffect
-        }
-        delay(AURA_WARMUP_MS)
+    LaunchedEffect(Unit) {
+        // Ждём N реально отрисованных кадров, затем включаем дым — и оставляем включённым.
+        repeat(AURA_WARMUP_FRAMES) { withFrameNanos { } }
         heavyArmed = true
     }
 

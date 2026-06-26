@@ -22,7 +22,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import kotlinx.coroutines.delay
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -76,13 +76,15 @@ private const val TAU = (2.0 * PI).toFloat()
 // Скорость медленного «дыхания» узора (доля фазы 0..1 в секунду).
 private const val PATTERN_SPEED = 0.07f
 
-// ── Стаггер прогрева AGSL-плиток ──
-// Первый кадр экрана плитки рисуют ДЕШЁВЫМ статичным градиентом (никаких
-// RuntimeShader). Затем каждая ВИДИМАЯ плитка включает свой шейдер по очереди —
-// RenderThread линкует по одной программе за раз, а не все 6 в одном кадре
-// (именно одновременная линковка давала стартовый ANR даже на Adreno 750).
-private const val TILE_WARMUP_BASE_MS = 350L  // задержка до первой плитки
-private const val TILE_WARMUP_STEP_MS = 90L   // +90мс на каждую следующую
+// ── Отложенный прогрев AGSL-плиток (НЕ деградация) ──
+// Первые кадры экрана плитки рисуют ДЕШЁВЫМ статичным градиентом (никаких
+// RuntimeShader), чтобы холодный старт не давил GPU. Затем каждая ВИДИМАЯ плитка
+// включает свой шейдер ПО ОЧЕРЕДИ — отсчёт ведётся в РЕАЛЬНО отрисованных кадрах
+// (withFrameNanos), поэтому тяжёлая линковка AGSL-программы ложится на отдельный
+// кадр уже ПОСЛЕ стартового шторма, по одной плитке за раз. Эффект включается и
+// работает ПОСТОЯННО (не пропадает, не зависит от FPS-деградации).
+private const val TILE_WARMUP_FRAMES = 30  // ~0.5с отрисованных кадров до 1-й плитки
+private const val TILE_STAGGER_FRAMES = 6  // +~0.1с (кадров) на каждую следующую
 
 /**
  * AGSL-шейдер плитки: медленный перелив между двумя цветами муда (домен-варп
@@ -168,22 +170,18 @@ private fun MoodTile(
     index: Int,
     onClick: () -> Unit
 ) {
-    // Шейдер плитки разрешён только не в degraded и на API33+. Но даже когда
-    // разрешён — включаем его НЕ на первом кадре, а со СТАГГЕРОМ по индексу, чтобы
-    // линковка AGSL-программ легла на разные кадры (см. TILE_WARMUP_*).
-    val degraded = com.liquidmusicglass.ui.PerfMonitor.degraded
-    val canShader = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !degraded
+    // AGSL включаем НЕ на первом кадре, а со СТАГГЕРОМ по индексу в РЕАЛЬНО
+    // отрисованных кадрах — чтобы линковка AGSL-программ легла на разные кадры уже
+    // после стартового прогрева. Это отложенный старт, а НЕ FPS-деградация: однажды
+    // включившись, плитка остаётся с шейдером (эффект не пропадает).
+    val canShader = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
 
     var shaderArmed by remember { mutableStateOf(false) }
-    LaunchedEffect(canShader, index) {
-        if (!canShader) {
-            shaderArmed = false
-            return@LaunchedEffect
-        }
-        // Стаггер: каждая видимая плитка включает свой AGSL по очереди, не все
-        // в одном кадре. LazyRow держит в композиции только видимые → задержки
-        // запускаются лишь для них.
-        delay(TILE_WARMUP_BASE_MS + index * TILE_WARMUP_STEP_MS)
+    LaunchedEffect(index) {
+        if (!canShader) return@LaunchedEffect
+        // Ждём N отрисованных кадров (+ стаггер по индексу), затем включаем шейдер.
+        // LazyRow держит в композиции только видимые плитки → таймеры идут лишь для них.
+        repeat(TILE_WARMUP_FRAMES + index * TILE_STAGGER_FRAMES) { withFrameNanos { } }
         shaderArmed = true
     }
 
@@ -228,7 +226,7 @@ private fun MoodTile(
                         }
                     }
                 } else {
-                    // Первый кадр / прогрев / degraded / <API33 — ДЕШЁВЫЙ статичный
+                    // Прогрев (шейдер ещё не включён) / <API33 — ДЕШЁВЫЙ статичный
                     // градиент. Клок НЕ читаем → плитка не перерисовывается каждый кадр.
                     drawRect(
                         Brush.linearGradient(
