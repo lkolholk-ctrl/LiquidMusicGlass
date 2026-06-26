@@ -67,7 +67,7 @@ import com.liquidmusicglass.ui.screens.LibraryScreen
 import com.liquidmusicglass.ui.screens.AlbumDetailScreen
 import com.liquidmusicglass.ui.screens.ArtistDetailScreen
 import com.liquidmusicglass.ui.screens.EqualizerScreen
-import com.liquidmusicglass.ui.screens.HistoryScreen
+import com.liquidmusicglass.ui.screens.NewScreen
 import com.liquidmusicglass.ui.screens.PlaylistDetailScreen
 import com.liquidmusicglass.ui.screens.SettingsScreen
 import com.liquidmusicglass.ui.screens.AuthScreen
@@ -264,7 +264,10 @@ fun AppRoot() {
                     showBack = false,
                     backdrop = rootBackdrop
                 )
-                4 -> HistoryScreen(showBack = false, title = "New")
+                4 -> NewScreen(
+                    onNavigateToAlbum = { detailAlbumId = it },
+                    onNavigateToArtist = { detailArtistId = it }
+                )
                 else -> HomeScreen(
                     onNavigateToAlbum = { detailAlbumId = it },
                     onNavigateToArtist = { detailArtistId = it },

@@ -237,98 +237,8 @@ fun WaveHomeScreen(
                 Spacer(Modifier.height(8.dp))
             }
 
-            // ── Recently played ──
-            if (recentlyPlayed.isNotEmpty()) {
-                item {
-                    WaveSectionHeader("Recently played")
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = 20.dp),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp)
-                    ) {
-                        items(
-                            recentlyPlayed.take(15).distinctBy { it.id },
-                            key = { "recent_${it.id}" }
-                        ) { recent ->
-                            WaveTrackCard(
-                                title = recent.title,
-                                subtitle = recent.artist,
-                                uri = recent.displayArtUri,
-                                coverUrl = recent.coverUrl,
-                                onClick = { PlayerController.playFromList(context, listOf(recent)) }
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(28.dp))
-                }
-            }
-
-            // ── Home-блоки (popular / banners / new_releases / recommendations …) ──
-            homeBlocks.forEach { block ->
-                item(key = "block_${block.id}") {
-                    WaveSectionHeader(block.title)
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = 20.dp),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp)
-                    ) {
-                        items(block.items, key = { "${block.id}_${it.id}" }) { homeItem ->
-                            WaveTrackCard(
-                                title = homeItem.title,
-                                subtitle = homeItem.displayArtist,
-                                coverUrl = homeItem.cover,
-                                onClick = {
-                                    // Решение по ТИПУ сущности, а не по наличию collectionId
-                                    // (трек по API тоже несёт collectionId своего альбома).
-                                    when {
-                                        homeItem.isArtist ->
-                                            onNavigateToArtist(homeItem.artistId ?: homeItem.id)
-                                        homeItem.isAlbum ->
-                                            onNavigateToAlbum(homeItem.collectionId ?: homeItem.id)
-                                        else -> {
-                                            // playFromList сам резолвит стрим начального трека,
-                                            // показывает Toast при ошибке и не зависит от гонки
-                                            // mediaItemCount в playNext — трек реально стартует.
-                                            val t = homeItem.toWaveTrack()
-                                            PlayerController.playFromList(context, listOf(t))
-                                        }
-                                    }
-                                }
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(28.dp))
-                }
-            }
-
-            // ── Charts ──
-            if (charts.isNotEmpty()) {
-                item {
-                    WaveSectionHeader("Charts")
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = 20.dp),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp)
-                    ) {
-                        items(charts, key = { "chart_${it.id}" }) { chart ->
-                            WaveChartCard(
-                                chart = chart,
-                                onClick = {
-                                    val chartTracks = chart.tracks.map { it.toTrack() }
-                                    if (chartTracks.isNotEmpty()) {
-                                        PlayerController.playFromList(
-                                            context = context,
-                                            tracks = chartTracks,
-                                            startIndex = 0,
-                                            autoRefillType = "chart",
-                                            autoRefillId = chart.id,
-                                            autoRefillName = chart.name
-                                        )
-                                    }
-                                }
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(28.dp))
-                }
-            }
+            // Рекомендации (recently played / home-блоки / charts) перенесены в таб New.
+            // На Wave остаются только мудкарточки + плеер волны/текущий трек.
         }
 
         // ── Онбординг волны: показываем, когда персональная волна пуста и юзер
@@ -371,7 +281,7 @@ fun WaveHomeScreen(
     }
 }
 
-private fun IcmHomeItem.toWaveTrack(): Track = Track(
+internal fun IcmHomeItem.toWaveTrack(): Track = Track(
     id = id,
     title = title,
     artist = displayArtist,
