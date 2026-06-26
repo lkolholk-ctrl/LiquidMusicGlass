@@ -109,10 +109,10 @@ class IcmApi private constructor() {
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
             .writeTimeout(15, TimeUnit.SECONDS)
-            // callTimeout ограничивает ВЕСЬ вызов (connect+TLS+retry+ответ). Раньше его
-            // не было → зависший TLS-handshake держал поток до бесконечности и забивал
-            // IO-пул (16 потоков в дампе ANR). Теперь любой вызов умрёт максимум за 30с.
-            .callTimeout(30, TimeUnit.SECONDS)
+            // callTimeout ограничивает ВЕСЬ вызов (connect+TLS+retry+ответ). 10с — чтобы
+            // при мёртвой/медленной сети запрос падал БЫСТРО (юзер не думает, что
+            // приложение встало колом), а зависшие коннекты не копились.
+            .callTimeout(10, TimeUnit.SECONDS)
             // ВКЛючаем штатное восстановление соединения OkHttp: прозрачный повтор на
             // протухших keep-alive соединениях (сервер закрыл сокет) и перебор маршрутов
             // (IPv6→IPv4). Без этого единичный мёртвый маршрут/протухший коннект давал
