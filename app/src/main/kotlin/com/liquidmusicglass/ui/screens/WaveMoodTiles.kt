@@ -158,6 +158,8 @@ private fun MoodTile(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) RuntimeShader(TILE_AGSL) else null
     }
     val shaderBrush = remember(shader) { shader?.let { ShaderBrush(it) } }
+    // При просадке FPS — не гоняем AGSL на каждой плитке, падаем на дешёвый градиент.
+    val degraded = com.liquidmusicglass.ui.PerfMonitor.degraded
 
     Box(
         modifier = Modifier
@@ -172,7 +174,7 @@ private fun MoodTile(
                 val ts = timeSec.value                       // читаем здесь → редроу только видимых
                 val patternPhase = ((ts * PATTERN_SPEED) + seed * 0.13f) % 1f
 
-                if (shader != null && shaderBrush != null) {
+                if (shader != null && shaderBrush != null && !degraded) {
                     shader.setFloatUniform("uResolution", size.width, size.height)
                     shader.setFloatUniform("uTime", ts + seed)       // сдвиг фазы у каждой плитки
                     shader.setFloatUniform("uColorA", mood.colorA.red, mood.colorA.green, mood.colorA.blue)

@@ -102,7 +102,12 @@ fun LyricsBackground(
                         scaleY = 1.8f
                         alpha = 0.45f
                     }
-                    .blur(LyricsTimeProcessor.BACKGROUND_BLUR_DP.dp)
+                    // При просадке FPS режем тяжёлый full-screen blur (RenderEffect) —
+                    // на слабом GPU это один из главных пожирателей RenderThread.
+                    .blur(
+                        (if (com.liquidmusicglass.ui.PerfMonitor.degraded) 6
+                         else LyricsTimeProcessor.BACKGROUND_BLUR_DP).dp
+                    )
             )
         }
 
