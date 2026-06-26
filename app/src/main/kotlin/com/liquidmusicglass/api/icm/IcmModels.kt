@@ -1,12 +1,52 @@
 package com.liquidmusicglass.api.icm
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonDecoder
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.longOrNull
+
+/**
+ * Терпимый к битым элементам десериализатор списка: декодирует массив поэлементно
+ * и ПРОПУСКАЕТ элементы, которые не распарсились (кривой/частичный объект, неверный
+ * тип, отсутствует обязательное поле), вместо того чтобы уронить ВЕСЬ список.
+ *
+ * Применять к UI-спискам: `@Serializable(with = TolerantListSerializer::class)`.
+ * Компилятор kotlinx сам подставит сериализатор элемента в конструктор.
+ */
+class TolerantListSerializer<T>(
+    private val element: KSerializer<T>
+) : KSerializer<List<T>> {
+    private val delegate = ListSerializer(element)
+    override val descriptor: SerialDescriptor = delegate.descriptor
+
+    override fun serialize(encoder: Encoder, value: List<T>) =
+        delegate.serialize(encoder, value)
+
+    override fun deserialize(decoder: Decoder): List<T> {
+        // Не-JSON формат — обычное поведение.
+        val jsonDecoder = decoder as? JsonDecoder ?: return delegate.deserialize(decoder)
+        val arr = jsonDecoder.decodeJsonElement() as? JsonArray ?: return emptyList()
+        val out = ArrayList<T>(arr.size)
+        for (e in arr) {
+            try {
+                out.add(jsonDecoder.json.decodeFromJsonElement(element, e))
+            } catch (_: Throwable) {
+                // битый элемент — пропускаем, список не роняем
+            }
+        }
+        return out
+    }
+}
 
 // ─── Health ───
 
@@ -79,7 +119,8 @@ data class IcmSearchResponse(
     val query: String,
     val region: String,
     val source: String? = null,
-    val items: List<IcmSearchItem>
+    @Serializable(with = TolerantListSerializer::class)
+    val items: List<IcmSearchItem> = emptyList()
 )
 
 @Serializable
@@ -151,6 +192,7 @@ data class IcmTrackResponse(
 data class IcmAlbumResponse(
     val album: IcmAlbum,
     // tolerant: пропущенный/null tracks не должен ронять парс всего альбома
+    @Serializable(with = TolerantListSerializer::class)
     val tracks: List<IcmAlbumTrack> = emptyList()
 )
 
@@ -207,8 +249,11 @@ data class IcmArtistResponse(
     val bio: String? = null,
     val followers: Long? = null,
     @SerialName("editorialVideoUrl") val editorialVideoUrl: String? = null,
-    @SerialName("topSongs") val topSongs: List<IcmArtistSong> = emptyList(),
+    @SerialName("topSongs")
+    @Serializable(with = TolerantListSerializer::class)
+    val topSongs: List<IcmArtistSong> = emptyList(),
     @SerialName("latestRelease") val latestRelease: IcmArtistAlbum? = null,
+    @Serializable(with = TolerantListSerializer::class)
     val albums: List<IcmArtistAlbum> = emptyList(),
     val singles: List<IcmArtistAlbum> = emptyList(),
     val featuring: List<IcmArtistAlbum> = emptyList(),
@@ -299,6 +344,7 @@ data class IcmChart(
     val name: String,
     val query: String,
     val cover: String? = null,
+    @Serializable(with = TolerantListSerializer::class)
     val tracks: List<IcmSearchItem> = emptyList()
 )
 
@@ -325,6 +371,7 @@ data class IcmPlaylist(
     val curator: String? = null,
     val description: String? = null,
     val cover: String? = null,
+    @Serializable(with = TolerantListSerializer::class)
     val tracks: List<IcmPlaylistTrack> = emptyList()
 )
 
@@ -618,7 +665,7 @@ data class IcmUserProfile(
 @Serializable
 data class IcmWaveResponse(
     val track: IcmWaveTrack? = null,
-    val status: String,
+    val status: String = "",
     val region: String? = null
 )
 
@@ -662,6 +709,7 @@ data class IcmWaveTrack(
 
 @Serializable
 data class IcmLibraryLikesResponse(
+    @Serializable(with = TolerantListSerializer::class)
     val items: List<IcmLibraryTrack> = emptyList(),
     val count: Int? = null,
     val total: Int? = null,
@@ -865,6 +913,7 @@ data class IcmHomeBlock(
     val id: String,
     val title: String,
     val type: String, // "banner", "new_releases", "charts", "recommendations"
+    @Serializable(with = TolerantListSerializer::class)
     val items: List<IcmHomeItem> = emptyList()
 )
 
@@ -1160,7 +1209,9 @@ data class IcmUserPlaylist(
 @Serializable
 data class IcmUserPlaylistTracksResponse(
     @SerialName("playlist") val playlist: IcmUserPlaylistInfo? = null,
-    @SerialName("tracks") val tracks: List<IcmUserPlaylistTrack> = emptyList()
+    @SerialName("tracks")
+    @Serializable(with = TolerantListSerializer::class)
+    val tracks: List<IcmUserPlaylistTrack> = emptyList()
 )
 
 @Serializable
