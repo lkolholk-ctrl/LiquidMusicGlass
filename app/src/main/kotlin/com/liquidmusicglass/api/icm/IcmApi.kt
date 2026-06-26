@@ -96,9 +96,15 @@ class IcmApi private constructor() {
         // Явный Dispatcher: ограничиваем число одновременных запросов (всё идёт на
         // один хост byicloud.online). Реальный темп держит IcmRateGate, а это —
         // страховка от переполнения пула при залпах резолвов/префетча.
+        // maxRequestsPerHost снижен 8→3: на холодном старте летит залп запросов к
+        // byicloud (синк лайков + контент главной), и пока ни одно HTTP/2-соединение
+        // не установлено, OkHttp открывал ДО 8 параллельных TLS-handshake'ов. На
+        // медленной/«подрезанной» сети они зависают пачкой и таймаутят → ложное
+        // «No internet connection». С 3 — гонок меньше, остальные мультиплексируются
+        // по уже поднятому HTTP/2-коннекту.
         val dispatcher = okhttp3.Dispatcher().apply {
             maxRequests = 12
-            maxRequestsPerHost = 8
+            maxRequestsPerHost = 3
         }
         OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)
