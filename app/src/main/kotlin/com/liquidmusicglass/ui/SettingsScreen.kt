@@ -461,45 +461,6 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(28.dp))
 
-            // ── MOBILE DATA ──
-            SectionLabel("MOBILE DATA")
-
-            val dataSaver by PlayerSettings.dataSaver.collectAsState()
-            val cellularData by PlayerSettings.cellularData.collectAsState()
-            val cellularStreaming by PlayerSettings.cellularStreaming.collectAsState()
-            val cellularDownloads by PlayerSettings.cellularDownloads.collectAsState()
-            PlainCard {
-                SettingsToggleItem(
-                    title = "Data Saver",
-                    subtitle = "Reduce buffering & prefetch on cellular",
-                    selected = dataSaver,
-                    onSelect = { PlayerSettings.setDataSaver(it) }
-                )
-                PlainDivider()
-                SettingsToggleItem(
-                    title = "Cellular Data",
-                    subtitle = "Allow any cellular access (off = Wi-Fi only)",
-                    selected = cellularData,
-                    onSelect = { PlayerSettings.setCellularData(it) }
-                )
-                PlainDivider()
-                SettingsToggleItem(
-                    title = "Streaming",
-                    subtitle = "Stream over cellular",
-                    selected = cellularStreaming,
-                    onSelect = { PlayerSettings.setCellularStreaming(it) }
-                )
-                PlainDivider()
-                SettingsToggleItem(
-                    title = "Downloads",
-                    subtitle = "Download over cellular",
-                    selected = cellularDownloads,
-                    onSelect = { PlayerSettings.setCellularDownloads(it) }
-                )
-            }
-
-            Spacer(modifier = Modifier.height(28.dp))
-
             // ── ACCESSIBILITY ──
             SectionLabel("ACCESSIBILITY")
 

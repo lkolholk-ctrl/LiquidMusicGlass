@@ -29,8 +29,7 @@ private val Context.playerSettingsDataStore: DataStore<Preferences> by
  * StateFlow обновляется и оптимистично при записи, и при эмиссии из DataStore.
  *
  * Дефолты безопасны для холодного старта (до первой эмиссии DataStore): кэш
- * включён на 500 МБ, сотовые разрешены (как в Apple Music по умолчанию),
- * нормализация/эконом/контраст выключены.
+ * включён на 500 МБ, AutoMix включён, нормализация/контраст выключены.
  */
 object PlayerSettings {
 
@@ -48,10 +47,6 @@ object PlayerSettings {
     private val KEY_CACHE_BYTES = longPreferencesKey("audio_cache_bytes")
     private val KEY_AUTO_MIX = booleanPreferencesKey("auto_mix")
     private val KEY_VOLUME_NORMALIZATION = booleanPreferencesKey("volume_normalization")
-    private val KEY_DATA_SAVER = booleanPreferencesKey("data_saver")
-    private val KEY_CELLULAR_DATA = booleanPreferencesKey("cellular_data")
-    private val KEY_CELLULAR_STREAMING = booleanPreferencesKey("cellular_streaming")
-    private val KEY_CELLULAR_DOWNLOADS = booleanPreferencesKey("cellular_downloads")
     private val KEY_INCREASE_CONTRAST = booleanPreferencesKey("increase_contrast")
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -68,18 +63,6 @@ object PlayerSettings {
 
     private val _volumeNormalization = MutableStateFlow(false)
     val volumeNormalization: StateFlow<Boolean> = _volumeNormalization
-
-    private val _dataSaver = MutableStateFlow(false)
-    val dataSaver: StateFlow<Boolean> = _dataSaver
-
-    private val _cellularData = MutableStateFlow(true)
-    val cellularData: StateFlow<Boolean> = _cellularData
-
-    private val _cellularStreaming = MutableStateFlow(true)
-    val cellularStreaming: StateFlow<Boolean> = _cellularStreaming
-
-    private val _cellularDownloads = MutableStateFlow(true)
-    val cellularDownloads: StateFlow<Boolean> = _cellularDownloads
 
     private val _increaseContrast = MutableStateFlow(false)
     val increaseContrast: StateFlow<Boolean> = _increaseContrast
@@ -105,10 +88,6 @@ object PlayerSettings {
         if (cacheChanged) MediaCacheManager.applyCacheSizeChange()
         _autoMix.value = p[KEY_AUTO_MIX] ?: true
         _volumeNormalization.value = p[KEY_VOLUME_NORMALIZATION] ?: false
-        _dataSaver.value = p[KEY_DATA_SAVER] ?: false
-        _cellularData.value = p[KEY_CELLULAR_DATA] ?: true
-        _cellularStreaming.value = p[KEY_CELLULAR_STREAMING] ?: true
-        _cellularDownloads.value = p[KEY_CELLULAR_DOWNLOADS] ?: true
         _increaseContrast.value = p[KEY_INCREASE_CONTRAST] ?: false
     }
 
@@ -135,48 +114,11 @@ object PlayerSettings {
         persist { it[KEY_VOLUME_NORMALIZATION] = enabled }
     }
 
-    fun setDataSaver(enabled: Boolean) {
-        _dataSaver.value = enabled
-        persist { it[KEY_DATA_SAVER] = enabled }
-    }
-
-    fun setCellularData(enabled: Boolean) {
-        _cellularData.value = enabled
-        persist { it[KEY_CELLULAR_DATA] = enabled }
-    }
-
-    fun setCellularStreaming(enabled: Boolean) {
-        _cellularStreaming.value = enabled
-        persist { it[KEY_CELLULAR_STREAMING] = enabled }
-    }
-
-    fun setCellularDownloads(enabled: Boolean) {
-        _cellularDownloads.value = enabled
-        persist { it[KEY_CELLULAR_DOWNLOADS] = enabled }
-    }
-
     fun setIncreaseContrast(enabled: Boolean) {
         _increaseContrast.value = enabled
         persist { it[KEY_INCREASE_CONTRAST] = enabled }
     }
 
-    // ── Производные правила доступа по сети (синхронные) ──
-
     /** Кэш аудио включён (выбран ненулевой размер). */
     fun isCacheEnabled(): Boolean = _audioCacheBytes.value > 0L
-
-    /**
-     * Разрешён ли СТРИМИНГ прямо сейчас. На Wi-Fi/безлимите — всегда. На сотовой —
-     * только если включён общий доступ к сотовым И стриминг по сотовой.
-     */
-    fun streamingAllowed(): Boolean {
-        if (NetworkMonitor.isUnmetered()) return true
-        return _cellularData.value && _cellularStreaming.value
-    }
-
-    /** Разрешены ли ЗАГРУЗКИ прямо сейчас (та же логика, своя под-настройка). */
-    fun downloadsAllowed(): Boolean {
-        if (NetworkMonitor.isUnmetered()) return true
-        return _cellularData.value && _cellularDownloads.value
-    }
 }

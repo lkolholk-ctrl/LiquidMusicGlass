@@ -86,9 +86,8 @@ class App : Application(), ImageLoaderFactory {
         // Initialize AppSettings (SharedPreferences) — лёгкая, можно на main
         AppSettings.init(this)
 
-        // Player settings (DataStore) + сетевой монитор (Wi-Fi/сотовая) — лёгкие
+        // Player settings (DataStore) — лёгкая инициализация
         com.liquidmusicglass.engine.PlayerSettings.init(this)
-        com.liquidmusicglass.engine.NetworkMonitor.init(this)
 
         // Initialize PlayerController — просто сохраняет context
         PlayerController.init(this)

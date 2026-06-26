@@ -89,15 +89,6 @@ class EndlessPlaybackEngine(
             return false
         }
 
-        // Сотовый гейт: стриминг по сотовой запрещён → НЕ дозаправляем очередь.
-        // Иначе при заблокированном стриминге очередь дренится скипами, а движок
-        // молотит сервер новыми запросами на дозаправку — это и есть «шторм»/ANR.
-        // Чтение флага мгновенное (StateFlow.value), без блокировки потока.
-        if (!PlayerSettings.streamingAllowed()) {
-            android.util.Log.d("EndlessEngine", "Refill blocked: streaming not allowed on cellular")
-            return false
-        }
-
         // ── BOUNDARY LOCK: refill is strictly allowed in Global (Wave) context ──
         if (PlayerController.playbackContext !is PlaybackContext.Global) {
             android.util.Log.d("EndlessEngine", "Refill blocked: active context is ${PlayerController.playbackContext}")

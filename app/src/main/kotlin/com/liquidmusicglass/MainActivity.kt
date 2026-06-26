@@ -60,8 +60,6 @@ class MainActivity : ComponentActivity() {
         override fun onAvailable(network: Network) {
             val isNewNetwork = currentNetwork != network
             currentNetwork = network
-            // Обновляем тип сети (Wi-Fi/сотовая) для гейтинга стриминга/загрузок.
-            com.liquidmusicglass.engine.NetworkMonitor.refreshNow()
             if (isNewNetwork) {
                 // Активная сеть сменилась (Wi-Fi↔моб., VPN вкл/выкл): соединения в пуле
                 // привязаны к старому маршруту и мертвы. Эвиктим пулы (ICM + обложки) и

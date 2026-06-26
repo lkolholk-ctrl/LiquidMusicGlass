@@ -39,13 +39,6 @@ object AudioDownloadManager {
             return
         }
 
-        // Сотовый гейтинг: загрузки по сотовой выключены → качаем только по Wi-Fi.
-        if (!PlayerSettings.downloadsAllowed()) {
-            android.util.Log.d("AudioDownloadManager", "Download blocked: cellular downloads off")
-            onComplete(false)
-            return
-        }
-
         val trackId = track.id
         if (isDownloading(trackId)) return
 
