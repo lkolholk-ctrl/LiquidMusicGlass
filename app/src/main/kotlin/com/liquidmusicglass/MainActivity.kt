@@ -54,12 +54,20 @@ class MainActivity : ComponentActivity() {
     private var isNetworkCallbackRegistered = false
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
-        private var wasOffline = true
+        private var currentNetwork: Network? = null
         private var reconnectJob: kotlinx.coroutines.Job? = null
 
         override fun onAvailable(network: Network) {
-            if (!wasOffline) return
-            wasOffline = false
+            val isNewNetwork = currentNetwork != network
+            currentNetwork = network
+            if (isNewNetwork) {
+                // Активная сеть сменилась (Wi-Fi↔моб., VPN вкл/выкл): соединения в пуле
+                // привязаны к старому маршруту и мертвы. Эвиктим пулы (ICM + обложки) и
+                // сбрасываем локальный бан — иначе приложение долбится в «трупы» и ничего
+                // не грузит, пока соединения сами не протухнут.
+                com.liquidmusicglass.api.icm.IcmApi.evictConnections()
+                (application as? App)?.evictImageConnections()
+            }
             // Debounce: на флапающей мобильной сети onAvailable может прийти много раз —
             // ждём 1.5с стабильности и делаем ОДИН рефетч + ретрай зависшего плеера,
             // вместо залпа запросов на каждое срабатывание.
@@ -74,7 +82,7 @@ class MainActivity : ComponentActivity() {
         }
 
         override fun onLost(network: Network) {
-            wasOffline = true
+            if (currentNetwork == network) currentNetwork = null
         }
     }
 
@@ -89,12 +97,10 @@ class MainActivity : ComponentActivity() {
 
         enableEdgeToEdge()
 
-        // Register network callback to auto-refresh profile when coming back online
+        // Default-network callback ловит СМЕНУ активной сети (Wi-Fi↔моб., VPN вкл/выкл),
+        // чтобы вовремя эвиктить мёртвые соединения и не «терять сеть» после переключения.
         val connectivityManager = getSystemService(ConnectivityManager::class.java)
-        val networkRequest = NetworkRequest.Builder()
-            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-            .build()
-        connectivityManager?.registerNetworkCallback(networkRequest, networkCallback)
+        connectivityManager?.registerDefaultNetworkCallback(networkCallback)
         isNetworkCallbackRegistered = true
 
         // Initialize ICM API with native key (or BuildConfig fallback)

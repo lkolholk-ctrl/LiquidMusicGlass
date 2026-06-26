@@ -167,6 +167,20 @@ class IcmApi private constructor() {
             .build()
     }
 
+    /**
+     * Сбросить сетевое состояние при СМЕНЕ сети (Wi-Fi↔моб., VPN вкл/выкл).
+     * Соединения в пуле привязаны к прежнему маршруту и после переключения мертвы —
+     * приложение продолжало долбиться в них и «ничего не грузило». Вызывать из
+     * networkCallback при появлении/смене активной сети.
+     */
+    fun evictConnections() {
+        try {
+            client.dispatcher.cancelAll()      // отменяем зависшие вызовы на мёртвых соединениях
+            client.connectionPool.evictAll()   // выкидываем протухшие соединения из пула
+            IcmRateGate.reset()                // снимаем локальный circuit-breaker бан
+        } catch (_: Throwable) {}
+    }
+
     private val mediaTypeJson = "application/json; charset=utf-8".toMediaType()
 
     /** Partner API key (pk_<id>_<random>) */

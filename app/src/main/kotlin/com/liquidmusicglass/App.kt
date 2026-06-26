@@ -31,20 +31,30 @@ class App : Application(), ImageLoaderFactory {
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    // Свой OkHttp для обложек, ОТДЕЛЬНЫЙ от IcmApi и С ТАЙМАУТАМИ: зависший
+    // mzstatic/CDN не должен держать соединения вечно и копить потоки (в ANR дампе
+    // обложки висели в TLS-handshake). callTimeout рубит висяк за 20с. Держим ссылку,
+    // чтобы эвиктить пул при смене сети (VPN/Wi-Fi↔моб.).
+    private val coverHttpClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.SECONDS)
+            .callTimeout(20, TimeUnit.SECONDS)
+            .dispatcher(Dispatcher().apply { maxRequestsPerHost = 4 })
+            .build()
+    }
+
+    /** Эвиктнуть пул соединений загрузчика обложек при смене сети. */
+    fun evictImageConnections() {
+        try {
+            coverHttpClient.dispatcher.cancelAll()
+            coverHttpClient.connectionPool.evictAll()
+        } catch (_: Throwable) {}
+    }
+
     override fun newImageLoader(): ImageLoader {
         return ImageLoader.Builder(this)
-            // Свой OkHttp для обложек, ОТДЕЛЬНЫЙ от IcmApi и С ТАЙМАУТАМИ: зависший
-            // mzstatic/CDN не должен держать соединения вечно и копить потоки (в ANR
-            // дампе обложки висели в TLS-handshake). callTimeout рубит висяк за 20с,
-            // maxRequestsPerHost ограничивает залп на один хост.
-            .okHttpClient {
-                OkHttpClient.Builder()
-                    .connectTimeout(10, TimeUnit.SECONDS)
-                    .readTimeout(15, TimeUnit.SECONDS)
-                    .callTimeout(20, TimeUnit.SECONDS)
-                    .dispatcher(Dispatcher().apply { maxRequestsPerHost = 4 })
-                    .build()
-            }
+            .okHttpClient { coverHttpClient }
             .components {
                 add(CoverSigningInterceptor())
             }
