@@ -11,13 +11,18 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -70,6 +75,14 @@ private const val TAU = (2.0 * PI).toFloat()
 
 // Скорость медленного «дыхания» узора (доля фазы 0..1 в секунду).
 private const val PATTERN_SPEED = 0.07f
+
+// ── Стаггер прогрева AGSL-плиток ──
+// Первый кадр экрана плитки рисуют ДЕШЁВЫМ статичным градиентом (никаких
+// RuntimeShader). Затем каждая ВИДИМАЯ плитка включает свой шейдер по очереди —
+// RenderThread линкует по одной программе за раз, а не все 6 в одном кадре
+// (именно одновременная линковка давала стартовый ANR даже на Adreno 750).
+private const val TILE_WARMUP_BASE_MS = 350L  // задержка до первой плитки
+private const val TILE_WARMUP_STEP_MS = 90L   // +90мс на каждую следующую
 
 /**
  * AGSL-шейдер плитки: медленный перелив между двумя цветами муда (домен-варп
@@ -135,11 +148,12 @@ fun WaveMoodTiles(
         contentPadding = PaddingValues(horizontal = 20.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        items(WAVE_MOODS, key = { it.label }) { mood ->
+        itemsIndexed(WAVE_MOODS, key = { _, m -> m.label }) { index, mood ->
             MoodTile(
                 mood = mood,
                 timeSec = timeSec,
-                seed = WAVE_MOODS.indexOf(mood) * 1.7f,
+                seed = index * 1.7f,
+                index = index,
                 onClick = { onSelect(mood) }
             )
         }
@@ -151,13 +165,32 @@ private fun MoodTile(
     mood: WaveMood,
     timeSec: State<Float>,
     seed: Float,
+    index: Int,
     onClick: () -> Unit
 ) {
-    // На warmup-старте/просадке FPS НЕ создаём RuntimeShader (создание = компиляция
-    // AGSL, это и есть затык на первом кадре My Wave) и не рисуем им — дешёвый градиент.
+    // Шейдер плитки разрешён только не в degraded и на API33+. Но даже когда
+    // разрешён — включаем его НЕ на первом кадре, а со СТАГГЕРОМ по индексу, чтобы
+    // линковка AGSL-программ легла на разные кадры (см. TILE_WARMUP_*).
     val degraded = com.liquidmusicglass.ui.PerfMonitor.degraded
-    val shader = remember(mood, degraded) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !degraded) RuntimeShader(TILE_AGSL) else null
+    val canShader = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !degraded
+
+    var shaderArmed by remember { mutableStateOf(false) }
+    LaunchedEffect(canShader, index) {
+        if (!canShader) {
+            shaderArmed = false
+            return@LaunchedEffect
+        }
+        // Стаггер: каждая видимая плитка включает свой AGSL по очереди, не все
+        // в одном кадре. LazyRow держит в композиции только видимые → задержки
+        // запускаются лишь для них.
+        delay(TILE_WARMUP_BASE_MS + index * TILE_WARMUP_STEP_MS)
+        shaderArmed = true
+    }
+
+    val shader = remember(mood, shaderArmed) {
+        if (shaderArmed && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            RuntimeShader(TILE_AGSL)
+        } else null
     }
     val shaderBrush = remember(shader) { shader?.let { ShaderBrush(it) } }
 
@@ -171,38 +204,18 @@ private fun MoodTile(
                 onClick = onClick
             )
             .drawBehind {
-                val ts = timeSec.value                       // читаем здесь → редроу только видимых
-                val patternPhase = ((ts * PATTERN_SPEED) + seed * 0.13f) % 1f
-
-                if (shader != null && shaderBrush != null && !degraded) {
+                if (shader != null && shaderBrush != null) {
+                    // AGSL активна (плитка прогрелась). Клок читаем ТОЛЬКО здесь —
+                    // статичные плитки не инвалидируются каждый кадр.
+                    val ts = timeSec.value
+                    val patternPhase = ((ts * PATTERN_SPEED) + seed * 0.13f) % 1f
                     shader.setFloatUniform("uResolution", size.width, size.height)
                     shader.setFloatUniform("uTime", ts + seed)       // сдвиг фазы у каждой плитки
                     shader.setFloatUniform("uColorA", mood.colorA.red, mood.colorA.green, mood.colorA.blue)
                     shader.setFloatUniform("uColorB", mood.colorB.red, mood.colorB.green, mood.colorB.blue)
                     drawRect(shaderBrush)
-                } else if (degraded) {
-                    // warmup/слабый GPU — СТАТИЧНЫЙ градиент, без анимации (дёшево)
-                    drawRect(
-                        Brush.linearGradient(
-                            colors = listOf(mood.colorA, mood.colorB),
-                            start = Offset.Zero,
-                            end = Offset(size.width, size.height)
-                        )
-                    )
-                } else {
-                    // CPU-фолбэк (<API33): медленно сдвигаемый диагональный градиент
-                    val shift = sin(patternPhase * TAU) * 0.5f
-                    drawRect(
-                        Brush.linearGradient(
-                            colors = listOf(mood.colorA, mood.colorB, mood.colorA),
-                            start = Offset(size.width * shift, 0f),
-                            end = Offset(size.width * (shift + 1f), size.height)
-                        )
-                    )
-                }
 
-                // ── узор (свой у каждого муда) — path-тяжёлый, на degraded НЕ рисуем ──
-                if (!degraded) {
+                    // ── узор (path-тяжёлый) — рисуем только когда шейдер активен ──
                     clipRect {
                         val a = mood.colorB
                         when (mood.pattern) {
@@ -214,9 +227,19 @@ private fun MoodTile(
                             MoodPattern.RINGS -> drawRings(patternPhase, size.width, size.height, a)
                         }
                     }
+                } else {
+                    // Первый кадр / прогрев / degraded / <API33 — ДЕШЁВЫЙ статичный
+                    // градиент. Клок НЕ читаем → плитка не перерисовывается каждый кадр.
+                    drawRect(
+                        Brush.linearGradient(
+                            colors = listOf(mood.colorA, mood.colorB),
+                            start = Offset.Zero,
+                            end = Offset(size.width, size.height)
+                        )
+                    )
                 }
 
-                // ── мягкий scrim к низу для читаемости подписи ──
+                // ── мягкий scrim к низу для читаемости подписи (всегда) ──
                 drawRect(
                     Brush.verticalGradient(
                         0.45f to Color.Transparent,

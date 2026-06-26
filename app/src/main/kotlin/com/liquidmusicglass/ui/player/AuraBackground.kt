@@ -10,11 +10,15 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import kotlinx.coroutines.delay
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -147,6 +151,14 @@ private fun rememberSmoothedBass(): State<Float> = produceState(0f) {
     }
 }
 
+// Тяжёлый AGSL-дым НЕ монтируется на первом кадре экрана: первые ~280мс рисуем
+// дешёвый статичный градиент, и только потом подключаем шейдер. Это снимает
+// компиляцию/линковку fbm-программы (6 октав) с критического пути первого кадра —
+// именно одновременная линковка ауры + всех мудовых плиток давала ANR на старте
+// My Wave (uptime ~0.47с) даже на флагмане. Аура и плитки прогреваются в РАЗНЫХ
+// кадрах (у плиток свой стаггер), так что RenderThread линкует по одной программе.
+private const val AURA_WARMUP_MS = 280L
+
 @Composable
 fun AuraBackground(
     albumColors: AlbumColors,
@@ -154,16 +166,25 @@ fun AuraBackground(
     intensity: Float = 0.78f,
     animate: Boolean = true,
 ) {
-    // degraded (warmup-старт или слабый GPU) → ТРИВИАЛЬНО дешёвый статичный фон:
-    // один линейный градиент без анимации и без drawBehind-перерисовки каждый кадр.
-    // 4 анимированных радиала из AuraGradientFallback тоже топили RenderThread на
-    // первом кадре, поэтому на degraded их НЕ используем.
-    if (com.liquidmusicglass.ui.PerfMonitor.degraded) {
-        AuraStaticBackground(albumColors, modifier)
-    } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        AuraShaderBackground(albumColors, intensity, modifier, animate)
-    } else {
-        AuraGradientFallback(albumColors, modifier)
+    val degraded = com.liquidmusicglass.ui.PerfMonitor.degraded
+    val tiramisu = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+
+    // Отложенный монтаж тяжёлого фона. degraded (слабый GPU доказан просадкой) —
+    // не монтируем вовсе. Иначе: первый кадр статичный, шейдер через AURA_WARMUP_MS.
+    var heavyArmed by remember { mutableStateOf(false) }
+    LaunchedEffect(degraded) {
+        if (degraded) {
+            heavyArmed = false
+            return@LaunchedEffect
+        }
+        delay(AURA_WARMUP_MS)
+        heavyArmed = true
+    }
+
+    when {
+        heavyArmed && tiramisu -> AuraShaderBackground(albumColors, intensity, modifier, animate)
+        heavyArmed && !tiramisu -> AuraGradientFallback(albumColors, modifier)
+        else -> AuraStaticBackground(albumColors, modifier)
     }
 }
 
@@ -222,7 +243,8 @@ private fun AuraShaderBackground(albumColors: AlbumColors, intensity: Float, mod
     Box(
         modifier
             .fillMaxSize()
-            .background(Color.Black)
+            // Без .background(Color.Black): шейдер заполняет кадр непрозрачно
+            // (alpha=1.0), отдельная заливка фона была лишним полноэкранным overdraw.
             .drawBehind {
                 shader.setFloatUniform("uResolution", size.width, size.height)
                 shader.setFloatUniform("uTime", timeSec)
