@@ -138,7 +138,10 @@ class IcmApi private constructor() {
                 var response: okhttp3.Response? = null
                 var exception: java.io.IOException? = null
                 var tryCount = 0
-                val maxRetries = if (fast) 1 else 3
+                // 3→2: при лежачем хосте 3 попытки на КАЖДЫЙ вызов плодили лишние
+                // висящие коннекты. 2 достаточно для транзиентных 5xx; остальное
+                // отсекает circuit-breaker (IcmRateGate).
+                val maxRetries = if (fast) 1 else 2
                 while (tryCount < maxRetries) {
                     try {
                         // Закрываем предыдущий 5xx-ответ перед повтором (не течём телом).
@@ -272,6 +275,7 @@ class IcmApi private constructor() {
                 val url = if (async) "$BASE_URL$endpoint?async=1" else "$BASE_URL$endpoint"
                 val request = buildRequest(url, method, body)
                 val response = client.newCall(request).execute()
+                IcmRateGate.recordSuccess()   // ответ получен → хост жив, сбрасываем счётчик фейлов
 
                 extractRequestId(response)?.let { onRequestId?.invoke(it) }
 
@@ -320,6 +324,7 @@ class IcmApi private constructor() {
                     }
                 }
             } catch (e: Exception) {
+                IcmRateGate.recordFailure()   // сетевой фейл без ответа → копим к circuit-breaker
                 Result.failure(e)
             }
         }
@@ -343,6 +348,7 @@ class IcmApi private constructor() {
             val url = if (async) "$BASE_URL$endpoint?async=1" else "$BASE_URL$endpoint"
             val request = buildRequest(url, method, body, fast = true)
             val response = client.newCall(request).execute()
+            IcmRateGate.recordSuccess()
 
             extractRequestId(response)?.let { onRequestId?.invoke(it) }
 
@@ -381,6 +387,7 @@ class IcmApi private constructor() {
                 }
             }
         } catch (e: Exception) {
+            IcmRateGate.recordFailure()
             return Result.failure(e)
         }
     }
