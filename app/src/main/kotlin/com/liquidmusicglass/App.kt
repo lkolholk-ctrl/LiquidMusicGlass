@@ -20,7 +20,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import okhttp3.Dispatcher
+import okhttp3.OkHttpClient
 import java.io.File
+import java.util.concurrent.TimeUnit
 
 import com.liquidmusicglass.engine.PlaylistManager
 
@@ -30,6 +33,18 @@ class App : Application(), ImageLoaderFactory {
 
     override fun newImageLoader(): ImageLoader {
         return ImageLoader.Builder(this)
+            // Свой OkHttp для обложек, ОТДЕЛЬНЫЙ от IcmApi и С ТАЙМАУТАМИ: зависший
+            // mzstatic/CDN не должен держать соединения вечно и копить потоки (в ANR
+            // дампе обложки висели в TLS-handshake). callTimeout рубит висяк за 20с,
+            // maxRequestsPerHost ограничивает залп на один хост.
+            .okHttpClient {
+                OkHttpClient.Builder()
+                    .connectTimeout(10, TimeUnit.SECONDS)
+                    .readTimeout(15, TimeUnit.SECONDS)
+                    .callTimeout(20, TimeUnit.SECONDS)
+                    .dispatcher(Dispatcher().apply { maxRequestsPerHost = 4 })
+                    .build()
+            }
             .components {
                 add(CoverSigningInterceptor())
             }

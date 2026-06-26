@@ -96,20 +96,23 @@ class IcmApi private constructor() {
         // Явный Dispatcher: ограничиваем число одновременных запросов (всё идёт на
         // один хост byicloud.online). Реальный темп держит IcmRateGate, а это —
         // страховка от переполнения пула при залпах резолвов/префетча.
-        // maxRequestsPerHost снижен 8→3: на холодном старте летит залп запросов к
-        // byicloud (синк лайков + контент главной), и пока ни одно HTTP/2-соединение
-        // не установлено, OkHttp открывал ДО 8 параллельных TLS-handshake'ов. На
-        // медленной/«подрезанной» сети они зависают пачкой и таймаутят → ложное
-        // «No internet connection». С 3 — гонок меньше, остальные мультиплексируются
-        // по уже поднятому HTTP/2-коннекту.
+        // maxRequestsPerHost снижен 8→5: на холодном старте летит залп запросов к
+        // byicloud, и пока ни одно HTTP/2-соединение не установлено, OkHttp открывал
+        // ДО 8 параллельных TLS-handshake'ов. На медленной/«подрезанной» сети они
+        // зависали пачкой → ложное «No internet connection». С 5 — гонок меньше +
+        // мёртвый хост не сожрёт весь пул; остальное мультиплексируется по HTTP/2.
         val dispatcher = okhttp3.Dispatcher().apply {
             maxRequests = 12
-            maxRequestsPerHost = 3
+            maxRequestsPerHost = 5
         }
         OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.SECONDS)
             .writeTimeout(10, TimeUnit.SECONDS)
+            // callTimeout ограничивает ВЕСЬ вызов (connect+TLS+retry+ответ). Раньше его
+            // не было → зависший TLS-handshake держал поток до бесконечности и забивал
+            // IO-пул (16 потоков в дампе ANR). Теперь любой вызов умрёт максимум за 30с.
+            .callTimeout(30, TimeUnit.SECONDS)
             // ВКЛючаем штатное восстановление соединения OkHttp: прозрачный повтор на
             // протухших keep-alive соединениях (сервер закрыл сокет) и перебор маршрутов
             // (IPv6→IPv4). Без этого единичный мёртвый маршрут/протухший коннект давал
