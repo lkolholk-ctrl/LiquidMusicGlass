@@ -3,6 +3,7 @@ package com.liquidmusicglass.api.icm
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -106,9 +107,9 @@ class IcmApi private constructor() {
             maxRequestsPerHost = 5
         }
         OkHttpClient.Builder()
-            .connectTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(15, TimeUnit.SECONDS)
-            .writeTimeout(15, TimeUnit.SECONDS)
+            .connectTimeout(5, TimeUnit.SECONDS)
+            .readTimeout(8, TimeUnit.SECONDS)
+            .writeTimeout(8, TimeUnit.SECONDS)
             // callTimeout ограничивает ВЕСЬ вызов (connect+TLS+retry+ответ). 10с — чтобы
             // при мёртвой/медленной сети запрос падал БЫСТРО (юзер не думает, что
             // приложение встало колом), а зависшие коннекты не копились.
@@ -263,7 +264,10 @@ class IcmApi private constructor() {
         // Обычный расширяемый Dispatchers.IO — НЕ limitedParallelism: при лежащей сети
         // узкий лимит забивался висяками и вешал весь API. Число коннектов держим
         // короткими таймаутами (callTimeout) + ограниченными ретраями, а не очередью.
-        return withContext(Dispatchers.IO) {
+        // ВНЕШНИЙ корутинный таймаут — на случай, если OkHttp callTimeout не сработает
+        // (висение на socketRead0): корутина гарантированно отменяется, не вешает пул.
+        return withTimeoutOrNull(11_000L) {
+        withContext(Dispatchers.IO) {
             // Circuit-breaker: пока активен бан — мгновенно фейлим, не выходя в сеть.
             if (IcmRateGate.isBanned()) {
                 return@withContext Result.failure(
@@ -327,6 +331,11 @@ class IcmApi private constructor() {
                 IcmRateGate.recordFailure()   // сетевой фейл без ответа → копим к circuit-breaker
                 Result.failure(e)
             }
+        }
+        } ?: run {
+            // Корутинный таймаут (запрос завис дольше 11с) — фиксируем фейл, не виснем.
+            IcmRateGate.recordFailure()
+            Result.failure(IcmApiException(408, "icm call coroutine timeout"))
         }
     }
 
