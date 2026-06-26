@@ -382,6 +382,26 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // Возврат из фона при живом процессе (музыка в foreground): onStart после
+    // onStop вызывается БЕЗ onCreate. GPU-контекст AGSL-шейдеров потерян — даём
+    // эффектам сигнал пере-прогрева (пересоздать дым/AGSL) и перезапускаем
+    // прогрев стекла. На самый первый onStart (после onCreate) НЕ реагируем.
+    private var wasStopped = false
+
+    override fun onStart() {
+        super.onStart()
+        if (wasStopped) {
+            wasStopped = false
+            com.liquidmusicglass.ui.EffectsLifecycle.onReturnedToForeground()
+            com.liquidmusicglass.ui.PerfMonitor.restart()
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        wasStopped = true
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         if (!isNetworkCallbackRegistered) return

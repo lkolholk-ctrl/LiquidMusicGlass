@@ -171,8 +171,13 @@ fun AuraBackground(
 ) {
     val tiramisu = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
 
+    // epoch меняется при возврате из фона → сбрасываем дым на статичный и пере-
+    // прогреваем. Смена heavyArmed true→false→true пересоздаёт AuraShaderBackground
+    // (а с ним — новый RuntimeShader вместо потерявшего GPU-контекст).
+    val epoch = com.liquidmusicglass.ui.EffectsLifecycle.epoch
     var heavyArmed by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
+    LaunchedEffect(epoch) {
+        heavyArmed = false
         // Ждём N реально отрисованных кадров, затем включаем дым — и оставляем включённым.
         repeat(AURA_WARMUP_FRAMES) { withFrameNanos { } }
         heavyArmed = true

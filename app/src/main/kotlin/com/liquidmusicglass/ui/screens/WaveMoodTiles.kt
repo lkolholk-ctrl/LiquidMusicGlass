@@ -176,8 +176,12 @@ private fun MoodTile(
     // включившись, плитка остаётся с шейдером (эффект не пропадает).
     val canShader = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
 
+    // epoch меняется при возврате из фона → сбрасываем арминг и пере-прогреваем,
+    // создавая НОВЫЙ RuntimeShader (старый теряет GPU-контекст после onStop).
+    val epoch = com.liquidmusicglass.ui.EffectsLifecycle.epoch
     var shaderArmed by remember { mutableStateOf(false) }
-    LaunchedEffect(index) {
+    LaunchedEffect(index, epoch) {
+        shaderArmed = false
         if (!canShader) return@LaunchedEffect
         // Ждём N отрисованных кадров (+ стаггер по индексу), затем включаем шейдер.
         // LazyRow держит в композиции только видимые плитки → таймеры идут лишь для них.
@@ -185,7 +189,7 @@ private fun MoodTile(
         shaderArmed = true
     }
 
-    val shader = remember(mood, shaderArmed) {
+    val shader = remember(mood, shaderArmed, epoch) {
         if (shaderArmed && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             RuntimeShader(TILE_AGSL)
         } else null

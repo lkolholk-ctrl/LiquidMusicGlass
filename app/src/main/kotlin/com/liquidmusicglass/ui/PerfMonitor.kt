@@ -35,25 +35,34 @@ object PerfMonitor {
     private const val WARMUP_FRAMES = 16
 
     private var frameCount = 0
-    private var started = false
+    private var posting = false
 
     private val frameCallback = Choreographer.FrameCallback { onFrame() }
 
     /** Запустить прогрев (идемпотентно). Вызывать на main-потоке. */
-    fun start() {
-        if (started) return
-        started = true
-        Choreographer.getInstance().postFrameCallback(frameCallback)
+    fun start() = restart()
+
+    /**
+     * Перезапустить прогрев — при холодном старте и при ВОЗВРАТЕ ИЗ ФОНА. Стекло
+     * снова кратко рисуется плоско (лёгкий кадр возврата + пере-применение
+     * RenderEffect), затем возвращается к полному. Идемпотентно к двойному вызову.
+     */
+    fun restart() {
+        frameCount = 0
+        degraded = true
+        if (!posting) {
+            posting = true
+            Choreographer.getInstance().postFrameCallback(frameCallback)
+        }
     }
 
     private fun onFrame() {
-        if (degraded) {
-            frameCount++
-            if (frameCount >= WARMUP_FRAMES) {
-                degraded = false
-                return // прогрев завершён — больше кадры не считаем, колбэк не перепостим
-            }
-            Choreographer.getInstance().postFrameCallback(frameCallback)
+        frameCount++
+        if (frameCount >= WARMUP_FRAMES) {
+            degraded = false
+            posting = false
+            return // прогрев завершён — кадры не считаем, колбэк не перепостим
         }
+        Choreographer.getInstance().postFrameCallback(frameCallback)
     }
 }
