@@ -94,7 +94,6 @@ fun AppRoot() {
     var detailAlbumId by remember { mutableStateOf<String?>(null) }
     var detailArtistId by remember { mutableStateOf<String?>(null) }
     var equalizerOpen by remember { mutableStateOf(false) }
-    var historyOpen by remember { mutableStateOf(false) }
     var playlistDetailId by remember { mutableStateOf<String?>(null) }
     var authOpen by remember { mutableStateOf(false) }
     var profileOpen by remember { mutableStateOf(false) }
@@ -245,6 +244,7 @@ fun AppRoot() {
                             onNavigateToArtist = { detailArtistId = it },
                             onNavigateToPlaylist = { playlistDetailId = it },
                             onOpenAuth = { authOpen = true },
+                            onOpenProfile = { profileOpen = true },
                             animationsActive = isHomeActive
                         )
                     }
@@ -258,11 +258,13 @@ fun AppRoot() {
                     onNavigateToArtist = { detailArtistId = it },
                     onOpenPlaylist = { playlistDetailId = it }
                 )
-                3 -> ProfileScreen(
-                    onOpenSettings = { settingsOpen = true },
-                    onLogout = { selectedIndex = 0 },
-                    onOpenAuth = { authOpen = true }
+                3 -> SettingsScreen(
+                    onBack = {},
+                    onOpenEqualizer = { equalizerOpen = true },
+                    showBack = false,
+                    backdrop = rootBackdrop
                 )
+                4 -> HistoryScreen(showBack = false, title = "New")
                 else -> HomeScreen(
                     onNavigateToAlbum = { detailAlbumId = it },
                     onNavigateToArtist = { detailArtistId = it },
@@ -443,24 +445,8 @@ fun AppRoot() {
             SettingsScreen(
                 onBack = { settingsOpen = false },
                 onOpenEqualizer = { equalizerOpen = true; settingsOpen = false },
-                onOpenHistory = { historyOpen = true },
                 backdrop = rootBackdrop
             )
-        }
-
-        // ── Listening History ──
-        AnimatedVisibility(
-            visible = historyOpen,
-            enter = slideInHorizontally(
-                initialOffsetX = { it },
-                animationSpec = tween(340, easing = FastOutSlowInEasing)
-            ) + fadeIn(animationSpec = tween(250)),
-            exit = slideOutHorizontally(
-                targetOffsetX = { it },
-                animationSpec = tween(300, easing = FastOutSlowInEasing)
-            ) + fadeOut(animationSpec = tween(200))
-        ) {
-            HistoryScreen(onBack = { historyOpen = false })
         }
 
         // ── Auth Screen ──
@@ -478,8 +464,9 @@ fun AppRoot() {
             AuthScreen(
                 onAuthSuccess = {
                     authOpen = false
-                    selectedIndex = 3
-                    AppSettings.setLastScreen(3)
+                    // На Wave (профиль теперь иконка слева вверху, не таб).
+                    selectedIndex = 0
+                    AppSettings.setLastScreen(0)
                 },
                 onBack = { authOpen = false }
             )
@@ -498,8 +485,9 @@ fun AppRoot() {
             ) + fadeOut(tween(150))
         ) {
             ProfileScreen(
-                onOpenSettings = { settingsOpen = true },
-                onLogout = { profileOpen = false }
+                onOpenSettings = { profileOpen = false; selectedIndex = 3 },
+                onLogout = { profileOpen = false },
+                onOpenAuth = { authOpen = true }
             )
         }
 

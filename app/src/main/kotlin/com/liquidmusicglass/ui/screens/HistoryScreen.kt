@@ -52,7 +52,11 @@ import kotlinx.coroutines.launch
  * реактивно обновляется (Flow). Тап по строке — играет трек. Есть очистка.
  */
 @Composable
-fun HistoryScreen(onBack: () -> Unit) {
+fun HistoryScreen(
+    onBack: () -> Unit = {},
+    showBack: Boolean = true,
+    title: String = "History"
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val lc = LiquidTheme.colors
@@ -72,27 +76,29 @@ fun HistoryScreen(onBack: () -> Unit) {
                     .padding(horizontal = 20.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null
-                        ) { onBack() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                        contentDescription = null,
-                        tint = lc.iconDefault,
-                        modifier = Modifier.size(22.dp)
-                    )
+                if (showBack) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) { onBack() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                            contentDescription = null,
+                            tint = lc.iconDefault,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
                 }
-                Spacer(modifier = Modifier.width(16.dp))
                 Text(
-                    text = "History",
+                    text = title,
                     color = lc.textPrimary,
                     fontSize = 24.sp,
                     fontWeight = FontWeight.Bold,

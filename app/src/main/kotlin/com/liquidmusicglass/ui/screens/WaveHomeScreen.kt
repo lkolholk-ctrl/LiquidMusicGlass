@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.CircularProgressIndicator
@@ -80,6 +81,7 @@ fun WaveHomeScreen(
     onNavigateToArtist: (String) -> Unit = {},
     onNavigateToPlaylist: (String) -> Unit = {},
     onOpenAuth: () -> Unit = {},
+    onOpenProfile: () -> Unit = {},
     animationsActive: Boolean = true,
 ) {
     val context = LocalContext.current
@@ -119,7 +121,7 @@ fun WaveHomeScreen(
                 .statusBarsPadding(),
             contentPadding = PaddingValues(bottom = 96.dp)
         ) {
-            item { WaveTopBar(onSearch = onNavigateToSearch) }
+            item { WaveTopBar(onSearch = onNavigateToSearch, onOpenProfile = onOpenProfile) }
 
             // ── Hero ──
             item {
@@ -526,28 +528,28 @@ private fun FlatCircleButton(onClick: () -> Unit, content: @Composable () -> Uni
 }
 
 @Composable
-private fun WaveTopBar(onSearch: () -> Unit) {
+private fun WaveTopBar(onSearch: () -> Unit, onOpenProfile: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .height(56.dp)
             .padding(horizontal = 16.dp)
     ) {
+        // Слева — профиль (вход/аккаунт), заменил фиолетовый play-квадрат.
         Box(
             modifier = Modifier
                 .align(Alignment.CenterStart)
                 .size(40.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(
-                    Brush.linearGradient(listOf(Color(0xFFFF2D9B), Color(0xFFB14BFF)))
-                ),
+                .clip(androidx.compose.foundation.shape.CircleShape)
+                .background(Color.White.copy(alpha = 0.12f))
+                .clickable { onOpenProfile() },
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                imageVector = Icons.Rounded.PlayArrow,
-                contentDescription = null,
+                imageVector = Icons.Rounded.AccountCircle,
+                contentDescription = "Profile",
                 tint = Color.White,
-                modifier = Modifier.size(22.dp)
+                modifier = Modifier.size(26.dp)
             )
         }
 

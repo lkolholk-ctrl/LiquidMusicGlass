@@ -59,7 +59,7 @@ private val Accent = Color(0xFF7FB77E)
 fun SettingsScreen(
     onBack: () -> Unit,
     onOpenEqualizer: () -> Unit = {},
-    onOpenHistory: () -> Unit = {},
+    showBack: Boolean = true,
     backdrop: LayerBackdrop
 ) {
     val context = LocalContext.current
@@ -90,25 +90,28 @@ fun SettingsScreen(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null
-                        ) { onBack() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                        contentDescription = null,
-                        tint = lc.iconDefault,
-                        modifier = Modifier.size(22.dp)
-                    )
+                // Кнопка «назад» только когда Settings открыт оверлеем; как таб — без неё.
+                if (showBack) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) { onBack() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                            contentDescription = null,
+                            tint = lc.iconDefault,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
                 }
-                Spacer(modifier = Modifier.width(16.dp))
                 Text(
                     text = "Settings",
                     color = lc.textPrimary,
@@ -475,21 +478,8 @@ fun SettingsScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(28.dp))
-
-            // ── HISTORY ──
-            SectionLabel("HISTORY")
-
-            PlainCard {
-                SettingsActionItem(
-                    title = "Listening History",
-                    subtitle = "Tracks you've played",
-                    icon = Icons.Rounded.ChevronRight,
-                    onClick = onOpenHistory
-                )
-            }
-
-            Spacer(modifier = Modifier.height(32.dp))
+            // Нижний отступ под плавающий таб-бар (Settings теперь вкладка).
+            Spacer(modifier = Modifier.height(110.dp))
         }
     }
 }
