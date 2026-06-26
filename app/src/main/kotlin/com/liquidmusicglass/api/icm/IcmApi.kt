@@ -104,9 +104,13 @@ class IcmApi private constructor() {
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(10, TimeUnit.SECONDS)
             .writeTimeout(10, TimeUnit.SECONDS)
-            // Единая политика ретраев — только наш интерсептор. retryOnConnectionFailure
-            // выключаем, чтобы не было ДВОЙНЫХ (умножающихся) повторов.
-            .retryOnConnectionFailure(false)
+            // ВКЛючаем штатное восстановление соединения OkHttp: прозрачный повтор на
+            // протухших keep-alive соединениях (сервер закрыл сокет) и перебор маршрутов
+            // (IPv6→IPv4). Без этого единичный мёртвый маршрут/протухший коннект давал
+            // «failed to connect» → ложное «No internet connection», хотя сеть жива.
+            // Это НЕ дублирует наш интерсептор: тот ретраит 5xx/таймауты, а это —
+            // выбор живого маршрута внутри одной попытки (4xx по-прежнему не ретраятся).
+            .retryOnConnectionFailure(true)
             .dispatcher(dispatcher)
             .connectionPool(okhttp3.ConnectionPool(5, 30, TimeUnit.SECONDS))
             .protocols(listOf(okhttp3.Protocol.HTTP_2, okhttp3.Protocol.HTTP_1_1))

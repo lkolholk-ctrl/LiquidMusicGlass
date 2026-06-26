@@ -15,10 +15,16 @@ fun icmUserMessage(throwable: Throwable?): String = when (throwable) {
         val m = throwable.message?.lowercase() ?: ""
         when {
             "timeout" in m || "timed out" in m ->
-                "Connection timed out. Check your internet."
-            "unable to resolve host" in m || "unknownhost" in m || "failed to connect" in m
+                "Connection timed out. Please try again."
+            // Реально нет сети/маршрута или DNS не резолвится.
+            "unable to resolve host" in m || "unknownhost" in m
                 || "network is unreachable" in m || "no address associated" in m ->
                 "No internet connection."
+            // Сеть есть, но не достучались до сервера (мёртвый маршрут/протухший коннект/
+            // сервер недоступен) — НЕ называем это «нет интернета».
+            "failed to connect" in m || "connection reset" in m || "unexpected end of stream" in m
+                || "connection closed" in m || "broken pipe" in m ->
+                "Can't reach the server. Please try again."
             else -> "Something went wrong. Please try again."
         }
     }
@@ -32,7 +38,8 @@ fun icmUserMessage(httpCode: Int, errorCode: String?): String {
         "source_not_allowed" -> return "This source isn't available right now."
         "track_not_found" -> return "Nothing found."
         "early_access" -> return "This track isn't available yet."
-        "network_error" -> return "No internet connection."
+        // Это код ОТ СЕРВЕРА (его upstream-проблема), а не отсутствие сети у юзера.
+        "network_error" -> return "Server is having trouble. Please try again."
         "not_linked", "no_partner_user", "unauthorized" -> return "Sign in with Telegram to continue."
     }
     return when (httpCode) {
@@ -41,7 +48,8 @@ fun icmUserMessage(httpCode: Int, errorCode: String?): String {
         404 -> "Nothing found."
         451 -> "Not available in your region."
         in 500..599 -> "Server is unavailable. Please try again later."
-        0 -> "No internet connection."
+        // code 0 = пустой/нечитаемый ответ (IcmApiException(0, …)), НЕ отсутствие сети.
+        0 -> "Can't reach the server. Please try again."
         else -> "Something went wrong. Please try again."
     }
 }
