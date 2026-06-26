@@ -176,9 +176,9 @@ object PlayerController {
     private val _recentlyPlayed = MutableStateFlow<List<Track>>(emptyList())
     val recentlyPlayed: StateFlow<List<Track>> = _recentlyPlayed
 
-    private val _themeMode = MutableStateFlow(0)
-    val themeMode: StateFlow<Int> = _themeMode
-    fun setThemeMode(mode: Int) { _themeMode.value = mode }
+    // Тема персистится в DataStore (PlayerSettings) — реактивно и переживает рестарт.
+    val themeMode: StateFlow<Int> get() = PlayerSettings.themeMode
+    fun setThemeMode(mode: Int) = PlayerSettings.setThemeMode(mode)
 
     private val _volume = MutableStateFlow(1f)
     val volume: StateFlow<Float> = _volume

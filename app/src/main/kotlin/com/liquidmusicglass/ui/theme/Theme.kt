@@ -226,3 +226,25 @@ fun LiquidMusicGlassTheme(
         }
     }
 }
+
+/**
+ * Принудительно ТЁМНЫЙ контент независимо от выбранной темы приложения. Wave и
+ * фулл-плеер всегда тёмные — их эффекты (аура/дым/AGSL) рассчитаны на тёмный фон.
+ * Тема приложения (Светлая/Тёмная/Системная) меняет только контентные экраны.
+ */
+@Composable
+fun ForceDarkContent(content: @Composable () -> Unit) {
+    CompositionLocalProvider(
+        LocalLiquidColors provides DarkLiquidColors
+    ) {
+        MaterialTheme(
+            colorScheme = LiquidDarkScheme,
+            typography = LiquidTypography
+        ) {
+            CompositionLocalProvider(
+                LocalTextStyle provides LocalTextStyle.current.copy(fontFamily = AppFontFamily),
+                content = content
+            )
+        }
+    }
+}

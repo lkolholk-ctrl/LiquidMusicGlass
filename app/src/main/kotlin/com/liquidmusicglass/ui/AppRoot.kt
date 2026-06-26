@@ -74,6 +74,7 @@ import com.liquidmusicglass.ui.screens.AuthScreen
 import com.liquidmusicglass.ui.screens.ProfileScreen
 import com.liquidmusicglass.ui.screens.WaveOnboardingScreen
 import com.liquidmusicglass.ui.screens.youtube.YouTubeSearchScreen
+import com.liquidmusicglass.ui.theme.ForceDarkContent
 import com.liquidmusicglass.ui.theme.LiquidTheme
 import kotlinx.coroutines.launch
 
@@ -235,15 +236,18 @@ fun AppRoot() {
                         onNavigateToYouTube = { youtubeSearchOpen = true }
                     )
                 } else {
-                    WaveHomeScreen(
-                        onNavigateToSearch = { selectedIndex = 1 },
-                        onOpenPlayer = { animateExpand() },
-                        onNavigateToAlbum = { detailAlbumId = it },
-                        onNavigateToArtist = { detailArtistId = it },
-                        onNavigateToPlaylist = { playlistDetailId = it },
-                        onOpenAuth = { authOpen = true },
-                        animationsActive = isHomeActive
-                    )
+                    // Wave всегда тёмный — эффекты завязаны на тёмный фон.
+                    ForceDarkContent {
+                        WaveHomeScreen(
+                            onNavigateToSearch = { selectedIndex = 1 },
+                            onOpenPlayer = { animateExpand() },
+                            onNavigateToAlbum = { detailAlbumId = it },
+                            onNavigateToArtist = { detailArtistId = it },
+                            onNavigateToPlaylist = { playlistDetailId = it },
+                            onOpenAuth = { authOpen = true },
+                            animationsActive = isHomeActive
+                        )
+                    }
                 }
                 1 -> SearchScreen(
                     onNavigateToAlbum = { detailAlbumId = it },
@@ -383,6 +387,8 @@ fun AppRoot() {
             }
         }
 
+        // Фулл-плеер всегда тёмный — эффекты/палитра рассчитаны на тёмный фон.
+        ForceDarkContent {
         FullPlayer(
             expandProgress = expandProgress.value,
             trackTitle = trackTitle,
@@ -421,6 +427,7 @@ fun AppRoot() {
                 detailArtistId = artistId
             }
         )
+        }
 
         AnimatedVisibility(
             visible = settingsOpen,

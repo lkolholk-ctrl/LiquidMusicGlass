@@ -5,6 +5,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.CoroutineScope
@@ -45,6 +46,7 @@ object PlayerSettings {
     private const val DEFAULT_CACHE_BYTES = 500L * 1024 * 1024
 
     private val KEY_CACHE_BYTES = longPreferencesKey("audio_cache_bytes")
+    private val KEY_THEME_MODE = intPreferencesKey("theme_mode")  // 0=System 1=Dark 2=Light
     private val KEY_AUTO_MIX = booleanPreferencesKey("auto_mix")
     private val KEY_VOLUME_NORMALIZATION = booleanPreferencesKey("volume_normalization")
     private val KEY_INCREASE_CONTRAST = booleanPreferencesKey("increase_contrast")
@@ -55,6 +57,10 @@ object PlayerSettings {
     // ── Зеркала (синхронное чтение через .value, реактивное — через collectAsState) ──
     private val _audioCacheBytes = MutableStateFlow(DEFAULT_CACHE_BYTES)
     val audioCacheBytes: StateFlow<Long> = _audioCacheBytes
+
+    // Тема приложения: 0=Системная, 1=Тёмная, 2=Светлая. По умолчанию системная.
+    private val _themeMode = MutableStateFlow(0)
+    val themeMode: StateFlow<Int> = _themeMode
 
     // AutoMix (бесшовная авто-дозаправка волны; будущий движок кроссфейда/инференса
     // подписывается на этот же Flow). По умолчанию ВКЛЮЧЕН.
@@ -86,6 +92,7 @@ object PlayerSettings {
         // Сохранённый размер кэша мог отличаться от дефолта, под которым кэш уже
         // собрался на старте — применяем его (rebuild идемпотентен, сам отсеет no-op).
         if (cacheChanged) MediaCacheManager.applyCacheSizeChange()
+        _themeMode.value = p[KEY_THEME_MODE] ?: 0
         _autoMix.value = p[KEY_AUTO_MIX] ?: true
         _volumeNormalization.value = p[KEY_VOLUME_NORMALIZATION] ?: false
         _increaseContrast.value = p[KEY_INCREASE_CONTRAST] ?: false
@@ -102,6 +109,12 @@ object PlayerSettings {
         val v = bytes.coerceAtLeast(0L)
         _audioCacheBytes.value = v
         persist { it[KEY_CACHE_BYTES] = v }
+    }
+
+    fun setThemeMode(mode: Int) {
+        val m = mode.coerceIn(0, 2)
+        _themeMode.value = m
+        persist { it[KEY_THEME_MODE] = m }
     }
 
     fun setAutoMix(enabled: Boolean) {
