@@ -50,7 +50,8 @@ private data class BottomNavItem(
     val index: Int
 )
 
-private val WaveAccent = Color(0xFFFFE000)
+// Бледно-зелёный акцент выбранного таба (жёлтый Яндекса убран).
+private val WaveAccent = Color(0xFF88C088)
 
 @Composable
 fun BottomBar(

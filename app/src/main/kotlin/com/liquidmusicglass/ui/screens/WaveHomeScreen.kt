@@ -553,7 +553,7 @@ private fun WaveTopBar(onSearch: () -> Unit) {
 
         Text(
             text = "My Wave",
-            color = WaveAccent,
+            color = Color.White,
             fontSize = 18.sp,
             fontWeight = FontWeight.Black,
             fontFamily = AppFontFamily,
@@ -598,4 +598,5 @@ private fun BigPlayButton(loading: Boolean, onClick: () -> Unit) {
     }
 }
 
-private val WaveAccent = Color(0xFFFFE000)
+// Бледно-зелёный акцент волны (заменил жёлтый — цвет Яндекса убран).
+private val WaveAccent = Color(0xFF88C088)

@@ -101,7 +101,7 @@ fun HistoryScreen(onBack: () -> Unit) {
                 if (history.isNotEmpty()) {
                     Text(
                         text = "Clear",
-                        color = lc.accentRed,
+                        color = lc.accent,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.SemiBold,
                         modifier = Modifier

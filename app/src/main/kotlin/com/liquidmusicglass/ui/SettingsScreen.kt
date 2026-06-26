@@ -52,7 +52,8 @@ import com.liquidmusicglass.ui.theme.LiquidTheme
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 
-private val AppleRed = Color(0xFFFC3C44)
+// Единый акцент приложения — бледно-зелёный (заменил красный Apple-стиля).
+private val Accent = Color(0xFF7FB77E)
 
 @Composable
 fun SettingsScreen(
@@ -249,7 +250,7 @@ fun SettingsScreen(
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
                                         text = quality,
-                                        color = if (isSelected) AppleRed else lc.textPrimary,
+                                        color = if (isSelected) Accent else lc.textPrimary,
                                         fontSize = 16.sp,
                                         fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
                                     )
@@ -279,7 +280,7 @@ fun SettingsScreen(
                                     modifier = Modifier
                                         .size(20.dp)
                                         .clip(CircleShape)
-                                        .background(AppleRed),
+                                        .background(Accent),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(
@@ -339,7 +340,7 @@ fun SettingsScreen(
                     themeLabels.forEachIndexed { index, label ->
                         val isSelected = themeMode == index
                         val isDark = lc.isDark
-                        val itemBg = if (isSelected) AppleRed else (if (isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
+                        val itemBg = if (isSelected) Accent else (if (isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
                         val unselectedTextColor = if (isDark) Color.White.copy(alpha = 0.45f) else Color.Black.copy(alpha = 0.45f)
 
                         Box(
@@ -438,7 +439,7 @@ fun SettingsScreen(
                         )
                         Text(
                             text = "Clear",
-                            color = AppleRed,
+                            color = Accent,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold,
                             modifier = Modifier
@@ -509,7 +510,7 @@ private fun CacheSizeSelector(
                 rowOptions.forEach { bytes ->
                     val isSelected = selected == bytes
                     val isDark = LiquidTheme.colors.isDark
-                    val itemBg = if (isSelected) AppleRed else (if (isDark) Color(0xFF1C1C1E) else Color(0xFFE5E5EA))
+                    val itemBg = if (isSelected) Accent else (if (isDark) Color(0xFF1C1C1E) else Color(0xFFE5E5EA))
                     val unselectedTextColor = if (isDark) Color.White.copy(alpha = 0.45f) else Color.Black.copy(alpha = 0.45f)
                     Box(
                         modifier = Modifier
@@ -678,7 +679,7 @@ private fun PreloadSelector(
         options.forEach { sec ->
             val isSelected = selectedSeconds == sec
             val isDark = LiquidTheme.colors.isDark
-            val itemBg = if (isSelected) AppleRed else (if (isDark) Color(0xFF1C1C1E) else Color(0xFFE5E5EA))
+            val itemBg = if (isSelected) Accent else (if (isDark) Color(0xFF1C1C1E) else Color(0xFFE5E5EA))
             val unselectedTextColor = if (isDark) Color.White.copy(alpha = 0.45f) else Color.Black.copy(alpha = 0.45f)
 
             Box(
@@ -725,7 +726,7 @@ private fun SleepTimerSelector(
         options.forEach { minutes ->
             val isSelected = selectedMinutes == minutes
             val isDark = LiquidTheme.colors.isDark
-            val itemBg = if (isSelected) AppleRed else (if (isDark) Color(0xFF1C1C1E) else Color(0xFFE5E5EA))
+            val itemBg = if (isSelected) Accent else (if (isDark) Color(0xFF1C1C1E) else Color(0xFFE5E5EA))
             val unselectedTextColor = if (isDark) Color.White.copy(alpha = 0.45f) else Color.Black.copy(alpha = 0.45f)
 
             Box(
