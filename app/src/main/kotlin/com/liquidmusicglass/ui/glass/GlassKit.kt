@@ -12,8 +12,11 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.ui.graphics.Shape
+import com.liquidmusicglass.ui.PerfMonitor
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material3.Icon
@@ -46,6 +49,20 @@ import com.kyant.shapes.Capsule
  */
 object GlassKit {
 
+    // Капсула для degraded-фолбэка (clip/border требуют androidx Shape, а не Kyant Capsule).
+    private val FlatCapsule: Shape = RoundedCornerShape(percent = 50)
+
+    /**
+     * Плоская подложка для degraded-режима (warmup/слабый GPU): без drawBackdrop —
+     * никакого захвата фона, blur, lens, highlight, shadow. Это убирает главный
+     * GPU-расход первого кадра. Тинт чуть усилен, чтобы контент оставался читаемым.
+     */
+    private fun Modifier.flatGlass(shape: Shape, tint: Color, border: Color): Modifier =
+        this.clip(shape)
+            .background(Color.White.copy(alpha = 0.10f))
+            .background(tint)
+            .border(0.8.dp, border, shape)
+
     // ═══════════════════════════════════════════
     //  Glass Card — карточка с полным стеклом
     // ═══════════════════════════════════════════
@@ -67,6 +84,16 @@ object GlassKit {
         content: @Composable () -> Unit
     ) {
         val shape = RoundedCornerShape(cornerRadius)
+
+        if (PerfMonitor.degraded) {
+            Box(
+                modifier = modifier
+                    .fillMaxWidth()
+                    .flatGlass(shape, tintColor, borderColor)
+                    .padding(horizontal = contentPadding, vertical = 6.dp)
+            ) { Column { content() } }
+            return
+        }
 
         Box(
             modifier = modifier
@@ -129,6 +156,10 @@ object GlassKit {
         shadowAlpha: Float = 0.10f,
         content: @Composable () -> Unit
     ) {
+        if (PerfMonitor.degraded) {
+            Box(modifier = modifier.flatGlass(FlatCapsule, tintColor, borderColor)) { content() }
+            return
+        }
         Box(
             modifier = modifier
                 .drawBackdrop(
@@ -183,6 +214,10 @@ object GlassKit {
         borderColor: Color = Color.White.copy(alpha = 0.20f),
         content: @Composable () -> Unit
     ) {
+        if (PerfMonitor.degraded) {
+            Box(modifier = modifier.flatGlass(FlatCapsule, tintColor, borderColor)) { content() }
+            return
+        }
         Box(
             modifier = modifier
                 .drawBackdrop(
@@ -237,6 +272,11 @@ object GlassKit {
     ) {
         val shape = RoundedCornerShape(cornerRadius)
 
+        if (PerfMonitor.degraded) {
+            Box(modifier = modifier.fillMaxWidth().flatGlass(shape, tintColor, borderColor)) { content() }
+            return
+        }
+
         Box(
             modifier = modifier
                 .fillMaxWidth()
@@ -280,6 +320,14 @@ object GlassKit {
         accentColor: Color = Color(0xFFFC3C44),
         content: @Composable () -> Unit
     ) {
+        if (PerfMonitor.degraded) {
+            Box(
+                modifier = modifier
+                    .clip(FlatCapsule)
+                    .background(accentColor)
+            ) { content() }
+            return
+        }
         Box(
             modifier = modifier
                 .drawBackdrop(
@@ -327,6 +375,10 @@ object GlassKit {
         borderColor: Color = Color.White.copy(alpha = 0.20f),
         content: @Composable () -> Unit
     ) {
+        if (PerfMonitor.degraded) {
+            Box(modifier = modifier.flatGlass(FlatCapsule, tintColor, borderColor)) { content() }
+            return
+        }
         Box(
             modifier = modifier
                 .drawBackdrop(

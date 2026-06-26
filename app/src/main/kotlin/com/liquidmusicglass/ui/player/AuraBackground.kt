@@ -154,15 +154,29 @@ fun AuraBackground(
     intensity: Float = 0.78f,
     animate: Boolean = true,
 ) {
-    // При просадке FPS (слабый GPU не тянет полноэкранный fbm-шейдер) — падаем на
-    // дешёвый градиентный фолбэк, чтобы RenderThread успевал и ушла ANR-плашка.
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-        !com.liquidmusicglass.ui.PerfMonitor.degraded
-    ) {
+    // degraded (warmup-старт или слабый GPU) → ТРИВИАЛЬНО дешёвый статичный фон:
+    // один линейный градиент без анимации и без drawBehind-перерисовки каждый кадр.
+    // 4 анимированных радиала из AuraGradientFallback тоже топили RenderThread на
+    // первом кадре, поэтому на degraded их НЕ используем.
+    if (com.liquidmusicglass.ui.PerfMonitor.degraded) {
+        AuraStaticBackground(albumColors, modifier)
+    } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         AuraShaderBackground(albumColors, intensity, modifier, animate)
     } else {
         AuraGradientFallback(albumColors, modifier)
     }
+}
+
+/** Сверхдешёвый статичный фон: один линейный градиент по палитре, без анимации. */
+@Composable
+private fun AuraStaticBackground(albumColors: AlbumColors, modifier: Modifier) {
+    val top by animateColorAsState(albumColors.darkMuted, tween(600), label = "auraStaticTop")
+    val bottom by animateColorAsState(albumColors.dominant, tween(600), label = "auraStaticBot")
+    Box(
+        modifier
+            .fillMaxSize()
+            .background(Brush.verticalGradient(listOf(top, bottom)))
+    )
 }
 
 @RequiresApi(Build.VERSION_CODES.TIRAMISU)

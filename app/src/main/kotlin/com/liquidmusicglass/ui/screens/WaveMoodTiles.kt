@@ -180,6 +180,15 @@ private fun MoodTile(
                     shader.setFloatUniform("uColorA", mood.colorA.red, mood.colorA.green, mood.colorA.blue)
                     shader.setFloatUniform("uColorB", mood.colorB.red, mood.colorB.green, mood.colorB.blue)
                     drawRect(shaderBrush)
+                } else if (degraded) {
+                    // warmup/слабый GPU — СТАТИЧНЫЙ градиент, без анимации (дёшево)
+                    drawRect(
+                        Brush.linearGradient(
+                            colors = listOf(mood.colorA, mood.colorB),
+                            start = Offset.Zero,
+                            end = Offset(size.width, size.height)
+                        )
+                    )
                 } else {
                     // CPU-фолбэк (<API33): медленно сдвигаемый диагональный градиент
                     val shift = sin(patternPhase * TAU) * 0.5f
@@ -192,16 +201,18 @@ private fun MoodTile(
                     )
                 }
 
-                // ── узор (свой у каждого муда) ──
-                clipRect {
-                    val a = mood.colorB
-                    when (mood.pattern) {
-                        MoodPattern.WAVES -> drawWaves(patternPhase, size.width, size.height, a)
-                        MoodPattern.DIAGONALS -> drawDiagonals(patternPhase, size.width, size.height, a)
-                        MoodPattern.CIRCLES -> drawCircles(patternPhase, size.width, size.height, a)
-                        MoodPattern.BLOBS -> drawBlobs(patternPhase, size.width, size.height, a)
-                        MoodPattern.DOTS -> drawDots(patternPhase, size.width, size.height, a)
-                        MoodPattern.RINGS -> drawRings(patternPhase, size.width, size.height, a)
+                // ── узор (свой у каждого муда) — path-тяжёлый, на degraded НЕ рисуем ──
+                if (!degraded) {
+                    clipRect {
+                        val a = mood.colorB
+                        when (mood.pattern) {
+                            MoodPattern.WAVES -> drawWaves(patternPhase, size.width, size.height, a)
+                            MoodPattern.DIAGONALS -> drawDiagonals(patternPhase, size.width, size.height, a)
+                            MoodPattern.CIRCLES -> drawCircles(patternPhase, size.width, size.height, a)
+                            MoodPattern.BLOBS -> drawBlobs(patternPhase, size.width, size.height, a)
+                            MoodPattern.DOTS -> drawDots(patternPhase, size.width, size.height, a)
+                            MoodPattern.RINGS -> drawRings(patternPhase, size.width, size.height, a)
+                        }
                     }
                 }
 

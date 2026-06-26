@@ -1,9 +1,12 @@
 package com.liquidmusicglass.ui.glass
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.Dp
@@ -27,6 +30,18 @@ fun LiquidGlassSurface(
     content: @Composable () -> Unit
 ) {
     val shape = RoundedCornerShape(cornerRadiusDp.dp)
+
+    // degraded (warmup/слабый GPU): без backdrop-capture/blur/lens — плоская
+    // полупрозрачная подложка. Это снимает один из главных GPU-расходов первого кадра.
+    if (com.liquidmusicglass.ui.PerfMonitor.degraded) {
+        Box(
+            modifier = modifier
+                .clip(shape)
+                .background(Color.White.copy(alpha = (tintAlpha + 0.10f).coerceAtMost(0.45f)))
+                .border(1.dp, Color.White.copy(alpha = borderAlpha), shape)
+        ) { content() }
+        return
+    }
 
     Box(
         modifier = modifier
