@@ -209,6 +209,22 @@ class AudioService : MediaSessionService() {
 
             val currentTrackId = player.currentMediaItem?.mediaId
 
+            // ── Сотовый гейт: стриминг сейчас запрещён (сотовая + тумблер выкл) ──
+            // Ошибка почти наверняка из-за гейта резолва. НЕ ретраим и НЕ авто-скипаем:
+            // иначе каждый трек очереди падает → скип → endless-движок дозаправляет
+            // очередь новыми запросами к серверу → бесконечный «шторм» (ANR). Чисто
+            // останавливаемся и сообщаем пользователю. Чтение флага — мгновенное
+            // (StateFlow.value в памяти), без блокирующего доступа к DataStore.
+            if (!PlayerSettings.streamingAllowed()) {
+                android.util.Log.w("AudioService", "[ERROR_RECOVERY] Streaming blocked on cellular — halting, no retry/skip")
+                lastErrorTrackId = null
+                errorRetryCount = 0
+                player.playWhenReady = false
+                PlayerController.setPlaying(false)
+                PlayerController.onPlaybackError("cellular_blocked")
+                return
+            }
+
             val isExpiredUrl = error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS
                 && error.message?.contains("403") == true
 
