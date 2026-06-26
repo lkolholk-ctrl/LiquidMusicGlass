@@ -154,7 +154,11 @@ fun AuraBackground(
     intensity: Float = 0.78f,
     animate: Boolean = true,
 ) {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+    // При просадке FPS (слабый GPU не тянет полноэкранный fbm-шейдер) — падаем на
+    // дешёвый градиентный фолбэк, чтобы RenderThread успевал и ушла ANR-плашка.
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+        !com.liquidmusicglass.ui.PerfMonitor.degraded
+    ) {
         AuraShaderBackground(albumColors, intensity, modifier, animate)
     } else {
         AuraGradientFallback(albumColors, modifier)

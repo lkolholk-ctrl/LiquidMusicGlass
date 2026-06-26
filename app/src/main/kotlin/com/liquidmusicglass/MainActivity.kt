@@ -97,6 +97,10 @@ class MainActivity : ComponentActivity() {
 
         enableEdgeToEdge()
 
+        // Детектор просадки FPS → деградация тяжёлых эффектов (аура/лирика/мудкарточки)
+        // на слабом GPU, чтобы RenderThread успевал и не было ANR-плашки.
+        com.liquidmusicglass.ui.PerfMonitor.start()
+
         // Default-network callback ловит СМЕНУ активной сети (Wi-Fi↔моб., VPN вкл/выкл),
         // чтобы вовремя эвиктить мёртвые соединения и не «терять сеть» после переключения.
         val connectivityManager = getSystemService(ConnectivityManager::class.java)
