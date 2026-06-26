@@ -419,10 +419,13 @@ class IcmApi private constructor() {
         partnerUserId: String,
         hideExplicit: Boolean = false
     ): Result<IcmSessionResponse> {
-        if (sessionToken != null) {
+        // Снимаем в локальную val: sessionToken — mutable var, между проверкой и
+        // использованием другой поток мог обнулить его (был бы NPE на !!).
+        val existing = sessionToken
+        if (existing != null) {
             return Result.success(
                 IcmSessionResponse(
-                    partnerSessionToken = sessionToken!!,
+                    partnerSessionToken = existing,
                     expiresIn = 0,
                     partnerUserId = partnerUserId,
                     scopes = emptyList()
