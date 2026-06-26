@@ -67,6 +67,7 @@ import com.liquidmusicglass.ui.screens.LibraryScreen
 import com.liquidmusicglass.ui.screens.AlbumDetailScreen
 import com.liquidmusicglass.ui.screens.ArtistDetailScreen
 import com.liquidmusicglass.ui.screens.EqualizerScreen
+import com.liquidmusicglass.ui.screens.HistoryScreen
 import com.liquidmusicglass.ui.screens.PlaylistDetailScreen
 import com.liquidmusicglass.ui.screens.SettingsScreen
 import com.liquidmusicglass.ui.screens.AuthScreen
@@ -92,6 +93,7 @@ fun AppRoot() {
     var detailAlbumId by remember { mutableStateOf<String?>(null) }
     var detailArtistId by remember { mutableStateOf<String?>(null) }
     var equalizerOpen by remember { mutableStateOf(false) }
+    var historyOpen by remember { mutableStateOf(false) }
     var playlistDetailId by remember { mutableStateOf<String?>(null) }
     var authOpen by remember { mutableStateOf(false) }
     var profileOpen by remember { mutableStateOf(false) }
@@ -434,8 +436,24 @@ fun AppRoot() {
             SettingsScreen(
                 onBack = { settingsOpen = false },
                 onOpenEqualizer = { equalizerOpen = true; settingsOpen = false },
+                onOpenHistory = { historyOpen = true },
                 backdrop = rootBackdrop
             )
+        }
+
+        // ── Listening History ──
+        AnimatedVisibility(
+            visible = historyOpen,
+            enter = slideInHorizontally(
+                initialOffsetX = { it },
+                animationSpec = tween(340, easing = FastOutSlowInEasing)
+            ) + fadeIn(animationSpec = tween(250)),
+            exit = slideOutHorizontally(
+                targetOffsetX = { it },
+                animationSpec = tween(300, easing = FastOutSlowInEasing)
+            ) + fadeOut(animationSpec = tween(200))
+        ) {
+            HistoryScreen(onBack = { historyOpen = false })
         }
 
         // ── Auth Screen ──

@@ -103,6 +103,39 @@ private val LightLiquidColors = LiquidColors(
     miniPlayerBorder = Color.Black.copy(alpha = 0.08f)
 )
 
+// ── Высококонтрастные варианты (тумблер «Увеличение контрастности») ──
+// Меньше прозрачности у стекла/разделителей, ярче вторичный/третичный текст,
+// плотнее обводки — читаемость в glassmorphism заметно выше.
+private val DarkLiquidColorsHighContrast = DarkLiquidColors.copy(
+    textSecondary = Color.White.copy(alpha = 0.82f),
+    textTertiary = Color.White.copy(alpha = 0.55f),
+    glassTint = Color.White.copy(alpha = 0.14f),
+    glassBorder = Color.White.copy(alpha = 0.42f),
+    divider = Color.White.copy(alpha = 0.16f),
+    iconMuted = Color.White.copy(alpha = 0.70f),
+    sectionLabel = Color.White.copy(alpha = 0.75f),
+    searchFieldBg = Color.White.copy(alpha = 0.16f),
+    chipBg = Color.White.copy(alpha = 0.12f),
+    chipBorder = Color.White.copy(alpha = 0.22f),
+    miniPlayerTint = Color.White.copy(alpha = 0.10f),
+    miniPlayerBorder = Color.White.copy(alpha = 0.42f)
+)
+
+private val LightLiquidColorsHighContrast = LightLiquidColors.copy(
+    textSecondary = Color.Black.copy(alpha = 0.78f),
+    textTertiary = Color.Black.copy(alpha = 0.52f),
+    glassTint = Color.Black.copy(alpha = 0.10f),
+    glassBorder = Color.Black.copy(alpha = 0.22f),
+    divider = Color.Black.copy(alpha = 0.14f),
+    iconMuted = Color.Black.copy(alpha = 0.68f),
+    sectionLabel = Color.Black.copy(alpha = 0.72f),
+    searchFieldBg = Color.Black.copy(alpha = 0.12f),
+    chipBg = Color.Black.copy(alpha = 0.10f),
+    chipBorder = Color.Black.copy(alpha = 0.18f),
+    miniPlayerTint = Color.Black.copy(alpha = 0.10f),
+    miniPlayerBorder = Color.Black.copy(alpha = 0.22f)
+)
+
 val LocalLiquidColors = staticCompositionLocalOf { DarkLiquidColors }
 
 // Shortcut
@@ -153,10 +186,12 @@ private val LiquidLightScheme = lightColorScheme(
 
 /**
  * @param themeMode 0=System, 1=Dark, 2=Light
+ * @param highContrast включить высококонтрастную палитру (меньше прозрачности).
  */
 @Composable
 fun LiquidMusicGlassTheme(
     themeMode: Int = 0,
+    highContrast: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val isDark = when (themeMode) {
@@ -165,7 +200,11 @@ fun LiquidMusicGlassTheme(
         else -> isSystemInDarkTheme()
     }
 
-    val liquidColors = if (isDark) DarkLiquidColors else LightLiquidColors
+    val liquidColors = if (isDark) {
+        if (highContrast) DarkLiquidColorsHighContrast else DarkLiquidColors
+    } else {
+        if (highContrast) LightLiquidColorsHighContrast else LightLiquidColors
+    }
     val materialScheme = if (isDark) LiquidDarkScheme else LiquidLightScheme
 
     CompositionLocalProvider(

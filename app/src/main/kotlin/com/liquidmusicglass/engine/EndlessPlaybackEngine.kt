@@ -80,6 +80,15 @@ class EndlessPlaybackEngine(
      * @return true, если дозагрузка была успешно выполнена.
      */
     suspend fun checkAndRefillIfNeeded(remainingCount: Int = -1): Boolean {
+        // ── AutoMix toggle (DataStore, единый источник правды) ──
+        // Выключен → не дозаправляем очередь: трек доигрывает и плеер возвращается
+        // к обычному Media3-поведению (конец очереди = остановка). Движок читает
+        // актуальное значение Flow на каждой проверке → реакция мгновенная.
+        if (!PlayerSettings.autoMix.value) {
+            android.util.Log.d("EndlessEngine", "Refill blocked: AutoMix is off")
+            return false
+        }
+
         // ── BOUNDARY LOCK: refill is strictly allowed in Global (Wave) context ──
         if (PlayerController.playbackContext !is PlaybackContext.Global) {
             android.util.Log.d("EndlessEngine", "Refill blocked: active context is ${PlayerController.playbackContext}")

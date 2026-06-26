@@ -4,13 +4,14 @@ import android.content.Context
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.cache.CacheDataSource
-import androidx.media3.datasource.cache.NoOpCacheEvictor
+import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.datasource.DefaultHttpDataSource
-import com.liquidmusicglass.api.icm.IcmAuthRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -23,10 +24,10 @@ import java.io.File
  * При ошибке кэша (база данных заблокирована, повреждена и т.д.)
  * автоматически переключается на чистый DefaultHttpDataSource без кэша.
  *
- * LRU cleanup:
- * - Лимит зависит от качества стрима (128K→350MB, 256K→250MB, 320K→150MB, ALAC→100MB)
- * - Треки не слушавшиеся >7 дней удаляются всегда
- * - Запускается при init и после каждого добавления в кэш
+ * Размер держит штатный [LeastRecentlyUsedCacheEvictor] (maxBytes из DataStore
+ * [PlayerSettings.audioCacheBytes]) — он вытесняет наименее используемое прямо при
+ * записи. Кэш ДИСКОВЫЙ (File в context.cacheDir), не в RAM. 0 = кэш выключен.
+ * Смена размера применяется немедленно — кэш пересобирается с новым лимитом.
  */
 @OptIn(UnstableApi::class)
 object MediaCacheManager {
@@ -44,21 +45,23 @@ object MediaCacheManager {
     private var initFailed = false
 
     private var cacheDir: File? = null
+    private var appContext: Context? = null
+
+    @Volatile
+    private var currentMaxBytes: Long = 0L
+
+    // Сериализует (пере)сборку SimpleCache — нельзя иметь два инстанса на одну папку.
+    private val cacheLock = Mutex()
 
     /**
-     * Возвращает лимит кэша в байтах на основе текущего качества стрима.
+     * Лимит кэша в байтах — теперь из пользовательской настройки
+     * [PlayerSettings.audioCacheBytes] (селектор 0/200МБ/500МБ/1/2/5ГБ).
+     * 0 = кэш выключен (см. [isCacheEnabled]).
      */
-    fun getCacheLimitBytes(): Long {
-        val quality = IcmAuthRepository.maxQuality.value
-            ?: "256K"
-        return when (quality.uppercase()) {
-            "128K" -> 350L * 1024 * 1024
-            "256K" -> 250L * 1024 * 1024
-            "320K" -> 150L * 1024 * 1024
-            "ALAC" -> 100L * 1024 * 1024
-            else -> 250L * 1024 * 1024 // default
-        }
-    }
+    fun getCacheLimitBytes(): Long = PlayerSettings.audioCacheBytes.value
+
+    /** Кэш включён (пользователь выбрал ненулевой размер). */
+    fun isCacheEnabled(): Boolean = PlayerSettings.isCacheEnabled()
 
     /**
      * Ленивая асинхронная инициализация кэша.
@@ -66,45 +69,33 @@ object MediaCacheManager {
      * После инициализации запускает LRU-очистку.
      */
     suspend fun init(context: Context) {
-        if (cache != null || initFailed) {
-            // Cache already ready — run cleanup in case quality changed
-            runCacheCleanup()
-            return
-        }
+        appContext = context.applicationContext
+        if (cache != null || initFailed) return
         if (isInitializing) return
 
         isInitializing = true
         try {
             withContext(Dispatchers.IO) {
-                val dir = File(context.cacheDir, "media3_cache").apply {
-                    if (!exists()) mkdirs()
+                cacheLock.withLock {
+                    if (cache != null) return@withLock
+                    val dir = File(context.cacheDir, "media3_cache").apply {
+                        if (!exists()) mkdirs()
+                    }
+                    cacheDir = dir
+
+                    val maxBytes = getCacheLimitBytes()
+                    if (maxBytes <= 0L) {
+                        // Кэш выключен пользователем → чистим папку, инстанс не создаём.
+                        dir.walkTopDown().filter { it.isFile }.forEach { it.delete() }
+                        cache = null
+                        cacheDataSourceFactory = null
+                        currentMaxBytes = 0L
+                        android.util.Log.d("MediaCacheManager", "Cache disabled by user (0)")
+                        return@withLock
+                    }
+
+                    buildCacheLocked(context, dir, maxBytes)
                 }
-                cacheDir = dir
-                val dbProvider = StandaloneDatabaseProvider(context)
-                val simpleCache = SimpleCache(
-                    dir,
-                    NoOpCacheEvictor(),
-                    dbProvider
-                )
-                cache = simpleCache
-
-                val httpFactory = DefaultHttpDataSource.Factory()
-                    .setAllowCrossProtocolRedirects(true)
-                    .setConnectTimeoutMs(30_000)
-                    .setReadTimeoutMs(30_000)
-                    .setDefaultRequestProperties(mapOf(
-                        "User-Agent" to "LiquidMusicGlass/1.0"
-                    ))
-
-                cacheDataSourceFactory = CacheDataSource.Factory()
-                    .setCache(simpleCache)
-                    .setUpstreamDataSourceFactory(httpFactory)
-                    .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
-
-                android.util.Log.d("MediaCacheManager", "Cache initialized at ${dir.absolutePath}")
-
-                // Run initial LRU cleanup
-                performLruCleanup(simpleCache, dir)
             }
         } catch (e: Exception) {
             android.util.Log.e("MediaCacheManager", "Cache init failed, falling back to no-cache: ${e.message}")
@@ -114,6 +105,46 @@ object MediaCacheManager {
         } finally {
             isInitializing = false
         }
+    }
+
+    /** Создаёт SimpleCache с LRU-эвиктором на maxBytes и фабрику. Вызывать на IO. */
+    private fun buildCacheLocked(context: Context, dir: File, maxBytes: Long) {
+        val dbProvider = StandaloneDatabaseProvider(context)
+        val simpleCache = SimpleCache(
+            dir,
+            LeastRecentlyUsedCacheEvictor(maxBytes),
+            dbProvider
+        )
+        cache = simpleCache
+        currentMaxBytes = maxBytes
+
+        val httpFactory = DefaultHttpDataSource.Factory()
+            .setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(30_000)
+            .setReadTimeoutMs(30_000)
+            .setDefaultRequestProperties(mapOf(
+                "User-Agent" to "LiquidMusicGlass/1.0"
+            ))
+
+        cacheDataSourceFactory = CacheDataSource.Factory()
+            .setCache(simpleCache)
+            .setUpstreamDataSourceFactory(httpFactory)
+            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+
+        android.util.Log.d(
+            "MediaCacheManager",
+            "Cache initialized at ${dir.absolutePath}, maxBytes=${maxBytes / 1024 / 1024}MB (LRU evictor)"
+        )
+    }
+
+    private fun releaseInternal() {
+        try {
+            cache?.release()
+        } catch (e: Exception) {
+            android.util.Log.e("MediaCacheManager", "release failed: ${e.message}")
+        }
+        cache = null
+        cacheDataSourceFactory = null
     }
 
     /**
@@ -129,84 +160,21 @@ object MediaCacheManager {
     }
 
     /**
-     * LRU-очистка кэша:
-     * 1. Удалить треки не слушавшиеся >7 дней (всегда)
-     * 2. Если всё ещё превышен лимит — удалять самые старые по lastTouch
+     * Размер кэша держит [LeastRecentlyUsedCacheEvictor] — он вытесняет наименее
+     * используемые ресурсы прямо при записи через CacheDataSource. Ручная очистка
+     * по размеру больше не нужна (и опасна — рассинхронит учёт эвиктора при
+     * удалении файлов «за его спиной»), поэтому здесь намеренно ничего не делаем.
      */
     private fun performLruCleanup(simpleCache: SimpleCache, dir: File) {
-        try {
-            // Safety check: only clean media3_cache, never downloads/
-            if (!dir.absolutePath.contains("media3_cache")) {
-                android.util.Log.w("MediaCacheManager", "LRU cleanup skipped: unexpected dir ${dir.absolutePath}")
-                return
-            }
-            val limitBytes = getCacheLimitBytes()
-            val sevenDaysAgo = System.currentTimeMillis() - 7 * 24 * 60 * 60 * 1000L
-
-            // Collect all cache files with metadata
-            data class CacheFile(
-                val file: File,
-                val size: Long,
-                val lastModified: Long
-            )
-
-            val files = dir.walkTopDown()
-                .filter { it.isFile }
-                .map { CacheFile(it, it.length(), it.lastModified()) }
-                .toList()
-
-            if (files.isEmpty()) return
-
-            var totalSize = files.sumOf { it.size }
-
-            // Phase 1: Remove files not accessed in 7+ days (always)
-            val staleFiles = files.filter { it.lastModified < sevenDaysAgo }
-            for (f in staleFiles.sortedBy { it.lastModified }) {
-                if (f.file.delete()) {
-                    totalSize -= f.size
-                    android.util.Log.d("MediaCacheManager", "LRU removed stale file: ${f.file.name} (${f.size / 1024}KB)")
-                }
-            }
-
-            // Phase 2: If still over limit, remove oldest by lastModified until under limit
-            if (totalSize > limitBytes) {
-                val remaining = files.filter { it.file.exists() }
-                    .sortedBy { it.lastModified }
-
-                for (f in remaining) {
-                    if (totalSize <= limitBytes) break
-                    if (f.file.delete()) {
-                        totalSize -= f.size
-                        android.util.Log.d("MediaCacheManager", "LRU removed old file: ${f.file.name} (${f.size / 1024}KB), total=${totalSize / 1024 / 1024}MB")
-                    }
-                }
-            }
-
-            // Release cache spans for deleted files so ExoPlayer knows they're gone
-            try {
-                simpleCache.keys.forEach { key ->
-                    val cachedSpans = simpleCache.getCachedSpans(key)
-                    if (cachedSpans.isEmpty()) {
-                        simpleCache.removeResource(key)
-                    }
-                }
-            } catch (_: Exception) { /* ignore */ }
-
-            android.util.Log.d("MediaCacheManager",
-                "LRU cleanup done. Limit=${limitBytes/1024/1024}MB, Current=${totalSize/1024/1024}MB, Files=${files.count { it.file.exists() }}"
-            )
-        } catch (e: Exception) {
-            android.util.Log.e("MediaCacheManager", "LRU cleanup failed: ${e.message}")
-        }
+        // no-op: эвиктор сам поддерживает лимит.
     }
 
     /**
-     * Вызывается после кэширования нового трека — запускает фоновую очистку.
+     * Раньше дёргалось после кэширования трека для ручной очистки. Теперь размер
+     * держит эвиктор — оставлено как no-op для совместимости с вызовами.
      */
     fun onCacheUpdated() {
-        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
-            runCacheCleanup()
-        }
+        // no-op
     }
 
     /**
@@ -216,7 +184,8 @@ object MediaCacheManager {
      * Thread-safe — может вызываться с Main dispatcher.
      */
     fun getDataSourceFactory(): androidx.media3.datasource.DataSource.Factory {
-        return cacheDataSourceFactory ?: DefaultHttpDataSource.Factory()
+        val cf = if (isCacheEnabled()) cacheDataSourceFactory else null
+        return cf ?: DefaultHttpDataSource.Factory()
             .setAllowCrossProtocolRedirects(true)
             .setConnectTimeoutMs(30_000)
             .setReadTimeoutMs(30_000)
@@ -226,10 +195,78 @@ object MediaCacheManager {
     }
 
     /**
-     * Возвращает CacheDataSource.Factory или null если кэш не инициализирован.
+     * Возвращает CacheDataSource.Factory или null если кэш не инициализирован
+     * ИЛИ выключен пользователем (размер 0) — тогда поток идёт мимо кэша.
      * Для передачи в ExoPlayer.Builder.setMediaSourceFactory().
      */
-    fun getCacheDataSourceFactory(): CacheDataSource.Factory? = cacheDataSourceFactory
+    fun getCacheDataSourceFactory(): CacheDataSource.Factory? =
+        if (isCacheEnabled()) cacheDataSourceFactory else null
+
+    /** Реально занятый объём кэша в байтах (для строки «В данный момент: X МБ»). */
+    suspend fun getCacheSizeBytes(): Long = withContext(Dispatchers.IO) {
+        try {
+            cache?.cacheSpace ?: run {
+                val dir = cacheDir ?: return@withContext 0L
+                dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+            }
+        } catch (_: Exception) {
+            0L
+        }
+    }
+
+    /** Полностью очистить кэш аудио (кнопка «Очистить»). */
+    suspend fun clearCache() = withContext(Dispatchers.IO) {
+        cacheLock.withLock {
+            val simpleCache = cache
+            try {
+                if (simpleCache != null) {
+                    // removeResource синхронизирует учёт эвиктора (в отличие от удаления
+                    // файлов «за его спиной»).
+                    simpleCache.keys.toList().forEach { key -> simpleCache.removeResource(key) }
+                } else {
+                    cacheDir?.walkTopDown()?.filter { it.isFile }?.forEach { it.delete() }
+                }
+                android.util.Log.d("MediaCacheManager", "Cache cleared by user")
+            } catch (e: Exception) {
+                android.util.Log.e("MediaCacheManager", "clearCache failed: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Применить смену размера кэша немедленно. maxBytes зашит в эвиктор при сборке
+     * SimpleCache, поэтому новый лимит = пересборка кэша: освобождаем старый инстанс
+     * и создаём новый с [LeastRecentlyUsedCacheEvictor] на новом размере (он сам
+     * подрежет содержимое под лимит). При 0 — освобождаем и чистим папку.
+     */
+    fun applyCacheSizeChange() {
+        val ctx = appContext ?: return
+        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+            cacheLock.withLock {
+                val maxBytes = getCacheLimitBytes()
+                // Уже на нужном размере и в согласованном состоянии — выходим.
+                if (maxBytes == currentMaxBytes && (cache != null || maxBytes <= 0L)) return@withLock
+
+                releaseInternal()
+                val dir = cacheDir ?: File(ctx.cacheDir, "media3_cache").apply { mkdirs() }.also { cacheDir = it }
+
+                if (maxBytes <= 0L) {
+                    dir.walkTopDown().filter { it.isFile }.forEach { it.delete() }
+                    currentMaxBytes = 0L
+                    android.util.Log.d("MediaCacheManager", "Cache disabled (0) — released and cleared")
+                    return@withLock
+                }
+
+                initFailed = false
+                try {
+                    buildCacheLocked(ctx, dir, maxBytes)
+                } catch (e: Exception) {
+                    android.util.Log.e("MediaCacheManager", "Rebuild after size change failed: ${e.message}")
+                    initFailed = true
+                }
+            }
+        }
+    }
 
     fun release() {
         try {
@@ -240,6 +277,7 @@ object MediaCacheManager {
         cache = null
         cacheDataSourceFactory = null
         cacheDir = null
+        currentMaxBytes = 0L
         initFailed = false
     }
 }

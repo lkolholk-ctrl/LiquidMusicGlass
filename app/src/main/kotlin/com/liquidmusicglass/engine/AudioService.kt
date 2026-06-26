@@ -413,13 +413,24 @@ class AudioService : MediaSessionService() {
 
         val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
 
-        val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(30_000, 60_000, 2_500, 5_000)
-            .build()
+        // Эконом сотовых данных: меньше буфер → меньше предзагруженного трафика.
+        // Оценивается при сборке плеера (старт сессии); смена флага вступает в
+        // силу со следующего запуска плеера.
+        val loadControl = if (PlayerSettings.dataSaver.value) {
+            DefaultLoadControl.Builder()
+                .setBufferDurationsMs(15_000, 30_000, 2_000, 4_000)
+                .build()
+        } else {
+            DefaultLoadControl.Builder()
+                .setBufferDurationsMs(30_000, 60_000, 2_500, 5_000)
+                .build()
+        }
 
-        // Renderers factory with a transparent bass-analysis audio processor.
-        // It does not alter the audio, only measures low-frequency energy for
-        // the reactive glow on the "Моя волна" screen.
+        // Renderers factory с двумя аудио-процессорами:
+        //  1) BassAudioProcessor — прозрачный анализ полос для реактивного свечения;
+        //  2) VolumeNormalizationProcessor — Sound Check (нормализация громкости),
+        //     активен только при включённом флаге, иначе прозрачный проброс.
+        // Порядок важен: нормализация ПОСЛЕ анализа, чтобы Bass видел чистый сигнал.
         val renderersFactory = object : DefaultRenderersFactory(this) {
             override fun buildAudioSink(
                 context: Context,
@@ -427,7 +438,7 @@ class AudioService : MediaSessionService() {
                 enableAudioTrackPlaybackParameters: Boolean
             ): AudioSink {
                 return DefaultAudioSink.Builder(context)
-                    .setAudioProcessors(arrayOf(BassAudioProcessor()))
+                    .setAudioProcessors(arrayOf(BassAudioProcessor(), VolumeNormalizationProcessor()))
                     .build()
             }
         }

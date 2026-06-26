@@ -284,7 +284,14 @@ object PlayerController {
         val currentQueue = queue.toList()
         if (currentQueue.isEmpty()) return
 
-        val endIndex = (currentIndex + 1 + depth).coerceAtMost(currentQueue.size)
+        // Эконом данных на сотовой: предзагружаем только 1 трек вместо depth.
+        // Стриминг по сотовой выключен → вообще не префетчим (резолв всё равно
+        // упрётся в гейт). На Wi-Fi/безлимите — полный префетч.
+        if (!PlayerSettings.streamingAllowed()) return
+        val effectiveDepth =
+            if (PlayerSettings.dataSaver.value && NetworkMonitor.isMetered()) 1 else depth
+
+        val endIndex = (currentIndex + 1 + effectiveDepth).coerceAtMost(currentQueue.size)
         val indicesToPrefetch = (currentIndex + 1 until endIndex)
 
         ioScope.launch {
@@ -728,6 +735,13 @@ object PlayerController {
             return cached.uri
         }
 
+        // Сотовый гейтинг: на сотовой без разрешения стриминга — не ходим в сеть
+        // (офлайн-файлы уже отданы раньше в StreamingDataSource.resolveUri).
+        if (!PlayerSettings.streamingAllowed()) {
+            UiLogger.log("[SYNC] streaming blocked on cellular for $trackId")
+            return null
+        }
+
         return try {
             val quality = getEffectiveQuality(trackId)
             val trackInfo = IcmRepository.getTrackInfoSync(trackId, quality = quality)
@@ -781,6 +795,10 @@ object PlayerController {
     }
 
     private suspend fun doResolveStreamUrl(trackId: String): StreamResult {
+        // Сотовый гейтинг: стриминг по сотовой выключен → не резолвим онлайн-URL.
+        if (!PlayerSettings.streamingAllowed()) {
+            return StreamResult.Error("cellular_blocked", "Streaming over cellular is turned off")
+        }
         return try {
             withTimeout(15_000) {
                 val quality = getEffectiveQuality(trackId)
@@ -1193,6 +1211,23 @@ object PlayerController {
                     durationMs = track.durationMs
                 )
             )
+            // Реальная история прослушивания в Room (для экрана «История»).
+            ioScope.launch {
+                runCatching {
+                    com.liquidmusicglass.data.local.db.AppDatabase.getInstance(ctx)
+                        .listenHistoryDao()
+                        .upsert(
+                            com.liquidmusicglass.data.local.db.ListenHistoryEntity(
+                                trackId = track.id,
+                                title = track.title,
+                                artist = track.artist,
+                                coverUrl = track.coverUrl,
+                                durationMs = track.durationMs,
+                                playedAt = System.currentTimeMillis()
+                            )
+                        )
+                }
+            }
         }
     }
 

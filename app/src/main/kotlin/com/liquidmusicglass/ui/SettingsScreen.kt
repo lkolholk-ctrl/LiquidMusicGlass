@@ -40,9 +40,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.runtime.LaunchedEffect
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.liquidmusicglass.engine.AppSettings
+import com.liquidmusicglass.engine.MediaCacheManager
 import com.liquidmusicglass.engine.PlayerController
+import com.liquidmusicglass.engine.PlayerSettings
 import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.ui.liquid.LiquidToggle
 import com.liquidmusicglass.ui.theme.LiquidTheme
@@ -55,6 +58,7 @@ private val AppleRed = Color(0xFFFC3C44)
 fun SettingsScreen(
     onBack: () -> Unit,
     onOpenEqualizer: () -> Unit = {},
+    onOpenHistory: () -> Unit = {},
     backdrop: LayerBackdrop
 ) {
     val context = LocalContext.current
@@ -371,9 +375,217 @@ fun SettingsScreen(
                 }
             }
 
+            Spacer(modifier = Modifier.height(28.dp))
+
+            // ── AUTOMIX & SOUND ──
+            SectionLabel("AUTOMIX & SOUND")
+
+            val autoMix by PlayerSettings.autoMix.collectAsState()
+            val volumeNorm by PlayerSettings.volumeNormalization.collectAsState()
+            PlainCard {
+                SettingsToggleItem(
+                    title = "AutoMix",
+                    subtitle = "Seamlessly keep the wave going",
+                    selected = autoMix,
+                    onSelect = { PlayerSettings.setAutoMix(it) }
+                )
+                PlainDivider()
+                SettingsToggleItem(
+                    title = "Sound Check",
+                    subtitle = "Normalize volume across tracks",
+                    selected = volumeNorm,
+                    onSelect = { PlayerSettings.setVolumeNormalization(it) }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(28.dp))
+
+            // ── AUDIO CACHE ──
+            SectionLabel("AUDIO CACHE")
+
+            val cacheBytes by PlayerSettings.audioCacheBytes.collectAsState()
+            var cacheUsed by remember { mutableStateOf(-1L) }
+            var cacheRefresh by remember { mutableStateOf(0) }
+            LaunchedEffect(cacheBytes, cacheRefresh) {
+                cacheUsed = MediaCacheManager.getCacheSizeBytes()
+            }
+            PlainCard {
+                Column(modifier = Modifier.padding(vertical = 6.dp)) {
+                    CacheSizeSelector(
+                        options = PlayerSettings.CACHE_OPTIONS_BYTES,
+                        selected = cacheBytes,
+                        onSelect = { bytes ->
+                            PlayerSettings.setAudioCacheBytes(bytes)
+                            MediaCacheManager.applyCacheSizeChange()
+                            scope.launch {
+                                delay(600)
+                                cacheRefresh++
+                            }
+                        }
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (cacheBytes <= 0L) "Cache is off"
+                            else "Currently used: ${formatBytes(cacheUsed.coerceAtLeast(0L))}",
+                            color = lc.textSecondary,
+                            fontSize = 12.sp,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            text = "Clear",
+                            color = AppleRed,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null
+                                ) {
+                                    scope.launch {
+                                        MediaCacheManager.clearCache()
+                                        delay(300)
+                                        cacheRefresh++
+                                    }
+                                }
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(28.dp))
+
+            // ── MOBILE DATA ──
+            SectionLabel("MOBILE DATA")
+
+            val dataSaver by PlayerSettings.dataSaver.collectAsState()
+            val cellularData by PlayerSettings.cellularData.collectAsState()
+            val cellularStreaming by PlayerSettings.cellularStreaming.collectAsState()
+            val cellularDownloads by PlayerSettings.cellularDownloads.collectAsState()
+            PlainCard {
+                SettingsToggleItem(
+                    title = "Data Saver",
+                    subtitle = "Reduce buffering & prefetch on cellular",
+                    selected = dataSaver,
+                    onSelect = { PlayerSettings.setDataSaver(it) }
+                )
+                PlainDivider()
+                SettingsToggleItem(
+                    title = "Cellular Data",
+                    subtitle = "Allow any cellular access (off = Wi-Fi only)",
+                    selected = cellularData,
+                    onSelect = { PlayerSettings.setCellularData(it) }
+                )
+                PlainDivider()
+                SettingsToggleItem(
+                    title = "Streaming",
+                    subtitle = "Stream over cellular",
+                    selected = cellularStreaming,
+                    onSelect = { PlayerSettings.setCellularStreaming(it) }
+                )
+                PlainDivider()
+                SettingsToggleItem(
+                    title = "Downloads",
+                    subtitle = "Download over cellular",
+                    selected = cellularDownloads,
+                    onSelect = { PlayerSettings.setCellularDownloads(it) }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(28.dp))
+
+            // ── ACCESSIBILITY ──
+            SectionLabel("ACCESSIBILITY")
+
+            val increaseContrast by PlayerSettings.increaseContrast.collectAsState()
+            PlainCard {
+                SettingsToggleItem(
+                    title = "Increase Contrast",
+                    subtitle = "Stronger text & less glass transparency",
+                    selected = increaseContrast,
+                    onSelect = { PlayerSettings.setIncreaseContrast(it) }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(28.dp))
+
+            // ── HISTORY ──
+            SectionLabel("HISTORY")
+
+            PlainCard {
+                SettingsActionItem(
+                    title = "Listening History",
+                    subtitle = "Tracks you've played",
+                    icon = Icons.Rounded.ChevronRight,
+                    onClick = onOpenHistory
+                )
+            }
+
             Spacer(modifier = Modifier.height(32.dp))
         }
     }
+}
+
+/** 0/200МБ/500МБ/1/2/5ГБ — две строки по три кнопки. */
+@Composable
+private fun CacheSizeSelector(
+    options: List<Long>,
+    selected: Long,
+    onSelect: (Long) -> Unit
+) {
+    Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
+        options.chunked(3).forEach { rowOptions ->
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                rowOptions.forEach { bytes ->
+                    val isSelected = selected == bytes
+                    val isDark = LiquidTheme.colors.isDark
+                    val itemBg = if (isSelected) AppleRed else (if (isDark) Color(0xFF1C1C1E) else Color(0xFFE5E5EA))
+                    val unselectedTextColor = if (isDark) Color.White.copy(alpha = 0.45f) else Color.Black.copy(alpha = 0.45f)
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(36.dp)
+                            .background(itemBg, RoundedCornerShape(50))
+                            .clip(RoundedCornerShape(50))
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                                onClick = { onSelect(bytes) }
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = cacheLabel(bytes),
+                            color = if (isSelected) Color.White else unselectedTextColor,
+                            fontSize = 13.sp,
+                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun cacheLabel(bytes: Long): String = when {
+    bytes <= 0L -> "Off"
+    bytes >= 1024L * 1024 * 1024 -> "${bytes / (1024L * 1024 * 1024)} GB"
+    else -> "${bytes / (1024L * 1024)} MB"
+}
+
+private fun formatBytes(bytes: Long): String = when {
+    bytes >= 1024L * 1024 * 1024 ->
+        String.format("%.1f GB", bytes / (1024.0 * 1024 * 1024))
+    else -> "${bytes / (1024L * 1024)} MB"
 }
 
 // ── UI Components ──

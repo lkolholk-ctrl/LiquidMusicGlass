@@ -17,15 +17,17 @@ import io.requery.android.database.sqlite.RequerySQLiteOpenHelperFactory
         CachedTrack::class,
         ListeningHistory::class,
         TrackStatsEntity::class,
-        PlaybackHistoryEntity::class
+        PlaybackHistoryEntity::class,
+        ListenHistoryEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun waveDao(): WaveDao
     abstract fun playbackHistoryDao(): PlaybackHistoryDao
+    abstract fun listenHistoryDao(): ListenHistoryDao
 
     companion object {
         @Volatile
