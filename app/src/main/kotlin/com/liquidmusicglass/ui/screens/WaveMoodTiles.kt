@@ -153,13 +153,13 @@ private fun MoodTile(
     seed: Float,
     onClick: () -> Unit
 ) {
-    // Шейдер живёт только на API 33+. Создаётся один раз на плитку.
-    val shader = remember(mood) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) RuntimeShader(TILE_AGSL) else null
+    // На warmup-старте/просадке FPS НЕ создаём RuntimeShader (создание = компиляция
+    // AGSL, это и есть затык на первом кадре My Wave) и не рисуем им — дешёвый градиент.
+    val degraded = com.liquidmusicglass.ui.PerfMonitor.degraded
+    val shader = remember(mood, degraded) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !degraded) RuntimeShader(TILE_AGSL) else null
     }
     val shaderBrush = remember(shader) { shader?.let { ShaderBrush(it) } }
-    // При просадке FPS — не гоняем AGSL на каждой плитке, падаем на дешёвый градиент.
-    val degraded = com.liquidmusicglass.ui.PerfMonitor.degraded
 
     Box(
         modifier = Modifier
