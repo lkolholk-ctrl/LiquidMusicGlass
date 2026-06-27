@@ -26,6 +26,23 @@ namespace juce
 // Single process-wide engine instance for the Stage 1 test tone.
 static std::unique_ptr<AutoMixAudioEngine> gEngine;
 
+// Shared helper: jstring -> juce::String, invoke a deck loader. Templates can't
+// have C language linkage, so this must live OUTSIDE the extern "C" block below.
+template <typename Fn>
+static jboolean loadInto (JNIEnv* env, jstring path, Fn&& fn)
+{
+    if (gEngine == nullptr || path == nullptr)
+        return JNI_FALSE;
+
+    const char* utf = env->GetStringUTFChars (path, nullptr);
+    if (utf == nullptr)
+        return JNI_FALSE;
+
+    const bool ok = fn (juce::String::fromUTF8 (utf));
+    env->ReleaseStringUTFChars (path, utf);
+    return ok ? JNI_TRUE : JNI_FALSE;
+}
+
 extern "C" {
 
 JNIEXPORT jboolean JNICALL
@@ -46,22 +63,6 @@ Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeInit(
         gEngine = std::make_unique<AutoMixAudioEngine>();
 
     return gEngine->init() ? JNI_TRUE : JNI_FALSE;
-}
-
-// Shared helper: jstring -> juce::String, invoke a deck loader.
-template <typename Fn>
-static jboolean loadInto (JNIEnv* env, jstring path, Fn&& fn)
-{
-    if (gEngine == nullptr || path == nullptr)
-        return JNI_FALSE;
-
-    const char* utf = env->GetStringUTFChars (path, nullptr);
-    if (utf == nullptr)
-        return JNI_FALSE;
-
-    const bool ok = fn (juce::String::fromUTF8 (utf));
-    env->ReleaseStringUTFChars (path, utf);
-    return ok ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jboolean JNICALL
