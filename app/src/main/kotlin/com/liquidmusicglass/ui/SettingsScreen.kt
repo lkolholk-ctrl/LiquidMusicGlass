@@ -478,6 +478,30 @@ fun SettingsScreen(
                 )
             }
 
+            Spacer(modifier = Modifier.height(28.dp))
+
+            // ── DEV (temporary — JUCE Stage 1 verification) ──
+            SectionLabel("DEV")
+
+            var toneOn by remember { mutableStateOf(false) }
+            PlainCard {
+                SettingsToggleItem(
+                    title = "JUCE Test Tone 440 Hz",
+                    subtitle = "Native JUCE → Oboe output check",
+                    selected = toneOn,
+                    onSelect = { on ->
+                        toneOn = on
+                        if (on) {
+                            com.liquidmusicglass.engine.automix.AutoMixNativeEngine.init(context)
+                            com.liquidmusicglass.engine.automix.AutoMixNativeEngine.startTone()
+                        } else {
+                            com.liquidmusicglass.engine.automix.AutoMixNativeEngine.stopTone()
+                            com.liquidmusicglass.engine.automix.AutoMixNativeEngine.release()
+                        }
+                    }
+                )
+            }
+
             // Нижний отступ под плавающий таб-бар (Settings теперь вкладка).
             Spacer(modifier = Modifier.height(110.dp))
         }
