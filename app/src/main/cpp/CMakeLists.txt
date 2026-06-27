@@ -61,6 +61,20 @@ if(NOT juce_POPULATED)
     FetchContent_Populate(JUCE)
 endif()
 
+# RubberBand (time-stretch for beat-matching). Built from its self-contained
+# single-file unit (bundled FFT + resampler, no threading, no external deps),
+# isolated in our target like JUCE. NOTE: RubberBand is GPL v2+ / commercial.
+FetchContent_Declare(
+    RubberBand
+    GIT_REPOSITORY https://github.com/breakfastquay/rubberband.git
+    GIT_TAG v3.3.0
+    GIT_SHALLOW TRUE
+)
+FetchContent_GetProperties(RubberBand)
+if(NOT rubberband_POPULATED)
+    FetchContent_Populate(RubberBand)
+endif()
+
 set(JUCE_MODULES_DIR ${juce_SOURCE_DIR}/modules)
 set(OBOE_DIR ${JUCE_MODULES_DIR}/juce_audio_devices/native/oboe)
 
@@ -82,6 +96,8 @@ add_library(
     automix/AutoMixAudioEngine.cpp
     automix/AutoMixJni.cpp
     automix/MediaCodecDecoder.cpp
+    automix/TimeStretch.cpp
+    ${rubberband_SOURCE_DIR}/single/RubberBandSingle.cpp
     # JUCE module unity builds, compiled directly (no juceaide). Order doesn't
     # matter for a single static-link target; deps resolved via the
     # JUCE_MODULE_AVAILABLE_* defines below.
@@ -102,6 +118,7 @@ target_include_directories(automix_juce PRIVATE
     ${OBOE_DIR}/include
     ${OBOE_DIR}/src
     ${CPUFEATURES_DIR}
+    ${rubberband_SOURCE_DIR}        # <rubberband/RubberBandStretcher.h>
 )
 
 # Stand in for the header juce_add_module would generate: tell each module which

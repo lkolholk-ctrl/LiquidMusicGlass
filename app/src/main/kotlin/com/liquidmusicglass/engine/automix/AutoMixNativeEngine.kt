@@ -81,6 +81,18 @@ object AutoMixNativeEngine {
             .onFailure { Log.w(TAG, "nativeStartCrossfade failed", it) }
     }
 
+    /**
+     * Pre-stretch deck B to match deck A's tempo (beat-match), pitch preserved.
+     * Heavy/offline — call from a background thread BEFORE startCrossfade.
+     */
+    @Synchronized
+    fun prepareStretchB(bpmA: Double, bpmB: Double): Boolean {
+        if (!available || !initialised) return false
+        return runCatching { nativePrepareStretchB(bpmA, bpmB) }.getOrElse {
+            Log.w(TAG, "nativePrepareStretchB failed", it); false
+        }
+    }
+
     /** Start/resume playback of the loaded track. */
     @Synchronized
     fun play() {
@@ -129,6 +141,7 @@ object AutoMixNativeEngine {
     private external fun nativeLoadTrackA(path: String): Boolean
     private external fun nativeLoadTrackB(path: String): Boolean
     private external fun nativeStartCrossfade(durationMs: Double)
+    private external fun nativePrepareStretchB(bpmA: Double, bpmB: Double): Boolean
     private external fun nativePlay()
     private external fun nativePause()
     private external fun nativeStop()

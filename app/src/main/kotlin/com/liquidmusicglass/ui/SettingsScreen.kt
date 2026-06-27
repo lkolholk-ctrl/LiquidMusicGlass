@@ -27,6 +27,10 @@ import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material.icons.rounded.LibraryMusic
+import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -498,6 +502,8 @@ fun SettingsScreen(
             var devStatus by remember {
                 mutableStateOf("WAV/AIFF/FLAC/OGG (JUCE) + MP3/AAC/M4A (MediaCodec)")
             }
+            var bpmA by remember { mutableStateOf("128") }
+            var bpmB by remember { mutableStateOf("100") }
             val engine = com.liquidmusicglass.engine.automix.AutoMixNativeEngine
 
             // Deck A: pick → copy → decode → play (audible immediately).
@@ -564,9 +570,51 @@ fun SettingsScreen(
                     onClick = { pickB.launch(arrayOf("audio/*")) }
                 )
                 PlainDivider()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedTextField(
+                        value = bpmA,
+                        onValueChange = { bpmA = it },
+                        label = { Text("BPM A") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = bpmB,
+                        onValueChange = { bpmB = it },
+                        label = { Text("BPM B") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                PlainDivider()
+                SettingsActionItem(
+                    title = "Beat-match B → A (stretch)",
+                    subtitle = "RubberBand prefetch — run before crossfade",
+                    icon = Icons.Rounded.Speed,
+                    onClick = {
+                        scope.launch {
+                            val a = bpmA.toDoubleOrNull() ?: 0.0
+                            val b = bpmB.toDoubleOrNull() ?: 0.0
+                            if (a <= 0.0 || b <= 0.0) { devStatus = "Enter valid BPM A & B"; return@launch }
+                            devStatus = "Stretching B (${b}→${a} BPM)…"
+                            engine.init(context)
+                            val ok = withContext(Dispatchers.IO) { engine.prepareStretchB(a, b) }
+                            devStatus = if (ok) "B beat-matched — hit Crossfade"
+                                        else "Stretch failed (load Deck B first)"
+                        }
+                    }
+                )
+                PlainDivider()
                 SettingsActionItem(
                     title = "Start Crossfade (8s)",
-                    subtitle = "Equal-power A → B",
+                    subtitle = "Equal-power A → B (beat-matched if stretched)",
                     icon = Icons.Rounded.SwapHoriz,
                     onClick = { engine.startCrossfade(8000.0) }
                 )

@@ -1,7 +1,9 @@
 #include "AutoMixAudioEngine.h"
 #include "MediaCodecDecoder.h"
+#include "TimeStretch.h"
 
 #include <cmath>
+#include <memory>
 
 AutoMixAudioEngine::AutoMixAudioEngine()
 {
@@ -74,9 +76,11 @@ bool AutoMixAudioEngine::loadDeck (Deck& deck, const juce::String& path)
     // wav/aiff/flac/ogg via JUCE.
     if (auto* reader = formatManager.createReaderFor (file))
     {
+        deck.sourceSampleRate = reader->sampleRate;
         deck.readerSource = std::make_unique<juce::AudioFormatReaderSource> (reader, true);
         deck.transport.setSource (deck.readerSource.get(), 32768, &readAheadThread, reader->sampleRate, 2);
         deck.transport.setPosition (0.0);
+        deck.path = path;
         deck.hasTrack.store (true);
         return true;
     }
@@ -89,10 +93,66 @@ bool AutoMixAudioEngine::loadDeck (Deck& deck, const juce::String& path)
         return false;
     }
 
+    deck.sourceSampleRate = decodedRate;
     deck.memorySource = std::make_unique<juce::MemoryAudioSource> (deck.decodedBuffer, false, false);
     deck.transport.setSource (deck.memorySource.get(), 0, nullptr, decodedRate, 2);
     deck.transport.setPosition (0.0);
+    deck.path = path;
     deck.hasTrack.store (true);
+    return true;
+}
+
+// Decode an entire file to PCM (independent of the playing source), for the
+// offline stretch. wav/flac via JUCE, mp3/aac via MediaCodec.
+bool AutoMixAudioEngine::decodeFullPCM (const juce::String& path, juce::AudioBuffer<float>& out, double& rate)
+{
+    const juce::File file (path);
+    if (! file.existsAsFile())
+        return false;
+
+    if (std::unique_ptr<juce::AudioFormatReader> reader { formatManager.createReaderFor (file) })
+    {
+        const int len = (int) reader->lengthInSamples;
+        if (len <= 0)
+            return false;
+        out.setSize (2, len);
+        reader->read (&out, 0, len, 0, true, true);
+        rate = reader->sampleRate;
+        return true;
+    }
+
+    return automix::decodeWithMediaCodec (path, out, rate);
+}
+
+bool AutoMixAudioEngine::prepareStretchB (double bpmA, double bpmB)
+{
+    if (! deckB.hasTrack.load() || deckB.path.isEmpty() || bpmA <= 0.0 || bpmB <= 0.0)
+        return false;
+
+    // Full source PCM of B (independent of the currently-set playing source).
+    juce::AudioBuffer<float> srcB;
+    double srcRate = 0.0;
+    if (! decodeFullPCM (deckB.path, srcB, srcRate))
+        return false;
+
+    // Match B's tempo to A: speed factor = bpmA/bpmB, so duration ratio = bpmB/bpmA.
+    const double timeRatio = bpmB / bpmA;
+
+    juce::AudioBuffer<float> stretched;
+    if (! automix::timeStretchOffline (srcB, srcRate, timeRatio, stretched))
+        return false;
+
+    // Swap deck B to play the beat-matched buffer.
+    deckB.transport.stop();
+    deckB.transport.setSource (nullptr);
+    deckB.readerSource.reset();
+    deckB.memorySource.reset();                 // release ref to old decodedBuffer
+    deckB.decodedBuffer = std::move (stretched);
+    deckB.memorySource = std::make_unique<juce::MemoryAudioSource> (deckB.decodedBuffer, false, false);
+    deckB.transport.setSource (deckB.memorySource.get(), 0, nullptr, srcRate, 2);
+    deckB.transport.setPosition (0.0);
+    deckB.sourceSampleRate = srcRate;
+    deckB.hasTrack.store (true);
     return true;
 }
 

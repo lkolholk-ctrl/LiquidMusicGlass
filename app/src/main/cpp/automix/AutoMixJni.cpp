@@ -94,6 +94,15 @@ Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeStartCrossfad
         gEngine->startCrossfade ((double) durationMs);
 }
 
+JNIEXPORT jboolean JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativePrepareStretchB(
+        JNIEnv* /*env*/, jobject /*thiz*/, jdouble bpmA, jdouble bpmB)
+{
+    if (gEngine == nullptr)
+        return JNI_FALSE;
+    return gEngine->prepareStretchB ((double) bpmA, (double) bpmB) ? JNI_TRUE : JNI_FALSE;
+}
+
 JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativePlay(
         JNIEnv* /*env*/, jobject /*thiz*/)

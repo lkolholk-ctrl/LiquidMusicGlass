@@ -40,6 +40,13 @@ public:
     /** Equal-power crossfade deck A -> deck B over durationMs. Starts both decks. */
     void startCrossfade (double durationMs);
 
+    /**
+     * Stage 4: pre-stretch deck B so its tempo matches deck A (bpmB -> bpmA),
+     * pitch preserved. Heavy/offline — call off the audio & main threads, before
+     * starting the crossfade. After this, deck B plays the beat-matched audio.
+     */
+    bool prepareStretchB (double bpmA, double bpmB);
+
     // juce::AudioIODeviceCallback
     void audioDeviceAboutToStart (juce::AudioIODevice* device) override;
     void audioDeviceStopped() override;
@@ -55,15 +62,18 @@ private:
     {
         juce::AudioTransportSource transport;
         std::unique_ptr<juce::AudioFormatReaderSource> readerSource; // wav/flac/ogg
-        juce::AudioBuffer<float> decodedBuffer;                      // mp3/aac (MediaCodec)
+        juce::AudioBuffer<float> decodedBuffer;                      // mp3/aac or stretched
         std::unique_ptr<juce::MemoryAudioSource> memorySource;
         std::atomic<bool> hasTrack { false };
+        juce::String path;                                           // for re-decode/stretch
+        double sourceSampleRate { 0.0 };
 
         Deck() = default;
         JUCE_DECLARE_NON_COPYABLE (Deck)
     };
 
     bool loadDeck (Deck& deck, const juce::String& path);
+    bool decodeFullPCM (const juce::String& path, juce::AudioBuffer<float>& out, double& rate);
 
     juce::AudioDeviceManager deviceManager;
     juce::AudioFormatManager formatManager;
