@@ -210,6 +210,16 @@ void AutoMixAudioEngine::setEntryOffsetB (double ms)
     entryOffsetMsB.store (ms < 0.0 ? 0.0 : ms);
 }
 
+double AutoMixAudioEngine::positionMsA()
+{
+    return deckA.transport.getCurrentPosition() * 1000.0;
+}
+
+double AutoMixAudioEngine::lengthMsA()
+{
+    return deckA.transport.getLengthInSeconds() * 1000.0;
+}
+
 //==============================================================================
 void AutoMixAudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
 {

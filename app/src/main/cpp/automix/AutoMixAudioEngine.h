@@ -46,6 +46,10 @@ public:
      *  next startCrossfade. 0 (default) keeps the Stage 3-5 behaviour unchanged. */
     void setEntryOffsetB (double ms);
 
+    /** Deck A transport position / length in ms — for transition timing. */
+    double positionMsA();
+    double lengthMsA();
+
     /**
      * Stage 4: pre-stretch deck B so its tempo matches deck A (bpmB -> bpmA),
      * pitch preserved. Heavy/offline — call off the audio & main threads, before

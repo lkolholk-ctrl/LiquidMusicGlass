@@ -510,8 +510,11 @@ fun SettingsScreen(
             var pathB by remember { mutableStateOf<String?>(null) }
             var juceAutoMix by remember { mutableStateOf(false) }
             val engine = com.liquidmusicglass.engine.automix.AutoMixNativeEngine
-            // Real ML analysis chain (model decides duration/type/offset/bpm).
-            val autoMixController = remember { com.liquidmusicglass.automix.AutoMixController(context.applicationContext) }
+            // LAZY: do NOT construct at composition — AutoMixController's ctor loads
+            // the TFLite model. It's built on first analysis, off the main thread,
+            // so the model never loads at app/cold start.
+            val autoMixLazy = remember { lazy { com.liquidmusicglass.automix.AutoMixController(context.applicationContext) } }
+            var autoMixJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
             // Free the JUCE/Oboe device + decoded buffers when leaving this screen,
             // so AAudio / native memory isn't held (no-op if never loaded).
@@ -664,52 +667,81 @@ fun SettingsScreen(
             PlainCard {
                 SettingsToggleItem(
                     title = "JUCE AutoMix (test)",
-                    subtitle = "On: model decides → JUCE executes. Off: legacy Media3 path.",
+                    subtitle = "On: model analyses in bg, JUCE blends near track end. Off: legacy Media3.",
                     selected = juceAutoMix,
                     onSelect = { juceAutoMix = it }
                 )
                 PlainDivider()
                 SettingsActionItem(
-                    title = "Run AutoMix transition (A → B)",
+                    title = "Arm AutoMix (analyze bg → timed cue)",
                     subtitle = devStatus,
                     icon = Icons.Rounded.AutoAwesome,
                     onClick = {
-                        scope.launch {
+                        autoMixJob?.cancel()
+                        autoMixJob = scope.launch {
                             val pa = pathA; val pb = pathB
-                            if (pa == null || pb == null) { devStatus = "Pick Deck A & B first"; return@launch }
-                            if (!juceAutoMix) {
-                                devStatus = "Toggle 'JUCE AutoMix' ON (off = legacy Media3 path)"
-                                return@launch
-                            }
-                            // Analysis runs in the background — deck A keeps playing.
-                            devStatus = "Model analysing pair…"
+                            if (pa == null || pb == null) { devStatus = "Play Deck A + pick Deck B first"; return@launch }
+                            if (!juceAutoMix) { devStatus = "Toggle 'JUCE AutoMix' ON"; return@launch }
+
+                            // 1) Analyse the pair in the BACKGROUND while deck A plays —
+                            //    the analysis never touches the player (music keeps going).
+                            devStatus = "Model analysing (bg)…"
                             val fa = File(pa); val fb = File(pb)
                             val durA = withContext(Dispatchers.IO) { audioDurationMs(fa) }
-                            val feat = withContext(Dispatchers.IO) {
-                                autoMixController.analyzeTrackPair(Uri.fromFile(fa), Uri.fromFile(fb), durA)
+                            val feat = withContext(Dispatchers.Default) {
+                                autoMixLazy.value.analyzeTrackPair(Uri.fromFile(fa), Uri.fromFile(fb), durA)
                             }
-                            // Log what the model decided (proves it dirigates JUCE).
                             android.util.Log.i(
                                 "JUCEAutoMix",
-                                "MODEL → JUCE: xfade=${feat.crossfadeDurationMs}ms type=${feat.transitionType} " +
-                                    "entry=${feat.entryOffsetMs}ms bpmA=${feat.bpmA} bpmB=${feat.bpmB} compat=${feat.compatibility}"
+                                "MODEL READY: xfade=${feat.crossfadeDurationMs}ms type=${feat.transitionType} " +
+                                    "start=${feat.transitionStartMs}ms entry=${feat.entryOffsetMs}ms " +
+                                    "bpmA=${feat.bpmA} bpmB=${feat.bpmB} compat=${feat.compatibility} ready=${feat.readyForTransition}"
                             )
-                            // Prepare deck B by the model's params OFF the main thread.
-                            // Deck A is NOT reloaded — it keeps playing into the crossfade.
-                            val ba = feat.bpmA; val bb = feat.bpmB
-                            withContext(Dispatchers.IO) {
-                                engine.init(context)
-                                engine.setEntryOffsetB(feat.entryOffsetMs.toDouble())
-                                if (ba != null && bb != null && ba > 0f && bb > 0f) {
-                                    engine.prepareStretchB(ba.toDouble(), bb.toDouble())
+                            devStatus = "Armed · model xfade=${feat.crossfadeDurationMs}ms start=${feat.transitionStartMs}ms — waiting for cue…"
+
+                            // 2) Wait for the transition cue (transitionStartMs / remaining),
+                            //    SEPARATE from analysis. JUCE wakes deck B only at the cue.
+                            val controller = autoMixLazy.value
+                            while (true) {
+                                delay(250)
+                                val posMs = engine.positionMsA().toLong()
+                                val lenMs = engine.lengthMsA().toLong()
+                                val remaining = (lenMs - posMs).coerceAtLeast(0L)
+                                val decision = controller.shouldStartTransition(posMs, remaining, feat)
+                                if (decision.shouldStart) {
+                                    android.util.Log.i(
+                                        "JUCEAutoMix",
+                                        "CUE @ pos=${posMs}ms rem=${remaining}ms → JUCE blend " +
+                                            "${decision.crossfadeDurationMs}ms type ${decision.transitionType}"
+                                    )
+                                    devStatus = "Cue @ ${posMs / 1000}s (rem ${remaining / 1000}s) → JUCE blending…"
+                                    val ba = feat.bpmA; val bb = feat.bpmB
+                                    withContext(Dispatchers.IO) {
+                                        engine.loadTrackB(pb)                              // JUCE wakes deck B now
+                                        engine.setEntryOffsetB(feat.entryOffsetMs.toDouble())
+                                        if (ba != null && bb != null && ba > 0f && bb > 0f) {
+                                            engine.prepareStretchB(ba.toDouble(), bb.toDouble())
+                                        }
+                                    }
+                                    engine.startCrossfade(decision.crossfadeDurationMs.toDouble())
+                                    devStatus = "JUCE blend: ${decision.crossfadeDurationMs}ms · type ${decision.transitionType} · " +
+                                        "bpm ${ba?.toInt() ?: "?"}→${bb?.toInt() ?: "?"}"
+                                    break
+                                }
+                                if (lenMs > 0 && posMs >= lenMs - 100) {
+                                    devStatus = "Track A ended, no cue (model not ready?)"
+                                    break
                                 }
                             }
-                            // Light: just arms the envelope/atomics on the audio thread.
-                            engine.startCrossfade(feat.crossfadeDurationMs.toDouble())
-                            devStatus = "JUCE: ${feat.crossfadeDurationMs}ms · type ${feat.transitionType} · " +
-                                "bpm ${ba?.toInt() ?: "?"}→${bb?.toInt() ?: "?"} · entry ${feat.entryOffsetMs}ms"
                         }
                     }
+                )
+                PlainDivider()
+                SettingsActionItem(
+                    title = "Cancel AutoMix arm",
+                    subtitle = "Stop waiting for the cue",
+                    icon = Icons.Rounded.Stop,
+                    onClick = { autoMixJob?.cancel(); devStatus = "AutoMix arm cancelled" }
                 )
             }
 
