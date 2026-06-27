@@ -46,7 +46,37 @@ object AutoMixNativeEngine {
         }
     }
 
-    /** Start the 440 Hz test tone. */
+    /** Decode-open a local audio file. Returns true if a reader was created. */
+    @Synchronized
+    fun loadTrack(path: String): Boolean {
+        if (!available || !initialised) return false
+        return runCatching { nativeLoadTrack(path) }.getOrElse {
+            Log.w(TAG, "nativeLoadTrack failed", it); false
+        }
+    }
+
+    /** Start/resume playback of the loaded track. */
+    @Synchronized
+    fun play() {
+        if (!available || !initialised) return
+        runCatching { nativePlay() }.onFailure { Log.w(TAG, "nativePlay failed", it) }
+    }
+
+    /** Pause playback (keeps position). */
+    @Synchronized
+    fun pause() {
+        if (!available || !initialised) return
+        runCatching { nativePause() }.onFailure { Log.w(TAG, "nativePause failed", it) }
+    }
+
+    /** Stop playback and rewind to the start. */
+    @Synchronized
+    fun stop() {
+        if (!available || !initialised) return
+        runCatching { nativeStop() }.onFailure { Log.w(TAG, "nativeStop failed", it) }
+    }
+
+    /** Start the 440 Hz test tone (only audible when no track is loaded). */
     @Synchronized
     fun startTone() {
         if (!available || !initialised) return
@@ -69,6 +99,10 @@ object AutoMixNativeEngine {
     }
 
     private external fun nativeInit(context: Context): Boolean
+    private external fun nativeLoadTrack(path: String): Boolean
+    private external fun nativePlay()
+    private external fun nativePause()
+    private external fun nativeStop()
     private external fun nativeStartTone()
     private external fun nativeStopTone()
     private external fun nativeRelease()

@@ -4,6 +4,9 @@ import android.content.Context
 import android.content.Intent
 import android.media.audiofx.AudioEffect
 import android.net.Uri
+import android.provider.OpenableColumns
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -19,6 +22,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Equalizer
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -51,6 +57,9 @@ import com.liquidmusicglass.ui.liquid.LiquidToggle
 import com.liquidmusicglass.ui.theme.LiquidTheme
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.File
 
 // Единый акцент приложения — бледно-зелёный (заменил красный Apple-стиля).
 private val Accent = Color(0xFF7FB77E)
@@ -480,25 +489,74 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(28.dp))
 
-            // ── DEV (temporary — JUCE Stage 1 verification) ──
+            // ── DEV (temporary — JUCE Stage 1/2 verification) ──
             SectionLabel("DEV")
 
             var toneOn by remember { mutableStateOf(false) }
+            var devStatus by remember {
+                mutableStateOf("Decodes: WAV, AIFF, FLAC, OGG (no MP3/AAC out of the box)")
+            }
+            val engine = com.liquidmusicglass.engine.automix.AutoMixNativeEngine
+
+            // System file picker → copy to cache → JUCE decode + play.
+            val pickTrack = rememberLauncherForActivityResult(
+                ActivityResultContracts.OpenDocument()
+            ) { uri ->
+                if (uri != null) {
+                    scope.launch {
+                        devStatus = "Loading…"
+                        val path = withContext(Dispatchers.IO) { copyUriToCache(context, uri) }
+                        if (path == null) {
+                            devStatus = "Copy failed"
+                            return@launch
+                        }
+                        engine.init(context)
+                        val ok = engine.loadTrack(path)
+                        if (ok) {
+                            engine.play()
+                            devStatus = "Playing: ${path.substringAfterLast('/')}"
+                        } else {
+                            devStatus = "Decode failed (unsupported?): ${path.substringAfterLast('/')}"
+                        }
+                    }
+                }
+            }
+
             PlainCard {
                 SettingsToggleItem(
                     title = "JUCE Test Tone 440 Hz",
-                    subtitle = "Native JUCE → Oboe output check",
+                    subtitle = "Native JUCE → Oboe output check (only when no track loaded)",
                     selected = toneOn,
                     onSelect = { on ->
                         toneOn = on
                         if (on) {
-                            com.liquidmusicglass.engine.automix.AutoMixNativeEngine.init(context)
-                            com.liquidmusicglass.engine.automix.AutoMixNativeEngine.startTone()
+                            engine.init(context)
+                            engine.startTone()
                         } else {
-                            com.liquidmusicglass.engine.automix.AutoMixNativeEngine.stopTone()
-                            com.liquidmusicglass.engine.automix.AutoMixNativeEngine.release()
+                            engine.stopTone()
                         }
                     }
+                )
+                PlainDivider()
+                SettingsActionItem(
+                    title = "JUCE: Pick & Play Track",
+                    subtitle = devStatus,
+                    icon = Icons.Rounded.PlayArrow,
+                    onClick = { pickTrack.launch(arrayOf("audio/*")) }
+                )
+                PlainDivider()
+                SettingsActionItem(
+                    title = "Pause",
+                    subtitle = "Pause JUCE transport",
+                    icon = Icons.Rounded.Pause,
+                    onClick = { engine.pause() }
+                )
+                PlainDivider()
+                SettingsActionItem(
+                    title = "Stop",
+                    subtitle = "Stop & rewind JUCE transport",
+                    icon = Icons.Rounded.Stop,
+                    onClick = { engine.stop() }
                 )
             }
 
@@ -773,5 +831,31 @@ private fun SleepTimerSelector(
                 )
             }
         }
+    }
+}
+
+/**
+ * DEV helper (Stage 2): copy a picked content:// audio file into the app cache so
+ * JUCE's AudioFormatManager can open it by path. Returns the absolute path, or
+ * null on failure. The extension is preserved so JUCE picks the right decoder.
+ */
+private fun copyUriToCache(context: Context, uri: Uri): String? {
+    return try {
+        val resolver = context.contentResolver
+        var displayName: String? = null
+        resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+            if (c.moveToFirst()) {
+                val idx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (idx >= 0) displayName = c.getString(idx)
+            }
+        }
+        val ext = displayName?.substringAfterLast('.', "")?.takeIf { it.isNotBlank() } ?: "wav"
+        val out = File(context.cacheDir, "automix_test.$ext")
+        resolver.openInputStream(uri)?.use { input ->
+            out.outputStream().use { output -> input.copyTo(output) }
+        } ?: return null
+        out.absolutePath
+    } catch (t: Throwable) {
+        null
     }
 }

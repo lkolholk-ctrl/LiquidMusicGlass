@@ -123,8 +123,13 @@ target_compile_definitions(automix_juce PRIVATE
     JUCE_USE_ANDROID_OBOE=1
     JUCE_USE_CURL=0
     JUCE_WEB_BROWSER=0
-    JUCE_USE_FLAC=0
-    JUCE_USE_OGGVORBIS=0
+    # Stage 2: decode real files. FLAC + Ogg Vorbis are bundled in JUCE (their
+    # C sources are #included by juce_audio_formats.cpp, which we already build —
+    # no extra CMake sources). WAV/AIFF are always on. MP3 stays off (JUCE's MP3
+    # decoder is evaluation-only/licensing-encumbered); mp3/aac come later via
+    # Android MediaCodec / FFmpeg.
+    JUCE_USE_FLAC=1
+    JUCE_USE_OGGVORBIS=1
     JUCE_USE_MP3AUDIOFORMAT=0
 )
 

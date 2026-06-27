@@ -48,6 +48,46 @@ Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeInit(
     return gEngine->init() ? JNI_TRUE : JNI_FALSE;
 }
 
+JNIEXPORT jboolean JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeLoadTrack(
+        JNIEnv* env, jobject /*thiz*/, jstring path)
+{
+    if (gEngine == nullptr || path == nullptr)
+        return JNI_FALSE;
+
+    const char* utf = env->GetStringUTFChars (path, nullptr);
+    if (utf == nullptr)
+        return JNI_FALSE;
+
+    const bool ok = gEngine->loadTrack (juce::String::fromUTF8 (utf));
+    env->ReleaseStringUTFChars (path, utf);
+    return ok ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativePlay(
+        JNIEnv* /*env*/, jobject /*thiz*/)
+{
+    if (gEngine != nullptr)
+        gEngine->play();
+}
+
+JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativePause(
+        JNIEnv* /*env*/, jobject /*thiz*/)
+{
+    if (gEngine != nullptr)
+        gEngine->pause();
+}
+
+JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeStop(
+        JNIEnv* /*env*/, jobject /*thiz*/)
+{
+    if (gEngine != nullptr)
+        gEngine->stop();
+}
+
 JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeStartTone(
         JNIEnv* /*env*/, jobject /*thiz*/)
