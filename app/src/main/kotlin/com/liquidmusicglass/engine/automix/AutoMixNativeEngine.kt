@@ -17,24 +17,38 @@ object AutoMixNativeEngine {
 
     private const val TAG = "AutoMixNativeEngine"
 
-    val available: Boolean
+    // 0 = not loaded yet, 1 = loaded, -1 = load failed.
+    @Volatile private var libState = 0
+    private var initialised = false
 
-    init {
-        available = try {
+    /**
+     * Lazily load libautomix_juce.so on FIRST real use — never at app/UI start.
+     * The native lib (JUCE + Signalsmith) and its AAudio device are large and
+     * compete for CMA/contiguous memory at cold start; loading them on demand
+     * (when the player / AutoMix is actually used) keeps the cold start light.
+     */
+    @Synchronized
+    private fun ensureLibrary(): Boolean {
+        if (libState == 1) return true
+        if (libState == -1) return false
+        return try {
             System.loadLibrary("automix_juce")
+            libState = 1
             true
         } catch (t: Throwable) {
             Log.w(TAG, "automix_juce native library not available", t)
+            libState = -1
             false
         }
     }
 
-    private var initialised = false
+    /** True only if the lib is already loaded. Reading this does NOT trigger a load. */
+    val isLoaded: Boolean get() = libState == 1
 
     /** Open the JUCE/Oboe output device. Returns true on success. Idempotent. */
     @Synchronized
     fun init(context: Context): Boolean {
-        if (!available) return false
+        if (!ensureLibrary()) return false
         if (initialised) return true
         return runCatching {
             val ok = nativeInit(context.applicationContext)
@@ -49,7 +63,7 @@ object AutoMixNativeEngine {
     /** Decode-open a local audio file into deck A. Returns true on success. */
     @Synchronized
     fun loadTrack(path: String): Boolean {
-        if (!available || !initialised) return false
+        if (!isLoaded || !initialised) return false
         return runCatching { nativeLoadTrack(path) }.getOrElse {
             Log.w(TAG, "nativeLoadTrack failed", it); false
         }
@@ -58,7 +72,7 @@ object AutoMixNativeEngine {
     /** Load a file into deck A (crossfade source). */
     @Synchronized
     fun loadTrackA(path: String): Boolean {
-        if (!available || !initialised) return false
+        if (!isLoaded || !initialised) return false
         return runCatching { nativeLoadTrackA(path) }.getOrElse {
             Log.w(TAG, "nativeLoadTrackA failed", it); false
         }
@@ -67,7 +81,7 @@ object AutoMixNativeEngine {
     /** Load a file into deck B (crossfade target). */
     @Synchronized
     fun loadTrackB(path: String): Boolean {
-        if (!available || !initialised) return false
+        if (!isLoaded || !initialised) return false
         return runCatching { nativeLoadTrackB(path) }.getOrElse {
             Log.w(TAG, "nativeLoadTrackB failed", it); false
         }
@@ -76,7 +90,7 @@ object AutoMixNativeEngine {
     /** Start an equal-power crossfade A -> B over durationMs. */
     @Synchronized
     fun startCrossfade(durationMs: Double) {
-        if (!available || !initialised) return
+        if (!isLoaded || !initialised) return
         runCatching { nativeStartCrossfade(durationMs) }
             .onFailure { Log.w(TAG, "nativeStartCrossfade failed", it) }
     }
@@ -87,7 +101,7 @@ object AutoMixNativeEngine {
      */
     @Synchronized
     fun prepareStretchB(bpmA: Double, bpmB: Double): Boolean {
-        if (!available || !initialised) return false
+        if (!isLoaded || !initialised) return false
         return runCatching { nativePrepareStretchB(bpmA, bpmB) }.getOrElse {
             Log.w(TAG, "nativePrepareStretchB failed", it); false
         }
@@ -96,42 +110,42 @@ object AutoMixNativeEngine {
     /** Start/resume playback of the loaded track. */
     @Synchronized
     fun play() {
-        if (!available || !initialised) return
+        if (!isLoaded || !initialised) return
         runCatching { nativePlay() }.onFailure { Log.w(TAG, "nativePlay failed", it) }
     }
 
     /** Pause playback (keeps position). */
     @Synchronized
     fun pause() {
-        if (!available || !initialised) return
+        if (!isLoaded || !initialised) return
         runCatching { nativePause() }.onFailure { Log.w(TAG, "nativePause failed", it) }
     }
 
     /** Stop playback and rewind to the start. */
     @Synchronized
     fun stop() {
-        if (!available || !initialised) return
+        if (!isLoaded || !initialised) return
         runCatching { nativeStop() }.onFailure { Log.w(TAG, "nativeStop failed", it) }
     }
 
     /** Start the 440 Hz test tone (only audible when no track is loaded). */
     @Synchronized
     fun startTone() {
-        if (!available || !initialised) return
+        if (!isLoaded || !initialised) return
         runCatching { nativeStartTone() }.onFailure { Log.w(TAG, "nativeStartTone failed", it) }
     }
 
     /** Stop the test tone (device stays open). */
     @Synchronized
     fun stopTone() {
-        if (!available || !initialised) return
+        if (!isLoaded || !initialised) return
         runCatching { nativeStopTone() }.onFailure { Log.w(TAG, "nativeStopTone failed", it) }
     }
 
     /** Close the device and free the engine. */
     @Synchronized
     fun release() {
-        if (!available || !initialised) return
+        if (!isLoaded || !initialised) return
         runCatching { nativeRelease() }.onFailure { Log.w(TAG, "nativeRelease failed", it) }
         initialised = false
     }

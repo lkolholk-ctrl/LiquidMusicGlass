@@ -53,6 +53,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.liquidmusicglass.engine.AppSettings
 import com.liquidmusicglass.engine.MediaCacheManager
@@ -505,6 +506,12 @@ fun SettingsScreen(
             var bpmA by remember { mutableStateOf("128") }
             var bpmB by remember { mutableStateOf("100") }
             val engine = com.liquidmusicglass.engine.automix.AutoMixNativeEngine
+
+            // Free the JUCE/Oboe device + decoded buffers when leaving this screen,
+            // so AAudio / native memory isn't held (no-op if never loaded).
+            DisposableEffect(Unit) {
+                onDispose { engine.release() }
+            }
 
             // Deck A: pick → copy → decode → play (audible immediately).
             val pickA = rememberLauncherForActivityResult(
