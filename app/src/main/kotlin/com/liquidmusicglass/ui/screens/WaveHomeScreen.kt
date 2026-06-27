@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.AccountCircle
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.CircularProgressIndicator
@@ -99,6 +100,11 @@ fun WaveHomeScreen(
     val homeContent by viewModel.homeContent.collectAsState()
     val charts by viewModel.charts.collectAsState()
 
+    // Активная «именованная» волна (по муду/треку/артисту). У дефолтной «Моей волны»
+    // имени нет → индикатор не показываем.
+    val waveContext by PlayerController.waveRefillContext.collectAsState()
+    val activeStationName = waveContext?.name?.takeIf { it.isNotBlank() }
+
     val albumColors = rememberAlbumColors(currentTrack?.displayArtUri, currentTrack?.coverUrl)
 
     val track = currentTrack
@@ -122,6 +128,16 @@ fun WaveHomeScreen(
             contentPadding = PaddingValues(bottom = 96.dp)
         ) {
             item { WaveTopBar(onSearch = onNavigateToSearch, onOpenProfile = onOpenProfile) }
+
+            // ── Индикатор активной волны (по муду/треку/артисту) + сброс на «Мою волну» ──
+            if (activeStationName != null) {
+                item {
+                    WaveStationIndicator(
+                        name = activeStationName,
+                        onClear = { viewModel.buildWaveQueue(context) }
+                    )
+                }
+            }
 
             // ── Hero ──
             item {
@@ -231,7 +247,7 @@ fun WaveHomeScreen(
             item {
                 Spacer(Modifier.height(8.dp))
                 WaveMoodTiles(
-                    onSelect = { mood -> viewModel.buildMoodWave(context, mood.query) },
+                    onSelect = { mood -> viewModel.buildMoodWave(context, mood.query, mood.label) },
                     animate = animationsActive
                 )
                 Spacer(Modifier.height(8.dp))
@@ -434,6 +450,45 @@ private fun FlatCircleButton(onClick: () -> Unit, content: @Composable () -> Uni
         contentAlignment = Alignment.Center
     ) {
         content()
+    }
+}
+
+/** Чип активной именованной волны: «Wave by <name>» + крестик сброса на My Wave. */
+@Composable
+private fun WaveStationIndicator(name: String, onClear: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .padding(horizontal = 20.dp, vertical = 4.dp)
+            .clip(androidx.compose.foundation.shape.CircleShape)
+            .background(Color.White.copy(alpha = 0.12f))
+            .padding(start = 14.dp, end = 4.dp, top = 5.dp, bottom = 5.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = "Wave by $name",
+            color = Color.White,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            fontFamily = AppFontFamily,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false)
+        )
+        Spacer(Modifier.width(4.dp))
+        Box(
+            modifier = Modifier
+                .size(24.dp)
+                .clip(androidx.compose.foundation.shape.CircleShape)
+                .clickable { onClear() },
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Close,
+                contentDescription = "Reset to My Wave",
+                tint = Color.White.copy(alpha = 0.85f),
+                modifier = Modifier.size(16.dp)
+            )
+        }
     }
 }
 
