@@ -96,6 +96,13 @@ target_include_directories(automix_juce PRIVATE
 # Stand in for the header juce_add_module would generate: tell each module which
 # sibling modules exist, and keep the footprint minimal (no net/browser/codecs).
 target_compile_definitions(automix_juce PRIVATE
+    # JUCE detects Android from a pre-defined JUCE_ANDROID (NOT __ANDROID__); the
+    # NDK also defines __linux__, so without this JUCE picks the Linux path and
+    # pulls <sys/dir.h> (gone on Android) and hides the JUCE_ANDROID-only API.
+    JUCE_ANDROID=1
+    # We provide module settings via -D below instead of a generated AppConfig,
+    # so silence JUCE's "No global header file was included!" guard.
+    JUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1
     JUCE_STANDALONE_APPLICATION=1
     JUCE_MODULE_AVAILABLE_juce_core=1
     JUCE_MODULE_AVAILABLE_juce_events=1
