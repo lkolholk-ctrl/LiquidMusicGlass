@@ -596,7 +596,7 @@ fun SettingsScreen(
                 PlainDivider()
                 SettingsActionItem(
                     title = "Beat-match B → A (stretch)",
-                    subtitle = "RubberBand prefetch — run before crossfade",
+                    subtitle = "Signalsmith prefetch — run before crossfade",
                     icon = Icons.Rounded.Speed,
                     onClick = {
                         scope.launch {

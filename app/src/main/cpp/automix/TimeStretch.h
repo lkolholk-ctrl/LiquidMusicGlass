@@ -5,8 +5,8 @@
 namespace automix
 {
     /**
-     * Stage 4: offline (prefetch) time-stretch using RubberBand's "finer" (R3)
-     * engine. Pitch is preserved (no chipmunk effect); only tempo changes.
+     * Stage 4: offline (prefetch) time-stretch using Signalsmith Stretch
+     * (MIT, header-only). Pitch is preserved (no chipmunk effect); tempo changes.
      *
      * @param in          source PCM (any channel count, interleaved-by-channel)
      * @param sampleRate  source sample rate (Hz)
