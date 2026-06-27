@@ -28,6 +28,7 @@ import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
@@ -505,7 +506,12 @@ fun SettingsScreen(
             }
             var bpmA by remember { mutableStateOf("128") }
             var bpmB by remember { mutableStateOf("100") }
+            var pathA by remember { mutableStateOf<String?>(null) }
+            var pathB by remember { mutableStateOf<String?>(null) }
+            var juceAutoMix by remember { mutableStateOf(false) }
             val engine = com.liquidmusicglass.engine.automix.AutoMixNativeEngine
+            // Real ML analysis chain (model decides duration/type/offset/bpm).
+            val autoMixController = remember { com.liquidmusicglass.automix.AutoMixController(context.applicationContext) }
 
             // Free the JUCE/Oboe device + decoded buffers when leaving this screen,
             // so AAudio / native memory isn't held (no-op if never loaded).
@@ -522,6 +528,7 @@ fun SettingsScreen(
                         devStatus = "Loading A…"
                         val path = withContext(Dispatchers.IO) { copyUriToCache(context, uri, "A") }
                         if (path == null) { devStatus = "A copy failed"; return@launch }
+                        pathA = path
                         engine.init(context)
                         if (engine.loadTrackA(path)) {
                             engine.play()
@@ -542,6 +549,7 @@ fun SettingsScreen(
                         devStatus = "Loading B…"
                         val path = withContext(Dispatchers.IO) { copyUriToCache(context, uri, "B") }
                         if (path == null) { devStatus = "B copy failed"; return@launch }
+                        pathB = path
                         engine.init(context)
                         if (engine.loadTrackB(path)) {
                             devStatus = "B loaded: ${path.substringAfterLast('/')} — hit Crossfade"
@@ -638,6 +646,62 @@ fun SettingsScreen(
                     subtitle = "Stop & rewind both decks",
                     icon = Icons.Rounded.Stop,
                     onClick = { engine.stop() }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(28.dp))
+
+            // ── DEV: AutoMix model -> JUCE (Stage 6) ──
+            // Separate from the global AutoMix toggle. ON = the ML model analyses
+            // the picked A/B pair and JUCE executes the blend by its decisions.
+            SectionLabel("DEV — AUTOMIX (MODEL → JUCE)")
+            PlainCard {
+                SettingsToggleItem(
+                    title = "JUCE AutoMix (test)",
+                    subtitle = "On: model decides → JUCE executes. Off: legacy Media3 path.",
+                    selected = juceAutoMix,
+                    onSelect = { juceAutoMix = it }
+                )
+                PlainDivider()
+                SettingsActionItem(
+                    title = "Run AutoMix transition (A → B)",
+                    subtitle = devStatus,
+                    icon = Icons.Rounded.AutoAwesome,
+                    onClick = {
+                        scope.launch {
+                            val pa = pathA; val pb = pathB
+                            if (pa == null || pb == null) { devStatus = "Pick Deck A & B first"; return@launch }
+                            if (!juceAutoMix) {
+                                devStatus = "Toggle 'JUCE AutoMix' ON (off = legacy Media3 path)"
+                                return@launch
+                            }
+                            devStatus = "Model analysing pair…"
+                            val fa = File(pa); val fb = File(pb)
+                            val durA = withContext(Dispatchers.IO) { audioDurationMs(fa) }
+                            val feat = withContext(Dispatchers.IO) {
+                                autoMixController.analyzeTrackPair(Uri.fromFile(fa), Uri.fromFile(fb), durA)
+                            }
+                            // Log what the model decided (proves it dirigates JUCE).
+                            android.util.Log.i(
+                                "JUCEAutoMix",
+                                "MODEL → JUCE: xfade=${feat.crossfadeDurationMs}ms type=${feat.transitionType} " +
+                                    "entry=${feat.entryOffsetMs}ms bpmA=${feat.bpmA} bpmB=${feat.bpmB} compat=${feat.compatibility}"
+                            )
+                            // Execute the blend in JUCE by the model's parameters.
+                            engine.init(context)
+                            engine.loadTrackA(pa)
+                            engine.loadTrackB(pb)
+                            engine.setEntryOffsetB(feat.entryOffsetMs.toDouble())
+                            val ba = feat.bpmA; val bb = feat.bpmB
+                            if (ba != null && bb != null && ba > 0f && bb > 0f) {
+                                withContext(Dispatchers.IO) { engine.prepareStretchB(ba.toDouble(), bb.toDouble()) }
+                            }
+                            engine.play()
+                            engine.startCrossfade(feat.crossfadeDurationMs.toDouble())
+                            devStatus = "JUCE: ${feat.crossfadeDurationMs}ms · type ${feat.transitionType} · " +
+                                "bpm ${ba?.toInt() ?: "?"}→${bb?.toInt() ?: "?"} · entry ${feat.entryOffsetMs}ms"
+                        }
+                    }
                 )
             }
 
@@ -938,5 +1002,18 @@ private fun copyUriToCache(context: Context, uri: Uri, slot: String): String? {
         out.absolutePath
     } catch (t: Throwable) {
         null
+    }
+}
+
+/** DEV helper: track duration (ms) for the AutoMix model analysis window. */
+private fun audioDurationMs(file: File): Long {
+    return try {
+        val r = android.media.MediaMetadataRetriever()
+        r.setDataSource(file.absolutePath)
+        val d = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
+        r.release()
+        d ?: 180_000L
+    } catch (_: Throwable) {
+        180_000L
     }
 }

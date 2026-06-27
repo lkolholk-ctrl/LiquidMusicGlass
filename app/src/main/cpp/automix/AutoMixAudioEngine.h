@@ -42,6 +42,10 @@ public:
     /** Equal-power crossfade deck A -> deck B over durationMs. Starts both decks. */
     void startCrossfade (double durationMs);
 
+    /** Stage 6: where deck B enters from (model's entryOffsetMs). Applied at the
+     *  next startCrossfade. 0 (default) keeps the Stage 3-5 behaviour unchanged. */
+    void setEntryOffsetB (double ms);
+
     /**
      * Stage 4: pre-stretch deck B so its tempo matches deck A (bpmB -> bpmA),
      * pitch preserved. Heavy/offline — call off the audio & main threads, before
@@ -100,6 +104,7 @@ private:
     long long crossfadePos { 0 };                 // audio-thread only
     std::atomic<float> baseGainA { 1.0f };        // gains outside an active crossfade
     std::atomic<float> baseGainB { 0.0f };
+    std::atomic<double> entryOffsetMsB { 0.0 };   // deck B entry point (model decides)
 
     double currentSampleRate { 44100.0 };
     int    currentBlockSize  { 512 };

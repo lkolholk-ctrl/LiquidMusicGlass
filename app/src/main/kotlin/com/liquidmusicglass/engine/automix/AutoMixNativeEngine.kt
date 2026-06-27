@@ -95,6 +95,14 @@ object AutoMixNativeEngine {
             .onFailure { Log.w(TAG, "nativeStartCrossfade failed", it) }
     }
 
+    /** Set deck B's entry point (model's entryOffsetMs), applied at next crossfade. */
+    @Synchronized
+    fun setEntryOffsetB(ms: Double) {
+        if (!isLoaded || !initialised) return
+        runCatching { nativeSetEntryOffsetB(ms) }
+            .onFailure { Log.w(TAG, "nativeSetEntryOffsetB failed", it) }
+    }
+
     /**
      * Pre-stretch deck B to match deck A's tempo (beat-match), pitch preserved.
      * Heavy/offline — call from a background thread BEFORE startCrossfade.
@@ -156,6 +164,7 @@ object AutoMixNativeEngine {
     private external fun nativeLoadTrackB(path: String): Boolean
     private external fun nativeStartCrossfade(durationMs: Double)
     private external fun nativePrepareStretchB(bpmA: Double, bpmB: Double): Boolean
+    private external fun nativeSetEntryOffsetB(ms: Double)
     private external fun nativePlay()
     private external fun nativePause()
     private external fun nativeStop()

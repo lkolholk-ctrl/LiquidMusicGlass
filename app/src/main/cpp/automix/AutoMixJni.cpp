@@ -104,6 +104,14 @@ Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativePrepareStretc
 }
 
 JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeSetEntryOffsetB(
+        JNIEnv* /*env*/, jobject /*thiz*/, jdouble ms)
+{
+    if (gEngine != nullptr)
+        gEngine->setEntryOffsetB ((double) ms);
+}
+
+JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativePlay(
         JNIEnv* /*env*/, jobject /*thiz*/)
 {

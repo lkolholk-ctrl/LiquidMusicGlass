@@ -196,13 +196,18 @@ void AutoMixAudioEngine::startCrossfade (double durationMs)
         deckA.transport.start();
     if (deckB.hasTrack.load())
     {
-        deckB.transport.setPosition (0.0);
+        deckB.transport.setPosition (entryOffsetMsB.load() / 1000.0); // model's entry point
         deckB.transport.start();
     }
 
     baseGainA.store (1.0f);
     baseGainB.store (0.0f);
     crossfadeStart.store (true); // audio thread resets position + activates
+}
+
+void AutoMixAudioEngine::setEntryOffsetB (double ms)
+{
+    entryOffsetMsB.store (ms < 0.0 ? 0.0 : ms);
 }
 
 //==============================================================================
