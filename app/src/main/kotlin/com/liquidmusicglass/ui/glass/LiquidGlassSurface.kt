@@ -8,15 +8,17 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.kyant.backdrop.backdrops.LayerBackdrop
-import com.kyant.backdrop.drawBackdrop
-import com.kyant.backdrop.effects.blur
-import com.kyant.backdrop.effects.lens
-import com.kyant.backdrop.effects.vibrancy
+import com.liquidmusicglass.ui.theme.LiquidTheme
 
+/**
+ * iOS-стиль (Batch 5): стекла на контенте больше нет — это плоская светло-серая
+ * карточка-подложка под текущую тему (как Settings). [backdrop] и blur/tint-параметры
+ * сохранены в сигнатуре ради совместимости вызовов, но не используются. Стекло
+ * осталось только на тумблерах (LiquidToggle).
+ */
 @Composable
 fun LiquidGlassSurface(
     backdrop: LayerBackdrop,
@@ -30,42 +32,13 @@ fun LiquidGlassSurface(
     content: @Composable () -> Unit
 ) {
     val shape = RoundedCornerShape(cornerRadiusDp.dp)
-
-    // degraded (warmup/слабый GPU): без backdrop-capture/blur/lens — плоская
-    // полупрозрачная подложка. Это снимает один из главных GPU-расходов первого кадра.
-    if (com.liquidmusicglass.ui.PerfMonitor.degraded) {
-        Box(
-            modifier = modifier
-                .clip(shape)
-                .background(Color.White.copy(alpha = (tintAlpha + 0.10f).coerceAtMost(0.45f)))
-                .border(1.dp, Color.White.copy(alpha = borderAlpha), shape)
-        ) { content() }
-        return
-    }
-
+    val lc = LiquidTheme.colors
+    val surface = if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7)
+    val border = if (lc.isDark) Color.White.copy(alpha = 0.06f) else Color.Black.copy(alpha = 0.05f)
     Box(
         modifier = modifier
-            .drawBackdrop(
-                backdrop = backdrop,
-                shape = { shape },
-                effects = {
-                    vibrancy()
-                    blur(blurRadius.toPx())
-                    lens(
-                        refractionHeight = refractionHeight.toPx(),
-                        refractionAmount = refractionAmount.toPx(),
-                        chromaticAberration = true
-                    )
-                },
-                onDrawSurface = {
-                    drawRect(Color.White.copy(alpha = tintAlpha))
-                    drawRect(
-                        color = Color.White.copy(alpha = borderAlpha),
-                        style = Stroke(width = 1.dp.toPx())
-                    )
-                }
-            )
-    ) {
-        content()
-    }
+            .clip(shape)
+            .background(surface)
+            .border(0.8.dp, border, shape)
+    ) { content() }
 }
