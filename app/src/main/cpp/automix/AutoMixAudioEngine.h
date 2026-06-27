@@ -6,17 +6,15 @@
 #include <memory>
 
 /**
- * Stage 2 of the native AutoMix engine: decode and play ONE real audio file
- * through JUCE -> Oboe.
+ * Stage 3 of the native AutoMix engine: TWO decks + equal-power crossfade.
  *
- * Owns a juce::AudioDeviceManager (drives Oboe on Android) plus a small JUCE
- * playback graph: AudioFormatManager -> AudioFormatReaderSource -> a buffered
- * AudioTransportSource. The audio callback pulls PCM from the transport, so the
- * device plays the decoded track. The Stage 1 440 Hz tone is kept as a quick
- * diagnostic when no track is loaded.
+ * Each deck (A and B) decodes its own file — JUCE readers for wav/aiff/flac/ogg,
+ * or the platform MediaCodec for mp3/aac — into an AudioTransportSource. The
+ * realtime callback pulls both decks and sums them with a per-sample equal-power
+ * envelope (cos/sin), so a crossfade has no clicks and no mid-point level dip.
  *
- * Still single-track only: no second deck, mixing, crossfade, time-stretch or
- * model integration (those are later stages).
+ * Still only volume crossfade: no time-stretch, beat-match, EQ or model
+ * integration (those are later stages).
  */
 class AutoMixAudioEngine : public juce::AudioIODeviceCallback
 {
@@ -24,52 +22,74 @@ public:
     AutoMixAudioEngine();
     ~AutoMixAudioEngine() override;
 
-    /** Open the default output device and attach our callback. Idempotent. */
     bool init();
-
-    /** Detach the callback and close the device. Safe to call multiple times. */
     void release();
 
-    // Stage 1 diagnostic tone (used only when no track is loaded) -------------
+    // Stage 1 diagnostic tone (only when neither deck has a track) -----------
     void startTone();
     void stopTone();
 
-    // Stage 2 single-track playback ------------------------------------------
-    /** Decode-open a local file. Returns false if missing/unsupported format. */
-    bool loadTrack(const juce::String& path);
+    // Stage 2/3 playback -----------------------------------------------------
+    bool loadTrack  (const juce::String& path);   // back-compat alias -> deck A
+    bool loadTrackA (const juce::String& path);
+    bool loadTrackB (const juce::String& path);
     void play();
     void pause();
     void stop();
 
+    /** Equal-power crossfade deck A -> deck B over durationMs. Starts both decks. */
+    void startCrossfade (double durationMs);
+
     // juce::AudioIODeviceCallback
-    void audioDeviceAboutToStart(juce::AudioIODevice* device) override;
+    void audioDeviceAboutToStart (juce::AudioIODevice* device) override;
     void audioDeviceStopped() override;
-    void audioDeviceIOCallbackWithContext(const float* const* inputChannelData,
-                                          int numInputChannels,
-                                          float* const* outputChannelData,
-                                          int numOutputChannels,
-                                          int numSamples,
-                                          const juce::AudioIODeviceCallbackContext& context) override;
+    void audioDeviceIOCallbackWithContext (const float* const* inputChannelData,
+                                           int numInputChannels,
+                                           float* const* outputChannelData,
+                                           int numOutputChannels,
+                                           int numSamples,
+                                           const juce::AudioIODeviceCallbackContext& context) override;
 
 private:
+    struct Deck
+    {
+        juce::AudioTransportSource transport;
+        std::unique_ptr<juce::AudioFormatReaderSource> readerSource; // wav/flac/ogg
+        juce::AudioBuffer<float> decodedBuffer;                      // mp3/aac (MediaCodec)
+        std::unique_ptr<juce::MemoryAudioSource> memorySource;
+        std::atomic<bool> hasTrack { false };
+
+        Deck() = default;
+        JUCE_DECLARE_NON_COPYABLE (Deck)
+    };
+
+    bool loadDeck (Deck& deck, const juce::String& path);
+
     juce::AudioDeviceManager deviceManager;
     juce::AudioFormatManager formatManager;
     juce::TimeSliceThread readAheadThread { "automix-readahead" };
-    std::unique_ptr<juce::AudioFormatReaderSource> readerSource; // wav/flac/ogg via JUCE
-    juce::AudioBuffer<float> decodedBuffer;                       // mp3/aac via MediaCodec
-    std::unique_ptr<juce::MemoryAudioSource> memorySource;
-    juce::AudioTransportSource transport;
+
+    Deck deckA, deckB;
+    juce::AudioBuffer<float> scratchA, scratchB; // per-block pull buffers (audio thread)
 
     std::atomic<bool> initialised { false };
     std::atomic<bool> toneOn { false };
-    std::atomic<bool> hasTrack { false };
+
+    // Crossfade state. crossfadeStart is latched by the audio thread so the
+    // sample position resets in sync; everything else is plain atomics.
+    std::atomic<bool> crossfadeStart  { false };
+    std::atomic<bool> crossfadeActive { false };
+    std::atomic<long long> crossfadeTotal { 0 };  // total samples
+    long long crossfadePos { 0 };                 // audio-thread only
+    std::atomic<float> baseGainA { 1.0f };        // gains outside an active crossfade
+    std::atomic<float> baseGainB { 0.0f };
 
     double currentSampleRate { 44100.0 };
     int    currentBlockSize  { 512 };
     double phase { 0.0 };
 
     static constexpr double kToneHz = 440.0;
-    static constexpr float  kToneAmplitude = 0.2f; // quiet, don't deafen
+    static constexpr float  kToneAmplitude = 0.2f;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AutoMixAudioEngine)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AutoMixAudioEngine)
 };

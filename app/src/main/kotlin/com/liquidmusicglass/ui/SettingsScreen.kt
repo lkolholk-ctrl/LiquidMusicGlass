@@ -25,6 +25,8 @@ import androidx.compose.material.icons.rounded.Equalizer
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.material.icons.rounded.SwapHoriz
+import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -494,29 +496,44 @@ fun SettingsScreen(
 
             var toneOn by remember { mutableStateOf(false) }
             var devStatus by remember {
-                mutableStateOf("Decodes: WAV/AIFF/FLAC/OGG (JUCE) + MP3/AAC/M4A (MediaCodec)")
+                mutableStateOf("WAV/AIFF/FLAC/OGG (JUCE) + MP3/AAC/M4A (MediaCodec)")
             }
             val engine = com.liquidmusicglass.engine.automix.AutoMixNativeEngine
 
-            // System file picker → copy to cache → JUCE decode + play.
-            val pickTrack = rememberLauncherForActivityResult(
+            // Deck A: pick → copy → decode → play (audible immediately).
+            val pickA = rememberLauncherForActivityResult(
                 ActivityResultContracts.OpenDocument()
             ) { uri ->
                 if (uri != null) {
                     scope.launch {
-                        devStatus = "Loading…"
-                        val path = withContext(Dispatchers.IO) { copyUriToCache(context, uri) }
-                        if (path == null) {
-                            devStatus = "Copy failed"
-                            return@launch
-                        }
+                        devStatus = "Loading A…"
+                        val path = withContext(Dispatchers.IO) { copyUriToCache(context, uri, "A") }
+                        if (path == null) { devStatus = "A copy failed"; return@launch }
                         engine.init(context)
-                        val ok = engine.loadTrack(path)
-                        if (ok) {
+                        if (engine.loadTrackA(path)) {
                             engine.play()
-                            devStatus = "Playing: ${path.substringAfterLast('/')}"
+                            devStatus = "A playing: ${path.substringAfterLast('/')}"
                         } else {
-                            devStatus = "Decode failed (unsupported?): ${path.substringAfterLast('/')}"
+                            devStatus = "A decode failed: ${path.substringAfterLast('/')}"
+                        }
+                    }
+                }
+            }
+
+            // Deck B: pick → copy → decode → load (silent until crossfade).
+            val pickB = rememberLauncherForActivityResult(
+                ActivityResultContracts.OpenDocument()
+            ) { uri ->
+                if (uri != null) {
+                    scope.launch {
+                        devStatus = "Loading B…"
+                        val path = withContext(Dispatchers.IO) { copyUriToCache(context, uri, "B") }
+                        if (path == null) { devStatus = "B copy failed"; return@launch }
+                        engine.init(context)
+                        if (engine.loadTrackB(path)) {
+                            devStatus = "B loaded: ${path.substringAfterLast('/')} — hit Crossfade"
+                        } else {
+                            devStatus = "B decode failed: ${path.substringAfterLast('/')}"
                         }
                     }
                 }
@@ -525,36 +542,45 @@ fun SettingsScreen(
             PlainCard {
                 SettingsToggleItem(
                     title = "JUCE Test Tone 440 Hz",
-                    subtitle = "Native JUCE → Oboe output check (only when no track loaded)",
+                    subtitle = "Output check (only when no track loaded)",
                     selected = toneOn,
                     onSelect = { on ->
                         toneOn = on
-                        if (on) {
-                            engine.init(context)
-                            engine.startTone()
-                        } else {
-                            engine.stopTone()
-                        }
+                        if (on) { engine.init(context); engine.startTone() } else engine.stopTone()
                     }
                 )
                 PlainDivider()
                 SettingsActionItem(
-                    title = "JUCE: Pick & Play Track",
+                    title = "Deck A: Pick & Play",
                     subtitle = devStatus,
                     icon = Icons.Rounded.PlayArrow,
-                    onClick = { pickTrack.launch(arrayOf("audio/*")) }
+                    onClick = { pickA.launch(arrayOf("audio/*")) }
+                )
+                PlainDivider()
+                SettingsActionItem(
+                    title = "Deck B: Pick (load)",
+                    subtitle = "Second track for the crossfade",
+                    icon = Icons.Rounded.LibraryMusic,
+                    onClick = { pickB.launch(arrayOf("audio/*")) }
+                )
+                PlainDivider()
+                SettingsActionItem(
+                    title = "Start Crossfade (8s)",
+                    subtitle = "Equal-power A → B",
+                    icon = Icons.Rounded.SwapHoriz,
+                    onClick = { engine.startCrossfade(8000.0) }
                 )
                 PlainDivider()
                 SettingsActionItem(
                     title = "Pause",
-                    subtitle = "Pause JUCE transport",
+                    subtitle = "Pause both decks",
                     icon = Icons.Rounded.Pause,
                     onClick = { engine.pause() }
                 )
                 PlainDivider()
                 SettingsActionItem(
                     title = "Stop",
-                    subtitle = "Stop & rewind JUCE transport",
+                    subtitle = "Stop & rewind both decks",
                     icon = Icons.Rounded.Stop,
                     onClick = { engine.stop() }
                 )
@@ -839,7 +865,7 @@ private fun SleepTimerSelector(
  * JUCE's AudioFormatManager can open it by path. Returns the absolute path, or
  * null on failure. The extension is preserved so JUCE picks the right decoder.
  */
-private fun copyUriToCache(context: Context, uri: Uri): String? {
+private fun copyUriToCache(context: Context, uri: Uri, slot: String): String? {
     return try {
         val resolver = context.contentResolver
         var displayName: String? = null
@@ -850,7 +876,7 @@ private fun copyUriToCache(context: Context, uri: Uri): String? {
             }
         }
         val ext = displayName?.substringAfterLast('.', "")?.takeIf { it.isNotBlank() } ?: "wav"
-        val out = File(context.cacheDir, "automix_test.$ext")
+        val out = File(context.cacheDir, "automix_$slot.$ext")
         resolver.openInputStream(uri)?.use { input ->
             out.outputStream().use { output -> input.copyTo(output) }
         } ?: return null

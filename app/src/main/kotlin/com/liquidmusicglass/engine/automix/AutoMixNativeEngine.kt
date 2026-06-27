@@ -46,13 +46,39 @@ object AutoMixNativeEngine {
         }
     }
 
-    /** Decode-open a local audio file. Returns true if a reader was created. */
+    /** Decode-open a local audio file into deck A. Returns true on success. */
     @Synchronized
     fun loadTrack(path: String): Boolean {
         if (!available || !initialised) return false
         return runCatching { nativeLoadTrack(path) }.getOrElse {
             Log.w(TAG, "nativeLoadTrack failed", it); false
         }
+    }
+
+    /** Load a file into deck A (crossfade source). */
+    @Synchronized
+    fun loadTrackA(path: String): Boolean {
+        if (!available || !initialised) return false
+        return runCatching { nativeLoadTrackA(path) }.getOrElse {
+            Log.w(TAG, "nativeLoadTrackA failed", it); false
+        }
+    }
+
+    /** Load a file into deck B (crossfade target). */
+    @Synchronized
+    fun loadTrackB(path: String): Boolean {
+        if (!available || !initialised) return false
+        return runCatching { nativeLoadTrackB(path) }.getOrElse {
+            Log.w(TAG, "nativeLoadTrackB failed", it); false
+        }
+    }
+
+    /** Start an equal-power crossfade A -> B over durationMs. */
+    @Synchronized
+    fun startCrossfade(durationMs: Double) {
+        if (!available || !initialised) return
+        runCatching { nativeStartCrossfade(durationMs) }
+            .onFailure { Log.w(TAG, "nativeStartCrossfade failed", it) }
     }
 
     /** Start/resume playback of the loaded track. */
@@ -100,6 +126,9 @@ object AutoMixNativeEngine {
 
     private external fun nativeInit(context: Context): Boolean
     private external fun nativeLoadTrack(path: String): Boolean
+    private external fun nativeLoadTrackA(path: String): Boolean
+    private external fun nativeLoadTrackB(path: String): Boolean
+    private external fun nativeStartCrossfade(durationMs: Double)
     private external fun nativePlay()
     private external fun nativePause()
     private external fun nativeStop()

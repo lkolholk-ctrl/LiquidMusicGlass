@@ -48,9 +48,9 @@ Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeInit(
     return gEngine->init() ? JNI_TRUE : JNI_FALSE;
 }
 
-JNIEXPORT jboolean JNICALL
-Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeLoadTrack(
-        JNIEnv* env, jobject /*thiz*/, jstring path)
+// Shared helper: jstring -> juce::String, invoke a deck loader.
+template <typename Fn>
+static jboolean loadInto (JNIEnv* env, jstring path, Fn&& fn)
 {
     if (gEngine == nullptr || path == nullptr)
         return JNI_FALSE;
@@ -59,9 +59,38 @@ Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeLoadTrack(
     if (utf == nullptr)
         return JNI_FALSE;
 
-    const bool ok = gEngine->loadTrack (juce::String::fromUTF8 (utf));
+    const bool ok = fn (juce::String::fromUTF8 (utf));
     env->ReleaseStringUTFChars (path, utf);
     return ok ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeLoadTrack(
+        JNIEnv* env, jobject /*thiz*/, jstring path)
+{
+    return loadInto (env, path, [] (const juce::String& p) { return gEngine->loadTrack (p); });
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeLoadTrackA(
+        JNIEnv* env, jobject /*thiz*/, jstring path)
+{
+    return loadInto (env, path, [] (const juce::String& p) { return gEngine->loadTrackA (p); });
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeLoadTrackB(
+        JNIEnv* env, jobject /*thiz*/, jstring path)
+{
+    return loadInto (env, path, [] (const juce::String& p) { return gEngine->loadTrackB (p); });
+}
+
+JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeStartCrossfade(
+        JNIEnv* /*env*/, jobject /*thiz*/, jdouble durationMs)
+{
+    if (gEngine != nullptr)
+        gEngine->startCrossfade ((double) durationMs);
 }
 
 JNIEXPORT void JNICALL
