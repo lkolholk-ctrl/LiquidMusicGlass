@@ -516,10 +516,13 @@ fun SettingsScreen(
             val autoMixLazy = remember { lazy { com.liquidmusicglass.automix.AutoMixController(context.applicationContext) } }
             var autoMixJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
-            // Free the JUCE/Oboe device + decoded buffers when leaving this screen,
-            // so AAudio / native memory isn't held (no-op if never loaded).
+            // Free the JUCE/Oboe device + decoded buffers (and the ML model if it was
+            // loaded) when leaving this screen, so nothing heavy is held in the bg.
             DisposableEffect(Unit) {
-                onDispose { engine.release() }
+                onDispose {
+                    engine.release()
+                    if (autoMixLazy.isInitialized()) runCatching { autoMixLazy.value.release() }
+                }
             }
 
             // Deck A: pick → copy → decode → play (audible immediately).
@@ -697,10 +700,16 @@ fun SettingsScreen(
                                     "start=${feat.transitionStartMs}ms entry=${feat.entryOffsetMs}ms " +
                                     "bpmA=${feat.bpmA} bpmB=${feat.bpmB} compat=${feat.compatibility} ready=${feat.readyForTransition}"
                             )
+                            // Model can decide NOT to mix (low compatibility) — that's
+                            // the model dirigating too. Don't wait the whole track then.
+                            if (!feat.readyForTransition) {
+                                devStatus = "Model: pair not compatible (compat=${"%.2f".format(feat.compatibility)}) — no transition"
+                                return@launch
+                            }
                             devStatus = "Armed · model xfade=${feat.crossfadeDurationMs}ms start=${feat.transitionStartMs}ms — waiting for cue…"
 
                             // 2) Wait for the transition cue (transitionStartMs / remaining),
-                            //    SEPARATE from analysis. JUCE wakes deck B only at the cue.
+                            //    SEPARATE from analysis — fires near the end, not now.
                             val controller = autoMixLazy.value
                             while (true) {
                                 delay(250)
@@ -715,9 +724,10 @@ fun SettingsScreen(
                                             "${decision.crossfadeDurationMs}ms type ${decision.transitionType}"
                                     )
                                     devStatus = "Cue @ ${posMs / 1000}s (rem ${remaining / 1000}s) → JUCE blending…"
+                                    // Deck B was decoded on pick; the heavy beat-match
+                                    // (re-decode + stretch) happens here, at the cue.
                                     val ba = feat.bpmA; val bb = feat.bpmB
                                     withContext(Dispatchers.IO) {
-                                        engine.loadTrackB(pb)                              // JUCE wakes deck B now
                                         engine.setEntryOffsetB(feat.entryOffsetMs.toDouble())
                                         if (ba != null && bb != null && ba > 0f && bb > 0f) {
                                             engine.prepareStretchB(ba.toDouble(), bb.toDouble())
@@ -729,7 +739,7 @@ fun SettingsScreen(
                                     break
                                 }
                                 if (lenMs > 0 && posMs >= lenMs - 100) {
-                                    devStatus = "Track A ended, no cue (model not ready?)"
+                                    devStatus = "Track A ended before cue (start=${feat.transitionStartMs}ms)"
                                     break
                                 }
                             }
