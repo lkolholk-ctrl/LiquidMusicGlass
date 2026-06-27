@@ -494,7 +494,7 @@ fun SettingsScreen(
 
             var toneOn by remember { mutableStateOf(false) }
             var devStatus by remember {
-                mutableStateOf("Decodes: WAV, AIFF, FLAC, OGG (no MP3/AAC out of the box)")
+                mutableStateOf("Decodes: WAV/AIFF/FLAC/OGG (JUCE) + MP3/AAC/M4A (MediaCodec)")
             }
             val engine = com.liquidmusicglass.engine.automix.AutoMixNativeEngine
 

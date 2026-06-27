@@ -1,4 +1,5 @@
 #include "AutoMixAudioEngine.h"
+#include "MediaCodecDecoder.h"
 
 #include <cmath>
 
@@ -16,6 +17,7 @@ AutoMixAudioEngine::~AutoMixAudioEngine()
     release();
     transport.setSource (nullptr);
     readerSource.reset();
+    memorySource.reset();
     readAheadThread.stopThread (2000);
 }
 
@@ -60,6 +62,7 @@ bool AutoMixAudioEngine::loadTrack (const juce::String& path)
     hasTrack.store (false);
     transport.setSource (nullptr);
     readerSource.reset();
+    memorySource.reset();
 
     const juce::File file (path);
     if (! file.existsAsFile())
@@ -68,23 +71,40 @@ bool AutoMixAudioEngine::loadTrack (const juce::String& path)
         return false;
     }
 
-    // createReaderFor picks a format by file extension; returns nullptr for
-    // unsupported types (e.g. mp3/aac in this build).
-    auto* reader = formatManager.createReaderFor (file);
-    if (reader == nullptr)
+    // First try JUCE's own readers (wav/aiff/flac/ogg). createReaderFor picks a
+    // format by extension and returns nullptr for types JUCE can't decode.
+    if (auto* reader = formatManager.createReaderFor (file))
     {
-        DBG ("AutoMixAudioEngine: no reader (unsupported format?): " << path);
+        readerSource = std::make_unique<juce::AudioFormatReaderSource> (reader, true);
+
+        // readAhead buffer + thread keep file reads off the realtime thread;
+        // sourceSampleRateToCorrectFor makes the transport resample to the device.
+        transport.setSource (readerSource.get(),
+                             32768,
+                             &readAheadThread,
+                             reader->sampleRate,
+                             2);
+        transport.setPosition (0.0);
+        hasTrack.store (true);
+        return true;
+    }
+
+    // Fallback for mp3/aac/m4a: decode with the platform MediaCodec into memory,
+    // then play that buffer through the same transport (resampled to the device).
+    double decodedRate = 0.0;
+    if (! automix::decodeWithMediaCodec (path, decodedBuffer, decodedRate))
+    {
+        DBG ("AutoMixAudioEngine: no JUCE reader and MediaCodec decode failed: " << path);
         return false;
     }
 
-    readerSource = std::make_unique<juce::AudioFormatReaderSource> (reader, true);
-
-    // readAhead buffer + thread keep decoding off the realtime thread;
-    // sourceSampleRateToCorrectFor makes the transport resample to the device.
-    transport.setSource (readerSource.get(),
-                         32768,
-                         &readAheadThread,
-                         reader->sampleRate,
+    // MemoryAudioSource references decodedBuffer (kept alive as a member), so the
+    // realtime callback only copies already-decoded PCM — no codec work there.
+    memorySource = std::make_unique<juce::MemoryAudioSource> (decodedBuffer, false, false);
+    transport.setSource (memorySource.get(),
+                         0,
+                         nullptr,
+                         decodedRate,
                          2);
     transport.setPosition (0.0);
     hasTrack.store (true);

@@ -81,6 +81,7 @@ add_library(
     SHARED
     automix/AutoMixAudioEngine.cpp
     automix/AutoMixJni.cpp
+    automix/MediaCodecDecoder.cpp
     # JUCE module unity builds, compiled directly (no juceaide). Order doesn't
     # matter for a single static-link target; deps resolved via the
     # JUCE_MODULE_AVAILABLE_* defines below.
@@ -137,10 +138,13 @@ find_library(android-lib android)
 find_library(juce-log-lib log)
 find_library(opensl-lib OpenSLES)
 find_library(aaudio-lib aaudio)
+# System media NDK (AMediaExtractor/AMediaCodec) for mp3/aac decode — no APK size.
+find_library(mediandk-lib mediandk)
 
 target_link_libraries(automix_juce
     ${android-lib}
     ${juce-log-lib}
     ${opensl-lib}
     ${aaudio-lib}
+    ${mediandk-lib}
 )

@@ -55,7 +55,9 @@ private:
     juce::AudioDeviceManager deviceManager;
     juce::AudioFormatManager formatManager;
     juce::TimeSliceThread readAheadThread { "automix-readahead" };
-    std::unique_ptr<juce::AudioFormatReaderSource> readerSource;
+    std::unique_ptr<juce::AudioFormatReaderSource> readerSource; // wav/flac/ogg via JUCE
+    juce::AudioBuffer<float> decodedBuffer;                       // mp3/aac via MediaCodec
+    std::unique_ptr<juce::MemoryAudioSource> memorySource;
     juce::AudioTransportSource transport;
 
     std::atomic<bool> initialised { false };
