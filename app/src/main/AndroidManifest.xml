@@ -67,7 +67,12 @@
             android:priority="1000">
             <intent-filter>
                 <action android:name="androidx.media3.session.MediaSessionService" />
-                <action android:name="android.media.browse.MediaBrowserService" />
+                <!-- MediaBrowserService action removed: on OEM devices (Honor/Huawei)
+                     the system media-resumption binds a browsable service at cold
+                     start, spinning up AudioService.onCreate -> ExoPlayer (+codec) and
+                     contending for CMA, contributing to the startup ANR. App playback
+                     connects via the MediaSessionService action above and is
+                     unaffected; only system "resume last media" browsing is dropped. -->
             </intent-filter>
         </service>
 
