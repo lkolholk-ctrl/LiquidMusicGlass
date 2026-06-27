@@ -61,10 +61,12 @@ fun EqualizerScreen(onBack: () -> Unit) {
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = "Equalizer is temporarily unavailable.",
+                    text = "The system equalizer isn't supported on this device.\n" +
+                        "A built-in equalizer is coming in a later update.",
                     color = lc.textSecondary,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Medium
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
                 )
             }
 

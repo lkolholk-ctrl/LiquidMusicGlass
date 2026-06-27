@@ -92,6 +92,9 @@ class App : Application(), ImageLoaderFactory {
         // Player settings (DataStore) — лёгкая инициализация
         com.liquidmusicglass.engine.PlayerSettings.init(this)
 
+        // Реактивный детектор энергосбережения (упрощает эффекты, не выключает)
+        com.liquidmusicglass.ui.PowerSaveMonitor.init(this)
+
         // Initialize PlayerController — просто сохраняет context
         PlayerController.init(this)
 

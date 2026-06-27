@@ -176,6 +176,9 @@ private fun MoodTile(
     // включившись, плитка остаётся с шейдером (эффект не пропадает).
     val canShader = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
 
+    // Энергосбережение: AGSL-плитка → статичный градиент (легче, не выключаем).
+    val powerSave = com.liquidmusicglass.ui.PowerSaveMonitor.active
+
     // epoch меняется при возврате из фона → сбрасываем арминг и пере-прогреваем,
     // создавая НОВЫЙ RuntimeShader (старый теряет GPU-контекст после onStop).
     val epoch = com.liquidmusicglass.ui.EffectsLifecycle.epoch
@@ -206,7 +209,7 @@ private fun MoodTile(
                 onClick = onClick
             )
             .drawBehind {
-                if (shader != null && shaderBrush != null) {
+                if (shader != null && shaderBrush != null && !powerSave) {
                     // AGSL активна (плитка прогрелась). Клок читаем ТОЛЬКО здесь —
                     // статичные плитки не инвалидируются каждый кадр.
                     val ts = timeSec.value

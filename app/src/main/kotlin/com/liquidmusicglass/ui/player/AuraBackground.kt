@@ -183,9 +183,12 @@ fun AuraBackground(
         heavyArmed = true
     }
 
+    // Энергосбережение: тяжёлый fbm-дым → лёгкий градиентный фон (не выключаем).
+    val powerSave = com.liquidmusicglass.ui.PowerSaveMonitor.active
+
     when {
-        heavyArmed && tiramisu -> AuraShaderBackground(albumColors, intensity, modifier, animate)
-        heavyArmed && !tiramisu -> AuraGradientFallback(albumColors, modifier)
+        heavyArmed && tiramisu && !powerSave -> AuraShaderBackground(albumColors, intensity, modifier, animate)
+        heavyArmed -> AuraGradientFallback(albumColors, modifier)
         else -> AuraStaticBackground(albumColors, modifier)
     }
 }
