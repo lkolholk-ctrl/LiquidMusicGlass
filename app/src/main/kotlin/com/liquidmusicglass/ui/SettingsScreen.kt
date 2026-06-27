@@ -529,8 +529,11 @@ fun SettingsScreen(
                         val path = withContext(Dispatchers.IO) { copyUriToCache(context, uri, "A") }
                         if (path == null) { devStatus = "A copy failed"; return@launch }
                         pathA = path
-                        engine.init(context)
-                        if (engine.loadTrackA(path)) {
+                        // Decode off the main thread (full decode can take seconds).
+                        val ok = withContext(Dispatchers.IO) {
+                            engine.init(context); engine.loadTrackA(path)
+                        }
+                        if (ok) {
                             engine.play()
                             devStatus = "A playing: ${path.substringAfterLast('/')}"
                         } else {
@@ -550,8 +553,11 @@ fun SettingsScreen(
                         val path = withContext(Dispatchers.IO) { copyUriToCache(context, uri, "B") }
                         if (path == null) { devStatus = "B copy failed"; return@launch }
                         pathB = path
-                        engine.init(context)
-                        if (engine.loadTrackB(path)) {
+                        // Decode off the main thread.
+                        val ok = withContext(Dispatchers.IO) {
+                            engine.init(context); engine.loadTrackB(path)
+                        }
+                        if (ok) {
                             devStatus = "B loaded: ${path.substringAfterLast('/')} — hit Crossfade"
                         } else {
                             devStatus = "B decode failed: ${path.substringAfterLast('/')}"
@@ -675,6 +681,7 @@ fun SettingsScreen(
                                 devStatus = "Toggle 'JUCE AutoMix' ON (off = legacy Media3 path)"
                                 return@launch
                             }
+                            // Analysis runs in the background — deck A keeps playing.
                             devStatus = "Model analysing pair…"
                             val fa = File(pa); val fb = File(pb)
                             val durA = withContext(Dispatchers.IO) { audioDurationMs(fa) }
@@ -687,16 +694,17 @@ fun SettingsScreen(
                                 "MODEL → JUCE: xfade=${feat.crossfadeDurationMs}ms type=${feat.transitionType} " +
                                     "entry=${feat.entryOffsetMs}ms bpmA=${feat.bpmA} bpmB=${feat.bpmB} compat=${feat.compatibility}"
                             )
-                            // Execute the blend in JUCE by the model's parameters.
-                            engine.init(context)
-                            engine.loadTrackA(pa)
-                            engine.loadTrackB(pb)
-                            engine.setEntryOffsetB(feat.entryOffsetMs.toDouble())
+                            // Prepare deck B by the model's params OFF the main thread.
+                            // Deck A is NOT reloaded — it keeps playing into the crossfade.
                             val ba = feat.bpmA; val bb = feat.bpmB
-                            if (ba != null && bb != null && ba > 0f && bb > 0f) {
-                                withContext(Dispatchers.IO) { engine.prepareStretchB(ba.toDouble(), bb.toDouble()) }
+                            withContext(Dispatchers.IO) {
+                                engine.init(context)
+                                engine.setEntryOffsetB(feat.entryOffsetMs.toDouble())
+                                if (ba != null && bb != null && ba > 0f && bb > 0f) {
+                                    engine.prepareStretchB(ba.toDouble(), bb.toDouble())
+                                }
                             }
-                            engine.play()
+                            // Light: just arms the envelope/atomics on the audio thread.
                             engine.startCrossfade(feat.crossfadeDurationMs.toDouble())
                             devStatus = "JUCE: ${feat.crossfadeDurationMs}ms · type ${feat.transitionType} · " +
                                 "bpm ${ba?.toInt() ?: "?"}→${bb?.toInt() ?: "?"} · entry ${feat.entryOffsetMs}ms"
