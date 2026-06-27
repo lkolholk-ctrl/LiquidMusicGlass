@@ -43,48 +43,82 @@ target_link_libraries(icmkey ${log-lib})
 # ---------------------------------------------------------------------------
 include(FetchContent)
 
-# Don't let JUCE build its host helper tool (juceaide) — we only link module
-# interface libraries into a SHARED lib and never use BinaryData/app bundling,
-# so juceaide is unnecessary and would otherwise need a host toolchain.
-set(JUCE_BUILD_HELPER_TOOLS OFF CACHE BOOL "" FORCE)
-set(JUCE_BUILD_EXTRAS OFF CACHE BOOL "" FORCE)
-set(JUCE_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-
+# Fetch the JUCE SOURCES only — deliberately NOT FetchContent_MakeAvailable /
+# add_subdirectory(JUCE). JUCE's own CMake builds a host helper tool "juceaide"
+# that compiles juce_gui_basics for the host and needs X11/freetype dev headers
+# the CI runner doesn't have (fatal error: X11/Xlib.h). We don't need juceaide
+# (no BinaryData / app bundling), so we compile just the audio modules we need
+# directly into our target. This is the standard bare-CMake Android JUCE path
+# and keeps the whole GUI/X11/juceaide toolchain out of the build.
 FetchContent_Declare(
     JUCE
     GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
     GIT_TAG 7.0.12
     GIT_SHALLOW TRUE
 )
-FetchContent_MakeAvailable(JUCE)
+FetchContent_GetProperties(JUCE)
+if(NOT juce_POPULATED)
+    FetchContent_Populate(JUCE)
+endif()
+
+set(JUCE_MODULES_DIR ${juce_SOURCE_DIR}/modules)
+set(OBOE_DIR ${JUCE_MODULES_DIR}/juce_audio_devices/native/oboe)
+
+# JUCE vendors a full copy of Oboe (not a submodule), so the shallow clone has
+# it. Compile it straight into our lib; JUCE's juce_android_Oboe.cpp uses it.
+file(GLOB_RECURSE OBOE_SOURCES CONFIGURE_DEPENDS ${OBOE_DIR}/src/*.cpp)
 
 add_library(
     automix_juce
     SHARED
     automix/AutoMixAudioEngine.cpp
     automix/AutoMixJni.cpp
+    # JUCE module unity builds, compiled directly (no juceaide). Order doesn't
+    # matter for a single static-link target; deps resolved via the
+    # JUCE_MODULE_AVAILABLE_* defines below.
+    ${JUCE_MODULES_DIR}/juce_core/juce_core.cpp
+    ${JUCE_MODULES_DIR}/juce_events/juce_events.cpp
+    ${JUCE_MODULES_DIR}/juce_audio_basics/juce_audio_basics.cpp
+    ${JUCE_MODULES_DIR}/juce_audio_formats/juce_audio_formats.cpp
+    ${JUCE_MODULES_DIR}/juce_audio_devices/juce_audio_devices.cpp
+    ${JUCE_MODULES_DIR}/juce_dsp/juce_dsp.cpp
+    ${OBOE_SOURCES}
 )
 
 target_compile_features(automix_juce PRIVATE cxx_std_17)
 
-# Stage 1 keeps the JUCE footprint minimal: no networking, no browser, no plugins.
+target_include_directories(automix_juce PRIVATE
+    ${JUCE_MODULES_DIR}
+    ${OBOE_DIR}/include
+    ${OBOE_DIR}/src
+)
+
+# Stand in for the header juce_add_module would generate: tell each module which
+# sibling modules exist, and keep the footprint minimal (no net/browser/codecs).
 target_compile_definitions(automix_juce PRIVATE
     JUCE_STANDALONE_APPLICATION=1
+    JUCE_MODULE_AVAILABLE_juce_core=1
+    JUCE_MODULE_AVAILABLE_juce_events=1
+    JUCE_MODULE_AVAILABLE_juce_audio_basics=1
+    JUCE_MODULE_AVAILABLE_juce_audio_formats=1
+    JUCE_MODULE_AVAILABLE_juce_audio_devices=1
+    JUCE_MODULE_AVAILABLE_juce_dsp=1
     JUCE_USE_ANDROID_OBOE=1
     JUCE_USE_CURL=0
     JUCE_WEB_BROWSER=0
     JUCE_USE_FLAC=0
     JUCE_USE_OGGVORBIS=0
-    JUCE_LOAD_CURL_SYMBOLS_LAZILY=0
+    JUCE_USE_MP3AUDIOFORMAT=0
 )
 
+find_library(android-lib android)
+find_library(juce-log-lib log)
+find_library(opensl-lib OpenSLES)
+find_library(aaudio-lib aaudio)
+
 target_link_libraries(automix_juce
-    PRIVATE
-    juce::juce_audio_devices
-    juce::juce_audio_formats
-    juce::juce_audio_basics
-    juce::juce_dsp
-    juce::juce_core
-    PUBLIC
-    juce::juce_recommended_config_flags
+    ${android-lib}
+    ${juce-log-lib}
+    ${opensl-lib}
+    ${aaudio-lib}
 )
