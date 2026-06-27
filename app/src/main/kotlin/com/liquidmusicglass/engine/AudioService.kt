@@ -22,9 +22,12 @@ import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.Renderer
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
+import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.video.VideoRendererEventListener
 import androidx.media3.session.CommandButton
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
@@ -431,6 +434,23 @@ class AudioService : MediaSessionService() {
                 return DefaultAudioSink.Builder(context)
                     .setAudioProcessors(arrayOf(BassAudioProcessor(), VolumeNormalizationProcessor()))
                     .build()
+            }
+
+            // Audio-only app: build NO video renderers. The default factory would
+            // create a video MediaCodec renderer + FrameReleaseChoreographer + GPU
+            // threads at player build, contending with UI shader compilation on a
+            // cold first launch (interpreted code) and tripping the startup ANR.
+            override fun buildVideoRenderers(
+                context: Context,
+                extensionRendererMode: Int,
+                mediaCodecSelector: MediaCodecSelector,
+                enableDecoderFallback: Boolean,
+                eventHandler: android.os.Handler,
+                eventListener: VideoRendererEventListener,
+                allowedVideoJoiningTimeMs: Long,
+                out: ArrayList<Renderer>
+            ) {
+                // intentionally empty — no video renderers
             }
         }
 
