@@ -37,10 +37,13 @@ class App : Application(), ImageLoaderFactory {
     // чтобы эвиктить пул при смене сети (VPN/Wi-Fi↔моб.).
     private val coverHttpClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
-            .connectTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(15, TimeUnit.SECONDS)
-            .callTimeout(20, TimeUnit.SECONDS)
-            .dispatcher(Dispatcher().apply { maxRequestsPerHost = 4 })
+            .connectTimeout(5, TimeUnit.SECONDS)
+            .readTimeout(8, TimeUnit.SECONDS)
+            .callTimeout(12, TimeUnit.SECONDS)
+            // maxRequests=6 — ГЛОБАЛЬНЫЙ потолок одновременных загрузок обложек: на
+            // первом экране не выходим пачкой в TLS-handshake (в ANR-дампе обложки
+            // висели именно там). maxRequestsPerHost=4 — на один CDN.
+            .dispatcher(Dispatcher().apply { maxRequests = 6; maxRequestsPerHost = 4 })
             .build()
     }
 

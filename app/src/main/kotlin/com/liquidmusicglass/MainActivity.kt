@@ -128,15 +128,19 @@ class MainActivity : ComponentActivity() {
     // Refresh profile on app start if user is logged in
         if (IcmAuthRepository.isLoggedIn.value) {
             authScope.launch {
-                val apiKey = try {
-                    IcmKeyProvider.getApiKey(this@MainActivity)
-                } catch (_: Throwable) { "" }.ifBlank { BuildConfig.ICM_API_KEY }
-                
-                if (apiKey.isNotBlank()) {
-                    IcmAuthRepository.refreshTokenIfNeeded(apiKey)
+                // Стартовые сетевые задачи — опциональны и ограничены по времени:
+                // приложение показывается и работает без них, не вися на сети.
+                kotlinx.coroutines.withTimeoutOrNull(5_000) {
+                    val apiKey = try {
+                        IcmKeyProvider.getApiKey(this@MainActivity)
+                    } catch (_: Throwable) { "" }.ifBlank { BuildConfig.ICM_API_KEY }
+
+                    if (apiKey.isNotBlank()) {
+                        IcmAuthRepository.refreshTokenIfNeeded(apiKey)
+                    }
+                    // Always refresh profile data on startup
+                    IcmAuthRepository.fetchUserData()
                 }
-                // Always refresh profile data on startup
-                IcmAuthRepository.fetchUserData()
             }
         }
 
