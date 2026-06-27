@@ -1027,7 +1027,15 @@ private fun copyUriToCache(context: Context, uri: Uri, slot: String): String? {
             }
         }
         val ext = displayName?.substringAfterLast('.', "")?.takeIf { it.isNotBlank() } ?: "wav"
-        val out = File(context.cacheDir, "automix_$slot.$ext")
+        // Unique filename per pick. The model's AutoMixController caches its energy
+        // analysis by URI string (energyCache[uri.toString()]). A fixed name like
+        // "automix_A.wav" makes every pick reuse the same path -> same URI -> the
+        // cache returns the FIRST track's analysis forever, so swapping A<->B yielded
+        // identical params. A unique nonce per pick guarantees a fresh URI -> cache
+        // miss -> real inference (new BPM/crossfade/start) for the new track.
+        val prefix = "automix_${slot}_"
+        context.cacheDir.listFiles { f -> f.name.startsWith(prefix) }?.forEach { it.delete() }
+        val out = File(context.cacheDir, "$prefix${System.currentTimeMillis()}.$ext")
         resolver.openInputStream(uri)?.use { input ->
             out.outputStream().use { output -> input.copyTo(output) }
         } ?: return null
