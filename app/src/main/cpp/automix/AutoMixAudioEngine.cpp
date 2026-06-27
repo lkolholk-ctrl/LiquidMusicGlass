@@ -222,6 +222,12 @@ void AutoMixAudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
     deckB.transport.prepareToPlay (currentBlockSize, currentSampleRate);
     scratchA.setSize (2, currentBlockSize);
     scratchB.setSize (2, currentBlockSize);
+
+    // Bass-swap low-pass: same fixed coefficients for every deck/channel; only a
+    // scalar changes at runtime, so there are no coefficient-swap clicks.
+    auto bassCoeffs = juce::dsp::IIR::Coefficients<float>::makeLowPass (currentSampleRate, kBassCutoffHz);
+    for (auto& f : lowpassA) { f.coefficients = bassCoeffs; f.reset(); }
+    for (auto& f : lowpassB) { f.coefficients = bassCoeffs; f.reset(); }
 }
 
 void AutoMixAudioEngine::audioDeviceStopped()
@@ -303,13 +309,26 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
 
     for (int i = 0; i < numSamples; ++i)
     {
-        float ga, gb;
+        float ga, gb;            // volume envelope (equal power)
+        float bassA = 1.0f;      // per-deck bass amount (1 = full low end, 0 = cut)
+        float bassB = 1.0f;
+
         if (active && total > 0.0)
         {
             double t = (double) (crossfadePos + i) / total;
             if (t > 1.0) t = 1.0;
             ga = (float) std::cos (t * halfPi); // equal power: ga*ga + gb*gb == 1
             gb = (float) std::sin (t * halfPi);
+
+            // Bass swap, concentrated in the middle of the crossfade and kept
+            // complementary (bassA + bassB == 1) so the total low energy stays
+            // ~constant — no double-bass mud, A's lows hand off to B's.
+            const float w = 0.5f; // swap over the middle 50% of the transition
+            float u = ((float) t - (0.5f - w * 0.5f)) / w;
+            u = juce::jlimit (0.0f, 1.0f, u);
+            const float s = u * u * (3.0f - 2.0f * u); // smoothstep 0->1
+            bassB = s;
+            bassA = 1.0f - s;
         }
         else
         {
@@ -317,8 +336,26 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
             gb = bgB;
         }
 
+        const float cutA = 1.0f - bassA; // how much low band to remove from A
+        const float cutB = 1.0f - bassB;
+
         for (int c = 0; c < ch; ++c)
-            o[c][i] = a[c][i] * ga + b[c][i] * gb;
+        {
+            float av = a[c][i];
+            float bv = b[c][i];
+
+            // Keep the low-pass state warm every sample (c < 2 = L/R have filters);
+            // subtract the scaled low band to attenuate that deck's bass.
+            if (c < 2)
+            {
+                const float la = lowpassA[(size_t) c].processSample (av);
+                const float lb = lowpassB[(size_t) c].processSample (bv);
+                av -= cutA * la;
+                bv -= cutB * lb;
+            }
+
+            o[c][i] = av * ga + bv * gb;
+        }
     }
 
     // Clear any channels beyond the 8 we mixed (phones are stereo; just in case).

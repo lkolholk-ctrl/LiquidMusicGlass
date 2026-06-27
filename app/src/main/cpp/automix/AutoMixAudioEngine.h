@@ -2,6 +2,8 @@
 
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_formats/juce_audio_formats.h>
+#include <juce_dsp/juce_dsp.h>
+#include <array>
 #include <atomic>
 #include <memory>
 
@@ -81,6 +83,11 @@ private:
 
     Deck deckA, deckB;
     juce::AudioBuffer<float> scratchA, scratchB; // per-block pull buffers (audio thread)
+
+    // Bass-swap: one low-pass per deck per channel extracts the low band so we
+    // can scale each deck's bass with a scalar (fixed coefficients -> no clicks).
+    std::array<juce::dsp::IIR::Filter<float>, 2> lowpassA, lowpassB;
+    static constexpr float kBassCutoffHz = 150.0f;
 
     std::atomic<bool> initialised { false };
     std::atomic<bool> toneOn { false };
