@@ -68,6 +68,14 @@ set(OBOE_DIR ${JUCE_MODULES_DIR}/juce_audio_devices/native/oboe)
 # it. Compile it straight into our lib; JUCE's juce_android_Oboe.cpp uses it.
 file(GLOB_RECURSE OBOE_SOURCES CONFIGURE_DEPENDS ${OBOE_DIR}/src/*.cpp)
 
+# JUCE's Android path includes <cpu-features.h> (android_getCpuFamily etc.). That
+# header + impl ship with the NDK under sources/android/cpufeatures but aren't on
+# the default include path, so add the dir and compile its source into our lib.
+if(NOT DEFINED ANDROID_NDK)
+    set(ANDROID_NDK ${CMAKE_ANDROID_NDK})
+endif()
+set(CPUFEATURES_DIR ${ANDROID_NDK}/sources/android/cpufeatures)
+
 add_library(
     automix_juce
     SHARED
@@ -83,6 +91,7 @@ add_library(
     ${JUCE_MODULES_DIR}/juce_audio_devices/juce_audio_devices.cpp
     ${JUCE_MODULES_DIR}/juce_dsp/juce_dsp.cpp
     ${OBOE_SOURCES}
+    ${CPUFEATURES_DIR}/cpu-features.c
 )
 
 target_compile_features(automix_juce PRIVATE cxx_std_17)
@@ -91,6 +100,7 @@ target_include_directories(automix_juce PRIVATE
     ${JUCE_MODULES_DIR}
     ${OBOE_DIR}/include
     ${OBOE_DIR}/src
+    ${CPUFEATURES_DIR}
 )
 
 # Stand in for the header juce_add_module would generate: tell each module which
