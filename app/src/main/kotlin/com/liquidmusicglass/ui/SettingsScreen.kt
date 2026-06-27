@@ -508,6 +508,7 @@ fun SettingsScreen(
             var bpmB by remember { mutableStateOf("100") }
             var pathA by remember { mutableStateOf<String?>(null) }
             var pathB by remember { mutableStateOf<String?>(null) }
+            var durationA by remember { mutableStateOf(0L) }
             var juceAutoMix by remember { mutableStateOf(false) }
             val engine = com.liquidmusicglass.engine.automix.AutoMixNativeEngine
             // LAZY: do NOT construct at composition — AutoMixController's ctor loads
@@ -525,49 +526,34 @@ fun SettingsScreen(
                 }
             }
 
-            // Deck A: pick → copy → decode → play (audible immediately).
+            // Pickers ONLY copy + remember the path. They DO NOT touch JUCE — the
+            // engine (AAudio / NDK MediaCodec / TimeSliceThread) must stay asleep
+            // until a blend actually runs, so it's never on the cold-start budget.
             val pickA = rememberLauncherForActivityResult(
                 ActivityResultContracts.OpenDocument()
             ) { uri ->
                 if (uri != null) {
                     scope.launch {
-                        devStatus = "Loading A…"
+                        devStatus = "Copying A…"
                         val path = withContext(Dispatchers.IO) { copyUriToCache(context, uri, "A") }
                         if (path == null) { devStatus = "A copy failed"; return@launch }
                         pathA = path
-                        // Decode off the main thread (full decode can take seconds).
-                        val ok = withContext(Dispatchers.IO) {
-                            engine.init(context); engine.loadTrackA(path)
-                        }
-                        if (ok) {
-                            engine.play()
-                            devStatus = "A playing: ${path.substringAfterLast('/')}"
-                        } else {
-                            devStatus = "A decode failed: ${path.substringAfterLast('/')}"
-                        }
+                        durationA = withContext(Dispatchers.IO) { audioDurationMs(File(path)) }
+                        devStatus = "A ready (${durationA / 1000}s) — pick B"
                     }
                 }
             }
 
-            // Deck B: pick → copy → decode → load (silent until crossfade).
             val pickB = rememberLauncherForActivityResult(
                 ActivityResultContracts.OpenDocument()
             ) { uri ->
                 if (uri != null) {
                     scope.launch {
-                        devStatus = "Loading B…"
+                        devStatus = "Copying B…"
                         val path = withContext(Dispatchers.IO) { copyUriToCache(context, uri, "B") }
                         if (path == null) { devStatus = "B copy failed"; return@launch }
                         pathB = path
-                        // Decode off the main thread.
-                        val ok = withContext(Dispatchers.IO) {
-                            engine.init(context); engine.loadTrackB(path)
-                        }
-                        if (ok) {
-                            devStatus = "B loaded: ${path.substringAfterLast('/')} — hit Crossfade"
-                        } else {
-                            devStatus = "B decode failed: ${path.substringAfterLast('/')}"
-                        }
+                        devStatus = "B ready — Arm AutoMix (or Manual blend)"
                     }
                 }
             }
@@ -584,15 +570,15 @@ fun SettingsScreen(
                 )
                 PlainDivider()
                 SettingsActionItem(
-                    title = "Deck A: Pick & Play",
+                    title = "Deck A: Pick",
                     subtitle = devStatus,
                     icon = Icons.Rounded.PlayArrow,
                     onClick = { pickA.launch(arrayOf("audio/*")) }
                 )
                 PlainDivider()
                 SettingsActionItem(
-                    title = "Deck B: Pick (load)",
-                    subtitle = "Second track for the crossfade",
+                    title = "Deck B: Pick",
+                    subtitle = "Second track (no JUCE until blend)",
                     icon = Icons.Rounded.LibraryMusic,
                     onClick = { pickB.launch(arrayOf("audio/*")) }
                 )
@@ -622,28 +608,27 @@ fun SettingsScreen(
                 }
                 PlainDivider()
                 SettingsActionItem(
-                    title = "Beat-match B → A (stretch)",
-                    subtitle = "Signalsmith prefetch — run before crossfade",
-                    icon = Icons.Rounded.Speed,
+                    title = "Manual blend now (A → B, 8s)",
+                    subtitle = "Wakes JUCE NOW: decode A+B, beat-match (if BPM), bass-swap crossfade",
+                    icon = Icons.Rounded.SwapHoriz,
                     onClick = {
                         scope.launch {
+                            val pa = pathA; val pb = pathB
+                            if (pa == null || pb == null) { devStatus = "Pick Deck A & B first"; return@launch }
+                            devStatus = "JUCE waking + decoding A/B…"
                             val a = bpmA.toDoubleOrNull() ?: 0.0
                             val b = bpmB.toDoubleOrNull() ?: 0.0
-                            if (a <= 0.0 || b <= 0.0) { devStatus = "Enter valid BPM A & B"; return@launch }
-                            devStatus = "Stretching B (${b}→${a} BPM)…"
-                            engine.init(context)
-                            val ok = withContext(Dispatchers.IO) { engine.prepareStretchB(a, b) }
-                            devStatus = if (ok) "B beat-matched — hit Crossfade"
-                                        else "Stretch failed (load Deck B first)"
+                            withContext(Dispatchers.IO) {
+                                engine.init(context)               // JUCE wakes on this manual action
+                                engine.loadTrackA(pa)
+                                engine.loadTrackB(pb)
+                                if (a > 0.0 && b > 0.0) engine.prepareStretchB(a, b)
+                            }
+                            engine.play()
+                            engine.startCrossfade(8000.0)
+                            devStatus = "Manual blend running (8s)"
                         }
                     }
-                )
-                PlainDivider()
-                SettingsActionItem(
-                    title = "Start Crossfade (8s)",
-                    subtitle = "Equal-power A → B (beat-matched if stretched)",
-                    icon = Icons.Rounded.SwapHoriz,
-                    onClick = { engine.startCrossfade(8000.0) }
                 )
                 PlainDivider()
                 SettingsActionItem(
@@ -682,17 +667,16 @@ fun SettingsScreen(
                     onClick = {
                         autoMixJob?.cancel()
                         autoMixJob = scope.launch {
-                            val pa = pathA; val pb = pathB
-                            if (pa == null || pb == null) { devStatus = "Play Deck A + pick Deck B first"; return@launch }
+                            val pa = pathA; val pb = pathB; val durA = durationA
+                            if (pa == null || pb == null || durA <= 0L) { devStatus = "Pick Deck A & B first"; return@launch }
                             if (!juceAutoMix) { devStatus = "Toggle 'JUCE AutoMix' ON"; return@launch }
 
-                            // 1) Analyse the pair in the BACKGROUND while deck A plays —
-                            //    the analysis never touches the player (music keeps going).
-                            devStatus = "Model analysing (bg)…"
-                            val fa = File(pa); val fb = File(pb)
-                            val durA = withContext(Dispatchers.IO) { audioDurationMs(fa) }
+                            // 1) Analyse the pair in the BACKGROUND. JUCE stays ASLEEP —
+                            //    no engine calls here, so AAudio / NDK MediaCodec / the
+                            //    TimeSliceThread are never started during analysis.
+                            devStatus = "Model analysing (bg)… JUCE asleep"
                             val feat = withContext(Dispatchers.Default) {
-                                autoMixLazy.value.analyzeTrackPair(Uri.fromFile(fa), Uri.fromFile(fb), durA)
+                                autoMixLazy.value.analyzeTrackPair(Uri.fromFile(File(pa)), Uri.fromFile(File(pb)), durA)
                             }
                             android.util.Log.i(
                                 "JUCEAutoMix",
@@ -700,48 +684,46 @@ fun SettingsScreen(
                                     "start=${feat.transitionStartMs}ms entry=${feat.entryOffsetMs}ms " +
                                     "bpmA=${feat.bpmA} bpmB=${feat.bpmB} compat=${feat.compatibility} ready=${feat.readyForTransition}"
                             )
-                            // Model can decide NOT to mix (low compatibility) — that's
-                            // the model dirigating too. Don't wait the whole track then.
                             if (!feat.readyForTransition) {
                                 devStatus = "Model: pair not compatible (compat=${"%.2f".format(feat.compatibility)}) — no transition"
                                 return@launch
                             }
-                            devStatus = "Armed · model xfade=${feat.crossfadeDurationMs}ms start=${feat.transitionStartMs}ms — waiting for cue…"
 
-                            // 2) Wait for the transition cue (transitionStartMs / remaining),
-                            //    SEPARATE from analysis — fires near the end, not now.
-                            val controller = autoMixLazy.value
+                            // 2) Simulated timeline — JUCE STILL ASLEEP — wait until the
+                            //    model's cue (transitionStartMs). Only THEN wake JUCE.
+                            val cueMs = if (feat.transitionStartMs > 0L) feat.transitionStartMs
+                                        else (durA - feat.crossfadeDurationMs).coerceAtLeast(0L)
+                            val armAt = System.currentTimeMillis()
+                            devStatus = "Armed · JUCE asleep · cue at ${cueMs / 1000}s of ${durA / 1000}s…"
                             while (true) {
                                 delay(250)
-                                val posMs = engine.positionMsA().toLong()
-                                val lenMs = engine.lengthMsA().toLong()
-                                val remaining = (lenMs - posMs).coerceAtLeast(0L)
-                                val decision = controller.shouldStartTransition(posMs, remaining, feat)
-                                if (decision.shouldStart) {
+                                val simPos = System.currentTimeMillis() - armAt
+                                if (simPos >= cueMs) {
                                     android.util.Log.i(
                                         "JUCEAutoMix",
-                                        "CUE @ pos=${posMs}ms rem=${remaining}ms → JUCE blend " +
-                                            "${decision.crossfadeDurationMs}ms type ${decision.transitionType}"
+                                        "CUE @ sim=${simPos}ms → JUCE WAKES + blend " +
+                                            "${feat.crossfadeDurationMs}ms type ${feat.transitionType}"
                                     )
-                                    devStatus = "Cue @ ${posMs / 1000}s (rem ${remaining / 1000}s) → JUCE blending…"
-                                    // Deck B was decoded on pick; the heavy beat-match
-                                    // (re-decode + stretch) happens here, at the cue.
+                                    devStatus = "Cue → JUCE waking + blending…"
                                     val ba = feat.bpmA; val bb = feat.bpmB
+                                    // FIRST JUCE init happens HERE, at the cue — decode A+B,
+                                    // beat-match — not at app start, not on pick.
                                     withContext(Dispatchers.IO) {
+                                        engine.init(context)
+                                        engine.loadTrackA(pa)
+                                        engine.loadTrackB(pb)
                                         engine.setEntryOffsetB(feat.entryOffsetMs.toDouble())
                                         if (ba != null && bb != null && ba > 0f && bb > 0f) {
                                             engine.prepareStretchB(ba.toDouble(), bb.toDouble())
                                         }
                                     }
-                                    engine.startCrossfade(decision.crossfadeDurationMs.toDouble())
-                                    devStatus = "JUCE blend: ${decision.crossfadeDurationMs}ms · type ${decision.transitionType} · " +
+                                    engine.play()
+                                    engine.startCrossfade(feat.crossfadeDurationMs.toDouble())
+                                    devStatus = "JUCE blend: ${feat.crossfadeDurationMs}ms · type ${feat.transitionType} · " +
                                         "bpm ${ba?.toInt() ?: "?"}→${bb?.toInt() ?: "?"}"
                                     break
                                 }
-                                if (lenMs > 0 && posMs >= lenMs - 100) {
-                                    devStatus = "Track A ended before cue (start=${feat.transitionStartMs}ms)"
-                                    break
-                                }
+                                devStatus = "Armed · JUCE asleep · ${simPos / 1000}s / cue ${cueMs / 1000}s"
                             }
                         }
                     }
