@@ -65,6 +65,7 @@ import com.liquidmusicglass.data.local.db.FavoriteTrackDatabase
 import com.liquidmusicglass.data.local.db.FavoriteTrackEntity
 import com.liquidmusicglass.data.local.db.LibraryRepository
 import com.liquidmusicglass.engine.AudioDownloadManager
+import com.liquidmusicglass.engine.PlaybackContext
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.Track
 import com.liquidmusicglass.ui.glass.GlassDialog
@@ -340,13 +341,11 @@ fun LibraryScreen(
                                             }
                                             val startIndex = tracks.indexOfFirst { it.id == trackEntity.trackId }
                                             if (startIndex >= 0) {
-                                                PlayerController.playFromList(
+                                                PlayerController.playLocalOnJuce(
                                                     context = context,
                                                     tracks = tracks,
                                                     startIndex = startIndex,
-                                                    autoRefillType = "library",
-                                                    autoRefillId = "downloads",
-                                                    autoRefillName = "Downloads"
+                                                    playbackContext = PlaybackContext.Downloads
                                                 )
                                             }
                                         }

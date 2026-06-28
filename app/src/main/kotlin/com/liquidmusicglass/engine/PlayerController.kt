@@ -44,6 +44,11 @@ sealed class PlaybackContext {
     object Global : PlaybackContext()
 }
 
+enum class PlaybackBackend {
+    EXO_STREAMING,
+    JUCE_LOCAL
+}
+
 /**
  * PlayerController — единая точка управления воспроизведением.
  */
@@ -74,8 +79,10 @@ object PlayerController {
     // ── Playback Context (isolation gate) ──
     private var _playbackContext: PlaybackContext = PlaybackContext.Global
     val playbackContext: PlaybackContext get() = _playbackContext
+    private val _playbackBackend = MutableStateFlow(PlaybackBackend.EXO_STREAMING)
+    val playbackBackend: StateFlow<PlaybackBackend> = _playbackBackend
     val isLocalJucePlaybackActive: Boolean
-        get() = (_playbackContext as? PlaybackContext.Playlist)?.id == "local_audio"
+        get() = _playbackBackend.value == PlaybackBackend.JUCE_LOCAL
 
     // ── Endless Playback (AutoMix) ──
     private val endlessEngine = EndlessPlaybackEngine(
@@ -385,6 +392,7 @@ object PlayerController {
             }
 
             _playbackContext = newContext
+            _playbackBackend.value = PlaybackBackend.EXO_STREAMING
             android.util.Log.d("VOIDPIXEL_MEDIA", "[CONTEXT_SET] $newContext")
 
             endlessEngine.reset()
@@ -482,7 +490,8 @@ object PlayerController {
     fun playLocalOnJuce(
         context: Context,
         tracks: List<Track>,
-        startIndex: Int = 0
+        startIndex: Int = 0,
+        playbackContext: PlaybackContext = PlaybackContext.Playlist("local_audio")
     ) {
         if (tracks.isEmpty() || startIndex !in tracks.indices) {
             android.util.Log.e("VOIDPIXEL_MEDIA", "playLocalOnJuce: empty tracks or bad startIndex=$startIndex")
@@ -493,7 +502,8 @@ object PlayerController {
 
         ioScope.launch {
             // Статичная локальная очередь — без онлайн-рефилла.
-            _playbackContext = PlaybackContext.Playlist("local_audio")
+            _playbackContext = playbackContext
+            _playbackBackend.value = PlaybackBackend.JUCE_LOCAL
             endlessEngine.reset()
 
             val immutableTracks = tracks.toList()
