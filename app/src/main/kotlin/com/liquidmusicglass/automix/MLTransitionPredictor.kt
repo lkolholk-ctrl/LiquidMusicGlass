@@ -222,10 +222,10 @@ class MLTransitionPredictor(context: Context) {
         val rawStart = outStart[0][0]
         // Сырые выходы голов — чтобы по экранному логу видеть, ЖИВЫ ли головы
         // entry_offset/transition_type, или они реально близки к нулю/argmax=0.
-        val debug = "raw[c=%.3f d=%.3f o=%.3f s=%.3f] tlogits=[%s] %s".format(
+        val debug = "raw[c=%.3f d=%.3f o=%.3f s=%.3f] tlogits=[%s] %s | feat: %s".format(
             rawCompat, rawDuration, rawOffset, rawStart,
             transProbs.joinToString(",") { "%.2f".format(it) },
-            mapInfo
+            mapInfo, features.debug
         )
 
         return Prediction(

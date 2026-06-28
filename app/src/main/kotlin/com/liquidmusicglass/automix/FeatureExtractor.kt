@@ -32,7 +32,14 @@ object FeatureExtractor {
     data class PairFeatures(
         val melA: Array<Array<FloatArray>>,    // [1, 431, 128]
         val melB: Array<Array<FloatArray>>,    // [1, 431, 128]
-        val aux: Array<FloatArray>             // [1, 32]
+        val aux: Array<FloatArray>,            // [1, 32]
+        /**
+         * Диагностика входа модели: RMS декодированных сэмплов A/B (если ≈0 —
+         * декод пустой/тишина), реальные BPM, увиденные ЭТИМ экстрактором, и
+         * разброс сырого мела до нормировки. Позволяет понять, зависит ли вход
+         * модели от трека вообще.
+         */
+        val debug: String
     )
 
     /**
@@ -61,10 +68,19 @@ object FeatureExtractor {
         auxA.copyInto(combinedAux, 0)
         auxB.copyInto(combinedAux, AUX_PER_TRACK)
 
+        // Диагностика входа: зависит ли он от трека вообще.
+        val rmsA = computeRms(samplesA)
+        val rmsB = computeRms(samplesB)
+        val (melAmin, melAmax) = rawRange(melA)
+        val debug = "rmsA=%.4f rmsB=%.4f bpmA=%.0f bpmB=%.0f melRaw[%.2f..%.2f] nA=%d nB=%d".format(
+            rmsA, rmsB, auxA[0] * 200f, auxB[0] * 200f, melAmin, melAmax, samplesA.size, samplesB.size
+        )
+
         return PairFeatures(
             melA = Array(1) { normalizedA },
             melB = Array(1) { normalizedB },
-            aux = Array(1) { combinedAux }
+            aux = Array(1) { combinedAux },
+            debug = debug
         )
     }
 
@@ -291,6 +307,18 @@ object FeatureExtractor {
     // ──────────────────────────────────────
     // Audio decoding
     // ──────────────────────────────────────
+
+    /** Мин/макс сырого мела (до нормировки) — для диагностики входа. */
+    private fun rawRange(frames: Array<FloatArray>): Pair<Float, Float> {
+        var mn = Float.POSITIVE_INFINITY
+        var mx = Float.NEGATIVE_INFINITY
+        for (row in frames) for (v in row) {
+            if (v < mn) mn = v
+            if (v > mx) mx = v
+        }
+        if (mn == Float.POSITIVE_INFINITY) return 0f to 0f
+        return mn to mx
+    }
 
     private fun normalizeFrames(frames: Array<FloatArray>): Array<FloatArray> {
         val flat = frames.flatMap { it.asIterable() }
