@@ -510,6 +510,15 @@ fun SettingsScreen(
             var pathB by remember { mutableStateOf<String?>(null) }
             var durationA by remember { mutableStateOf(0L) }
             val engine = com.liquidmusicglass.engine.automix.AutoMixNativeEngine
+            // ЗАКРЕПЛЕНИЕ ФУНДАМЕНТА: dev-тест JUCE использует ТОТ ЖЕ глобальный
+            // движок, что и локальное воспроизведение. Пока играет локалка — не
+            // даём тесту трогать движок (init/play/stop/crossfade/tone), иначе он
+            // оборвёт живой звук (тот же класс бага, что engine.release в onDispose).
+            fun localJuceBusy(): Boolean =
+                if (com.liquidmusicglass.engine.PlayerController.isLocalJucePlaybackActive) {
+                    devStatus = "Локальное аудио играет на JUCE — тест движка недоступен"
+                    true
+                } else false
             // LAZY: do NOT construct at composition — AutoMixController's ctor loads
             // the TFLite model. It's built on first analysis, off the main thread,
             // so the model never loads at app/cold start.
@@ -578,8 +587,10 @@ fun SettingsScreen(
                     subtitle = "Output check (only when no track loaded)",
                     selected = toneOn,
                     onSelect = { on ->
-                        toneOn = on
-                        if (on) { engine.init(context); engine.startTone() } else engine.stopTone()
+                        if (!localJuceBusy()) {
+                            toneOn = on
+                            if (on) { engine.init(context); engine.startTone() } else engine.stopTone()
+                        }
                     }
                 )
                 PlainDivider()
@@ -626,7 +637,7 @@ fun SettingsScreen(
                     subtitle = "Wakes JUCE NOW: decode A+B, beat-match (if BPM), bass-swap crossfade",
                     icon = Icons.Rounded.SwapHoriz,
                     onClick = {
-                        scope.launch {
+                        if (!localJuceBusy()) scope.launch {
                             val pa = pathA; val pb = pathB
                             if (pa == null || pb == null) { devStatus = "Pick Deck A & B first"; return@launch }
                             devStatus = "JUCE waking + decoding A/B…"
@@ -649,14 +660,14 @@ fun SettingsScreen(
                     title = "Pause",
                     subtitle = "Pause both decks",
                     icon = Icons.Rounded.Pause,
-                    onClick = { engine.pause() }
+                    onClick = { if (!localJuceBusy()) engine.pause() }
                 )
                 PlainDivider()
                 SettingsActionItem(
                     title = "Stop",
                     subtitle = "Stop & rewind both decks",
                     icon = Icons.Rounded.Stop,
-                    onClick = { engine.stop() }
+                    onClick = { if (!localJuceBusy()) engine.stop() }
                 )
             }
 
@@ -675,6 +686,7 @@ fun SettingsScreen(
                     subtitle = devStatus,
                     icon = Icons.Rounded.AutoAwesome,
                     onClick = {
+                        if (localJuceBusy()) return@SettingsActionItem
                         autoMixJob?.cancel()
                         autoMixJob = scope.launch {
                             val pa = pathA; val pb = pathB; val durA = durationA
@@ -758,6 +770,7 @@ fun SettingsScreen(
                     subtitle = "Stage 7a: Media3 plays A, JUCE blends at cue, Media3 continues B",
                     icon = Icons.Rounded.SwapHoriz,
                     onClick = {
+                        if (localJuceBusy()) return@SettingsActionItem
                         autoMixJob?.cancel()
                         autoMixJob = scope.launch {
                             val pa = pathA; val pb = pathB; val durA = durationA
@@ -803,7 +816,10 @@ fun SettingsScreen(
                     icon = Icons.Rounded.Stop,
                     onClick = {
                         autoMixJob?.cancel()
-                        runCatching { engine.stop() }
+                        // engine.stop() остановит и локалку (общий движок) — гард.
+                        if (!com.liquidmusicglass.engine.PlayerController.isLocalJucePlaybackActive) {
+                            runCatching { engine.stop() }
+                        }
                         if (handoffLazy.isInitialized()) runCatching { handoffLazy.value.release() }
                         devStatus = "AutoMix arm cancelled"
                     }
