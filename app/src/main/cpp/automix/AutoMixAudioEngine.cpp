@@ -1,5 +1,6 @@
 #include "AutoMixAudioEngine.h"
 #include "MediaCodecDecoder.h"
+#include "MediaCodecAudioSource.h"
 #include "TimeStretch.h"
 
 #include <cmath>
@@ -18,8 +19,8 @@ AutoMixAudioEngine::~AutoMixAudioEngine()
     release();
     deckA.transport.setSource (nullptr);
     deckB.transport.setSource (nullptr);
-    deckA.readerSource.reset(); deckA.memorySource.reset();
-    deckB.readerSource.reset(); deckB.memorySource.reset();
+    deckA.readerSource.reset(); deckA.memorySource.reset(); deckA.mediaCodecSource.reset();
+    deckB.readerSource.reset(); deckB.memorySource.reset(); deckB.mediaCodecSource.reset();
     readAheadThread.stopThread (2000);
 }
 
@@ -65,6 +66,7 @@ bool AutoMixAudioEngine::loadDeck (Deck& deck, const juce::String& path)
     deck.transport.setSource (nullptr);
     deck.readerSource.reset();
     deck.memorySource.reset();
+    deck.mediaCodecSource.reset();
 
     const juce::File file (path);
     if (! file.existsAsFile())
@@ -85,21 +87,23 @@ bool AutoMixAudioEngine::loadDeck (Deck& deck, const juce::String& path)
         return true;
     }
 
-    // mp3/aac/m4a via MediaCodec -> in-memory float buffer.
-    double decodedRate = 0.0;
-    if (! automix::decodeWithMediaCodec (path, deck.decodedBuffer, decodedRate))
+    // mp3/aac/m4a via STREAMING MediaCodec source — playback starts immediately
+    // (only codec config up front), decode happens on the read-ahead thread.
+    if (auto streaming = automix::MediaCodecAudioSource::create (path))
     {
-        DBG ("AutoMixAudioEngine: no JUCE reader and MediaCodec decode failed: " << path);
-        return false;
+        deck.sourceSampleRate = streaming->getSampleRate();
+        deck.mediaCodecSource = std::move (streaming);
+        // 64k-frame look-ahead (~1.3 s @ 48k) on the shared read-ahead thread.
+        deck.transport.setSource (deck.mediaCodecSource.get(), 1 << 16, &readAheadThread,
+                                  deck.sourceSampleRate, 2);
+        deck.transport.setPosition (0.0);
+        deck.path = path;
+        deck.hasTrack.store (true);
+        return true;
     }
 
-    deck.sourceSampleRate = decodedRate;
-    deck.memorySource = std::make_unique<juce::MemoryAudioSource> (deck.decodedBuffer, false, false);
-    deck.transport.setSource (deck.memorySource.get(), 0, nullptr, decodedRate, 2);
-    deck.transport.setPosition (0.0);
-    deck.path = path;
-    deck.hasTrack.store (true);
-    return true;
+    DBG ("AutoMixAudioEngine: no JUCE reader and MediaCodec open failed: " << path);
+    return false;
 }
 
 // Decode an entire file to PCM (independent of the playing source), for the
@@ -232,6 +236,7 @@ void AutoMixAudioEngine::clearDeckA()
     deckA.transport.setSource (nullptr);
     deckA.readerSource.reset();
     deckA.memorySource.reset();
+    deckA.mediaCodecSource.reset();
     deckA.decodedBuffer.setSize (0, 0);
 }
 
@@ -309,6 +314,7 @@ void AutoMixAudioEngine::clearDeck (int index)
     d.transport.setSource (nullptr);
     d.readerSource.reset();
     d.memorySource.reset();
+    d.mediaCodecSource.reset();
     d.decodedBuffer.setSize (0, 0);
 }
 

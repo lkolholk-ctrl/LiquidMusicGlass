@@ -7,6 +7,8 @@
 #include <atomic>
 #include <memory>
 
+namespace automix { class MediaCodecAudioSource; }
+
 /**
  * Stage 3 of the native AutoMix engine: TWO decks + equal-power crossfade.
  *
@@ -109,9 +111,10 @@ private:
     struct Deck
     {
         juce::AudioTransportSource transport;
-        std::unique_ptr<juce::AudioFormatReaderSource> readerSource; // wav/flac/ogg
-        juce::AudioBuffer<float> decodedBuffer;                      // mp3/aac or stretched
-        std::unique_ptr<juce::MemoryAudioSource> memorySource;
+        std::unique_ptr<juce::AudioFormatReaderSource> readerSource;       // wav/flac/ogg
+        juce::AudioBuffer<float> decodedBuffer;                            // stretched/beat-matched
+        std::unique_ptr<juce::MemoryAudioSource> memorySource;            // plays decodedBuffer
+        std::unique_ptr<automix::MediaCodecAudioSource> mediaCodecSource; // streaming mp3/aac (instant)
         std::atomic<bool> hasTrack { false };
         juce::String path;                                           // for re-decode/stretch
         double sourceSampleRate { 0.0 };

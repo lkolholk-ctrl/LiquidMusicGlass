@@ -96,6 +96,7 @@ add_library(
     automix/AutoMixAudioEngine.cpp
     automix/AutoMixJni.cpp
     automix/MediaCodecDecoder.cpp
+    automix/MediaCodecAudioSource.cpp
     automix/TimeStretch.cpp
     # JUCE module unity builds, compiled directly (no juceaide). Order doesn't
     # matter for a single static-link target; deps resolved via the
