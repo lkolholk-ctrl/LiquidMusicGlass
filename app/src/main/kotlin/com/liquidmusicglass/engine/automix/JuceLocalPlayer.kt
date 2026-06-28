@@ -129,7 +129,7 @@ class JuceLocalPlayer(
         startIndex: Int,
         startPositionMs: Long
     ): ListenableFuture<*> {
-        android.util.Log.d("JUCELocalDbg", "handleSetMediaItems n=${mediaItems.size} start=$startIndex pos=$startPositionMs", Throwable("caller"))
+        android.util.Log.e("JUCELocalDbg", "handleSetMediaItems n=${mediaItems.size} start=$startIndex pos=$startPositionMs", Throwable("caller"))
         playlist = mediaItems.toList()
         currentIndex = if (startIndex == C.INDEX_UNSET) 0 else startIndex.coerceIn(0, playlist.lastIndex.coerceAtLeast(0))
         loadCurrent(if (startPositionMs == C.TIME_UNSET) 0L else startPositionMs)
@@ -144,7 +144,7 @@ class JuceLocalPlayer(
     }
 
     override fun handleSetPlayWhenReady(playWhenReady: Boolean): ListenableFuture<*> {
-        android.util.Log.d("JUCELocalDbg", "handleSetPlayWhenReady=$playWhenReady", Throwable("caller"))
+        android.util.Log.e("JUCELocalDbg", "handleSetPlayWhenReady=$playWhenReady", Throwable("caller"))
         playWhenReadyFlag = playWhenReady
         // Движок дёргаем на фоновом потоке (вызовы @Synchronized могут встать за
         // идущим декодом — нельзя блокировать main). Если идёт загрузка, она сама
@@ -175,7 +175,7 @@ class JuceLocalPlayer(
     }
 
     override fun handleStop(): ListenableFuture<*> {
-        android.util.Log.d("JUCELocalDbg", "handleStop", Throwable("caller"))
+        android.util.Log.e("JUCELocalDbg", "handleStop", Throwable("caller"))
         playWhenReadyFlag = false
         loadHandler.post { if (!released) runCatching { engine.stop() } }
         invalidateState()
@@ -207,7 +207,7 @@ class JuceLocalPlayer(
         val mi = playlist.getOrNull(currentIndex) ?: return
         val uri = mi.localConfiguration?.uri ?: return
 
-        android.util.Log.d("JUCELocalDbg", "loadCurrent idx=$currentIndex pos=$positionMs pwr=$playWhenReadyFlag")
+        android.util.Log.e("JUCELocalDbg", "loadCurrent idx=$currentIndex pos=$positionMs pwr=$playWhenReadyFlag")
         val seq = loadSeq.incrementAndGet()
         loading = true
         invalidateState()                      // сразу показать BUFFERING (на main)
