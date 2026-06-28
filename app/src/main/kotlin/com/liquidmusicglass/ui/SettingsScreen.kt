@@ -689,49 +689,54 @@ fun SettingsScreen(
                                 return@launch
                             }
 
-                            // 2) Симулированный таймлайн — JUCE СПИТ. Каждую итерацию
-                            //    СПРАШИВАЕМ МОДЕЛЬ (через контроллер): пора ли начинать
-                            //    переход. shouldStartTransition сам решает момент по
-                            //    модельному transitionStartMs и возвращает параметры
-                            //    перехода. Никаких ручных формул — и ВРЕМЯ, и параметры
-                            //    целиком от модели. JUCE будим только на cue.
+                            // 2) Будим JUCE и СРАЗУ играем трек A — настоящий звук.
+                            //    JUCE грузится только ТУТ, по нажатию Arm (не на старте
+                            //    приложения), поэтому cold-start остаётся лёгким. Decode
+                            //    A+B, точку входа B и beat-match готовим заранее, чтобы
+                            //    кроссфейд стартовал без рывка.
                             val controller = autoMixLazy.value
-                            val cueMs = feat.transitionStartMs
-                            val armAt = System.currentTimeMillis()
-                            devStatus = "Armed · JUCE asleep · cue at ${cueMs / 1000}s of ${durA / 1000}s…"
-                            while (true) {
-                                delay(250)
-                                val simPos = System.currentTimeMillis() - armAt
-                                val remaining = (durA - simPos).coerceAtLeast(0L)
-                                val tr = controller.shouldStartTransition(simPos, remaining, feat)
+                            val ba = feat.bpmA; val bb = feat.bpmB
+                            devStatus = "Waking JUCE · loading A+B…"
+                            withContext(Dispatchers.IO) {
+                                engine.init(context)
+                                engine.loadTrackA(pa)
+                                engine.loadTrackB(pb)
+                                engine.setEntryOffsetB(feat.entryOffsetMs.toDouble())
+                                if (ba != null && bb != null && ba > 0f && bb > 0f) {
+                                    engine.prepareStretchB(ba.toDouble(), bb.toDouble())
+                                }
+                            }
+                            engine.play()   // дек A играет с начала — звук слышен сразу
+                            android.util.Log.i(
+                                "JUCEAutoMix",
+                                "PLAYING A · cue @ ${feat.transitionStartMs}ms (model) · " +
+                                    "xfade ${feat.crossfadeDurationMs}ms type ${feat.transitionType}"
+                            )
+
+                            // 3) Крутим РЕАЛЬНУЮ позицию дека A. Когда модель скажет
+                            //    «пора» (shouldStartTransition по transitionStartMs) —
+                            //    запускаем кроссфейд A→B. И звук, и момент — от модели.
+                            var blended = false
+                            while (!blended) {
+                                delay(200)
+                                val posA = engine.positionMsA().toLong()
+                                val lenA = engine.lengthMsA().toLong().coerceAtLeast(durA)
+                                val remaining = (lenA - posA).coerceAtLeast(0L)
+                                val tr = controller.shouldStartTransition(posA, remaining, feat)
                                 if (tr.shouldStart) {
                                     android.util.Log.i(
                                         "JUCEAutoMix",
-                                        "MODEL CUE @ sim=${simPos}ms → JUCE WAKES + blend " +
-                                            "${tr.crossfadeDurationMs}ms type ${tr.transitionType} " +
-                                            "entry ${tr.entryOffsetMs}ms start ${tr.transitionStartMs}ms"
+                                        "MODEL CUE @ posA=${posA}ms → blend ${tr.crossfadeDurationMs}ms " +
+                                            "type ${tr.transitionType} entry ${tr.entryOffsetMs}ms"
                                     )
-                                    devStatus = "Cue → JUCE waking + blending…"
-                                    val ba = feat.bpmA; val bb = feat.bpmB
-                                    // FIRST JUCE init happens HERE, at the cue — decode A+B,
-                                    // beat-match — not at app start, not on pick. Все
-                                    // параметры берём из решения модели (tr.*).
-                                    withContext(Dispatchers.IO) {
-                                        engine.init(context)
-                                        engine.loadTrackA(pa)
-                                        engine.loadTrackB(pb)
-                                        engine.setEntryOffsetB(tr.entryOffsetMs.toDouble())
-                                        if (ba != null && bb != null && ba > 0f && bb > 0f) {
-                                            engine.prepareStretchB(ba.toDouble(), bb.toDouble())
-                                        }
-                                    }
-                                    engine.play()
+                                    engine.setEntryOffsetB(tr.entryOffsetMs.toDouble())
                                     engine.startCrossfade(tr.crossfadeDurationMs.toDouble())
                                     devStatus = "JUCE blend: ${tr.crossfadeDurationMs}ms · type ${tr.transitionType} · " +
                                         "bpm ${ba?.toInt() ?: "?"}→${bb?.toInt() ?: "?"}"
-                                    break
+                                    blended = true
+                                } else {
+                                    devStatus = "Playing A · ${posA / 1000}s / cue ${feat.transitionStartMs / 1000}s of ${lenA / 1000}s"
                                 }
-                                devStatus = "Armed · JUCE asleep · ${simPos / 1000}s / cue ${cueMs / 1000}s"
                             }
                         }
                     }
@@ -739,9 +744,13 @@ fun SettingsScreen(
                 PlainDivider()
                 SettingsActionItem(
                     title = "Cancel AutoMix arm",
-                    subtitle = "Stop waiting for the cue",
+                    subtitle = "Stop playback / waiting for the cue",
                     icon = Icons.Rounded.Stop,
-                    onClick = { autoMixJob?.cancel(); devStatus = "AutoMix arm cancelled" }
+                    onClick = {
+                        autoMixJob?.cancel()
+                        runCatching { engine.stop() }
+                        devStatus = "AutoMix arm cancelled"
+                    }
                 )
             }
 
