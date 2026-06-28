@@ -47,19 +47,26 @@ class MLTransitionPredictor(context: Context) {
         var c = -1; var d = -1; var o = -1; var t = -1; var s = -1
         val count = try { interpreter.outputTensorCount } catch (_: Throwable) { 0 }
         for (i in 0 until count) {
-            val name = try {
-                interpreter.getOutputTensor(i).name().lowercase()
-            } catch (_: Throwable) { "" }
-            when {
-                "transition_type" in name -> t = i
-                "transition_start" in name -> s = i
-                "compatibility" in name || "compat" in name -> c = i
-                "crossfade" in name || "duration" in name -> d = i
-                "entry_offset" in name || "offset" in name -> o = i
+            val rawName = try { interpreter.getOutputTensor(i).name() ?: "" } catch (_: Throwable) { "" }
+            when (outputSemanticId(rawName)) {
+                0 -> c = i
+                1 -> d = i
+                2 -> o = i
+                3 -> t = i
+                4 -> s = i
             }
         }
+        // Голову transition_type подтверждаем ПО ФОРМЕ: это единственный выход
+        // с 6 элементами ([1,6]). Это железная гарантия от краша «копирование
+        // [1,6] → [1,1]», даже если имена/суффиксы окажутся нестандартными —
+        // именно на этом падала прошлая сборка (StatefulPartitionedCall_1:3).
+        for (i in 0 until count) {
+            val shape = try { interpreter.getOutputTensor(i).shape() } catch (_: Throwable) { IntArray(0) }
+            val elems = shape.fold(1) { a, b -> a * b }
+            if (elems == 6) { t = i; break }
+        }
         val byName = intArrayOf(c, d, o, t, s)
-        // Принимаем имя-маппинг только если ВСЕ 5 голов распознаны и индексы
+        // Принимаем маппинг только если ВСЕ 5 голов распознаны и индексы
         // различны — иначе любой частичный резолв мог бы дать коллизию.
         val ok = count == 5 && byName.all { it in 0..4 } && byName.toSet().size == 5
         if (ok) {
@@ -92,6 +99,31 @@ class MLTransitionPredictor(context: Context) {
         mapInfo = "in[a$idxMelA,b$idxMelB,x$idxAux]" +
             (if (ok) " out[c$idxCompat,d$idxDuration,o$idxOffset,t$idxTransition,s$idxStart]"
              else " out:positional(n=$count)")
+    }
+
+    /**
+     * Семантический индекс выходной головы по имени тензора:
+     * 0=compatibility, 1=crossfade_duration, 2=entry_offset,
+     * 3=transition_type, 4=transition_start.
+     *
+     * В этой модели реальные имена выходов — "StatefulPartitionedCall_1:N",
+     * где N и есть порядковый номер головы Keras → берём суффикс ":N".
+     * Если экспорт сохранил человекочитаемые имена — ловим по подстроке.
+     * Возвращает -1, если распознать не удалось.
+     */
+    private fun outputSemanticId(name: String): Int {
+        val lower = name.lowercase()
+        when {
+            "transition_type" in lower -> return 3
+            "transition_start" in lower -> return 4
+            "compatibility" in lower || "compat" in lower -> return 0
+            "crossfade" in lower || "duration" in lower -> return 1
+            "entry_offset" in lower || "offset" in lower -> return 2
+        }
+        val colon = name.lastIndexOf(':')
+        if (colon in 0 until name.length - 1)
+            return name.substring(colon + 1).toIntOrNull() ?: -1
+        return -1
     }
 
     data class Prediction(
