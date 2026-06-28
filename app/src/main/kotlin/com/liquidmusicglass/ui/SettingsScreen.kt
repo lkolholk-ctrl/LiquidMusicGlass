@@ -509,7 +509,6 @@ fun SettingsScreen(
             var pathA by remember { mutableStateOf<String?>(null) }
             var pathB by remember { mutableStateOf<String?>(null) }
             var durationA by remember { mutableStateOf(0L) }
-            var juceAutoMix by remember { mutableStateOf(false) }
             val engine = com.liquidmusicglass.engine.automix.AutoMixNativeEngine
             // LAZY: do NOT construct at composition — AutoMixController's ctor loads
             // the TFLite model. It's built on first analysis, off the main thread,
@@ -669,13 +668,6 @@ fun SettingsScreen(
                     onSelect = { com.liquidmusicglass.engine.AppSettings.setJuceAutoMix(it) }
                 )
                 PlainDivider()
-                SettingsToggleItem(
-                    title = "JUCE AutoMix (test)",
-                    subtitle = "On: model analyses in bg, JUCE blends near track end. Off: legacy Media3.",
-                    selected = juceAutoMix,
-                    onSelect = { juceAutoMix = it }
-                )
-                PlainDivider()
                 SettingsActionItem(
                     title = "Arm AutoMix (analyze bg → timed cue)",
                     subtitle = devStatus,
@@ -685,7 +677,6 @@ fun SettingsScreen(
                         autoMixJob = scope.launch {
                             val pa = pathA; val pb = pathB; val durA = durationA
                             if (pa == null || pb == null || durA <= 0L) { devStatus = "Pick Deck A & B first"; return@launch }
-                            if (!juceAutoMix) { devStatus = "Toggle 'JUCE AutoMix' ON"; return@launch }
 
                             // 1) Analyse the pair in the BACKGROUND. JUCE stays ASLEEP —
                             //    no engine calls here, so AAudio / NDK MediaCodec / the
@@ -769,7 +760,6 @@ fun SettingsScreen(
                         autoMixJob = scope.launch {
                             val pa = pathA; val pb = pathB; val durA = durationA
                             if (pa == null || pb == null || durA <= 0L) { devStatus = "Pick Deck A & B first"; return@launch }
-                            if (!juceAutoMix) { devStatus = "Toggle 'JUCE AutoMix' ON"; return@launch }
 
                             // Анализ пары (Стадия 6) — JUCE спит. Модель даёт точку
                             // перехода и параметры свода.
