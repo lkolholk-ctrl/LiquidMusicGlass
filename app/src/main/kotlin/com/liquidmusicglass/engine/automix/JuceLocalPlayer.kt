@@ -182,6 +182,116 @@ class JuceLocalPlayer(
         return Futures.immediateVoidFuture()
     }
 
+    // COMMAND_CHANGE_MEDIA_ITEMS объявлен в доступных командах И используется
+    // нашим же кодом (clearMediaItems/addMediaItems/replaceMediaItem в
+    // AudioService/PlayerController), поэтому ОБЯЗАНЫ реализовать все мутаторы
+    // очереди. Иначе SimpleBasePlayer по умолчанию бросает
+    // IllegalStateException «Missing implementation to handle
+    // COMMAND_CHANGE_MEDIA_ITEMS» прямо на main → ANR (ловили на HONOR при
+    // clearMediaItems из легаси-контроллера сессии).
+    //
+    // Принцип: держим playlist/currentIndex согласованными и дёргаем движок
+    // ТОЛЬКО если поменялся реально играющий трек. Добавление/перемещение/
+    // замена не-текущего элемента звук НЕ трогают.
+
+    override fun handleAddMediaItems(
+        index: Int,
+        mediaItems: MutableList<MediaItem>
+    ): ListenableFuture<*> {
+        val list = playlist.toMutableList()
+        val at = index.coerceIn(0, list.size)
+        list.addAll(at, mediaItems)
+        playlist = list
+        if (at <= currentIndex) currentIndex += mediaItems.size  // текущий сдвинулся правее
+        ended = false
+        invalidateState()
+        return Futures.immediateVoidFuture()
+    }
+
+    override fun handleRemoveMediaItems(
+        fromIndex: Int,
+        toIndex: Int
+    ): ListenableFuture<*> {
+        val list = playlist.toMutableList()
+        val from = fromIndex.coerceIn(0, list.size)
+        val to = toIndex.coerceIn(from, list.size)
+        if (from == to) { invalidateState(); return Futures.immediateVoidFuture() }
+        val removedCurrent = currentIndex in from until to
+        repeat(to - from) { if (from < list.size) list.removeAt(from) }
+        playlist = list
+
+        when {
+            list.isEmpty() -> {
+                currentIndex = 0
+                playWhenReadyFlag = false
+                ended = false
+                loadHandler.post { if (!released) runCatching { engine.stop() } }
+            }
+            removedCurrent -> {
+                currentIndex = from.coerceIn(0, list.lastIndex)
+                ended = false
+                loadCurrent(0L)                 // в эту позицию «въехал» следующий трек
+                notifyCurrentTrackChanged()
+            }
+            currentIndex >= to -> currentIndex -= (to - from)  // удаляли только до текущего
+        }
+        invalidateState()
+        return Futures.immediateVoidFuture()
+    }
+
+    override fun handleMoveMediaItems(
+        fromIndex: Int,
+        toIndex: Int,
+        newIndex: Int
+    ): ListenableFuture<*> {
+        val list = playlist.toMutableList()
+        val from = fromIndex.coerceIn(0, list.size)
+        val to = toIndex.coerceIn(from, list.size)
+        if (from == to) { invalidateState(); return Futures.immediateVoidFuture() }
+        val curItem = playlist.getOrNull(currentIndex)   // следим за играющим по ссылке
+        val moved = ArrayList(list.subList(from, to))
+        repeat(to - from) { list.removeAt(from) }
+        val insertAt = newIndex.coerceIn(0, list.size)
+        list.addAll(insertAt, moved)
+        playlist = list
+        // Перемещение не меняет играющий трек — только его индекс.
+        val newCur = list.indexOfFirst { it === curItem }
+        if (newCur >= 0) currentIndex = newCur
+        invalidateState()
+        return Futures.immediateVoidFuture()
+    }
+
+    override fun handleReplaceMediaItems(
+        fromIndex: Int,
+        toIndex: Int,
+        mediaItems: MutableList<MediaItem>
+    ): ListenableFuture<*> {
+        val list = playlist.toMutableList()
+        val from = fromIndex.coerceIn(0, list.size)
+        val to = toIndex.coerceIn(from, list.size)
+        val replacedCurrent = currentIndex in from until to
+        val oldCurUri = playlist.getOrNull(currentIndex)?.localConfiguration?.uri
+        repeat(to - from) { if (from < list.size) list.removeAt(from) }
+        list.addAll(from, mediaItems)
+        playlist = list
+
+        if (replacedCurrent) {
+            currentIndex = from.coerceIn(0, list.lastIndex.coerceAtLeast(0))
+            val newCurUri = list.getOrNull(currentIndex)?.localConfiguration?.uri
+            // Если играющий трек заменили на тот же URI (например, обновление
+            // метаданных) — НЕ перезагружаем, чтобы не рвать звук.
+            if (list.isNotEmpty() && newCurUri != oldCurUri) {
+                ended = false
+                loadCurrent(0L)
+                notifyCurrentTrackChanged()
+            }
+        } else if (currentIndex >= to) {
+            currentIndex += mediaItems.size - (to - from)
+        }
+        invalidateState()
+        return Futures.immediateVoidFuture()
+    }
+
     override fun handlePrepare(): ListenableFuture<*> {
         prepared = true
         invalidateState()
