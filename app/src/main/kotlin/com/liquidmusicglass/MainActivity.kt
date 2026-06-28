@@ -89,6 +89,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // JUCE инициализируется через Activity-контекст (см. JuceContextHolder).
+        com.liquidmusicglass.engine.automix.JuceContextHolder.set(this)
+
         if (CrashHandler.hasCrashLog(this)) {
             startActivity(Intent(this, CrashActivity::class.java))
             finish()
@@ -408,6 +411,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        com.liquidmusicglass.engine.automix.JuceContextHolder.clear(this)
         if (!isNetworkCallbackRegistered) return
         val connectivityManager = getSystemService(ConnectivityManager::class.java)
         try {

@@ -1,7 +1,10 @@
 package com.liquidmusicglass.engine.automix
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
+import java.util.concurrent.CountDownLatch
 
 /**
  * Kotlin bridge to the native JUCE -> Oboe audio engine.
@@ -45,17 +48,55 @@ object AutoMixNativeEngine {
     /** True only if the lib is already loaded. Reading this does NOT trigger a load. */
     val isLoaded: Boolean get() = libState == 1
 
-    /** Open the JUCE/Oboe output device. Returns true on success. Idempotent. */
-    @Synchronized
+    /**
+     * Open the JUCE/Oboe output device. Returns true on success. Idempotent.
+     *
+     * КРИТИЧНО: JUCE-инициализация (Thread::initialiseJUCE -> JuceActivityWatcher
+     * -> getAppContext -> IsInstanceOf) ОБЯЗАНА выполняться на ГЛАВНОМ потоке —
+     * только там JNIEnv корректно резолвит app-контекст/classloader и кэш
+     * jclass'ов JUCE. Вызов nativeInit с фонового потока (например, из
+     * AutoMixCoordinator на Dispatchers.IO) роняет процесс с
+     * "JNI DETECTED ERROR: java_class == null in IsInstanceOf".
+     * Поэтому nativeInit маршалится на главный поток независимо от вызывающего;
+     * тяжёлый декод/свод (loadTrack*/startCrossfade) остаются на фоне.
+     *
+     * Не @Synchronized: nativeInit всегда исполняется на одном (главном) потоке,
+     * значит сериализован сам по себе; держать монитор объекта во время
+     * блокирующего ожидания main создало бы дедлок с другими @Synchronized
+     * вызовами движка с главного потока.
+     */
     fun init(context: Context): Boolean {
         if (!ensureLibrary()) return false
         if (initialised) return true
-        return runCatching {
-            val ok = nativeInit(context.applicationContext)
-            initialised = ok
-            ok
-        }.getOrElse {
-            Log.w(TAG, "nativeInit failed", it)
+        // JUCE-инициализации нужен ACTIVITY-контекст (getAppContext/JuceActivityWatcher
+        // делают IsInstanceOf по android.app.Activity). applicationContext роняет это
+        // с "java_class == null". Берём живую Activity из холдера (например, когда
+        // init зовёт AudioService/координатор без Activity), иначе — переданный
+        // контекст КАК ЕСТЬ (из Compose это уже Activity).
+        val initCtx: Context = JuceContextHolder.get() ?: context
+        val ok = runOnMainBlocking {
+            runCatching { nativeInit(initCtx) }.getOrElse {
+                Log.w(TAG, "nativeInit failed", it); false
+            }
+        }
+        initialised = ok
+        return ok
+    }
+
+    /** Выполнить [block] на главном потоке и дождаться результата (или сразу, если уже на main). */
+    private fun runOnMainBlocking(block: () -> Boolean): Boolean {
+        if (Looper.myLooper() == Looper.getMainLooper()) return block()
+        val latch = CountDownLatch(1)
+        // happens-before обеспечивает сам latch (countDown -> await), @Volatile не нужен.
+        var result = false
+        Handler(Looper.getMainLooper()).post {
+            try { result = block() } finally { latch.countDown() }
+        }
+        return try {
+            latch.await()
+            result
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
             false
         }
     }
