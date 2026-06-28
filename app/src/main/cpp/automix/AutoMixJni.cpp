@@ -135,6 +135,75 @@ Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeSetBassSwap(
         gEngine->setBassSwap (enabled == JNI_TRUE);
 }
 
+// ── Stage 8: full LOCAL player (ping-pong decks) ───────────────────────────
+
+JNIEXPORT jboolean JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeLoadIncoming(
+        JNIEnv* env, jobject /*thiz*/, jstring path)
+{
+    return loadInto (env, path, [] (const juce::String& p) { return gEngine->loadIncoming (p); });
+}
+
+JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeStartTransition(
+        JNIEnv* /*env*/, jobject /*thiz*/, jdouble durationMs, jdouble entryMs)
+{
+    if (gEngine != nullptr)
+        gEngine->startTransition ((double) durationMs, (double) entryMs);
+}
+
+JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativePlayCurrent(
+        JNIEnv* /*env*/, jobject /*thiz*/)
+{
+    if (gEngine != nullptr)
+        gEngine->playCurrent();
+}
+
+JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeSeekCurrent(
+        JNIEnv* /*env*/, jobject /*thiz*/, jdouble ms)
+{
+    if (gEngine != nullptr)
+        gEngine->seekCurrent ((double) ms);
+}
+
+JNIEXPORT jdouble JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativePositionMsCurrent(
+        JNIEnv* /*env*/, jobject /*thiz*/)
+{
+    return gEngine != nullptr ? (jdouble) gEngine->positionMsCurrent() : 0.0;
+}
+
+JNIEXPORT jdouble JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeLengthMsCurrent(
+        JNIEnv* /*env*/, jobject /*thiz*/)
+{
+    return gEngine != nullptr ? (jdouble) gEngine->lengthMsCurrent() : 0.0;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeIsCrossfadeActive(
+        JNIEnv* /*env*/, jobject /*thiz*/)
+{
+    return (gEngine != nullptr && gEngine->isCrossfadeActive()) ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jint JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeCurrentDeckIndex(
+        JNIEnv* /*env*/, jobject /*thiz*/)
+{
+    return gEngine != nullptr ? (jint) gEngine->currentDeckIndex() : 0;
+}
+
+JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeClearDeck(
+        JNIEnv* /*env*/, jobject /*thiz*/, jint index)
+{
+    if (gEngine != nullptr)
+        gEngine->clearDeck ((int) index);
+}
+
 JNIEXPORT jdouble JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativePositionMsA(
         JNIEnv* /*env*/, jobject /*thiz*/)

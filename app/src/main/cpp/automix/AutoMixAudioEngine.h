@@ -42,6 +42,31 @@ public:
     /** Equal-power crossfade deck A -> deck B over durationMs. Starts both decks. */
     void startCrossfade (double durationMs);
 
+    // ── Stage 8: full LOCAL player (ping-pong decks) ───────────────────────
+    // The engine plays a queue: one deck is "current", the other is "incoming".
+    // A transition crossfades current -> incoming (either direction); on
+    // completion the incoming deck becomes current. Transport ops act on the
+    // current deck so Kotlin can drive a normal player (play/pause/seek/pos).
+
+    /** Load a track into the NON-current (incoming) deck, ready for a transition. */
+    bool loadIncoming (const juce::String& path);
+    /** Equal-power crossfade current -> incoming over durationMs; incoming starts
+     *  at entryMs. On completion the incoming deck becomes current. */
+    void startTransition (double durationMs, double entryMs);
+    /** Start / resume the current deck. */
+    void playCurrent();
+    /** Seek the current deck (ms). */
+    void seekCurrent (double ms);
+    /** Current deck position / length (ms). */
+    double positionMsCurrent();
+    double lengthMsCurrent();
+    /** True while a transition (crossfade) is running. */
+    bool isCrossfadeActive();
+    /** Which deck is current (0 = A, 1 = B). */
+    int  currentDeckIndex();
+    /** Clear a deck by index (0 = A, 1 = B): free its source/track. */
+    void clearDeck (int index);
+
     /** Stage 6: where deck B enters from (model's entryOffsetMs). Applied at the
      *  next startCrossfade. 0 (default) keeps the Stage 3-5 behaviour unchanged. */
     void setEntryOffsetB (double ms);
@@ -97,6 +122,7 @@ private:
 
     bool loadDeck (Deck& deck, const juce::String& path);
     bool decodeFullPCM (const juce::String& path, juce::AudioBuffer<float>& out, double& rate);
+    Deck& deckRef (int index) { return index == 0 ? deckA : deckB; }
 
     juce::AudioDeviceManager deviceManager;
     juce::AudioFormatManager formatManager;
@@ -118,6 +144,8 @@ private:
     // sample position resets in sync; everything else is plain atomics.
     std::atomic<bool> crossfadeStart  { false };
     std::atomic<bool> crossfadeActive { false };
+    std::atomic<int>  currentDeck     { 0 };   // 0 = A, 1 = B (Stage 8 ping-pong)
+    std::atomic<int>  fadeOutDeck     { 0 };   // deck fading OUT during active transition
     std::atomic<long long> crossfadeTotal { 0 };  // total samples
     long long crossfadePos { 0 };                 // audio-thread only
     std::atomic<float> baseGainA { 1.0f };        // gains outside an active crossfade

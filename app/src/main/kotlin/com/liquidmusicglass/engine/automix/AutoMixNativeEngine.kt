@@ -166,6 +166,70 @@ object AutoMixNativeEngine {
         runCatching { nativeSetBassSwap(enabled) }.onFailure { Log.w(TAG, "nativeSetBassSwap failed", it) }
     }
 
+    // ── Stage 8: full LOCAL player (ping-pong decks) ────────────────────────
+
+    /** Load a track into the NON-current (incoming) deck. */
+    @Synchronized
+    fun loadIncoming(path: String): Boolean {
+        if (!isLoaded || !initialised) return false
+        return runCatching { nativeLoadIncoming(path) }.getOrElse {
+            Log.w(TAG, "nativeLoadIncoming failed", it); false
+        }
+    }
+
+    /** Crossfade current -> incoming over durationMs; incoming starts at entryMs. */
+    @Synchronized
+    fun startTransition(durationMs: Double, entryMs: Double) {
+        if (!isLoaded || !initialised) return
+        runCatching { nativeStartTransition(durationMs, entryMs) }
+            .onFailure { Log.w(TAG, "nativeStartTransition failed", it) }
+    }
+
+    /** Start / resume the current deck. */
+    @Synchronized
+    fun playCurrent() {
+        if (!isLoaded || !initialised) return
+        runCatching { nativePlayCurrent() }.onFailure { Log.w(TAG, "nativePlayCurrent failed", it) }
+    }
+
+    /** Seek the current deck (ms). */
+    @Synchronized
+    fun seekCurrent(ms: Double) {
+        if (!isLoaded || !initialised) return
+        runCatching { nativeSeekCurrent(ms) }.onFailure { Log.w(TAG, "nativeSeekCurrent failed", it) }
+    }
+
+    /** Current deck position (ms). */
+    fun positionMsCurrent(): Double {
+        if (!isLoaded || !initialised) return 0.0
+        return runCatching { nativePositionMsCurrent() }.getOrDefault(0.0)
+    }
+
+    /** Current deck length (ms). */
+    fun lengthMsCurrent(): Double {
+        if (!isLoaded || !initialised) return 0.0
+        return runCatching { nativeLengthMsCurrent() }.getOrDefault(0.0)
+    }
+
+    /** True while a transition (crossfade) is running. */
+    fun isCrossfadeActive(): Boolean {
+        if (!isLoaded || !initialised) return false
+        return runCatching { nativeIsCrossfadeActive() }.getOrDefault(false)
+    }
+
+    /** Which deck is current (0 = A, 1 = B). */
+    fun currentDeckIndex(): Int {
+        if (!isLoaded || !initialised) return 0
+        return runCatching { nativeCurrentDeckIndex() }.getOrDefault(0)
+    }
+
+    /** Clear a deck by index (0 = A, 1 = B). */
+    @Synchronized
+    fun clearDeck(index: Int) {
+        if (!isLoaded || !initialised) return
+        runCatching { nativeClearDeck(index) }.onFailure { Log.w(TAG, "nativeClearDeck failed", it) }
+    }
+
     /** Deck A current position (ms). 0 if not playing/loaded. */
     fun positionMsA(): Double {
         if (!isLoaded || !initialised) return 0.0
@@ -243,6 +307,15 @@ object AutoMixNativeEngine {
     private external fun nativeSetEntryOffsetA(ms: Double)
     private external fun nativeClearDeckA()
     private external fun nativeSetBassSwap(enabled: Boolean)
+    private external fun nativeLoadIncoming(path: String): Boolean
+    private external fun nativeStartTransition(durationMs: Double, entryMs: Double)
+    private external fun nativePlayCurrent()
+    private external fun nativeSeekCurrent(ms: Double)
+    private external fun nativePositionMsCurrent(): Double
+    private external fun nativeLengthMsCurrent(): Double
+    private external fun nativeIsCrossfadeActive(): Boolean
+    private external fun nativeCurrentDeckIndex(): Int
+    private external fun nativeClearDeck(index: Int)
     private external fun nativePositionMsA(): Double
     private external fun nativeLengthMsA(): Double
     private external fun nativePlay()

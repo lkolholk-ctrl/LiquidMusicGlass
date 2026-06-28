@@ -181,6 +181,8 @@ void AutoMixAudioEngine::stop()
 
     crossfadeStart.store (false);
     crossfadeActive.store (false);
+    currentDeck.store (0);
+    fadeOutDeck.store (0);
     baseGainA.store (1.0f);
     baseGainB.store (0.0f);
 }
@@ -207,6 +209,7 @@ void AutoMixAudioEngine::startCrossfade (double durationMs)
         deckB.transport.start();
     }
 
+    fadeOutDeck.store (0);        // legacy direction: A fades out, B fades in
     baseGainA.store (1.0f);
     baseGainB.store (0.0f);
     crossfadeStart.store (true); // audio thread resets position + activates
@@ -230,6 +233,83 @@ void AutoMixAudioEngine::clearDeckA()
     deckA.readerSource.reset();
     deckA.memorySource.reset();
     deckA.decodedBuffer.setSize (0, 0);
+}
+
+// ── Stage 8: full LOCAL player (ping-pong decks) ───────────────────────────
+
+bool AutoMixAudioEngine::loadIncoming (const juce::String& path)
+{
+    return loadDeck (deckRef (1 - currentDeck.load()), path);
+}
+
+void AutoMixAudioEngine::startTransition (double durationMs, double entryMs)
+{
+    long long total = (long long) (durationMs * currentSampleRate / 1000.0);
+    if (total < 1) total = 1;
+    crossfadeTotal.store (total);
+
+    const int out = currentDeck.load();
+    const int in  = 1 - out;
+    fadeOutDeck.store (out);
+
+    Deck& outDeck = deckRef (out);
+    Deck& inDeck  = deckRef (in);
+
+    if (inDeck.hasTrack.load())
+    {
+        inDeck.transport.setPosition ((entryMs < 0.0 ? 0.0 : entryMs) / 1000.0);
+        inDeck.transport.start();
+    }
+    if (outDeck.hasTrack.load())
+        outDeck.transport.start();
+
+    // Steady gains reflect current=out (1) until the envelope ramps it over.
+    baseGainA.store (out == 0 ? 1.0f : 0.0f);
+    baseGainB.store (out == 0 ? 0.0f : 1.0f);
+    crossfadeStart.store (true);
+}
+
+void AutoMixAudioEngine::playCurrent()
+{
+    Deck& d = deckRef (currentDeck.load());
+    if (d.hasTrack.load())
+        d.transport.start();
+}
+
+void AutoMixAudioEngine::seekCurrent (double ms)
+{
+    deckRef (currentDeck.load()).transport.setPosition ((ms < 0.0 ? 0.0 : ms) / 1000.0);
+}
+
+double AutoMixAudioEngine::positionMsCurrent()
+{
+    return deckRef (currentDeck.load()).transport.getCurrentPosition() * 1000.0;
+}
+
+double AutoMixAudioEngine::lengthMsCurrent()
+{
+    return deckRef (currentDeck.load()).transport.getLengthInSeconds() * 1000.0;
+}
+
+bool AutoMixAudioEngine::isCrossfadeActive()
+{
+    return crossfadeActive.load() || crossfadeStart.load();
+}
+
+int AutoMixAudioEngine::currentDeckIndex()
+{
+    return currentDeck.load();
+}
+
+void AutoMixAudioEngine::clearDeck (int index)
+{
+    Deck& d = deckRef (index);
+    d.hasTrack.store (false);
+    d.transport.stop();
+    d.transport.setSource (nullptr);
+    d.readerSource.reset();
+    d.memorySource.reset();
+    d.decodedBuffer.setSize (0, 0);
 }
 
 void AutoMixAudioEngine::setBassSwap (bool enabled)
@@ -336,6 +416,7 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
     const double total   = (double) crossfadeTotal.load();
     const float  bgA     = baseGainA.load();
     const float  bgB     = baseGainB.load();
+    const int    fOut    = fadeOutDeck.load(); // which physical deck fades OUT
     const double halfPi  = juce::MathConstants<double>::halfPi;
 
     const int ch = juce::jmin (numOutputChannels, 8);
@@ -359,21 +440,25 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
         {
             double t = (double) (crossfadePos + i) / total;
             if (t > 1.0) t = 1.0;
-            ga = (float) std::cos (t * halfPi); // equal power: ga*ga + gb*gb == 1
-            gb = (float) std::sin (t * halfPi);
+            const float gOut = (float) std::cos (t * halfPi); // outgoing (equal power)
+            const float gIn  = (float) std::sin (t * halfPi); // incoming
 
-            // Bass swap (Stage 5), only when both decks are in JUCE. For the
-            // Stage 7 overlap crossfade A lives on Media3 (deck A empty here), so
-            // the swap is disabled — otherwise it would thin out B's low end.
+            // Bass swap (Stage 5), only when enabled. Complementary: incoming
+            // gains its low end while the outgoing deck gives up its own.
+            float bassOut = 1.0f, bassIn = 1.0f;
             if (bassSwapEnabled.load())
             {
                 const float w = 0.5f; // swap over the middle 50% of the transition
                 float u = ((float) t - (0.5f - w * 0.5f)) / w;
                 u = juce::jlimit (0.0f, 1.0f, u);
                 const float s = u * u * (3.0f - 2.0f * u); // smoothstep 0->1
-                bassB = s;
-                bassA = 1.0f - s;
+                bassIn  = s;
+                bassOut = 1.0f - s;
             }
+
+            // Map outgoing/incoming onto physical decks A/B by direction.
+            if (fOut == 0) { ga = gOut; gb = gIn;  bassA = bassOut; bassB = bassIn; }
+            else           { ga = gIn;  gb = gOut; bassA = bassIn;  bassB = bassOut; }
         }
         else
         {
@@ -414,8 +499,10 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
         if ((double) crossfadePos >= total)
         {
             crossfadeActive.store (false);
-            baseGainA.store (0.0f); // A fully faded out
-            baseGainB.store (1.0f); // B fully in
+            const int out = fOut;                      // deck that faded out
+            currentDeck.store (1 - out);               // incoming is now current
+            baseGainA.store (out == 0 ? 0.0f : 1.0f);  // outgoing -> 0, incoming -> 1
+            baseGainB.store (out == 0 ? 1.0f : 0.0f);
         }
     }
 }
