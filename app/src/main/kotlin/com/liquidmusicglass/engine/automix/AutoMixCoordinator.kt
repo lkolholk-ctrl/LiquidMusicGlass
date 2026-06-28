@@ -51,6 +51,9 @@ object AutoMixCoordinator {
     @Volatile private var controller: AutoMixController? = null
     @Volatile private var trackJob: Job? = null
     @Volatile private var armedForTrackId: String? = null
+    // Идёт JUCE-свод: переходы Media3 (вызванные нашим же seek на B) не должны
+    // отменять job свода и перезапускать анализ.
+    @Volatile private var blending = false
 
     /** Запустить координатор один раз (из AudioService.onCreate). Идемпотентно. */
     fun start(context: Context) {
@@ -64,6 +67,7 @@ object AutoMixCoordinator {
     }
 
     private fun onTrackChanged(track: Track?) {
+        if (blending) return            // во время свода переход на B не рвёт job
         trackJob?.cancel()
         val s = scope ?: return
         if (track == null) return
@@ -152,19 +156,42 @@ object AutoMixCoordinator {
     }
 
     private suspend fun doBlend(crossfadeMs: Long, entryMs: Long) {
-        val svc = PlayerController.audioServiceRef
-        // 1) Заглушить + пауза Media3 (нет двойного звука и авто-перехода на B).
-        svc?.handoffPause()
-        // 2) JUCE сводит хвост A → начало B.
-        withContext(Dispatchers.IO) { engine.startCrossfade(crossfadeMs.toDouble()) }
-        android.util.Log.i("AutoMixCoordinator", "blend started ${crossfadeMs}ms")
-        // 3) Ждём завершения свода.
-        delay(crossfadeMs)
-        // 4) Возврат управления Media3: переход на B с позиции, где JUCE закончил.
-        svc?.handoffToNext(entryMs + crossfadeMs)
-        // 5) Освобождаем деки JUCE до следующего свода.
-        withContext(Dispatchers.IO) { runCatching { engine.stop() } }
-        android.util.Log.i("AutoMixCoordinator", "hand-off done → Media3 B @ ${(entryMs + crossfadeMs) / 1000}s")
+        blending = true
+        val resumeB = entryMs + crossfadeMs
+        try {
+            val svc = PlayerController.audioServiceRef
+            // 1) Заглушить + пауза Media3 (A) — нет двойного звука и авто-перехода.
+            svc?.handoffPause()
+            // 2) Предзагрузить B на позиции hand-back, ОСТАВАЯСЬ НА ПАУЗЕ: ExoPlayer
+            //    буферизует B заранее → возврат без рывка. Переход на B (onTrackChanged)
+            //    игнорируется, т.к. blending=true.
+            svc?.handoffPrepareNext(resumeB)
+            // 3) JUCE сводит хвост A → начало B.
+            withContext(Dispatchers.IO) { engine.startCrossfade(crossfadeMs.toDouble()) }
+            android.util.Log.i("AutoMixCoordinator", "blend started ${crossfadeMs}ms")
+            // 4) Ждём свод. СНАЧАЛА глушим JUCE (иначе наложение с Media3), ПОТОМ
+            //    играет уже буферизованный B.
+            delay(crossfadeMs)
+            withContext(Dispatchers.IO) { runCatching { engine.stop() } }
+            svc?.handoffPlay()
+            android.util.Log.i("AutoMixCoordinator", "hand-off done → Media3 B @ ${resumeB / 1000}s")
+        } finally {
+            blending = false
+        }
+        // Media3 теперь на B — поставить анализ следующей пары (B→C); переход был
+        // проигнорирован из-за blending, поэтому армим вручную (дедуп по id внутри).
+        armNext()
+    }
+
+    /** Поставить анализ для текущего трека Media3 (B после свода). Не отменяет
+     *  завершающийся job свода — просто заводит новый. Дедуп по armedForTrackId. */
+    private fun armNext() {
+        val s = scope ?: return
+        if (!PlayerSettings.autoMix.value) return
+        val track = PlayerController.currentTrack.value ?: return
+        if (track.id == armedForTrackId) return
+        armedForTrackId = track.id
+        trackJob = s.launch { runCatching { runForTrack(track) } }
     }
 
     /** Локальный трек → content://; стриминговый → свежий https:// (или null). */

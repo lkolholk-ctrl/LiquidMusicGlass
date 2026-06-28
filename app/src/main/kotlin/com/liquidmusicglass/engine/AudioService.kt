@@ -758,6 +758,19 @@ class AudioService : MediaSessionService() {
         it.play()
     }
 
+    /** Во время свода: перейти на B и встать на нужную позицию, но ОСТАТЬСЯ НА
+     *  ПАУЗЕ — ExoPlayer буферизует B заранее, чтобы hand-back был без рывка. */
+    fun handoffPrepareNext(positionMs: Long) = withPlayerOnMain {
+        val nextIndex = it.currentMediaItemIndex + 1
+        if (nextIndex < it.mediaItemCount) {
+            it.seekTo(nextIndex, positionMs.coerceAtLeast(0L))
+        }
+        // playWhenReady остаётся false (после handoffPause) — буферизуем, не играем.
+    }
+
+    /** Завершение hand-back: B уже на позиции и буферизован — вернуть звук и играть. */
+    fun handoffPlay() = withPlayerOnMain { it.volume = 1f; it.play() }
+
     /** Свод отменён/сорвался: вернуть звук и продолжить как обычно (fallback). */
     fun handoffAbort() = withPlayerOnMain { it.volume = 1f; it.play() }
 
