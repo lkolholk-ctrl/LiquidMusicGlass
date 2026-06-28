@@ -40,6 +40,27 @@ bool AutoMixAudioEngine::init()
         return false;
     }
 
+    // Крупный ВЫХОДНОЙ буфер устройства. При тротлинге процесса системой (шторка,
+    // другое приложение на агрессивных OEM типа Honor) аудио-колбэк Oboe может
+    // пропускать дедлайны → цикличные заедания. Большой буфер даёт HAL запас
+    // кадров, чтобы пропуск колбэка не приводил к underrun. Для музыки латентность
+    // не важна, поэтому берём максимально доступный буфер устройства (или 4096).
+    {
+        auto setup = deviceManager.getAudioDeviceSetup();
+        int target = 4096;   // ~85 мс @48k
+        if (auto* dev = deviceManager.getCurrentAudioDevice())
+        {
+            const auto sizes = dev->getAvailableBufferSizes();
+            if (! sizes.isEmpty())
+                target = juce::jlimit (4096, 8192, sizes.getLast());  // 85–170 мс, без крайностей
+        }
+        if (setup.bufferSize < target)
+        {
+            setup.bufferSize = target;
+            deviceManager.setAudioDeviceSetup (setup, true);
+        }
+    }
+
     deviceManager.addAudioCallback (this);
     initialised.store (true);
     return true;
