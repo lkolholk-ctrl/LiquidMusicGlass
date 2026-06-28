@@ -8,6 +8,7 @@ import android.os.Looper
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import com.liquidmusicglass.engine.PlayerController
+import com.liquidmusicglass.debug.DebugLog
 import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
 import androidx.media3.common.C
@@ -134,7 +135,7 @@ class JuceLocalPlayer(
         startIndex: Int,
         startPositionMs: Long
     ): ListenableFuture<*> {
-        android.util.Log.e("JUCELocalDbg", "handleSetMediaItems n=${mediaItems.size} start=$startIndex pos=$startPositionMs", Throwable("caller"))
+        DebugLog.add("JUCE.setItems n=${mediaItems.size} start=$startIndex pos=$startPositionMs | ${DebugLog.caller()}")
         playlist = mediaItems.toList()
         currentIndex = if (startIndex == C.INDEX_UNSET) 0 else startIndex.coerceIn(0, playlist.lastIndex.coerceAtLeast(0))
         ended = false
@@ -151,7 +152,7 @@ class JuceLocalPlayer(
     }
 
     override fun handleSetPlayWhenReady(playWhenReady: Boolean): ListenableFuture<*> {
-        android.util.Log.e("JUCELocalDbg", "handleSetPlayWhenReady=$playWhenReady", Throwable("caller"))
+        DebugLog.add("JUCE.setPWR=$playWhenReady | ${DebugLog.caller()}")
         if (playWhenReady) ended = false
         playWhenReadyFlag = playWhenReady
         // Движок дёргаем на фоновом потоке (вызовы @Synchronized могут встать за
@@ -170,6 +171,7 @@ class JuceLocalPlayer(
         positionMs: Long,
         seekCommand: Int
     ): ListenableFuture<*> {
+        DebugLog.add("JUCE.handleSeek idx=$mediaItemIndex pos=$positionMs cur=$currentIndex cmd=$seekCommand | ${DebugLog.caller()}")
         val target = if (mediaItemIndex == C.INDEX_UNSET) currentIndex else mediaItemIndex
         if (target != currentIndex && target in playlist.indices) {
             currentIndex = target
@@ -185,7 +187,7 @@ class JuceLocalPlayer(
     }
 
     override fun handleStop(): ListenableFuture<*> {
-        android.util.Log.e("JUCELocalDbg", "handleStop", Throwable("caller"))
+        DebugLog.add("JUCE.handleStop | ${DebugLog.caller()}")
         playWhenReadyFlag = false
         ended = false
         loadHandler.post { if (!released) runCatching { engine.stop() } }
@@ -218,7 +220,7 @@ class JuceLocalPlayer(
         val mi = playlist.getOrNull(currentIndex) ?: return
         val uri = mi.localConfiguration?.uri ?: return
 
-        android.util.Log.e("JUCELocalDbg", "loadCurrent idx=$currentIndex pos=$positionMs pwr=$playWhenReadyFlag")
+        DebugLog.add("JUCE.loadCurrent idx=$currentIndex pos=$positionMs pwr=$playWhenReadyFlag")
         val seq = loadSeq.incrementAndGet()
         loading = true
         ended = false
@@ -246,7 +248,7 @@ class JuceLocalPlayer(
                 if (!ok) {
                     playWhenReadyFlag = false
                     PlayerController.onPlaybackError("JUCE_LOAD_FAILED")
-                    android.util.Log.e("JUCELocalDbg", "loadCurrent failed for uri=$uri path=$path")
+                    DebugLog.add("JUCE.loadFAILED uri=$uri path=$path")
                 }
                 invalidateState()
             }
@@ -317,7 +319,7 @@ class JuceLocalPlayer(
 
             target.takeIf { it.exists() && it.length() > 0L }?.absolutePath
         } catch (t: Throwable) {
-            android.util.Log.e("JUCELocalDbg", "content uri cache copy failed: $uri", t)
+            DebugLog.add("JUCE.cacheCopyFAILED uri=$uri err=${t.message}")
             null
         }
     }

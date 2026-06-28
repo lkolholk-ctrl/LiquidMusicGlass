@@ -11,6 +11,7 @@ import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.MoreExecutors
+import com.liquidmusicglass.debug.DebugLog
 import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.api.icm.IcmTrackResponse
 import com.liquidmusicglass.data.local.WaveRepository
@@ -358,7 +359,7 @@ object PlayerController {
         }
 
         val startTrack = tracks[startIndex]
-        android.util.Log.e("JUCELocalDbg", "playFromList(EXO) ENTER tracks=${tracks.size} startIndex=$startIndex id=${startTrack.id} online=${startTrack.isOnlineTrack} uri=${startTrack.uri}")
+        DebugLog.add("PC.playFromList(EXO) n=${tracks.size} start=$startIndex online=${startTrack.isOnlineTrack} | ${DebugLog.caller()}")
 
         // ── Determine playback context BEFORE any async work ──
         val newContext = when {
@@ -498,7 +499,7 @@ object PlayerController {
             return
         }
         val startTrack = tracks[startIndex]
-        android.util.Log.e("JUCELocalDbg", "playLocalOnJuce ENTER tracks=${tracks.size} startIndex=$startIndex id=${startTrack.id}")
+        DebugLog.add("PC.playLocalOnJuce n=${tracks.size} start=$startIndex id=${startTrack.id} | ${DebugLog.caller()}")
 
         ioScope.launch {
             // Статичная локальная очередь — без онлайн-рефилла.
@@ -521,7 +522,7 @@ object PlayerController {
 
                 // Поднять сервис/контроллер (после этого audioServiceRef установлен).
                 getPlayer(context)
-                android.util.Log.e("JUCELocalDbg", "playLocalOnJuce: audioServiceRef=${if (audioServiceRef==null) "NULL" else "ok"} items=${mediaItems.size}")
+                DebugLog.add("PC.playLocalOnJuce -> svc ref=${if (audioServiceRef==null) "NULL" else "ok"} items=${mediaItems.size}")
                 audioServiceRef?.playLocalQueue(mediaItems, startIndex)
                 resetPlaybackLogging(startTrack.durationMs)
             }

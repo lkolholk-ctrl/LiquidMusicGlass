@@ -383,7 +383,10 @@ fun AppRoot() {
             ) {
                 BottomBar(
                     selectedIndex = selectedIndex,
-                    onItemSelected = { selectedIndex = it; AppSettings.setLastScreen(it) }
+                    onItemSelected = {
+                        com.liquidmusicglass.debug.DebugLog.add("TAB -> $it")
+                        selectedIndex = it; AppSettings.setLastScreen(it)
+                    }
                 )
 
                 Spacer(
@@ -511,6 +514,9 @@ fun AppRoot() {
 
         // ── Update Dialog ──
         UpdateDialog(backdrop = rootBackdrop)
+
+        // ── ВРЕМЕННЫЙ on-screen логгер (отладка JUCE без logcat) ──
+        com.liquidmusicglass.ui.debug.DebugOverlay()
         }
     }
 }

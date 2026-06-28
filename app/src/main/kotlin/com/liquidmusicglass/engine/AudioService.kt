@@ -38,6 +38,7 @@ import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.liquidmusicglass.R
+import com.liquidmusicglass.debug.DebugLog
 import com.liquidmusicglass.data.local.db.AppDatabase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -811,6 +812,7 @@ class AudioService : MediaSessionService() {
     /** Поставить сессию на ExoPlayer (стриминг). Идемпотентно. */
     private fun bindExoPlayer() {
         if (session?.player !== player) {
+            DebugLog.add("SVC.bindExoPlayer (session JUCE->EXO) | ${DebugLog.caller()}")
             runCatching { juceLocalPlayer?.stop() }    // заглушить JUCE — без двойного звука
             session?.player = player
         }
@@ -822,18 +824,19 @@ class AudioService : MediaSessionService() {
      * Вызывать с главного потока (PlayerController делает это в Dispatchers.Main).
      */
     fun playLocalQueue(mediaItems: List<MediaItem>, startIndex: Int = 0) {
-        android.util.Log.e("JUCELocalDbg", "playLocalQueue ENTER items=${mediaItems.size} startIndex=$startIndex sessionNull=${session==null}")
+        DebugLog.add("SVC.playLocalQueue items=${mediaItems.size} start=$startIndex sessionNull=${session==null}")
         mainScope.launch {
             currentQueueItems = mediaItems.toList()
             val juce = ensureJucePlayer()
             if (session?.player !== juce) {
+                DebugLog.add("SVC.playLocalQueue (session EXO->JUCE)")
                 runCatching { player.pause() }         // заглушить Exo — без двойного звука
                 session?.player = juce
             }
             juce.setMediaItems(mediaItems, startIndex.coerceAtLeast(0), 0L)
             juce.prepare()
             juce.playWhenReady = true
-            android.util.Log.e("JUCELocalDbg", "playLocalQueue applied: sessionPlayerIsJuce=${session?.player === juce}")
+            DebugLog.add("SVC.playLocalQueue applied isJuce=${session?.player === juce}")
         }
     }
 
