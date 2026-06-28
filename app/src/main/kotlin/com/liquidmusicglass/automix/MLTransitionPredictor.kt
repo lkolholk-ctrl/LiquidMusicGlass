@@ -35,6 +35,12 @@ class MLTransitionPredictor(context: Context) {
     private val idxOffset: Int
     private val idxTransition: Int
     private val idxStart: Int
+    // ВХОДЫ тоже резолвятся по имени: если реальный порядок входов модели не
+    // [mel_a, mel_b, aux], позиционная подача отправила бы буфер мела (~220 КБ)
+    // в тензор aux (128 б) → TFLite бросает по размеру → тихий уход в алгоритм.
+    private val idxMelA: Int
+    private val idxMelB: Int
+    private val idxAux: Int
     private val mapInfo: String
 
     init {
@@ -58,11 +64,34 @@ class MLTransitionPredictor(context: Context) {
         val ok = count == 5 && byName.all { it in 0..4 } && byName.toSet().size == 5
         if (ok) {
             idxCompat = c; idxDuration = d; idxOffset = o; idxTransition = t; idxStart = s
-            mapInfo = "byname:c$c,d$d,o$o,t$t,s$s"
         } else {
             idxCompat = 0; idxDuration = 1; idxOffset = 2; idxTransition = 3; idxStart = 4
-            mapInfo = "positional(out=$count)"
         }
+
+        // --- входы по имени ---
+        var ma = -1; var mb = -1; var ax = -1
+        val inCount = try { interpreter.inputTensorCount } catch (_: Throwable) { 0 }
+        for (i in 0 until inCount) {
+            val name = try {
+                interpreter.getInputTensor(i).name().lowercase()
+            } catch (_: Throwable) { "" }
+            when {
+                "mel_a" in name -> ma = i
+                "mel_b" in name -> mb = i
+                "aux" in name -> ax = i
+            }
+        }
+        val inByName = intArrayOf(ma, mb, ax)
+        val inOk = inCount == 3 && inByName.all { it in 0..2 } && inByName.toSet().size == 3
+        if (inOk) {
+            idxMelA = ma; idxMelB = mb; idxAux = ax
+        } else {
+            idxMelA = 0; idxMelB = 1; idxAux = 2
+        }
+
+        mapInfo = "in[a$idxMelA,b$idxMelB,x$idxAux]" +
+            (if (ok) " out[c$idxCompat,d$idxDuration,o$idxOffset,t$idxTransition,s$idxStart]"
+             else " out:positional(n=$count)")
     }
 
     data class Prediction(
@@ -125,7 +154,15 @@ class MLTransitionPredictor(context: Context) {
         val outTransition = Array(1) { FloatArray(6) }
         val outStart = Array(1) { FloatArray(1) }
 
-        val inputs = arrayOf(bufferA, bufferB, bufferAux)
+        // Входы — по индексу, резолвнутому ПО ИМЕНИ (mel_a/mel_b/aux), чтобы
+        // буфер каждого входа попал в свой тензор независимо от порядка в модели.
+        val inputs = arrayOfNulls<Any>(3)
+        inputs[idxMelA] = bufferA
+        inputs[idxMelB] = bufferB
+        inputs[idxAux] = bufferAux
+        @Suppress("UNCHECKED_CAST")
+        val inputArray = inputs as Array<Any>
+
         // Каждый буфер кладём по индексу, резолвнутому ПО ИМЕНИ — [1,6]-голова
         // transition_type гарантированно попадает на свой выход.
         val outputs = HashMap<Int, Any>(5)
@@ -135,7 +172,7 @@ class MLTransitionPredictor(context: Context) {
         outputs[idxTransition] = outTransition
         outputs[idxStart] = outStart
 
-        interpreter.runForMultipleInputsOutputs(inputs, outputs)
+        interpreter.runForMultipleInputsOutputs(inputArray, outputs)
 
         val transProbs = outTransition[0]
         var bestType = 0
