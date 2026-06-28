@@ -24,8 +24,9 @@ object DebugLog {
 
     /** Compose-наблюдаемый список строк (новые внизу). */
     val lines = mutableStateListOf<String>()
-    /** Видимость оверлея (тумблер в самом оверлее). */
-    val visible = mutableStateOf(true)
+    /** Видимость оверлея (тумблер в самом оверлее). По умолчанию свёрнут — UI чистый,
+     *  но инструмент под рукой (чип «LOG» сверху). Снять после стабилизации. */
+    val visible = mutableStateOf(false)
 
     fun add(msg: String) {
         val ts = (SystemClock.elapsedRealtime() - t0) / 1000.0
