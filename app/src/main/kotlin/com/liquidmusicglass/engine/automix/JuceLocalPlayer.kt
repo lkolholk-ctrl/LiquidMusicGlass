@@ -128,7 +128,8 @@ class JuceLocalPlayer(
 
     override fun handleSeek(
         mediaItemIndex: Int,
-        positionMs: Long
+        positionMs: Long,
+        seekCommand: Int
     ): ListenableFuture<*> {
         val target = if (mediaItemIndex == C.INDEX_UNSET) currentIndex else mediaItemIndex
         if (target != currentIndex && target in playlist.indices) {
