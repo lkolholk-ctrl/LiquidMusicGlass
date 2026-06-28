@@ -706,7 +706,7 @@ fun SettingsScreen(
                                     engine.prepareStretchB(ba.toDouble(), bb.toDouble())
                                 }
                             }
-                            engine.play()   // дек A играет с начала — звук слышен сразу
+                            withContext(Dispatchers.IO) { engine.play() }   // дек A играет с начала — звук слышен сразу
                             android.util.Log.i(
                                 "JUCEAutoMix",
                                 "PLAYING A · cue @ ${feat.transitionStartMs}ms (model) · " +
@@ -729,8 +729,10 @@ fun SettingsScreen(
                                         "MODEL CUE @ posA=${posA}ms → blend ${tr.crossfadeDurationMs}ms " +
                                             "type ${tr.transitionType} entry ${tr.entryOffsetMs}ms"
                                     )
-                                    engine.setEntryOffsetB(tr.entryOffsetMs.toDouble())
-                                    engine.startCrossfade(tr.crossfadeDurationMs.toDouble())
+                                    withContext(Dispatchers.IO) {
+                                        engine.setEntryOffsetB(tr.entryOffsetMs.toDouble())
+                                        engine.startCrossfade(tr.crossfadeDurationMs.toDouble())
+                                    }
                                     devStatus = "JUCE blend: ${tr.crossfadeDurationMs}ms · type ${tr.transitionType} · " +
                                         "bpm ${ba?.toInt() ?: "?"}→${bb?.toInt() ?: "?"}"
                                     blended = true
