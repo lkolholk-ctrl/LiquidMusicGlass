@@ -25,12 +25,54 @@ class MLTransitionPredictor(context: Context) {
 
     private val interpreter: Interpreter = ModelLoader.load(context)
 
+    // Индексы выходов резолвятся ПО ИМЕНИ тензора, а не по жёсткой позиции.
+    // Если модель пере-экспортируют с другим порядком голов — маппинг не
+    // сломается, и каждая голова читается из своего выхода (модель раскрыта
+    // на полную). Если имена не распознаны — честный фолбэк на исходный
+    // порядок Keras (compat, crossfade, entry, transition, start).
+    private val idxCompat: Int
+    private val idxDuration: Int
+    private val idxOffset: Int
+    private val idxTransition: Int
+    private val idxStart: Int
+    private val mapInfo: String
+
+    init {
+        var c = -1; var d = -1; var o = -1; var t = -1; var s = -1
+        val count = try { interpreter.outputTensorCount } catch (_: Throwable) { 0 }
+        for (i in 0 until count) {
+            val name = try {
+                interpreter.getOutputTensor(i).name().lowercase()
+            } catch (_: Throwable) { "" }
+            when {
+                "transition_type" in name -> t = i
+                "transition_start" in name -> s = i
+                "compatibility" in name || "compat" in name -> c = i
+                "crossfade" in name || "duration" in name -> d = i
+                "entry_offset" in name || "offset" in name -> o = i
+            }
+        }
+        val byName = intArrayOf(c, d, o, t, s)
+        // Принимаем имя-маппинг только если ВСЕ 5 голов распознаны и индексы
+        // различны — иначе любой частичный резолв мог бы дать коллизию.
+        val ok = count == 5 && byName.all { it in 0..4 } && byName.toSet().size == 5
+        if (ok) {
+            idxCompat = c; idxDuration = d; idxOffset = o; idxTransition = t; idxStart = s
+            mapInfo = "byname:c$c,d$d,o$o,t$t,s$s"
+        } else {
+            idxCompat = 0; idxDuration = 1; idxOffset = 2; idxTransition = 3; idxStart = 4
+            mapInfo = "positional(out=$count)"
+        }
+    }
+
     data class Prediction(
         val compatibility: Float,
         val crossfadeDurationMs: Long,
         val entryOffsetMs: Long,
         val transitionType: Int,
-        val transitionStartFraction: Float
+        val transitionStartFraction: Float,
+        /** Диагностика: сырые значения голов модели (до денормализации/коэрса). */
+        val debug: String
     )
 
     /**
@@ -84,13 +126,14 @@ class MLTransitionPredictor(context: Context) {
         val outStart = Array(1) { FloatArray(1) }
 
         val inputs = arrayOf(bufferA, bufferB, bufferAux)
-        val outputs = mapOf(
-            0 to outCompat,
-            1 to outDuration,
-            2 to outOffset,
-            3 to outTransition,
-            4 to outStart
-        )
+        // Каждый буфер кладём по индексу, резолвнутому ПО ИМЕНИ — [1,6]-голова
+        // transition_type гарантированно попадает на свой выход.
+        val outputs = HashMap<Int, Any>(5)
+        outputs[idxCompat] = outCompat
+        outputs[idxDuration] = outDuration
+        outputs[idxOffset] = outOffset
+        outputs[idxTransition] = outTransition
+        outputs[idxStart] = outStart
 
         interpreter.runForMultipleInputsOutputs(inputs, outputs)
 
@@ -104,14 +147,27 @@ class MLTransitionPredictor(context: Context) {
             }
         }
 
+        val rawCompat = outCompat[0][0]
+        val rawDuration = outDuration[0][0]
+        val rawOffset = outOffset[0][0]
+        val rawStart = outStart[0][0]
+        // Сырые выходы голов — чтобы по экранному логу видеть, ЖИВЫ ли головы
+        // entry_offset/transition_type, или они реально близки к нулю/argmax=0.
+        val debug = "raw[c=%.3f d=%.3f o=%.3f s=%.3f] tlogits=[%s] %s".format(
+            rawCompat, rawDuration, rawOffset, rawStart,
+            transProbs.joinToString(",") { "%.2f".format(it) },
+            mapInfo
+        )
+
         return Prediction(
-            compatibility = outCompat[0][0].coerceIn(0f, 1f),
+            compatibility = rawCompat.coerceIn(0f, 1f),
             // Модель сама управляет длительностью кроссфейда в окне 5..30с:
             // нормализованный выход 0..1 → 5000..30000мс.
-            crossfadeDurationMs = (5000f + outDuration[0][0] * 25000f).toLong().coerceIn(5000L, 30000L),
-            entryOffsetMs = (outOffset[0][0] * 10000f).toLong().coerceIn(0L, 10000L),
+            crossfadeDurationMs = (5000f + rawDuration * 25000f).toLong().coerceIn(5000L, 30000L),
+            entryOffsetMs = (rawOffset * 10000f).toLong().coerceIn(0L, 10000L),
             transitionType = bestType,
-            transitionStartFraction = outStart[0][0].coerceIn(0f, 1f)
+            transitionStartFraction = rawStart.coerceIn(0f, 1f),
+            debug = debug
         )
     }
 

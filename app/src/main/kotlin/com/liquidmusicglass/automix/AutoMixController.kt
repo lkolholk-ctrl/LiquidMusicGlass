@@ -103,14 +103,15 @@ class AutoMixController(
                 bpmB = plan.bpmB,
                 keyA = plan.keyA,
                 keyB = plan.keyB,
-                debugInfo = "ML: compat=%.2f xfade=%dms start=%dms(frac=%.2f) entry=%dms type=%d"
+                debugInfo = "ML: compat=%.2f xfade=%dms start=%dms(frac=%.2f) entry=%dms type=%d | %s"
                     .format(
                         mlPrediction.compatibility,
                         mlPrediction.crossfadeDurationMs,
                         modelStartMs,
                         mlPrediction.transitionStartFraction,
                         mlPrediction.entryOffsetMs,
-                        mlPrediction.transitionType
+                        mlPrediction.transitionType,
+                        mlPrediction.debug
                     ),
                 readyForTransition = mlPrediction.compatibility > MIN_COMPATIBILITY
             )

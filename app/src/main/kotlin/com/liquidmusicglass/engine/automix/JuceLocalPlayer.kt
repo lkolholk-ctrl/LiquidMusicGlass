@@ -381,7 +381,8 @@ class JuceLocalPlayer(
                     "AutoMix.PRED ready=${f.readyForTransition} " +
                         "compat=${"%.2f".format(f.compatibility)} " +
                         "xfade=${f.crossfadeDurationMs}ms start=${f.transitionStartMs}ms " +
-                        "entry=${f.entryOffsetMs}ms type=${f.transitionType} bpm=${f.bpmA}->${f.bpmB}"
+                        "entry=${f.entryOffsetMs}ms type=${f.transitionType} bpm=${f.bpmA}->${f.bpmB}\n" +
+                        f.debugInfo
                 )
             }.onFailure { DebugLog.add("AutoMix.analyze FAILED ${it.message}") }
         }
