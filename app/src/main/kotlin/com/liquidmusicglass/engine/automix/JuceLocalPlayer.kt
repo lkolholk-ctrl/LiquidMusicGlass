@@ -282,16 +282,25 @@ class JuceLocalPlayer(
             return engine.loadTrackA(p)
         }
         if (uri.scheme == "content") {
+            // 1) ПРЯМОЙ путь из MediaStore.DATA — самый быстрый (::open файла
+            //    напрямую). Чтение через дескриптор content-провайдера медленнее
+            //    → декод отстаёт → цикличные заедания. Поэтому путь приоритетнее FD.
+            legacyDataPath(uri)?.takeIf { File(it).exists() }?.let { p ->
+                if (engine.loadTrackA(p)) return true
+            }
+            // 2) FD без копии — для scoped-storage файлов БЕЗ прямого пути.
             val viaFd = runCatching {
                 context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                    // statSize может быть -1 → нативка определит длину через fstat.
-                    engine.loadTrackAFd(pfd.fd, 0L, pfd.statSize)
+                    engine.loadTrackAFd(pfd.fd, 0L, pfd.statSize)  // statSize=-1 → fstat в нативке
                 } ?: false
             }.getOrDefault(false)
             if (viaFd) return true
-            DebugLog.add("JUCE.fd failed → fallback copy uri=$uri")
+            // 3) Последний фолбэк — копия в кэш.
+            DebugLog.add("JUCE.path+fd failed → fallback copy uri=$uri")
+            val path = copyContentUriToCache(uri) ?: return false
+            return engine.loadTrackA(path)
         }
-        // Фолбэк: путь из MediaStore.DATA или копия в кэш (старый путь).
+        // Прочие схемы — через общий резолвер.
         val path = resolveFilePath(uri) ?: return false
         return engine.loadTrackA(path)
     }
