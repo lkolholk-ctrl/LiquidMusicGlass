@@ -8,9 +8,16 @@ import android.os.Looper
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import com.liquidmusicglass.engine.PlayerController
+import com.liquidmusicglass.engine.PlayerSettings
+import com.liquidmusicglass.automix.AutoMixController
 import com.liquidmusicglass.debug.DebugLog
 import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
@@ -60,10 +67,21 @@ class JuceLocalPlayer(
     @Volatile private var ended = false
     @Volatile private var released = false
 
+    // ── Stage 8c (ШАГ 1: ТОЛЬКО НАБЛЮДЕНИЕ) ──────────────────────────────────
+    // Когда трек подходит к концу и включён тумблер AutoMix — в фоне анализируем
+    // пару (текущий+следующий) моделью и ЛОГИРУЕМ предсказание. Звук НЕ трогаем:
+    // переход трека идёт как обычно. Это безопасная проверка, что v4 даёт
+    // вменяемые параметры свода, прежде чем реально исполнять кроссфейд (шаг 2).
+    private val autoMixScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private val autoMixController by lazy { AutoMixController(context.applicationContext) }
+    @Volatile private var autoMixAnalyzedIndex = -1
+    private val AUTOMIX_LEAD_MS = 40_000L   // окно до конца трека для анализа (хватает на свод ≤30с)
+
     // Периодический пинок состояния, чтобы позиция/прогресс в сессии шли «живо».
     private val ticker = object : Runnable {
         override fun run() {
             if (released) return
+            maybeAnalyzeForAutoMix()   // Stage 8c шаг 1 — только лог, звук не трогает
             maybeAdvanceAtEnd()
             invalidateState()
             handler.postDelayed(this, 500L)
@@ -216,6 +234,7 @@ class JuceLocalPlayer(
 
     override fun handleRelease(): ListenableFuture<*> {
         released = true
+        runCatching { autoMixScope.cancel() }
         handler.removeCallbacksAndMessages(null)
         loadHandler.removeCallbacksAndMessages(null)
         // release() движка тоже @Synchronized — на фоне, чтобы не ждать монитор на
@@ -243,6 +262,7 @@ class JuceLocalPlayer(
         val seq = loadSeq.incrementAndGet()
         loading = true
         ended = false
+        autoMixAnalyzedIndex = -1              // новый трек → заново разрешить AutoMix-анализ
         invalidateState()                      // сразу показать BUFFERING (на main)
 
         loadHandler.post {
@@ -330,6 +350,40 @@ class JuceLocalPlayer(
     private fun notifyCurrentTrackChanged() {
         playlist.getOrNull(currentIndex)?.mediaId?.takeIf { it.isNotBlank() }?.let {
             PlayerController.onTrackChanged(it)
+        }
+    }
+
+    /**
+     * Stage 8c ШАГ 1 — ТОЛЬКО НАБЛЮДЕНИЕ. У точки свода (за AUTOMIX_LEAD_MS до
+     * конца) разово анализируем пару моделью в фоне и пишем предсказание в лог.
+     * Звук НЕ трогаем. Гейт — тумблер AutoMix. Никогда не роняет воспроизведение.
+     */
+    private fun maybeAnalyzeForAutoMix() {
+        if (!PlayerSettings.autoMix.value) return
+        if (loading || !prepared || !playWhenReadyFlag || playlist.isEmpty()) return
+        val idx = currentIndex
+        if (idx >= playlist.lastIndex) return            // нет следующего трека
+        if (autoMixAnalyzedIndex == idx) return           // уже анализировали этот трек
+        val len = engine.lengthMsCurrent().toLong()
+        if (len <= 1000L) return                          // длина ещё не известна
+        val remaining = len - engine.positionMsCurrent().toLong()
+        if (remaining > AUTOMIX_LEAD_MS || remaining < 1500L) return  // ещё рано / уже поздно
+
+        val curUri = playlist.getOrNull(idx)?.localConfiguration?.uri ?: return
+        val nextUri = playlist.getOrNull(idx + 1)?.localConfiguration?.uri ?: return
+        autoMixAnalyzedIndex = idx
+        DebugLog.add("AutoMix.analyze START idx=$idx rem=${remaining}ms")
+
+        autoMixScope.launch {
+            runCatching {
+                val f = autoMixController.analyzeTrackPair(curUri, nextUri, len)
+                DebugLog.add(
+                    "AutoMix.PRED ready=${f.readyForTransition} " +
+                        "compat=${"%.2f".format(f.compatibility)} " +
+                        "xfade=${f.crossfadeDurationMs}ms start=${f.transitionStartMs}ms " +
+                        "entry=${f.entryOffsetMs}ms type=${f.transitionType} bpm=${f.bpmA}->${f.bpmB}"
+                )
+            }.onFailure { DebugLog.add("AutoMix.analyze FAILED ${it.message}") }
         }
     }
 
