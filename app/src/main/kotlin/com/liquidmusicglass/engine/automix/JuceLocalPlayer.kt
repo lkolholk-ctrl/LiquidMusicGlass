@@ -581,7 +581,13 @@ class JuceLocalPlayer(
 
         loadHandler.post {
             val ok = !released && loadUriIntoIncoming(plan.nextUri)
-            if (ok) engine.startTransition(plan.xfadeMs.toDouble(), plan.entryMs.toDouble())
+            if (ok) {
+                // Ровная equal-power громкость: ВЫКЛючаем bass-swap, иначе в
+                // середине свода вырезается низ одного дека и переход звучит
+                // тоньше/тише. Без бит-мэтча подмена баса не нужна.
+                engine.setBassSwap(false)
+                engine.startTransition(plan.xfadeMs.toDouble(), plan.entryMs.toDouble())
+            }
             handler.post {
                 if (released) return@post
                 if (ok) {
