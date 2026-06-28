@@ -4,6 +4,8 @@ import android.graphics.RuntimeShader
 import android.os.Build
 import androidx.annotation.RequiresApi
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.withInfiniteAnimationFrameMillis
 import androidx.compose.foundation.background
@@ -23,6 +25,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ShaderBrush
+import androidx.compose.ui.graphics.graphicsLayer
 import com.liquidmusicglass.engine.AudioReactor
 import com.liquidmusicglass.ui.glass.AlbumColors
 
@@ -187,7 +190,27 @@ fun AuraBackground(
     val powerSave = com.liquidmusicglass.ui.PowerSaveMonitor.active
 
     when {
-        heavyArmed && tiramisu && !powerSave -> AuraShaderBackground(albumColors, intensity, modifier, animate)
+        heavyArmed && tiramisu && !powerSave -> {
+            // Плавное появление: под шейдером — мгновенная градиентная база (нет
+            // чёрной вспышки и резкого щелчка), сам fbm-дым «проявляется» альфой
+            // 0→1, как эффекты на мудовых карточках. Базу убираем, когда дым
+            // полностью проявился (без лишнего overdraw).
+            var shown by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) { shown = true }
+            val fade by animateFloatAsState(
+                targetValue = if (shown) 1f else 0f,
+                animationSpec = tween(550, easing = LinearOutSlowInEasing),
+                label = "auraFadeIn"
+            )
+            Box(modifier) {
+                if (fade < 0.999f) AuraStaticBackground(albumColors, Modifier)
+                AuraShaderBackground(
+                    albumColors, intensity,
+                    Modifier.graphicsLayer { alpha = fade },
+                    animate
+                )
+            }
+        }
         heavyArmed -> AuraGradientFallback(albumColors, modifier)
         else -> AuraStaticBackground(albumColors, modifier)
     }
@@ -224,9 +247,14 @@ private fun AuraShaderBackground(albumColors: AlbumColors, intensity: Float, mod
     // Когда экран перекрыт оверлеем (открыт альбом/плеер/настройки) — замораживаем
     // тяжёлый AGSL-клок, чтобы не рисовать дым под другим экраном (это давало спайк
     // RenderThread → ANR на слабых GPU). produceState перезапускается при смене animate.
-    val timeSec by produceState(0f, animate) {
+    // Фаза ПЕРСИСТЕНТНА между заморозками: когда экран перекрыт (animate=false)
+    // produceState приостанавливается (кадры не тратятся — perf сохранён), но при
+    // возврате фаза ПРОДОЛЖАЕТСЯ с того же места, а не сбрасывается в 0. Это
+    // убирает «прыжок» дыма при переключении на главный (resume из phaseHolder).
+    val phaseHolder = remember { floatArrayOf(0f) }
+    val timeSec by produceState(phaseHolder[0], animate) {
         if (!animate) return@produceState
-        var phase = 0f
+        var phase = phaseHolder[0]
         var s1 = 0f
         var s2 = 0f
         var lastMs = 0L
@@ -237,6 +265,7 @@ private fun AuraShaderBackground(albumColors: AlbumColors, intensity: Float, mod
                 s1 = advanceBass(s1, AudioReactor.low.coerceIn(0f, 1f))
                 s2 += (s1 - s2) * BASS_STAGE2
                 phase += dt * (1f + s2 * 0.15f)
+                phaseHolder[0] = phase
                 value = phase
             }
         }
