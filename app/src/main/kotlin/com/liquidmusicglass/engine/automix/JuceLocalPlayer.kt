@@ -78,10 +78,14 @@ class JuceLocalPlayer(
             .add(Player.COMMAND_RELEASE)
             .build()
 
+        val lenMs = engine.lengthMsCurrent().toLong()
         val items = playlist.mapIndexed { i, mi ->
-            MediaItemData.Builder(/* uid = */ mi.mediaId.ifEmpty { "juce_$i" })
+            val b = MediaItemData.Builder(/* uid = */ mi.mediaId.ifEmpty { "juce_$i" })
                 .setMediaItem(mi)
-                .build()
+            // Длительность текущего трека берём из движка (другие — из метаданных
+            // item'а, если есть), чтобы прогресс-бар в UI/нотификации был корректным.
+            if (i == currentIndex && lenMs > 0L) b.setDurationUs(lenMs * 1000L)
+            b.build()
         }
 
         val state = if (!prepared || playlist.isEmpty()) Player.STATE_IDLE else Player.STATE_READY

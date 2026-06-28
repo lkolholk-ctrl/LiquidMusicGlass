@@ -466,6 +466,56 @@ object PlayerController {
         }
     }
 
+    /**
+     * Stage 8b — играть ЛОКАЛЬНУЮ очередь полностью через JUCE-движок.
+     *
+     * В отличие от [playFromList] (ExoPlayer + стриминговый резолв), здесь звук
+     * даёт нативный JUCE: AudioService переставляет MediaSession на JuceLocalPlayer
+     * (нотификация / экран блокировки / MediaController продолжают работать), а
+     * затем AutoMix (Стадия 8c) делает кроссфейд ВНУТРИ движка без швов.
+     *
+     * Только локальные файлы (content:// / file://) — JUCE читает их с диска.
+     * Онлайн-рефилл «волны» здесь не запускаем: очередь статична.
+     */
+    fun playLocalOnJuce(
+        context: Context,
+        tracks: List<Track>,
+        startIndex: Int = 0
+    ) {
+        if (tracks.isEmpty() || startIndex !in tracks.indices) {
+            android.util.Log.e("VOIDPIXEL_MEDIA", "playLocalOnJuce: empty tracks or bad startIndex=$startIndex")
+            return
+        }
+        val startTrack = tracks[startIndex]
+        android.util.Log.d("VOIDPIXEL_MEDIA", "playLocalOnJuce: tracks=${tracks.size}, startIndex=$startIndex, id=${startTrack.id}")
+
+        ioScope.launch {
+            // Статичная локальная очередь — без онлайн-рефилла.
+            _playbackContext = PlaybackContext.Playlist("local_audio")
+            endlessEngine.reset()
+
+            val immutableTracks = tracks.toList()
+            queue = immutableTracks
+            _queueFlow.value = immutableTracks
+            currentIndex = startIndex
+
+            val mediaItems = immutableTracks.map { track -> buildMediaItem(track, track.uri) }
+
+            withContext(Dispatchers.Main) {
+                _currentTrack.value = startTrack
+                _durationMs.value = startTrack.durationMs
+                _currentPositionMs.value = 0L
+                _isBuffering.value = false
+
+                // Поднять сервис/контроллер (после этого audioServiceRef установлен).
+                getPlayer(context)
+                audioServiceRef?.playLocalQueue(mediaItems, startIndex)
+                resetPlaybackLogging(startTrack.durationMs)
+            }
+            addToRecent(startTrack)
+        }
+    }
+
     fun togglePlayPause(context: Context) {
         mainScope.launch {
             val player = getPlayer(context) ?: return@launch

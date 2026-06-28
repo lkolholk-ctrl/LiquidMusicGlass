@@ -72,6 +72,15 @@ class AudioService : MediaSessionService() {
     private lateinit var player: ExoPlayer
     private var session: MediaSession? = null
 
+    /**
+     * Stage 8b — отдельный плеер для ЛОКАЛЬНОГО аудио, играющий через JUCE-движок.
+     * Создаётся лениво при первой локальной очереди и подставляется в ту же
+     * MediaSession (session.setPlayer), поэтому нотификация / экран блокировки /
+     * MediaController продолжают работать, но звук локальных треков даёт JUCE.
+     * Стриминг остаётся на [player] (ExoPlayer).
+     */
+    private var juceLocalPlayer: com.liquidmusicglass.engine.automix.JuceLocalPlayer? = null
+
     private val channelId = "liquid_music_playback"
 
     private val _playbackState = MutableStateFlow(Player.STATE_IDLE)
@@ -504,6 +513,9 @@ class AudioService : MediaSessionService() {
         player.removeListener(playerListener)
         player.release()
 
+        runCatching { juceLocalPlayer?.release() }
+        juceLocalPlayer = null
+
         session?.release()
         session = null
 
@@ -518,9 +530,10 @@ class AudioService : MediaSessionService() {
         positionJob = mainScope.launch {
             while (isActive) {
                 try {
-                    // ── ExoPlayer reads on Main thread ──
-                    val position = player.currentPosition
-                    val duration = player.duration
+                    // ── Читаем АКТИВНЫЙ плеер (JUCE для локального, Exo для стриминга) на Main ──
+                    val active = activePlayer()
+                    val position = active.currentPosition
+                    val duration = active.duration
                     val safeDuration = if (duration > 0 && duration != C.TIME_UNSET) duration else 0L
 
                     val effectiveDuration = if (safeDuration > 0L) {
@@ -701,6 +714,7 @@ class AudioService : MediaSessionService() {
     fun setQueue(mediaItems: List<MediaItem>, startIndex: Int = 0, startPositionMs: Long = 0L) {
         currentQueueItems = mediaItems.toList()
         mainScope.launch {
+            bindExoPlayer()                            // стриминг → ExoPlayer (с JUCE при необходимости)
             player.stop()
             player.clearMediaItems()
             player.setMediaItems(currentQueueItems, startIndex, startPositionMs)
@@ -739,6 +753,55 @@ class AudioService : MediaSessionService() {
     fun setDucked(ducked: Boolean) {
         _isDucked.value = ducked
         player.volume = if (ducked) 0.2f else 1f
+    }
+
+    // ── Stage 8b: локальное аудио полностью на JUCE ───────────────────────────
+    // Одна MediaSession, два плеера: ExoPlayer (стриминг) и JuceLocalPlayer
+    // (локальные файлы). session.setPlayer переключает источник звука, оставляя
+    // нотификацию/контроллер живыми. Активный плеер — тот, что сейчас в сессии.
+
+    /** Плеер, которым сейчас управляет сессия (JUCE — локальное, Exo — стриминг). */
+    private fun activePlayer(): Player = session?.player ?: player
+
+    /** Лениво создать JUCE-плеер локального аудио (на главном looper'е). */
+    private fun ensureJucePlayer(): com.liquidmusicglass.engine.automix.JuceLocalPlayer {
+        juceLocalPlayer?.let { return it }
+        val p = com.liquidmusicglass.engine.automix.JuceLocalPlayer(this, mainLooper)
+        juceLocalPlayer = p
+        return p
+    }
+
+    /** Поставить сессию на ExoPlayer (стриминг). Идемпотентно. */
+    private fun bindExoPlayer() {
+        if (session?.player !== player) {
+            runCatching { juceLocalPlayer?.pause() }   // заглушить JUCE — без двойного звука
+            session?.player = player
+        }
+    }
+
+    /**
+     * Stage 8b — играть ЛОКАЛЬНУЮ очередь полностью через JUCE. Переставляет
+     * сессию на JUCE-плеер и останавливает ExoPlayer, затем загружает очередь.
+     * Вызывать с главного потока (PlayerController делает это в Dispatchers.Main).
+     */
+    fun playLocalQueue(mediaItems: List<MediaItem>, startIndex: Int = 0) {
+        mainScope.launch {
+            currentQueueItems = mediaItems.toList()
+            val juce = ensureJucePlayer()
+            if (session?.player !== juce) {
+                runCatching { player.pause() }         // заглушить Exo — без двойного звука
+                session?.player = juce
+            }
+            juce.setMediaItems(mediaItems, startIndex.coerceAtLeast(0), 0L)
+            juce.prepare()
+            juce.playWhenReady = true
+            android.util.Log.d("AudioService", "[JUCE_LOCAL] queue=${mediaItems.size}, startIndex=$startIndex")
+        }
+    }
+
+    /** Stage 8b — вернуть сессию на ExoPlayer (для стриминга). */
+    fun useExoForStreaming() {
+        mainScope.launch { bindExoPlayer() }
     }
 
     // ── Stage 7 hand-off (Media3 ↔ JUCE) ─────────────────────────────────

@@ -747,15 +747,11 @@ private fun LocalAudioView(
             if (tracks.isNotEmpty()) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = {
-                        PlayerController.playFromList(
+                        // Stage 8b — локальное аудио играем полностью через JUCE.
+                        PlayerController.playLocalOnJuce(
                             context = context,
                             tracks = tracks.shuffled(),
-                            startIndex = 0,
-                            // Playlist-контекст = статичная локальная очередь без
-                            // онлайн-рефилла «волны» (тот гейтится на Global).
-                            autoRefillType = "playlist",
-                            autoRefillId = "local_audio",
-                            autoRefillName = "Local Audio"
+                            startIndex = 0
                         )
                     }) {
                         Icon(Icons.Default.Shuffle, null, tint = Color(0xFFFF9F0A), modifier = Modifier.size(22.dp))
@@ -803,13 +799,11 @@ private fun LocalAudioView(
                             onClick = {
                                 val startIndex = tracks.indexOfFirst { it.id == track.id }
                                 if (startIndex >= 0) {
-                                    PlayerController.playFromList(
+                                    // Stage 8b — локальное аудио играем полностью через JUCE.
+                                    PlayerController.playLocalOnJuce(
                                         context = context,
                                         tracks = tracks,
-                                        startIndex = startIndex,
-                                        autoRefillType = "playlist",
-                                        autoRefillId = "local_audio",
-                                        autoRefillName = "Local Audio"
+                                        startIndex = startIndex
                                     )
                                 }
                             }
