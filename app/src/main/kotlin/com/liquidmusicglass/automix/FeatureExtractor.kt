@@ -1,10 +1,13 @@
 package com.liquidmusicglass.automix
 
 import android.content.Context
+import android.media.AudioFormat
+import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.net.Uri
 import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import kotlin.math.abs
 import kotlin.math.ln
 import kotlin.math.pow
@@ -303,8 +306,17 @@ object FeatureExtractor {
     }
 
     /**
-     * Декодируем PCM моно из URI.
-     * @param fromEnd если true, берём последние SEGMENT_DURATION_SEC секунд.
+     * Декодируем РЕАЛЬНЫЙ PCM моно из URI — через MediaCodec, а не сырые байты.
+     *
+     * Раньше тут стоял MediaExtractor.readSampleData(), который для MP3/AAC
+     * отдаёт СЖАТЫЕ (encoded) кадры, а не PCM — и эти байты интерпретировались
+     * как PCM16. То есть mel-спектрограмма и aux-фичи (а значит и весь вход
+     * модели) считались на мусоре для всех сжатых форматов. Теперь честный
+     * декодер: extractor → MediaCodec → PCM float, стерео сводится в моно,
+     * ресэмплинг до MelSpectrogram.SAMPLE_RATE. Модель получает настоящий звук.
+     *
+     * @param fromEnd если true, берём последние SEGMENT_DURATION_SEC секунд (конец A);
+     *                иначе — первые секунды (начало B).
      * @param trackDurationMs длительность трека (нужна для fromEnd).
      */
     private fun decodePcmSegment(
@@ -313,82 +325,250 @@ object FeatureExtractor {
         fromEnd: Boolean,
         trackDurationMs: Long
     ): FloatArray {
+        val targetRate = MelSpectrogram.SAMPLE_RATE
+        val targetSamples = MelSpectrogram.SEGMENT_DURATION_SEC * targetRate
+        val silence = FloatArray(targetSamples)
+
         val extractor = MediaExtractor()
-        extractor.setDataSource(context, uri, null)
+        try {
+            extractor.setDataSource(context, uri, null)
+        } catch (_: Exception) {
+            extractor.release()
+            return silence
+        }
 
-        var audioTrackIndex = -1
-        var sampleRate = MelSpectrogram.SAMPLE_RATE
-
+        var trackIndex = -1
+        var inputFormat: MediaFormat? = null
         for (i in 0 until extractor.trackCount) {
-            val format = extractor.getTrackFormat(i)
-            val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
+            val fmt = extractor.getTrackFormat(i)
+            val mime = fmt.getString(MediaFormat.KEY_MIME) ?: continue
             if (mime.startsWith("audio/")) {
-                audioTrackIndex = i
-                if (format.containsKey(MediaFormat.KEY_SAMPLE_RATE)) {
-                    sampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
-                }
+                trackIndex = i
+                inputFormat = fmt
                 break
             }
         }
 
-        if (audioTrackIndex == -1) {
+        val format = inputFormat
+        val mime = format?.getString(MediaFormat.KEY_MIME)
+        if (trackIndex == -1 || format == null || mime == null) {
             extractor.release()
-            return FloatArray(MelSpectrogram.SEGMENT_DURATION_SEC * MelSpectrogram.SAMPLE_RATE)
+            return silence
         }
 
-        extractor.selectTrack(audioTrackIndex)
+        extractor.selectTrack(trackIndex)
 
-        // Если fromEnd — seekTo к последним 10 сек
+        val sourceRate = if (format.containsKey(MediaFormat.KEY_SAMPLE_RATE)) {
+            format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+        } else {
+            targetRate
+        }
+
+        // fromEnd → перематываемся к последним SEGMENT_DURATION_SEC секундам трека.
         if (fromEnd && trackDurationMs > 0L) {
-            val seekToMs = (trackDurationMs - MelSpectrogram.SEGMENT_DURATION_SEC * 1000L)
-                .coerceAtLeast(0L)
-            extractor.seekTo(seekToMs * 1000L, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
+            val seekToUs = (trackDurationMs - MelSpectrogram.SEGMENT_DURATION_SEC * 1000L)
+                .coerceAtLeast(0L) * 1000L
+            try {
+                extractor.seekTo(seekToUs, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
+            } catch (_: Exception) {
+                // не критично — декодируем с того, что есть
+            }
         }
 
-        val maxBytes = MelSpectrogram.SEGMENT_DURATION_SEC * sampleRate * 2 * 2
-        val buffer = ByteBuffer.allocate(maxBytes)
-        val output = ArrayList<Float>(MelSpectrogram.SEGMENT_DURATION_SEC * MelSpectrogram.SAMPLE_RATE)
+        // WAV/PCM (audio/raw) уже несжатый — readSampleData отдаёт настоящий PCM.
+        // Декодер для него есть не на всех устройствах, поэтому читаем напрямую.
+        if (mime.startsWith("audio/raw")) {
+            val channels = if (format.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) {
+                format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+            } else {
+                2
+            }
+            val raw = decodeRawPcm(extractor, channels, sourceRate)
+            extractor.release()
+            if (raw.isEmpty()) return silence
+            val resampledRaw = if (sourceRate == targetRate) raw
+                else resampleLinear(raw, sourceRate, targetRate)
+            return fitToExactSamples(resampledRaw, targetSamples)
+        }
 
-        while (true) {
+        val codec = try {
+            MediaCodec.createDecoderByType(mime)
+        } catch (_: Exception) {
+            extractor.release()
+            return silence
+        }
+
+        // Берём небольшой запас по длине (декодер может отдать чуть больше).
+        val maxMonoSamples = MelSpectrogram.SEGMENT_DURATION_SEC * sourceRate + sourceRate
+        val mono = FloatArray(maxMonoSamples)
+        var monoCount = 0
+
+        var channels = if (format.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) {
+            format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+        } else {
+            2
+        }
+        var pcmIsFloat = false
+
+        try {
+            codec.configure(format, null, null, 0)
+            codec.start()
+
+            val bufferInfo = MediaCodec.BufferInfo()
+            var inputDone = false
+            var outputDone = false
+            var idleIterations = 0
+
+            while (!outputDone && monoCount < maxMonoSamples) {
+                if (idleIterations > MAX_IDLE_ITERATIONS) break
+
+                if (!inputDone) {
+                    val inIndex = codec.dequeueInputBuffer(TIMEOUT_US)
+                    if (inIndex >= 0) {
+                        val inBuf = codec.getInputBuffer(inIndex)
+                        if (inBuf != null) {
+                            val sampleSize = extractor.readSampleData(inBuf, 0)
+                            if (sampleSize < 0) {
+                                codec.queueInputBuffer(
+                                    inIndex, 0, 0, 0,
+                                    MediaCodec.BUFFER_FLAG_END_OF_STREAM
+                                )
+                                inputDone = true
+                            } else {
+                                codec.queueInputBuffer(
+                                    inIndex, 0, sampleSize,
+                                    extractor.sampleTime, 0
+                                )
+                                extractor.advance()
+                            }
+                        }
+                    }
+                }
+
+                val outIndex = codec.dequeueOutputBuffer(bufferInfo, TIMEOUT_US)
+                when {
+                    outIndex >= 0 -> {
+                        idleIterations = 0
+                        if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
+                            outputDone = true
+                        }
+                        if (bufferInfo.size > 0) {
+                            val outBuf = codec.getOutputBuffer(outIndex)
+                            if (outBuf != null) {
+                                outBuf.position(bufferInfo.offset)
+                                outBuf.limit(bufferInfo.offset + bufferInfo.size)
+                                monoCount = appendPcm(outBuf, mono, monoCount, channels, pcmIsFloat)
+                            }
+                        }
+                        codec.releaseOutputBuffer(outIndex, false)
+                    }
+
+                    outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                        val outFormat = codec.outputFormat
+                        if (outFormat.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) {
+                            channels = outFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+                        }
+                        if (outFormat.containsKey(KEY_PCM_ENCODING)) {
+                            pcmIsFloat = outFormat.getInteger(KEY_PCM_ENCODING) ==
+                                AudioFormat.ENCODING_PCM_FLOAT
+                        }
+                    }
+
+                    outIndex == MediaCodec.INFO_TRY_AGAIN_LATER -> idleIterations++
+
+                    else -> { /* INFO_OUTPUT_BUFFERS_CHANGED и прочее — игнорируем */ }
+                }
+            }
+        } catch (_: Exception) {
+            // вернём то, что успели декодировать
+        } finally {
+            try { codec.stop() } catch (_: Exception) {}
+            try { codec.release() } catch (_: Exception) {}
+            extractor.release()
+        }
+
+        if (monoCount == 0) return silence
+
+        val decoded = mono.copyOf(monoCount)
+        val resampled = if (sourceRate == targetRate) {
+            decoded
+        } else {
+            resampleLinear(decoded, sourceRate, targetRate)
+        }
+
+        return fitToExactSamples(resampled, targetSamples)
+    }
+
+    /**
+     * PCM из буфера декодера → моно float [-1f, 1f], дописывает в [dst] с [dstIndex].
+     * 16-bit signed PCM (основной случай) и float PCM; стерео сводится в моно.
+     */
+    private fun appendPcm(
+        src: ByteBuffer,
+        dst: FloatArray,
+        dstIndex: Int,
+        channels: Int,
+        isFloat: Boolean
+    ): Int {
+        var idx = dstIndex
+        val ch = channels.coerceAtLeast(1)
+        src.order(ByteOrder.LITTLE_ENDIAN)
+
+        if (isFloat) {
+            val fb = src.asFloatBuffer()
+            val frames = fb.remaining() / ch
+            var f = 0
+            while (f < frames && idx < dst.size) {
+                var sum = 0f
+                for (c in 0 until ch) sum += fb.get()
+                dst[idx++] = (sum / ch).coerceIn(-1f, 1f)
+                f++
+            }
+        } else {
+            val sb = src.asShortBuffer()
+            val frames = sb.remaining() / ch
+            var f = 0
+            while (f < frames && idx < dst.size) {
+                var sum = 0f
+                for (c in 0 until ch) sum += sb.get() / 32768f
+                dst[idx++] = sum / ch
+                f++
+            }
+        }
+        return idx
+    }
+
+    /**
+     * Прямое чтение несжатого PCM (audio/raw / WAV) из экстрактора в моно float.
+     * Читает до SEGMENT_DURATION_SEC секунд от текущей позиции (учитывает seek).
+     */
+    private fun decodeRawPcm(
+        extractor: MediaExtractor,
+        channels: Int,
+        sourceRate: Int
+    ): FloatArray {
+        val ch = channels.coerceAtLeast(1)
+        val maxMonoSamples = MelSpectrogram.SEGMENT_DURATION_SEC * sourceRate + sourceRate
+        val mono = FloatArray(maxMonoSamples)
+        var monoCount = 0
+        val buffer = ByteBuffer.allocate(64 * 1024)
+
+        while (monoCount < maxMonoSamples) {
             buffer.clear()
             val size = extractor.readSampleData(buffer, 0)
             if (size < 0) break
-
+            buffer.position(0)
             buffer.limit(size)
-            val data = ByteArray(size)
-            buffer.get(data)
-
-            var i = 0
-            while (i + 1 < data.size) {
-                val sample = ((data[i + 1].toInt() shl 8) or (data[i].toInt() and 0xFF)).toShort()
-                output.add(sample / 32768f)
-                i += 2
-            }
-
-            extractor.advance()
-
-            if (output.size >= MelSpectrogram.SEGMENT_DURATION_SEC * sampleRate) {
-                break
-            }
+            monoCount = appendPcm(buffer, mono, monoCount, ch, isFloat = false)
+            if (!extractor.advance()) break
         }
 
-        extractor.release()
-
-        val mono = if (sampleRate == MelSpectrogram.SAMPLE_RATE) {
-            output.toFloatArray()
-        } else {
-            resampleLinear(
-                input = output.toFloatArray(),
-                inputRate = sampleRate,
-                outputRate = MelSpectrogram.SAMPLE_RATE
-            )
-        }
-
-        return fitToExactSamples(
-            mono,
-            MelSpectrogram.SEGMENT_DURATION_SEC * MelSpectrogram.SAMPLE_RATE
-        )
+        return if (monoCount == 0) FloatArray(0) else mono.copyOf(monoCount)
     }
+
+    private const val TIMEOUT_US = 10_000L
+    private const val MAX_IDLE_ITERATIONS = 200
+    private const val KEY_PCM_ENCODING = "pcm-encoding"
 
     private fun resampleLinear(
         input: FloatArray,
