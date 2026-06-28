@@ -77,26 +77,46 @@ class AutoMixController(
             durationB = nextDurationMs
         )
 
-        // 4. Комбинируем ML + алгоритмический анализ
-        if (mlPrediction != null && mlPrediction.compatibility > COMPATIBILITY_THRESHOLD) {
-            val finalCompat = (mlPrediction.compatibility * 0.6f + plan.compatibility * 0.4f)
+        // 4. Модель РАСКРЫВАЕТСЯ ПОЛНОСТЬЮ. Если TFLite загрузилась — ВСЕ
+        //    параметры перехода берём из её выхода: compatibility,
+        //    crossfade_duration, entry_offset, transition_type и transition_start.
+        //    Алгоритмический SmartTransitionFinder больше НЕ перетирает их — он
+        //    остаётся только запасным путём (модель не загрузилась) и источником
+        //    детектированных BPM/Key для отображения (это вход aux, не выход сети).
+        if (mlPrediction != null) {
+            // transition_start модель отдаёт как долю 0..1 от длительности трека A.
+            // Единственная защита — чтобы кроссфейд успел завершиться до конца
+            // трека (не выходим за durationA - crossfade). Сам выбор точки — модели.
+            val latestStart = (currentTrackDurationMs - mlPrediction.crossfadeDurationMs)
+                .coerceAtLeast(0L)
+            val modelStartMs = (mlPrediction.transitionStartFraction * currentTrackDurationMs)
+                .toLong()
+                .coerceIn(0L, latestStart)
             return@withContext TrackFeatures(
                 trackUri = nextTrackUri,
-                compatibility = finalCompat,
-                crossfadeDurationMs = plan.crossfadeDurationMs,
-                entryOffsetMs = plan.entryOffsetMs,
-                transitionType = plan.transitionType,
-                transitionStartMs = plan.transitionStartMs,
+                compatibility = mlPrediction.compatibility,
+                crossfadeDurationMs = mlPrediction.crossfadeDurationMs,
+                entryOffsetMs = mlPrediction.entryOffsetMs,
+                transitionType = mlPrediction.transitionType,
+                transitionStartMs = modelStartMs,
                 bpmA = plan.bpmA,
                 bpmB = plan.bpmB,
                 keyA = plan.keyA,
                 keyB = plan.keyB,
-                debugInfo = "ML+Algo: ${plan.debugInfo}",
-                readyForTransition = true
+                debugInfo = "ML: compat=%.2f xfade=%dms start=%dms(frac=%.2f) entry=%dms type=%d"
+                    .format(
+                        mlPrediction.compatibility,
+                        mlPrediction.crossfadeDurationMs,
+                        modelStartMs,
+                        mlPrediction.transitionStartFraction,
+                        mlPrediction.entryOffsetMs,
+                        mlPrediction.transitionType
+                    ),
+                readyForTransition = mlPrediction.compatibility > MIN_COMPATIBILITY
             )
         }
 
-        // 5. Только алгоритмический анализ
+        // 5. Запасной путь — модель недоступна: чистый алгоритмический анализ.
         return@withContext TrackFeatures(
             trackUri = nextTrackUri,
             compatibility = plan.compatibility,
@@ -474,7 +494,6 @@ class AutoMixController(
     }
 
     companion object {
-        private const val COMPATIBILITY_THRESHOLD = 0.45f
         private const val MIN_COMPATIBILITY = 0.25f
         private const val DEFAULT_COMPATIBILITY = 0.75f
         private const val DEFAULT_CROSSFADE_MS = 8000L
