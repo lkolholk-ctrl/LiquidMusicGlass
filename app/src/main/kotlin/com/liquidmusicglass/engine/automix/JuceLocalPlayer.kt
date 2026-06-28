@@ -135,9 +135,28 @@ class JuceLocalPlayer(
         startIndex: Int,
         startPositionMs: Long
     ): ListenableFuture<*> {
-        DebugLog.add("JUCE.setItems n=${mediaItems.size} start=$startIndex pos=$startPositionMs | ${DebugLog.caller()}")
+        val incomingIds = mediaItems.map { it.mediaId }
+        val currentIds = playlist.map { it.mediaId }
+        val sameQueue = incomingIds.isNotEmpty() && incomingIds == currentIds
+        val targetIndex = if (startIndex == C.INDEX_UNSET) currentIndex
+            else startIndex.coerceIn(0, mediaItems.lastIndex.coerceAtLeast(0))
+        val noStartPos = startPositionMs == C.TIME_UNSET || startPositionMs <= 0L
+
+        DebugLog.add("JUCE.setItems n=${mediaItems.size} start=$startIndex pos=$startPositionMs same=$sameQueue tgt=$targetIndex cur=$currentIndex | ${DebugLog.caller()}")
+
+        // ЗАЩИТА: повторная установка ТОЙ ЖЕ очереди на ТОТ ЖЕ индекс без явной
+        // позиции (например, ресинк сессии при переключении вкладок) НЕ должна
+        // перезагружать трек — иначе звук обрывается и ползунок прыгает в 0.
+        // Просто обновляем ссылку на плейлист и выходим, не трогая движок.
+        if (sameQueue && targetIndex == currentIndex && noStartPos) {
+            DebugLog.add("JUCE.setItems SKIPPED (same queue+index, no reload)")
+            playlist = mediaItems.toList()
+            invalidateState()
+            return Futures.immediateVoidFuture()
+        }
+
         playlist = mediaItems.toList()
-        currentIndex = if (startIndex == C.INDEX_UNSET) 0 else startIndex.coerceIn(0, playlist.lastIndex.coerceAtLeast(0))
+        currentIndex = targetIndex
         ended = false
         loadCurrent(if (startPositionMs == C.TIME_UNSET) 0L else startPositionMs)
         notifyCurrentTrackChanged()
