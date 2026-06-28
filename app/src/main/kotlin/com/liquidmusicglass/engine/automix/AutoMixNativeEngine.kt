@@ -58,7 +58,7 @@ object AutoMixNativeEngine {
      * AutoMixCoordinator на Dispatchers.IO) роняет процесс с
      * "JNI DETECTED ERROR: java_class == null in IsInstanceOf".
      * Поэтому nativeInit маршалится на главный поток независимо от вызывающего;
-     * тяжёлый декод/свод (loadTrack*/startCrossfade) остаются на фоне.
+     * тяжёлый декод/свод (loadTrackA/B, startCrossfade) остаются на фоне.
      *
      * Не @Synchronized: nativeInit всегда исполняется на одном (главном) потоке,
      * значит сериализован сам по себе; держать монитор объекта во время
