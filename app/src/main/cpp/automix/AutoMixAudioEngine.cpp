@@ -40,23 +40,33 @@ bool AutoMixAudioEngine::init()
         return false;
     }
 
-    // Крупный ВЫХОДНОЙ буфер устройства. При тротлинге процесса системой (шторка,
-    // другое приложение на агрессивных OEM типа Honor) аудио-колбэк Oboe может
-    // пропускать дедлайны → цикличные заедания. Большой буфер даёт HAL запас
-    // кадров, чтобы пропуск колбэка не приводил к underrun. Для музыки латентность
-    // не важна, поэтому берём максимально доступный буфер устройства (или 4096).
+    // RT-режим (low-latency). Раньше тут НАМЕРЕННО раздували буфер до 4096–8192,
+    // чтобы пережить тротлинг. Побочка: большой буфер уводит Oboe/AAudio с MMAP
+    // fast-path на Legacy-микшер с колбэком ОБЫЧНОГО приоритета — он и голодает,
+    // когда система рисует уведомление/шторку → заикания возвращаются.
+    //
+    // Теперь запрашиваем НАТИВНЫЙ burst-кратный буфер: тогда Oboe держит
+    // low-latency fast-path, а его аудио-колбэк планируется audioserver'ом как
+    // real-time (SCHED_FIFO) и переживает скачки CPU приложения. Берём 2×burst —
+    // всё ещё fast-path, но с небольшим запасом кадров против единичного пропуска.
     {
         auto setup = deviceManager.getAudioDeviceSetup();
-        int target = 4096;   // ~85 мс @48k
+        int rtBuffer = 0;
         if (auto* dev = deviceManager.getCurrentAudioDevice())
         {
+            const int burst = dev->getDefaultBufferSize();   // нативный low-latency burst
             const auto sizes = dev->getAvailableBufferSizes();
+            if (burst > 0)
+                rtBuffer = burst * 2;
+            else if (! sizes.isEmpty())
+                rtBuffer = sizes.getFirst();                  // самый маленький поддерживаемый
+            // не опускаемся ниже минимально поддерживаемого размера устройства
             if (! sizes.isEmpty())
-                target = juce::jlimit (4096, 8192, sizes.getLast());  // 85–170 мс, без крайностей
+                rtBuffer = juce::jmax (rtBuffer, sizes.getFirst());
         }
-        if (setup.bufferSize < target)
+        if (rtBuffer > 0 && setup.bufferSize != rtBuffer)
         {
-            setup.bufferSize = target;
+            setup.bufferSize = rtBuffer;
             deviceManager.setAudioDeviceSetup (setup, true);
         }
     }
