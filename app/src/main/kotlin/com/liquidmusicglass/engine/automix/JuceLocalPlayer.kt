@@ -90,13 +90,16 @@ class JuceLocalPlayer(
             .add(Player.COMMAND_RELEASE)
             .build()
 
-        val lenMs = engine.lengthMsCurrent().toLong()
         val items = playlist.mapIndexed { i, mi ->
             val b = MediaItemData.Builder(/* uid = */ mi.mediaId.ifEmpty { "juce_$i" })
                 .setMediaItem(mi)
-            // Длительность текущего трека берём из движка (другие — из метаданных
-            // item'а, если есть), чтобы прогресс-бар в UI/нотификации был корректным.
-            if (i == currentIndex && lenMs > 0L) b.setDurationUs(lenMs * 1000L)
+            // ВАЖНО: длительность берём из СТАБИЛЬНЫХ метаданных трека (MediaStore),
+            // а НЕ из движка. Меняющийся durationUs между вызовами getState() Media3
+            // трактует как разрыв таймлайна; если длина на миг просядет ниже позиции
+            // (например, read-ahead голодает при тяжёлой перерисовке UI), плеер ложно
+            // «заканчивает» трек → стоп + перемотка в начало. Метаданные не плавают.
+            val durMs = mi.mediaMetadata.durationMs
+            if (durMs != null && durMs > 0L) b.setDurationUs(durMs * 1000L)
             b.build()
         }
 
