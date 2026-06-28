@@ -320,15 +320,20 @@ object FeatureExtractor {
         return mn to mx
     }
 
+    /**
+     * Нормировка мела ровно как при обучении модели: глобальный dB в [-80, 0]
+     * (его уже выдаёт MelSpectrogram.generate) → (dB + 80) / 80 → [0, 1].
+     *
+     * Раньше тут был z-score ((x-mean)/std). Это и убивало модель: вход уходил
+     * из тренировочного распределения, сеть насыщалась и выдавала один и тот же
+     * вырожденный ответ (compat≈0, entry=0, start=1.0) на ЛЮБОЙ трек. Проверено
+     * прогоном самой модели: на [0,1]-мел она оживает (compat варьируется,
+     * entry_offset и type реагируют на вход).
+     */
     private fun normalizeFrames(frames: Array<FloatArray>): Array<FloatArray> {
-        val flat = frames.flatMap { it.asIterable() }
-        val mean = flat.average().toFloat()
-        val variance = flat.map { (it - mean) * (it - mean) }.average().toFloat()
-        val std = sqrt(variance + 1e-6f)
-
         return Array(frames.size) { t ->
             FloatArray(frames[t].size) { m ->
-                (frames[t][m] - mean) / std
+                ((frames[t][m] + 80f) / 80f).coerceIn(0f, 1f)
             }
         }
     }

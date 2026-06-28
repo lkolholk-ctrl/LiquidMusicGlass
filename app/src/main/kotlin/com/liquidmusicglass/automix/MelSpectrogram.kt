@@ -43,11 +43,13 @@ object MelSpectrogram {
         }
 
         val frameCount = ((requiredSamples - N_FFT) / HOP_LENGTH) + 1
-        val melFrames = Array(frameCount) { FloatArray(N_MELS) }
+        val powerFrames = Array(frameCount) { FloatArray(N_MELS) }
 
         var frameIndex = 0
         var start = 0
+        var globalMax = 1e-10f
 
+        // Проход 1: мел-СПЕКТР МОЩНОСТИ по кадрам + ГЛОБАЛЬНЫЙ максимум.
         while (start + N_FFT <= requiredSamples) {
             val frame = FloatArray(N_FFT)
             for (i in 0 until N_FFT) {
@@ -60,13 +62,29 @@ object MelSpectrogram {
             }
 
             val mel = applyMelFilterBank(powerSpectrum, melFilterBank)
-            melFrames[frameIndex] = powerToDb(mel)
+            powerFrames[frameIndex] = mel
+            for (v in mel) if (v > globalMax) globalMax = v
 
             frameIndex++
             start += HOP_LENGTH
         }
 
-        return fitFramesToTarget(melFrames, TARGET_FRAMES)
+        // Проход 2: power_to_db с ГЛОБАЛЬНЫМ ref=max и клипом top_db=80 → dB в
+        // [-80, 0], ровно как librosa.power_to_db(S, ref=np.max). КРИТИЧНО: модель
+        // обучалась именно на глобальном dB — пер-кадровый максимум (как было
+        // раньше) убивал межкадровую динамику и насыщал сеть (compat≈0, entry=0,
+        // start=1.0). Масштабирование в [0,1] делает FeatureExtractor.normalizeFrames.
+        val invLn10 = 1f / ln(10f)
+        val lnRef = ln(globalMax)
+        val dbFrames = Array(frameCount) { f ->
+            val src = powerFrames[f]
+            FloatArray(N_MELS) { m ->
+                val db = 10f * (ln(max(src[m], 1e-10f)) - lnRef) * invLn10
+                max(db, -80f)
+            }
+        }
+
+        return fitFramesToTarget(dbFrames, TARGET_FRAMES)
     }
 
     private fun applyMelFilterBank(
@@ -87,18 +105,6 @@ object MelSpectrogram {
         }
 
         return mel
-    }
-
-    private fun powerToDb(values: FloatArray): FloatArray {
-        var maxVal = 1e-10f
-        for (v in values) {
-            if (v > maxVal) maxVal = v
-        }
-
-        return FloatArray(values.size) { i ->
-            val v = max(values[i], 1e-10f)
-            (10f * ln(v / maxVal) / ln(10f))
-        }
     }
 
     private fun fitFramesToTarget(
