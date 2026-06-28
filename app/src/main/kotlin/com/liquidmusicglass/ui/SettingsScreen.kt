@@ -516,6 +516,11 @@ fun SettingsScreen(
             // so the model never loads at app/cold start.
             val autoMixLazy = remember { lazy { com.liquidmusicglass.automix.AutoMixController(context.applicationContext) } }
             var autoMixJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+            // Stage 7a: hand-off controller (Media3 ↔ JUCE) on local files. LAZY —
+            // its ExoPlayer is built only when a hand-off actually runs.
+            val handoffLazy = remember {
+                lazy { com.liquidmusicglass.engine.automix.JuceHandoffController(context.applicationContext) }
+            }
 
             // Free the JUCE/Oboe device + decoded buffers (and the ML model if it was
             // loaded) when leaving this screen, so nothing heavy is held in the bg.
@@ -523,6 +528,7 @@ fun SettingsScreen(
                 onDispose {
                     engine.release()
                     if (autoMixLazy.isInitialized()) runCatching { autoMixLazy.value.release() }
+                    if (handoffLazy.isInitialized()) runCatching { handoffLazy.value.release() }
                 }
             }
 
@@ -745,12 +751,58 @@ fun SettingsScreen(
                 )
                 PlainDivider()
                 SettingsActionItem(
+                    title = "Hand-off (Media3 → JUCE → Media3)",
+                    subtitle = "Stage 7a: Media3 plays A, JUCE blends at cue, Media3 continues B",
+                    icon = Icons.Rounded.SwapHoriz,
+                    onClick = {
+                        autoMixJob?.cancel()
+                        autoMixJob = scope.launch {
+                            val pa = pathA; val pb = pathB; val durA = durationA
+                            if (pa == null || pb == null || durA <= 0L) { devStatus = "Pick Deck A & B first"; return@launch }
+                            if (!juceAutoMix) { devStatus = "Toggle 'JUCE AutoMix' ON"; return@launch }
+
+                            // Анализ пары (Стадия 6) — JUCE спит. Модель даёт точку
+                            // перехода и параметры свода.
+                            devStatus = "Model analysing (bg)…"
+                            val feat = withContext(Dispatchers.Default) {
+                                autoMixLazy.value.analyzeTrackPair(
+                                    Uri.fromFile(File(pa)), Uri.fromFile(File(pb)), durA
+                                )
+                            }
+                            if (!feat.readyForTransition) {
+                                devStatus = "Model: pair not compatible — no hand-off"
+                                return@launch
+                            }
+                            android.util.Log.i(
+                                "JUCEAutoMix",
+                                "HANDOFF arm: cue=${feat.transitionStartMs}ms xfade=${feat.crossfadeDurationMs}ms " +
+                                    "entry=${feat.entryOffsetMs}ms type=${feat.transitionType}"
+                            )
+                            // Стадия 7a: Media3 ведёт A, JUCE сводит у точки модели,
+                            // Media3 продолжает B. JUCE поднимается лениво у cue.
+                            handoffLazy.value.handoff(
+                                engine = engine,
+                                pathA = pa,
+                                pathB = pb,
+                                transitionStartMs = feat.transitionStartMs,
+                                crossfadeMs = feat.crossfadeDurationMs,
+                                entryOffsetMs = feat.entryOffsetMs,
+                                bpmA = feat.bpmA,
+                                bpmB = feat.bpmB,
+                                status = { s -> devStatus = s }
+                            )
+                        }
+                    }
+                )
+                PlainDivider()
+                SettingsActionItem(
                     title = "Cancel AutoMix arm",
                     subtitle = "Stop playback / waiting for the cue",
                     icon = Icons.Rounded.Stop,
                     onClick = {
                         autoMixJob?.cancel()
                         runCatching { engine.stop() }
+                        if (handoffLazy.isInitialized()) runCatching { handoffLazy.value.release() }
                         devStatus = "AutoMix arm cancelled"
                     }
                 )

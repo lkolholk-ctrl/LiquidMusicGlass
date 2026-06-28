@@ -103,6 +103,14 @@ object AutoMixNativeEngine {
             .onFailure { Log.w(TAG, "nativeSetEntryOffsetB failed", it) }
     }
 
+    /** Stage 7 hand-off: deck A's blend-start (the Media3 cue), applied at next crossfade. */
+    @Synchronized
+    fun setEntryOffsetA(ms: Double) {
+        if (!isLoaded || !initialised) return
+        runCatching { nativeSetEntryOffsetA(ms) }
+            .onFailure { Log.w(TAG, "nativeSetEntryOffsetA failed", it) }
+    }
+
     /** Deck A current position (ms). 0 if not playing/loaded. */
     fun positionMsA(): Double {
         if (!isLoaded || !initialised) return 0.0
@@ -177,6 +185,7 @@ object AutoMixNativeEngine {
     private external fun nativeStartCrossfade(durationMs: Double)
     private external fun nativePrepareStretchB(bpmA: Double, bpmB: Double): Boolean
     private external fun nativeSetEntryOffsetB(ms: Double)
+    private external fun nativeSetEntryOffsetA(ms: Double)
     private external fun nativePositionMsA(): Double
     private external fun nativeLengthMsA(): Double
     private external fun nativePlay()

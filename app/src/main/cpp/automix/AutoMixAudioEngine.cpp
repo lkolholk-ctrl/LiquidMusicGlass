@@ -191,9 +191,16 @@ void AutoMixAudioEngine::startCrossfade (double durationMs)
     if (total < 1) total = 1;
     crossfadeTotal.store (total);
 
-    // Both decks must be running for the mix; B restarts from its beginning.
+    // Both decks must be running for the mix. Stage 7 hand-off: deck A can be
+    // positioned at the Media3 cue (entryOffsetMsA) so the blend continues
+    // seamlessly from where Media3 left off; 0 keeps Stage 3-6 behaviour.
     if (deckA.hasTrack.load())
+    {
+        const double aOff = entryOffsetMsA.load();
+        if (aOff > 0.0)
+            deckA.transport.setPosition (aOff / 1000.0);
         deckA.transport.start();
+    }
     if (deckB.hasTrack.load())
     {
         deckB.transport.setPosition (entryOffsetMsB.load() / 1000.0); // model's entry point
@@ -208,6 +215,11 @@ void AutoMixAudioEngine::startCrossfade (double durationMs)
 void AutoMixAudioEngine::setEntryOffsetB (double ms)
 {
     entryOffsetMsB.store (ms < 0.0 ? 0.0 : ms);
+}
+
+void AutoMixAudioEngine::setEntryOffsetA (double ms)
+{
+    entryOffsetMsA.store (ms < 0.0 ? 0.0 : ms);
 }
 
 double AutoMixAudioEngine::positionMsA()

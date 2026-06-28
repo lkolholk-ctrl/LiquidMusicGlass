@@ -111,6 +111,14 @@ Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeSetEntryOffse
         gEngine->setEntryOffsetB ((double) ms);
 }
 
+JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeSetEntryOffsetA(
+        JNIEnv* /*env*/, jobject /*thiz*/, jdouble ms)
+{
+    if (gEngine != nullptr)
+        gEngine->setEntryOffsetA ((double) ms);
+}
+
 JNIEXPORT jdouble JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativePositionMsA(
         JNIEnv* /*env*/, jobject /*thiz*/)

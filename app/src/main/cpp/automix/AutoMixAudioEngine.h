@@ -46,6 +46,11 @@ public:
      *  next startCrossfade. 0 (default) keeps the Stage 3-5 behaviour unchanged. */
     void setEntryOffsetB (double ms);
 
+    /** Stage 7 hand-off: where deck A starts the blend from (the Media3 cue tail).
+     *  Applied at the next startCrossfade. 0 (default) keeps Stage 3-6 behaviour
+     *  unchanged (deck A blends from its current position). */
+    void setEntryOffsetA (double ms);
+
     /** Deck A transport position / length in ms — for transition timing. */
     double positionMsA();
     double lengthMsA();
@@ -109,6 +114,7 @@ private:
     std::atomic<float> baseGainA { 1.0f };        // gains outside an active crossfade
     std::atomic<float> baseGainB { 0.0f };
     std::atomic<double> entryOffsetMsB { 0.0 };   // deck B entry point (model decides)
+    std::atomic<double> entryOffsetMsA { 0.0 };   // deck A blend-start (Stage 7 hand-off)
 
     double currentSampleRate { 44100.0 };
     int    currentBlockSize  { 512 };
