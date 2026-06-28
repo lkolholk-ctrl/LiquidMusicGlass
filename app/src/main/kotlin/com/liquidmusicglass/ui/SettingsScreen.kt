@@ -659,6 +659,16 @@ fun SettingsScreen(
             // the picked A/B pair and JUCE executes the blend by its decisions.
             SectionLabel("DEV — AUTOMIX (MODEL → JUCE)")
             PlainCard {
+                // Stage 7b/7c: JUCE-свод в РЕАЛЬНОМ потоке (локальные + стриминг).
+                // OFF по умолчанию — обычное воспроизведение не затрагивается.
+                val juceRealFlow by com.liquidmusicglass.engine.AppSettings.juceAutoMixEnabled.collectAsState()
+                SettingsToggleItem(
+                    title = "JUCE AutoMix in playback (beta)",
+                    subtitle = "On: модель дирижирует переходами в реальном плеере (локальные + стриминг). Off: обычный Media3.",
+                    selected = juceRealFlow,
+                    onSelect = { com.liquidmusicglass.engine.AppSettings.setJuceAutoMix(it) }
+                )
+                PlainDivider()
                 SettingsToggleItem(
                     title = "JUCE AutoMix (test)",
                     subtitle = "On: model analyses in bg, JUCE blends near track end. Off: legacy Media3.",

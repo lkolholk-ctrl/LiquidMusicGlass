@@ -306,6 +306,11 @@ class AudioService : MediaSessionService() {
 
         PlayerController.audioServiceRef = this
 
+        // Stage 7b/7c: координатор JUCE-свода в реальном потоке. Бездействует,
+        // пока выключен флаг juceAutoMixEnabled — обычное воспроизведение не
+        // затрагивается. JUCE поднимается лениво только у точки свода.
+        com.liquidmusicglass.engine.automix.AutoMixCoordinator.start(this)
+
         // ── Одна сессия, созданная один раз ──
         val sessionActivityIntent = android.content.Intent(this, com.liquidmusicglass.MainActivity::class.java).apply {
             putExtra("NAVIGATE_TO", "LARGE_PLAYER")
@@ -735,6 +740,26 @@ class AudioService : MediaSessionService() {
         _isDucked.value = ducked
         player.volume = if (ducked) 0.2f else 1f
     }
+
+    // ── Stage 7 hand-off (Media3 ↔ JUCE) ─────────────────────────────────
+    // Во время JUCE-свода Media3 ПОЛНОСТЬЮ заглушается и встаёт на паузу —
+    // это и убирает двойной звук, и не даёт ExoPlayer самому перейти на B.
+    /** У точки свода: заглушить (volume 0) и приостановить текущий трек A. */
+    fun handoffPause() = withPlayerOnMain { it.volume = 0f; it.pause() }
+
+    /** После свода: перейти на следующий item (B) и встать на позицию, где
+     *  JUCE закончил свод (entryOffset + crossfade), вернуть звук и играть. */
+    fun handoffToNext(positionMs: Long) = withPlayerOnMain {
+        val nextIndex = it.currentMediaItemIndex + 1
+        if (nextIndex < it.mediaItemCount) {
+            it.seekTo(nextIndex, positionMs.coerceAtLeast(0L))
+        }
+        it.volume = 1f
+        it.play()
+    }
+
+    /** Свод отменён/сорвался: вернуть звук и продолжить как обычно (fallback). */
+    fun handoffAbort() = withPlayerOnMain { it.volume = 1f; it.play() }
 
     private fun updateNotificationLayout() {
         val session = session ?: return
