@@ -689,37 +689,45 @@ fun SettingsScreen(
                                 return@launch
                             }
 
-                            // 2) Simulated timeline — JUCE STILL ASLEEP — wait until the
-                            //    model's cue (transitionStartMs). Only THEN wake JUCE.
-                            val cueMs = if (feat.transitionStartMs > 0L) feat.transitionStartMs
-                                        else (durA - feat.crossfadeDurationMs).coerceAtLeast(0L)
+                            // 2) Симулированный таймлайн — JUCE СПИТ. Каждую итерацию
+                            //    СПРАШИВАЕМ МОДЕЛЬ (через контроллер): пора ли начинать
+                            //    переход. shouldStartTransition сам решает момент по
+                            //    модельному transitionStartMs и возвращает параметры
+                            //    перехода. Никаких ручных формул — и ВРЕМЯ, и параметры
+                            //    целиком от модели. JUCE будим только на cue.
+                            val controller = autoMixLazy.value
+                            val cueMs = feat.transitionStartMs
                             val armAt = System.currentTimeMillis()
                             devStatus = "Armed · JUCE asleep · cue at ${cueMs / 1000}s of ${durA / 1000}s…"
                             while (true) {
                                 delay(250)
                                 val simPos = System.currentTimeMillis() - armAt
-                                if (simPos >= cueMs) {
+                                val remaining = (durA - simPos).coerceAtLeast(0L)
+                                val tr = controller.shouldStartTransition(simPos, remaining, feat)
+                                if (tr.shouldStart) {
                                     android.util.Log.i(
                                         "JUCEAutoMix",
-                                        "CUE @ sim=${simPos}ms → JUCE WAKES + blend " +
-                                            "${feat.crossfadeDurationMs}ms type ${feat.transitionType}"
+                                        "MODEL CUE @ sim=${simPos}ms → JUCE WAKES + blend " +
+                                            "${tr.crossfadeDurationMs}ms type ${tr.transitionType} " +
+                                            "entry ${tr.entryOffsetMs}ms start ${tr.transitionStartMs}ms"
                                     )
                                     devStatus = "Cue → JUCE waking + blending…"
                                     val ba = feat.bpmA; val bb = feat.bpmB
                                     // FIRST JUCE init happens HERE, at the cue — decode A+B,
-                                    // beat-match — not at app start, not on pick.
+                                    // beat-match — not at app start, not on pick. Все
+                                    // параметры берём из решения модели (tr.*).
                                     withContext(Dispatchers.IO) {
                                         engine.init(context)
                                         engine.loadTrackA(pa)
                                         engine.loadTrackB(pb)
-                                        engine.setEntryOffsetB(feat.entryOffsetMs.toDouble())
+                                        engine.setEntryOffsetB(tr.entryOffsetMs.toDouble())
                                         if (ba != null && bb != null && ba > 0f && bb > 0f) {
                                             engine.prepareStretchB(ba.toDouble(), bb.toDouble())
                                         }
                                     }
                                     engine.play()
-                                    engine.startCrossfade(feat.crossfadeDurationMs.toDouble())
-                                    devStatus = "JUCE blend: ${feat.crossfadeDurationMs}ms · type ${feat.transitionType} · " +
+                                    engine.startCrossfade(tr.crossfadeDurationMs.toDouble())
+                                    devStatus = "JUCE blend: ${tr.crossfadeDurationMs}ms · type ${tr.transitionType} · " +
                                         "bpm ${ba?.toInt() ?: "?"}→${bb?.toInt() ?: "?"}"
                                     break
                                 }
