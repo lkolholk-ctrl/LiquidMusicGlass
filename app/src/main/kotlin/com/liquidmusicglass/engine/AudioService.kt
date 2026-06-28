@@ -123,7 +123,7 @@ class AudioService : MediaSessionService() {
             AudioManager.AUDIOFOCUS_LOSS -> {
                 android.util.Log.d("VOIDPIXEL_MEDIA", "[AUDIO_FOCUS] LOSS (permanent) — pausing playback")
                 setDucked(false)
-                player.pause()
+                activePlayer().pause()
             }
         }
     }
@@ -282,6 +282,36 @@ class AudioService : MediaSessionService() {
         }
     }
 
+    private val jucePlayerListener = object : Player.Listener {
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            _playbackState.value = playbackState
+            _isBuffering.value = (playbackState == Player.STATE_BUFFERING)
+            manageWakeLock()
+
+            if (playbackState == Player.STATE_ENDED) {
+                android.util.Log.d("AudioService", "JUCE STATE_ENDED -> notifying controller")
+                PlayerController.onTrackEnded()
+            }
+        }
+
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            PlayerController.setPlaying(isPlaying)
+            manageWakeLock()
+        }
+
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            mediaItem?.let {
+                android.util.Log.d("AudioService", "JUCE onMediaItemTransition: id=${it.mediaId}, reason=$reason")
+                PlayerController.onTrackChanged(it.mediaId)
+            }
+        }
+
+        override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+            android.util.Log.e("AudioService", "JUCE player error: ${error.errorCodeName} | ${error.message}")
+            PlayerController.onPlaybackError(error.errorCodeName)
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
 
@@ -366,7 +396,8 @@ class AudioService : MediaSessionService() {
 
     /** Acquire or release WakeLock based on playback state */
     private fun manageWakeLock() {
-        val isActive = player.isPlaying || player.playbackState == Player.STATE_BUFFERING
+        val active = activePlayer()
+        val isActive = active.isPlaying || active.playbackState == Player.STATE_BUFFERING
         if (isActive) {
             if (wakeLock?.isHeld == false) {
                 wakeLock?.acquire(10 * 60 * 1000L) // 10 min timeout, refreshed by playback
@@ -513,7 +544,10 @@ class AudioService : MediaSessionService() {
         player.removeListener(playerListener)
         player.release()
 
-        runCatching { juceLocalPlayer?.release() }
+        runCatching {
+            juceLocalPlayer?.removeListener(jucePlayerListener)
+            juceLocalPlayer?.release()
+        }
         juceLocalPlayer = null
 
         session?.release()
@@ -650,9 +684,11 @@ class AudioService : MediaSessionService() {
 
                 COMMAND_FORCE_STOP -> {
                     android.util.Log.d("AudioService", "[FORCE_STOP] Executing hard termination sequence")
-                    // 1. Stop ExoPlayer
+                    // 1. Stop every playback backend
+                    activePlayer().stop()
                     player.stop()
                     player.clearMediaItems()
+                    runCatching { juceLocalPlayer?.stop() }
                     // 2. Release MediaSession
                     session.release()
                     this@AudioService.session = null
@@ -746,13 +782,13 @@ class AudioService : MediaSessionService() {
     }
     fun setPlaybackSpeed(speed: Float) {
         val clamped = speed.coerceIn(0.5f, 2.0f)
-        player.setPlaybackParameters(PlaybackParameters(clamped))
+        runCatching { activePlayer().setPlaybackParameters(PlaybackParameters(clamped)) }
         _playbackSpeed.value = clamped
     }
 
     fun setDucked(ducked: Boolean) {
         _isDucked.value = ducked
-        player.volume = if (ducked) 0.2f else 1f
+        runCatching { activePlayer().volume = if (ducked) 0.2f else 1f }
     }
 
     // ── Stage 8b: локальное аудио полностью на JUCE ───────────────────────────
@@ -767,6 +803,7 @@ class AudioService : MediaSessionService() {
     private fun ensureJucePlayer(): com.liquidmusicglass.engine.automix.JuceLocalPlayer {
         juceLocalPlayer?.let { return it }
         val p = com.liquidmusicglass.engine.automix.JuceLocalPlayer(this, mainLooper)
+        p.addListener(jucePlayerListener)
         juceLocalPlayer = p
         return p
     }
@@ -774,7 +811,7 @@ class AudioService : MediaSessionService() {
     /** Поставить сессию на ExoPlayer (стриминг). Идемпотентно. */
     private fun bindExoPlayer() {
         if (session?.player !== player) {
-            runCatching { juceLocalPlayer?.pause() }   // заглушить JUCE — без двойного звука
+            runCatching { juceLocalPlayer?.stop() }    // заглушить JUCE — без двойного звука
             session?.player = player
         }
     }

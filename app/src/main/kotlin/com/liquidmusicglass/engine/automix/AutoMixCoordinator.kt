@@ -74,6 +74,7 @@ object AutoMixCoordinator {
         val s = scope ?: return
         if (track == null) return
         if (!PlayerSettings.autoMix.value) return
+        if (PlayerController.isLocalJucePlaybackActive) return
         if (track.id == armedForTrackId) return
         armedForTrackId = track.id
         trackJob = s.launch { runCatching { runForTrack(track) } }
@@ -82,6 +83,7 @@ object AutoMixCoordinator {
     private suspend fun runForTrack(current: Track) {
         val ctx = appContext ?: return
         if (!PlayerSettings.autoMix.value) return
+        if (PlayerController.isLocalJucePlaybackActive) return
 
         // Следующий трек в очереди — если нет, обычный конец, ничего не делаем.
         val queue = PlayerController.getCurrentQueue()
@@ -122,6 +124,7 @@ object AutoMixCoordinator {
         try {
             while (true) {
                 if (!PlayerSettings.autoMix.value) return
+                if (PlayerController.isLocalJucePlaybackActive) return
                 // Трек сменился под нами (skip/ошибка) — выходим.
                 if (PlayerController.currentTrack.value?.id != current.id) return
                 val pos = PlayerController.currentPositionMs.value
@@ -194,6 +197,7 @@ object AutoMixCoordinator {
     private fun armNext() {
         val s = scope ?: return
         if (!PlayerSettings.autoMix.value) return
+        if (PlayerController.isLocalJucePlaybackActive) return
         val track = PlayerController.currentTrack.value ?: return
         if (track.id == armedForTrackId) return
         armedForTrackId = track.id

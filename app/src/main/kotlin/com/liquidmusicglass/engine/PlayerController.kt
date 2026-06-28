@@ -74,6 +74,8 @@ object PlayerController {
     // ── Playback Context (isolation gate) ──
     private var _playbackContext: PlaybackContext = PlaybackContext.Global
     val playbackContext: PlaybackContext get() = _playbackContext
+    val isLocalJucePlaybackActive: Boolean
+        get() = (_playbackContext as? PlaybackContext.Playlist)?.id == "local_audio"
 
     // ── Endless Playback (AutoMix) ──
     private val endlessEngine = EndlessPlaybackEngine(
