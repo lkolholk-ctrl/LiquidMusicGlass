@@ -16,7 +16,7 @@ import java.nio.ByteOrder
  *
  * Выходы:
  *   compatibility:      [1, 1]    — совместимость 0..1
- *   crossfade_duration: [1, 1]    — длительность (normalized 0..1 → 2000..16000мс)
+ *   crossfade_duration: [1, 1]    — длительность (normalized 0..1 → 5000..30000мс)
  *   entry_offset:       [1, 1]    — смещение входа (normalized 0..1 → 0..10000мс)
  *   transition_type:    [1, 6]    — softmax по 6 типам перехода
  *   transition_start:   [1, 1]    — точка начала (normalized 0..1 от длительности)
@@ -106,7 +106,9 @@ class MLTransitionPredictor(context: Context) {
 
         return Prediction(
             compatibility = outCompat[0][0].coerceIn(0f, 1f),
-            crossfadeDurationMs = (outDuration[0][0] * 16000f).toLong().coerceIn(2000L, 16000L),
+            // Модель сама управляет длительностью кроссфейда в окне 5..30с:
+            // нормализованный выход 0..1 → 5000..30000мс.
+            crossfadeDurationMs = (5000f + outDuration[0][0] * 25000f).toLong().coerceIn(5000L, 30000L),
             entryOffsetMs = (outOffset[0][0] * 10000f).toLong().coerceIn(0L, 10000L),
             transitionType = bestType,
             transitionStartFraction = outStart[0][0].coerceIn(0f, 1f)
