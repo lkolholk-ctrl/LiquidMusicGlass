@@ -119,6 +119,19 @@ object AutoMixNativeEngine {
         }
     }
 
+    /**
+     * Load deck A from a file descriptor (content:// via openFileDescriptor) — без
+     * копирования в кэш. fd дублируется в нативке, поэтому вызывающий может закрыть
+     * свой ParcelFileDescriptor сразу после возврата. length<=0 → определяется fstat'ом.
+     */
+    @Synchronized
+    fun loadTrackAFd(fd: Int, offset: Long, length: Long): Boolean {
+        if (!isLoaded || !initialised) return false
+        return runCatching { nativeLoadTrackAFd(fd, offset, length) }.getOrElse {
+            Log.w(TAG, "nativeLoadTrackAFd failed", it); false
+        }
+    }
+
     /** Load a file into deck B (crossfade target). */
     @Synchronized
     fun loadTrackB(path: String): Boolean {
@@ -300,6 +313,7 @@ object AutoMixNativeEngine {
     private external fun nativeInit(context: Context): Boolean
     private external fun nativeLoadTrack(path: String): Boolean
     private external fun nativeLoadTrackA(path: String): Boolean
+    private external fun nativeLoadTrackAFd(fd: Int, offset: Long, length: Long): Boolean
     private external fun nativeLoadTrackB(path: String): Boolean
     private external fun nativeStartCrossfade(durationMs: Double)
     private external fun nativePrepareStretchB(bpmA: Double, bpmB: Double): Boolean

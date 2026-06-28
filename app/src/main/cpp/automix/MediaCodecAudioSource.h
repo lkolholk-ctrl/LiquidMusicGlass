@@ -8,6 +8,7 @@
 
 #include <vector>
 #include <memory>
+#include <cstdint>
 
 namespace automix
 {
@@ -26,8 +27,13 @@ namespace automix
     class MediaCodecAudioSource : public juce::PositionableAudioSource
     {
     public:
-        /** Open a local file and configure the decoder. Returns nullptr on failure. */
+        /** Open a local file by path and configure the decoder. Returns nullptr on failure. */
         static std::unique_ptr<MediaCodecAudioSource> create (const juce::String& path);
+
+        /** Open from a file descriptor (e.g. content:// via openFileDescriptor) — no copy.
+         *  The fd is dup()'d internally, so the caller may close its own fd right after.
+         *  size <= 0 → derived via fstat. Returns nullptr on failure. */
+        static std::unique_ptr<MediaCodecAudioSource> createFromFd (int fd, int64_t offset, int64_t size);
 
         ~MediaCodecAudioSource() override;
 
@@ -47,6 +53,8 @@ namespace automix
     private:
         MediaCodecAudioSource() = default;
         bool openFile (const juce::String& path);
+        bool openFd (int fd, int64_t offset, int64_t size);
+        bool configureFromExtractor();   // shared: pick audio track + start codec
         void closeCodec();
         /** Decode until at least framesWanted frames are buffered, or EOS. */
         void fillLeftover (int framesWanted);

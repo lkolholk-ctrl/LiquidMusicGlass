@@ -246,19 +246,16 @@ class JuceLocalPlayer(
         invalidateState()                      // сразу показать BUFFERING (на main)
 
         loadHandler.post {
-            val path = resolveFilePath(uri)
             var ok = false
-            if (path != null) {
-                runCatching {
-                    engine.init(context)
-                    engine.stop()              // current deck back to A
-                    engine.clearDeck(1)        // incoming empty
-                    engine.setBassSwap(true)
-                    ok = engine.loadTrackA(path)
-                    if (ok && positionMs > 0L) engine.seekCurrent(positionMs.toDouble())
-                    // Старт здесь же, на фоне — main не дёргает @Synchronized движок.
-                    if (ok && playWhenReadyFlag && seq == loadSeq.get()) engine.playCurrent()
-                }
+            runCatching {
+                engine.init(context)
+                engine.stop()              // current deck back to A
+                engine.clearDeck(1)        // incoming empty
+                engine.setBassSwap(true)
+                ok = loadUriIntoDeckA(uri)
+                if (ok && positionMs > 0L) engine.seekCurrent(positionMs.toDouble())
+                // Старт здесь же, на фоне — main не дёргает @Synchronized движок.
+                if (ok && playWhenReadyFlag && seq == loadSeq.get()) engine.playCurrent()
             }
             // Состояние применяем на main — только если загрузка ещё актуальна.
             handler.post {
@@ -267,11 +264,36 @@ class JuceLocalPlayer(
                 if (!ok) {
                     playWhenReadyFlag = false
                     PlayerController.onPlaybackError("JUCE_LOAD_FAILED")
-                    DebugLog.add("JUCE.loadFAILED uri=$uri path=$path")
+                    DebugLog.add("JUCE.loadFAILED uri=$uri")
                 }
                 invalidateState()
             }
         }
+    }
+
+    /**
+     * Загрузить URI в дек A. content:// → сначала по файловому дескриптору (БЕЗ
+     * копирования в кэш), при неудаче — фолбэк на путь/копию. file:// → по пути
+     * (JUCE-ридеры wav/flac лучше идут по пути). Вызывается на loadHandler (фон).
+     */
+    private fun loadUriIntoDeckA(uri: Uri): Boolean {
+        if (uri.scheme == "file") {
+            val p = uri.path ?: return false
+            return engine.loadTrackA(p)
+        }
+        if (uri.scheme == "content") {
+            val viaFd = runCatching {
+                context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                    // statSize может быть -1 → нативка определит длину через fstat.
+                    engine.loadTrackAFd(pfd.fd, 0L, pfd.statSize)
+                } ?: false
+            }.getOrDefault(false)
+            if (viaFd) return true
+            DebugLog.add("JUCE.fd failed → fallback copy uri=$uri")
+        }
+        // Фолбэк: путь из MediaStore.DATA или копия в кэш (старый путь).
+        val path = resolveFilePath(uri) ?: return false
+        return engine.loadTrackA(path)
     }
 
     /** Конец трека (без AutoMix) → следующий; на последнем — стоп. */

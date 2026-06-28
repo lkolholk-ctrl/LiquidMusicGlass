@@ -18,6 +18,14 @@ std::unique_ptr<MediaCodecAudioSource> MediaCodecAudioSource::create (const juce
     return s;
 }
 
+std::unique_ptr<MediaCodecAudioSource> MediaCodecAudioSource::createFromFd (int srcFd, int64_t offset, int64_t size)
+{
+    std::unique_ptr<MediaCodecAudioSource> s (new MediaCodecAudioSource());
+    if (! s->openFd (srcFd, offset, size))
+        return nullptr;
+    return s;
+}
+
 MediaCodecAudioSource::~MediaCodecAudioSource()
 {
     closeCodec();
@@ -49,6 +57,34 @@ bool MediaCodecAudioSource::openFile (const juce::String& path)
     if (AMediaExtractor_setDataSourceFd (extractor, fd, 0, (off64_t) st.st_size) != AMEDIA_OK)
         return false;
 
+    return configureFromExtractor();
+}
+
+bool MediaCodecAudioSource::openFd (int srcFd, int64_t offset, int64_t size)
+{
+    // dup so OUR lifetime is independent of the caller's ParcelFileDescriptor.
+    fd = ::dup (srcFd);
+    if (fd < 0)
+        return false;
+
+    if (size <= 0)
+    {
+        struct stat st {};
+        if (::fstat (fd, &st) == 0 && st.st_size > 0)
+            size = (int64_t) st.st_size;
+    }
+    if (size <= 0)
+        return false;
+
+    extractor = AMediaExtractor_new();
+    if (AMediaExtractor_setDataSourceFd (extractor, fd, (off64_t) offset, (off64_t) size) != AMEDIA_OK)
+        return false;
+
+    return configureFromExtractor();
+}
+
+bool MediaCodecAudioSource::configureFromExtractor()
+{
     const int trackCount = (int) AMediaExtractor_getTrackCount (extractor);
     int audioTrack = -1;
     AMediaFormat* format = nullptr;

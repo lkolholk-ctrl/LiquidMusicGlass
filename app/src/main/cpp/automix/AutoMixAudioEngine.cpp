@@ -171,6 +171,39 @@ bool AutoMixAudioEngine::prepareStretchB (double bpmA, double bpmB)
 bool AutoMixAudioEngine::loadTrack  (const juce::String& path) { return loadDeck (deckA, path); }
 bool AutoMixAudioEngine::loadTrackA (const juce::String& path) { return loadDeck (deckA, path); }
 bool AutoMixAudioEngine::loadTrackB (const juce::String& path) { return loadDeck (deckB, path); }
+bool AutoMixAudioEngine::loadTrackAFd (int fd, long long offset, long long size)
+{
+    return loadDeckFd (deckA, fd, offset, size);
+}
+
+// content:// без копии: декод по дескриптору через потоковый MediaCodec-источник
+// (мгновенный старт, ничего не копируем в кэш). Всегда MediaCodec — он покрывает
+// все распространённые форматы.
+bool AutoMixAudioEngine::loadDeckFd (Deck& deck, int fd, long long offset, long long size)
+{
+    deck.transport.stop();
+    deck.hasTrack.store (false);
+    deck.transport.setSource (nullptr);
+    deck.readerSource.reset();
+    deck.memorySource.reset();
+    deck.mediaCodecSource.reset();
+
+    auto streaming = automix::MediaCodecAudioSource::createFromFd (fd, (int64_t) offset, (int64_t) size);
+    if (streaming == nullptr)
+    {
+        DBG ("AutoMixAudioEngine: MediaCodec FD open failed");
+        return false;
+    }
+
+    deck.sourceSampleRate = streaming->getSampleRate();
+    deck.mediaCodecSource = std::move (streaming);
+    deck.transport.setSource (deck.mediaCodecSource.get(), (int) (deck.sourceSampleRate * 5.0),
+                              &readAheadThread, deck.sourceSampleRate, 2);
+    deck.transport.setPosition (0.0);
+    deck.path = {};
+    deck.hasTrack.store (true);
+    return true;
+}
 
 void AutoMixAudioEngine::play()
 {

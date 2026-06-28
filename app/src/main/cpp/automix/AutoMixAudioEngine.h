@@ -37,6 +37,9 @@ public:
     bool loadTrack  (const juce::String& path);   // back-compat alias -> deck A
     bool loadTrackA (const juce::String& path);
     bool loadTrackB (const juce::String& path);
+    /** Load deck A from a file descriptor (content:// via openFileDescriptor) — no copy.
+     *  Always decodes via MediaCodec (handles all common formats). */
+    bool loadTrackAFd (int fd, long long offset, long long size);
     void play();
     void pause();
     void stop();
@@ -124,6 +127,7 @@ private:
     };
 
     bool loadDeck (Deck& deck, const juce::String& path);
+    bool loadDeckFd (Deck& deck, int fd, long long offset, long long size);
     bool decodeFullPCM (const juce::String& path, juce::AudioBuffer<float>& out, double& rate);
     Deck& deckRef (int index) { return index == 0 ? deckA : deckB; }
 

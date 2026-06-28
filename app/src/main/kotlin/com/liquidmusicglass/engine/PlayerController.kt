@@ -664,12 +664,18 @@ object PlayerController {
             android.util.Log.w("VOIDPIXEL_MEDIA", "[TRACK_CHANGED] mediaId=$mediaId not found in local queue")
             return
         }
+        // Идемпотентность: тот же трек на том же индексе уже активен — выходим.
+        // Иначе тройной источник (jucePlayerListener + MediaController-bridge +
+        // прямой bridge из JuceLocalPlayer) трижды сбрасывал позицию в 0 и дёргал
+        // префетч. Теперь полезную работу делает только ПЕРВЫЙ вызов на смену трека.
+        if (_currentTrack.value?.id == mediaId && currentIndex == index) return
+
         val track = currentQueue[index]
         currentIndex = index
         _currentTrack.value = track
         _durationMs.value = track.durationMs
         _currentPositionMs.value = 0L
-        
+
         resetPlaybackLogging(track.durationMs)
         // Только ближайший следующий — для мгновенного скипа. Более глубокая
         // предзагрузка управляется настройкой «Preload next track» (по таймеру до конца).
