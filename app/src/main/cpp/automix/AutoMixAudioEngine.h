@@ -51,6 +51,14 @@ public:
      *  unchanged (deck A blends from its current position). */
     void setEntryOffsetA (double ms);
 
+    /** Stage 7 overlap crossfade: empty deck A so the next startCrossfade only
+     *  fades deck B IN (A stays on Media3 and fades out there — true overlap). */
+    void clearDeckA();
+
+    /** Enable/disable the Stage 5 bass-swap. Off for the overlap crossfade where
+     *  deck A isn't in JUCE (the swap would wrongly thin out B's low end). */
+    void setBassSwap (bool enabled);
+
     /** Deck A transport position / length in ms — for transition timing. */
     double positionMsA();
     double lengthMsA();
@@ -101,6 +109,7 @@ private:
     // can scale each deck's bass with a scalar (fixed coefficients -> no clicks).
     std::array<juce::dsp::IIR::Filter<float>, 2> lowpassA, lowpassB;
     static constexpr float kBassCutoffHz = 150.0f;
+    std::atomic<bool> bassSwapEnabled { true }; // off for Stage 7 overlap (A on Media3)
 
     std::atomic<bool> initialised { false };
     std::atomic<bool> toneOn { false };

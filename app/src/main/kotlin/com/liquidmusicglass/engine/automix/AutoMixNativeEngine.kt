@@ -152,6 +152,20 @@ object AutoMixNativeEngine {
             .onFailure { Log.w(TAG, "nativeSetEntryOffsetA failed", it) }
     }
 
+    /** Stage 7 overlap: empty deck A so the next crossfade only fades deck B IN. */
+    @Synchronized
+    fun clearDeckA() {
+        if (!isLoaded || !initialised) return
+        runCatching { nativeClearDeckA() }.onFailure { Log.w(TAG, "nativeClearDeckA failed", it) }
+    }
+
+    /** Enable/disable Stage 5 bass-swap (off for the overlap crossfade). */
+    @Synchronized
+    fun setBassSwap(enabled: Boolean) {
+        if (!isLoaded || !initialised) return
+        runCatching { nativeSetBassSwap(enabled) }.onFailure { Log.w(TAG, "nativeSetBassSwap failed", it) }
+    }
+
     /** Deck A current position (ms). 0 if not playing/loaded. */
     fun positionMsA(): Double {
         if (!isLoaded || !initialised) return 0.0
@@ -227,6 +241,8 @@ object AutoMixNativeEngine {
     private external fun nativePrepareStretchB(bpmA: Double, bpmB: Double): Boolean
     private external fun nativeSetEntryOffsetB(ms: Double)
     private external fun nativeSetEntryOffsetA(ms: Double)
+    private external fun nativeClearDeckA()
+    private external fun nativeSetBassSwap(enabled: Boolean)
     private external fun nativePositionMsA(): Double
     private external fun nativeLengthMsA(): Double
     private external fun nativePlay()

@@ -771,6 +771,22 @@ class AudioService : MediaSessionService() {
     /** Завершение hand-back: B уже на позиции и буферизован — вернуть звук и играть. */
     fun handoffPlay() = withPlayerOnMain { it.volume = 1f; it.play() }
 
+    /** Stage 7 наложенный кроссфейд: плавно гасит громкость A по equal-power
+     *  cos за durationMs, НЕ останавливая воспроизведение (B одновременно
+     *  нарастает в JUCE). Шаги планируются на главном потоке. */
+    fun crossfadeFadeOutA(durationMs: Long) {
+        val stepMs = 30L
+        val steps = (durationMs / stepMs).toInt().coerceAtLeast(1)
+        val h = android.os.Handler(android.os.Looper.getMainLooper())
+        for (i in 0..steps) {
+            h.postDelayed({
+                val t = i.toFloat() / steps
+                val g = kotlin.math.cos(t * (Math.PI.toFloat() / 2f))
+                player.volume = g.coerceIn(0f, 1f)
+            }, i * stepMs)
+        }
+    }
+
     /** Свод отменён/сорвался: вернуть звук и продолжить как обычно (fallback). */
     fun handoffAbort() = withPlayerOnMain { it.volume = 1f; it.play() }
 

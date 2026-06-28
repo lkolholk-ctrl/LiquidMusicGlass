@@ -222,6 +222,21 @@ void AutoMixAudioEngine::setEntryOffsetA (double ms)
     entryOffsetMsA.store (ms < 0.0 ? 0.0 : ms);
 }
 
+void AutoMixAudioEngine::clearDeckA()
+{
+    deckA.hasTrack.store (false); // audio thread stops pulling deck A first
+    deckA.transport.stop();
+    deckA.transport.setSource (nullptr);
+    deckA.readerSource.reset();
+    deckA.memorySource.reset();
+    deckA.decodedBuffer.setSize (0, 0);
+}
+
+void AutoMixAudioEngine::setBassSwap (bool enabled)
+{
+    bassSwapEnabled.store (enabled);
+}
+
 double AutoMixAudioEngine::positionMsA()
 {
     return deckA.transport.getCurrentPosition() * 1000.0;
@@ -347,15 +362,18 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
             ga = (float) std::cos (t * halfPi); // equal power: ga*ga + gb*gb == 1
             gb = (float) std::sin (t * halfPi);
 
-            // Bass swap, concentrated in the middle of the crossfade and kept
-            // complementary (bassA + bassB == 1) so the total low energy stays
-            // ~constant — no double-bass mud, A's lows hand off to B's.
-            const float w = 0.5f; // swap over the middle 50% of the transition
-            float u = ((float) t - (0.5f - w * 0.5f)) / w;
-            u = juce::jlimit (0.0f, 1.0f, u);
-            const float s = u * u * (3.0f - 2.0f * u); // smoothstep 0->1
-            bassB = s;
-            bassA = 1.0f - s;
+            // Bass swap (Stage 5), only when both decks are in JUCE. For the
+            // Stage 7 overlap crossfade A lives on Media3 (deck A empty here), so
+            // the swap is disabled — otherwise it would thin out B's low end.
+            if (bassSwapEnabled.load())
+            {
+                const float w = 0.5f; // swap over the middle 50% of the transition
+                float u = ((float) t - (0.5f - w * 0.5f)) / w;
+                u = juce::jlimit (0.0f, 1.0f, u);
+                const float s = u * u * (3.0f - 2.0f * u); // smoothstep 0->1
+                bassB = s;
+                bassA = 1.0f - s;
+            }
         }
         else
         {

@@ -119,6 +119,22 @@ Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeSetEntryOffse
         gEngine->setEntryOffsetA ((double) ms);
 }
 
+JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeClearDeckA(
+        JNIEnv* /*env*/, jobject /*thiz*/)
+{
+    if (gEngine != nullptr)
+        gEngine->clearDeckA();
+}
+
+JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeSetBassSwap(
+        JNIEnv* /*env*/, jobject /*thiz*/, jboolean enabled)
+{
+    if (gEngine != nullptr)
+        gEngine->setBassSwap (enabled == JNI_TRUE);
+}
+
 JNIEXPORT jdouble JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativePositionMsA(
         JNIEnv* /*env*/, jobject /*thiz*/)

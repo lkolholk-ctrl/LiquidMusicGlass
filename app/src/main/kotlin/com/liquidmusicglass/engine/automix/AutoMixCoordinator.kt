@@ -40,8 +40,10 @@ import java.io.File
  */
 object AutoMixCoordinator {
 
-    private const val PREARM_LEAD_MS = 8_000L   // за сколько до cue готовить сегменты+JUCE
+    private const val PREARM_LEAD_MS = 8_000L   // за сколько до cue готовить сегмент+JUCE
     private const val MARGIN_MS = 1_500L        // запас в извлекаемом окне
+    private const val LOCKSTEP_MS = 500L        // B играет в JUCE и Media3 параллельно перед сменой источника
+    private const val SAFETY_MS = 2_000L        // запас хвоста A, чтобы он не доиграл до нашего seek
     private const val POLL_MS = 200L
 
     private val engine = AutoMixNativeEngine
@@ -103,9 +105,12 @@ object AutoMixCoordinator {
         if (!feat.readyForTransition) return
 
         val crossfade = feat.crossfadeDurationMs
-        val cueMs = feat.transitionStartMs.coerceIn(0L, (durA - crossfade).coerceAtLeast(0L))
+        // Зажимаем cue так, чтобы у A остался хвост на ВЕСЬ свод + лок-степ + запас:
+        // иначе A доиграет и Media3 сам авто-перейдёт на B до нашего seek (тогда
+        // handoffPrepareNext уедет на C вместо B).
+        val latestCue = (durA - crossfade - LOCKSTEP_MS - SAFETY_MS).coerceAtLeast(0L)
+        val cueMs = feat.transitionStartMs.coerceIn(0L, latestCue)
         val entry = feat.entryOffsetMs
-        val ba = feat.bpmA; val bb = feat.bpmB
 
         android.util.Log.i(
             "AutoMixCoordinator",
@@ -113,7 +118,6 @@ object AutoMixCoordinator {
         )
 
         var armed = false
-        var wavA: File? = null
         var wavB: File? = null
         try {
             while (true) {
@@ -124,23 +128,22 @@ object AutoMixCoordinator {
 
                 if (!armed && pos >= (cueMs - PREARM_LEAD_MS).coerceAtLeast(0L)) {
                     armed = true
-                    // Извлекаем хвост A и начало B (резолвим URI заново — свежий
-                    // стрим-URL на случай истечения подписи).
-                    val aUri = resolveUri(current) ?: return
+                    // Наложенный кроссфейд: A ОСТАЁТСЯ в Media3 и гаснет там. В JUCE
+                    // грузим ТОЛЬКО начало B — оно нарастает поверх. Хвост A не
+                    // извлекаем и в JUCE не кладём (нет шва на стороне A).
                     val bUri = resolveUri(next) ?: return
-                    wavA = extractTail(ctx, aUri, cueMs, crossfade)
-                    wavB = extractHead(ctx, bUri, entry, crossfade)
-                    if (wavA == null || wavB == null) return // fallback: обычный переход
+                    // Нужно проиграть B в JUCE на весь кроссфейд + лок-степ передачи.
+                    wavB = extractHead(ctx, bUri, entry, crossfade + LOCKSTEP_MS)
+                    if (wavB == null) return // fallback: обычный переход Media3
 
                     withContext(Dispatchers.IO) {
                         engine.init(ctx)
-                        engine.loadTrackA(wavA!!.absolutePath)
+                        engine.clearDeckA()           // дека A пуста — A звучит из Media3
+                        engine.setBassSwap(false)     // bass-swap не нужен (A не в JUCE)
                         engine.loadTrackB(wavB!!.absolutePath)
-                        engine.setEntryOffsetA(0.0) // wavA уже начинается с cue
-                        engine.setEntryOffsetB(0.0) // wavB уже начинается с entry
-                        if (ba != null && bb != null && ba > 0f && bb > 0f) {
-                            engine.prepareStretchB(ba.toDouble(), bb.toDouble())
-                        }
+                        engine.setEntryOffsetB(0.0)   // wavB начинается с entry
+                        // Без бит-матча в реальном потоке: растянутый B не совпал бы
+                        // по позиции с Media3 при передаче. Нативный темп = ровный шов.
                     }
                 }
 
@@ -151,7 +154,7 @@ object AutoMixCoordinator {
                 delay(POLL_MS)
             }
         } finally {
-            cleanup(wavA, wavB)
+            cleanup(wavB)
         }
     }
 
@@ -160,21 +163,24 @@ object AutoMixCoordinator {
         val resumeB = entryMs + crossfadeMs
         try {
             val svc = PlayerController.audioServiceRef
-            // 1) Заглушить + пауза Media3 (A) — нет двойного звука и авто-перехода.
-            svc?.handoffPause()
-            // 2) Предзагрузить B на позиции hand-back, ОСТАВАЯСЬ НА ПАУЗЕ: ExoPlayer
-            //    буферизует B заранее → возврат без рывка. Переход на B (onTrackChanged)
-            //    игнорируется, т.к. blending=true.
-            svc?.handoffPrepareNext(resumeB)
-            // 3) JUCE сводит хвост A → начало B.
+            // НАЛОЖЕННЫЙ кроссфейд: A гаснет в Media3 (cos), B нарастает в JUCE (sin)
+            // ОДНОВРЕМЕННО. A НЕ паузим и не трогаем — никакого шва и паузы.
+            svc?.crossfadeFadeOutA(crossfadeMs)
             withContext(Dispatchers.IO) { engine.startCrossfade(crossfadeMs.toDouble()) }
-            android.util.Log.i("AutoMixCoordinator", "blend started ${crossfadeMs}ms")
-            // 4) Ждём свод. СНАЧАЛА глушим JUCE (иначе наложение с Media3), ПОТОМ
-            //    играет уже буферизованный B.
+            android.util.Log.i("AutoMixCoordinator", "overlap crossfade ${crossfadeMs}ms")
             delay(crossfadeMs)
+
+            // A уже тихий (Media3 vol≈0), B на полной в JUCE. Передаём B в Media3 БЕЗ
+            // шва: Media3 встаёт на ту же позицию B и играет МОЛЧА (vol=0) в лок-степе
+            // с JUCE; затем просто меняем источник — оба тот же трек на той же позиции.
+            svc?.handoffPrepareNext(resumeB)   // seek на B (index+1), Media3 играет@0
+            delay(LOCKSTEP_MS)
             withContext(Dispatchers.IO) { runCatching { engine.stop() } }
-            svc?.handoffPlay()
-            android.util.Log.i("AutoMixCoordinator", "hand-off done → Media3 B @ ${resumeB / 1000}s")
+            svc?.handoffPlay()                 // Media3 vol=1 (B на той же позиции)
+            android.util.Log.i(
+                "AutoMixCoordinator",
+                "hand-off done → Media3 B @ ${(resumeB + LOCKSTEP_MS) / 1000}s"
+            )
         } finally {
             blending = false
         }
@@ -199,15 +205,10 @@ object AutoMixCoordinator {
         if (track.isOnlineTrack) PlayerController.resolveStreamUrlSync(track.id) else track.uri
     } catch (_: Throwable) { null }
 
-    private suspend fun extractTail(ctx: Context, uri: Uri, cueMs: Long, crossfadeMs: Long): File? {
-        val out = File(ctx.cacheDir, "automix_tailA.wav")
-        val endMs = cueMs + crossfadeMs + MARGIN_MS
-        return if (SegmentExtractor.extractToWav(ctx, uri, cueMs, endMs, out)) out else null
-    }
-
-    private suspend fun extractHead(ctx: Context, uri: Uri, entryMs: Long, crossfadeMs: Long): File? {
+    /** Извлечь начало B: [entryMs, entryMs + playMs + запас) во временный WAV. */
+    private suspend fun extractHead(ctx: Context, uri: Uri, entryMs: Long, playMs: Long): File? {
         val out = File(ctx.cacheDir, "automix_headB.wav")
-        val endMs = entryMs + crossfadeMs + MARGIN_MS
+        val endMs = entryMs + playMs + MARGIN_MS
         return if (SegmentExtractor.extractToWav(ctx, uri, entryMs, endMs, out)) out else null
     }
 
