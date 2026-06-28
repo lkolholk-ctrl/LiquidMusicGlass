@@ -77,12 +77,32 @@ class JuceLocalPlayer(
     @Volatile private var autoMixAnalyzedIndex = -1
     private val AUTOMIX_LEAD_MS = 40_000L   // окно до конца трека для анализа (хватает на свод ≤30с)
 
+    // ── Stage 8c (ШАГ 2: РЕАЛЬНЫЙ СВОД) ──────────────────────────────────────
+    // Когда модель сказала ready и подобрала параметры — у точки свода реально
+    // запускаем equal-power кроссфейд current→incoming в движке (пинг-понг деков).
+    // Точку запуска якорим к КОНЦУ трека (remaining ≤ xfade): голова start у v4
+    // выдаёт раннюю долю и ненадёжна, а xfade/entry/compat — осмысленные.
+    // По завершении свода incoming становится current → двигаем currentIndex.
+    // Всё под тумблером AutoMix; при фейле — обычное переключение (фолбэк).
+    private data class AutoMixPlan(
+        val fromIndex: Int,
+        val xfadeMs: Long,
+        val entryMs: Long,
+        val type: Int,
+        val nextUri: Uri
+    )
+    @Volatile private var autoMixPlan: AutoMixPlan? = null
+    // 0 = простаиваем, 1 = грузим incoming, 2 = свод идёт
+    @Volatile private var transitionState = 0
+    @Volatile private var transitionFromIndex = -1
+
     // Периодический пинок состояния, чтобы позиция/прогресс в сессии шли «живо».
     private val ticker = object : Runnable {
         override fun run() {
             if (released) return
-            maybeAnalyzeForAutoMix()   // Stage 8c шаг 1 — только лог, звук не трогает
-            maybeAdvanceAtEnd()
+            maybeAnalyzeForAutoMix()       // шаг 1: анализ пары моделью + план свода
+            maybeRunAutoMixTransition()    // шаг 2: реальный кроссфейд по плану модели
+            maybeAdvanceAtEnd()            // обычное переключение (если свода нет)
             invalidateState()
             handler.postDelayed(this, 500L)
         }
@@ -337,6 +357,9 @@ class JuceLocalPlayer(
         DebugLog.add("JUCE.handleStop | ${DebugLog.caller()}")
         playWhenReadyFlag = false
         ended = false
+        transitionState = 0
+        transitionFromIndex = -1
+        autoMixPlan = null
         loadHandler.post { if (!released) runCatching { engine.stop() } }
         invalidateState()
         return Futures.immediateVoidFuture()
@@ -369,6 +392,11 @@ class JuceLocalPlayer(
         val uri = mi.localConfiguration?.uri ?: return
 
         DebugLog.add("JUCE.loadCurrent idx=$currentIndex pos=$positionMs pwr=$playWhenReadyFlag")
+        // Прямая загрузка трека (скип/сик/новая очередь) ОТМЕНЯЕТ любой идущий
+        // модельный свод: дальше всё на деке A, движок ниже делает engine.stop().
+        transitionState = 0
+        transitionFromIndex = -1
+        autoMixPlan = null
         val seq = loadSeq.incrementAndGet()
         loading = true
         ended = false
@@ -437,6 +465,7 @@ class JuceLocalPlayer(
 
     /** Конец трека (без AutoMix) → следующий; на последнем — стоп. */
     private fun maybeAdvanceAtEnd() {
+        if (transitionState != 0) return   // идёт модельный свод — он сам двигает трек
         if (loading || !prepared || !playWhenReadyFlag || playlist.isEmpty()) return
         val len = engine.lengthMsCurrent().toLong()
         if (len <= 1000L) return                 // длина ещё не известна/мусор — не дёргаем
@@ -494,8 +523,101 @@ class JuceLocalPlayer(
                         "entry=${f.entryOffsetMs}ms type=${f.transitionType} bpm=${f.bpmA}->${f.bpmB}\n" +
                         f.debugInfo
                 )
+                // Шаг 2: если модель готова свести — кладём план. Точку запуска
+                // НЕ берём из модельного start (он ранний/ненадёжен), якорим к
+                // концу трека по xfade. xfade ограничиваем [3с, 20с].
+                if (PlayerSettings.autoMix.value && f.readyForTransition && idx == currentIndex) {
+                    val xfade = f.crossfadeDurationMs.coerceIn(3_000L, 20_000L)
+                    val entry = f.entryOffsetMs.coerceIn(0L, 10_000L)
+                    autoMixPlan = AutoMixPlan(idx, xfade, entry, f.transitionType, nextUri)
+                    DebugLog.add("AutoMix.plan idx=$idx xfade=${xfade}ms entry=${entry}ms type=${f.transitionType}")
+                }
             }.onFailure { DebugLog.add("AutoMix.analyze FAILED ${it.message}") }
         }
+    }
+
+    /**
+     * Stage 8c ШАГ 2 — РЕАЛЬНЫЙ СВОД. Вызывается из тикера (каждые 500мс).
+     * Если есть план модели и трек подошёл к точке свода (remaining ≤ xfade) —
+     * грузим следующий трек в incoming-дек и запускаем equal-power кроссфейд в
+     * движке. По завершении свода incoming становится current → двигаем индекс.
+     */
+    private fun maybeRunAutoMixTransition() {
+        // Свод уже идёт — ждём завершения и финализируем.
+        if (transitionState == 2) {
+            if (!engine.isCrossfadeActive()) {
+                val newIdx = (transitionFromIndex + 1).coerceIn(0, playlist.lastIndex.coerceAtLeast(0))
+                currentIndex = newIdx
+                transitionState = 0
+                transitionFromIndex = -1
+                ended = false
+                // autoMixAnalyzedIndex остаётся равным предыдущему (fromIndex) —
+                // НЕ блокируем анализ нового текущего трека: у его конца снова
+                // сработает анализ и следующий свод (пинг-понг продолжается).
+                notifyCurrentTrackChanged()
+                invalidateState()
+                DebugLog.add("AutoMix.xfade DONE → idx=$newIdx deck=${engine.currentDeckIndex()}")
+            }
+            return
+        }
+        if (transitionState == 1) return   // incoming грузится — ждём
+
+        if (!PlayerSettings.autoMix.value) { autoMixPlan = null; return }
+        val plan = autoMixPlan ?: return
+        if (plan.fromIndex != currentIndex) { autoMixPlan = null; return }
+        if (loading || !prepared || !playWhenReadyFlag) return
+        val len = engine.lengthMsCurrent().toLong()
+        if (len <= 1000L) return
+        val remaining = len - engine.positionMsCurrent().toLong()
+        if (remaining > plan.xfadeMs + 250L) return   // ещё рано (якорим к концу)
+        if (remaining < 800L) { autoMixPlan = null; return }  // уже поздно — обычное переключение доведёт
+
+        // Запускаем свод. Загрузка incoming + startTransition — на фоне (движок
+        // @Synchronized нельзя на main). Состояние 1 (грузим), потом 2 (свод).
+        autoMixPlan = null
+        transitionState = 1
+        transitionFromIndex = plan.fromIndex
+        DebugLog.add("AutoMix.xfade TRIGGER idx=${plan.fromIndex} rem=${remaining}ms xfade=${plan.xfadeMs}ms")
+
+        loadHandler.post {
+            val ok = !released && loadUriIntoIncoming(plan.nextUri)
+            if (ok) engine.startTransition(plan.xfadeMs.toDouble(), plan.entryMs.toDouble())
+            handler.post {
+                if (released) return@post
+                if (ok) {
+                    transitionState = 2     // свод пошёл
+                } else {
+                    transitionState = 0     // фейл загрузки — фолбэк на обычное переключение
+                    transitionFromIndex = -1
+                    DebugLog.add("AutoMix.xfade LOAD FAILED → fallback advance")
+                }
+                invalidateState()
+            }
+        }
+    }
+
+    /** Загрузить URI в incoming-дек (следующий трек для свода). Зеркало
+     *  loadUriIntoDeckA, но в НЕ-текущий дек. Вызывается на loadHandler (фон). */
+    private fun loadUriIntoIncoming(uri: Uri): Boolean {
+        if (uri.scheme == "file") {
+            val p = uri.path ?: return false
+            return engine.loadIncoming(p)
+        }
+        if (uri.scheme == "content") {
+            legacyDataPath(uri)?.takeIf { File(it).exists() }?.let { p ->
+                if (engine.loadIncoming(p)) return true
+            }
+            val viaFd = runCatching {
+                context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                    engine.loadIncomingFd(pfd.fd, 0L, pfd.statSize)
+                } ?: false
+            }.getOrDefault(false)
+            if (viaFd) return true
+            val path = copyContentUriToCache(uri) ?: return false
+            return engine.loadIncoming(path)
+        }
+        val path = resolveFilePath(uri) ?: return false
+        return engine.loadIncoming(path)
     }
 
     /** content:// -> stable cache file path; file:// -> its path. */

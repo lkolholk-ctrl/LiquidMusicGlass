@@ -55,6 +55,9 @@ public:
 
     /** Load a track into the NON-current (incoming) deck, ready for a transition. */
     bool loadIncoming (const juce::String& path);
+    /** Same, but from a file descriptor (content:// без копии) — для AutoMix-свода
+     *  следующего локального трека, у которого нет прямого пути. */
+    bool loadIncomingFd (int fd, long long offset, long long size);
     /** Equal-power crossfade current -> incoming over durationMs; incoming starts
      *  at entryMs. On completion the incoming deck becomes current. */
     void startTransition (double durationMs, double entryMs);

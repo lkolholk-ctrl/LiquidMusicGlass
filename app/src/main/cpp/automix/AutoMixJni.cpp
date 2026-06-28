@@ -153,6 +153,15 @@ Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeLoadIncoming(
     return loadInto (env, path, [] (const juce::String& p) { return gEngine->loadIncoming (p); });
 }
 
+JNIEXPORT jboolean JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeLoadIncomingFd(
+        JNIEnv* /*env*/, jobject /*thiz*/, jint fd, jlong offset, jlong length)
+{
+    if (gEngine == nullptr || fd < 0)
+        return JNI_FALSE;
+    return gEngine->loadIncomingFd ((int) fd, (long long) offset, (long long) length) ? JNI_TRUE : JNI_FALSE;
+}
+
 JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeStartTransition(
         JNIEnv* /*env*/, jobject /*thiz*/, jdouble durationMs, jdouble entryMs)

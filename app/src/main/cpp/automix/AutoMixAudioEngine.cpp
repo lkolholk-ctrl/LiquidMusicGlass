@@ -319,6 +319,11 @@ bool AutoMixAudioEngine::loadIncoming (const juce::String& path)
     return loadDeck (deckRef (1 - currentDeck.load()), path);
 }
 
+bool AutoMixAudioEngine::loadIncomingFd (int fd, long long offset, long long size)
+{
+    return loadDeckFd (deckRef (1 - currentDeck.load()), fd, offset, size);
+}
+
 void AutoMixAudioEngine::startTransition (double durationMs, double entryMs)
 {
     long long total = (long long) (durationMs * currentSampleRate / 1000.0);

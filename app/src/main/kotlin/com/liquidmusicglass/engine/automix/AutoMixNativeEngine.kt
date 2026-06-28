@@ -190,6 +190,15 @@ object AutoMixNativeEngine {
         }
     }
 
+    /** Load into the NON-current (incoming) deck по дескриптору (content:// без копии). */
+    @Synchronized
+    fun loadIncomingFd(fd: Int, offset: Long, length: Long): Boolean {
+        if (!isLoaded || !initialised) return false
+        return runCatching { nativeLoadIncomingFd(fd, offset, length) }.getOrElse {
+            Log.w(TAG, "nativeLoadIncomingFd failed", it); false
+        }
+    }
+
     /** Crossfade current -> incoming over durationMs; incoming starts at entryMs. */
     @Synchronized
     fun startTransition(durationMs: Double, entryMs: Double) {
@@ -322,6 +331,7 @@ object AutoMixNativeEngine {
     private external fun nativeClearDeckA()
     private external fun nativeSetBassSwap(enabled: Boolean)
     private external fun nativeLoadIncoming(path: String): Boolean
+    private external fun nativeLoadIncomingFd(fd: Int, offset: Long, length: Long): Boolean
     private external fun nativeStartTransition(durationMs: Double, entryMs: Double)
     private external fun nativePlayCurrent()
     private external fun nativeSeekCurrent(ms: Double)
