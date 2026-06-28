@@ -349,7 +349,7 @@ object PlayerController {
         }
 
         val startTrack = tracks[startIndex]
-        android.util.Log.d("VOIDPIXEL_MEDIA", "playFromList: tracks=${tracks.size}, startIndex=$startIndex, startTrackId=${startTrack.id}")
+        android.util.Log.e("JUCELocalDbg", "playFromList(EXO) ENTER tracks=${tracks.size} startIndex=$startIndex id=${startTrack.id} online=${startTrack.isOnlineTrack} uri=${startTrack.uri}")
 
         // ── Determine playback context BEFORE any async work ──
         val newContext = when {
@@ -487,7 +487,7 @@ object PlayerController {
             return
         }
         val startTrack = tracks[startIndex]
-        android.util.Log.d("VOIDPIXEL_MEDIA", "playLocalOnJuce: tracks=${tracks.size}, startIndex=$startIndex, id=${startTrack.id}")
+        android.util.Log.e("JUCELocalDbg", "playLocalOnJuce ENTER tracks=${tracks.size} startIndex=$startIndex id=${startTrack.id}")
 
         ioScope.launch {
             // Статичная локальная очередь — без онлайн-рефилла.
@@ -509,6 +509,7 @@ object PlayerController {
 
                 // Поднять сервис/контроллер (после этого audioServiceRef установлен).
                 getPlayer(context)
+                android.util.Log.e("JUCELocalDbg", "playLocalOnJuce: audioServiceRef=${if (audioServiceRef==null) "NULL" else "ok"} items=${mediaItems.size}")
                 audioServiceRef?.playLocalQueue(mediaItems, startIndex)
                 resetPlaybackLogging(startTrack.durationMs)
             }

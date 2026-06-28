@@ -785,6 +785,7 @@ class AudioService : MediaSessionService() {
      * Вызывать с главного потока (PlayerController делает это в Dispatchers.Main).
      */
     fun playLocalQueue(mediaItems: List<MediaItem>, startIndex: Int = 0) {
+        android.util.Log.e("JUCELocalDbg", "playLocalQueue ENTER items=${mediaItems.size} startIndex=$startIndex sessionNull=${session==null}")
         mainScope.launch {
             currentQueueItems = mediaItems.toList()
             val juce = ensureJucePlayer()
@@ -795,7 +796,7 @@ class AudioService : MediaSessionService() {
             juce.setMediaItems(mediaItems, startIndex.coerceAtLeast(0), 0L)
             juce.prepare()
             juce.playWhenReady = true
-            android.util.Log.d("AudioService", "[JUCE_LOCAL] queue=${mediaItems.size}, startIndex=$startIndex")
+            android.util.Log.e("JUCELocalDbg", "playLocalQueue applied: sessionPlayerIsJuce=${session?.player === juce}")
         }
     }
 
