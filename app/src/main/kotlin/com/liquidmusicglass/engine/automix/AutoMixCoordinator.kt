@@ -3,8 +3,8 @@ package com.liquidmusicglass.engine.automix
 import android.content.Context
 import android.net.Uri
 import com.liquidmusicglass.automix.AutoMixController
-import com.liquidmusicglass.engine.AppSettings
 import com.liquidmusicglass.engine.PlayerController
+import com.liquidmusicglass.engine.PlayerSettings
 import com.liquidmusicglass.engine.Track
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -18,7 +18,7 @@ import java.io.File
 /**
  * Stage 7b/7c — встраивание JUCE-свода в РЕАЛЬНЫЙ поток воспроизведения.
  *
- * Media3 играет трек A как обычно. Когда включён флаг juceAutoMixEnabled,
+ * Media3 играет трек A как обычно. Когда включён глобальный тумблер AutoMix (PlayerSettings.autoMix),
  * координатор для каждой пары (текущий → следующий в очереди):
  *  1. резолвит источники (локальный content:// или стриминговый https://);
  *  2. в фоне анализирует пару моделью (Стадия 6) → точка/параметры свода;
@@ -67,7 +67,7 @@ object AutoMixCoordinator {
         trackJob?.cancel()
         val s = scope ?: return
         if (track == null) return
-        if (!AppSettings.juceAutoMixEnabled.value) return
+        if (!PlayerSettings.autoMix.value) return
         if (track.id == armedForTrackId) return
         armedForTrackId = track.id
         trackJob = s.launch { runCatching { runForTrack(track) } }
@@ -75,7 +75,7 @@ object AutoMixCoordinator {
 
     private suspend fun runForTrack(current: Track) {
         val ctx = appContext ?: return
-        if (!AppSettings.juceAutoMixEnabled.value) return
+        if (!PlayerSettings.autoMix.value) return
 
         // Следующий трек в очереди — если нет, обычный конец, ничего не делаем.
         val queue = PlayerController.getCurrentQueue()
@@ -113,7 +113,7 @@ object AutoMixCoordinator {
         var wavB: File? = null
         try {
             while (true) {
-                if (!AppSettings.juceAutoMixEnabled.value) return
+                if (!PlayerSettings.autoMix.value) return
                 // Трек сменился под нами (skip/ошибка) — выходим.
                 if (PlayerController.currentTrack.value?.id != current.id) return
                 val pos = PlayerController.currentPositionMs.value

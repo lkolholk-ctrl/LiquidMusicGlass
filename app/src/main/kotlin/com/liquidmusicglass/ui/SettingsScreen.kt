@@ -406,7 +406,7 @@ fun SettingsScreen(
             PlainCard {
                 SettingsToggleItem(
                     title = "AutoMix",
-                    subtitle = "Seamlessly keep the wave going",
+                    subtitle = "Модель дирижирует JUCE-сводом между треками (локальные + стриминг) + авто-волна",
                     selected = autoMix,
                     onSelect = { PlayerSettings.setAutoMix(it) }
                 )
@@ -658,16 +658,9 @@ fun SettingsScreen(
             // the picked A/B pair and JUCE executes the blend by its decisions.
             SectionLabel("DEV — AUTOMIX (MODEL → JUCE)")
             PlainCard {
-                // Stage 7b/7c: JUCE-свод в РЕАЛЬНОМ потоке (локальные + стриминг).
-                // OFF по умолчанию — обычное воспроизведение не затрагивается.
-                val juceRealFlow by com.liquidmusicglass.engine.AppSettings.juceAutoMixEnabled.collectAsState()
-                SettingsToggleItem(
-                    title = "JUCE AutoMix in playback (beta)",
-                    subtitle = "On: модель дирижирует переходами в реальном плеере (локальные + стриминг). Off: обычный Media3.",
-                    selected = juceRealFlow,
-                    onSelect = { com.liquidmusicglass.engine.AppSettings.setJuceAutoMix(it) }
-                )
-                PlainDivider()
+                // Реальным потоком управляет ГЛОБАЛЬНЫЙ тумблер AutoMix (секция
+                // AUTOMIX & SOUND). Здесь — только изолированные DEV-тесты на
+                // выбранной паре A/B.
                 SettingsActionItem(
                     title = "Arm AutoMix (analyze bg → timed cue)",
                     subtitle = devStatus,
