@@ -6,6 +6,7 @@ import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.net.Uri
+import com.liquidmusicglass.debug.DebugLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.nio.ByteBuffer
@@ -42,8 +43,14 @@ class AutoMixController(
 
     init {
         predictor = try {
-            MLTransitionPredictor(appContext)
-        } catch (_: Throwable) {
+            MLTransitionPredictor(appContext).also {
+                DebugLog.add("AutoMix.model LOADED ok")
+            }
+        } catch (t: Throwable) {
+            // Главная причина ухода в алгоритмический путь — логируем явно,
+            // чтобы видеть, ПОЧЕМУ модель не раскрылась (несовместимый op,
+            // отсутствие нативной либы, битый файл и т.п.).
+            DebugLog.add("AutoMix.model LOAD FAILED ${t.javaClass.simpleName}: ${t.message}")
             null
         }
     }
@@ -63,9 +70,13 @@ class AutoMixController(
         val energyB = getOrAnalyze(nextTrackUri, nextDurationMs)
 
         // 2. ML предсказание (если модель доступна)
-        val mlPrediction = try {
+        val mlPrediction = if (predictor == null) {
+            DebugLog.add("AutoMix.predict SKIP (model not loaded)")
+            null
+        } else try {
             predictor?.predictPair(appContext, currentTrackUri, nextTrackUri, currentTrackDurationMs)
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
+            DebugLog.add("AutoMix.predict FAILED ${t.javaClass.simpleName}: ${t.message}")
             null
         }
 
