@@ -525,7 +525,16 @@ fun SettingsScreen(
             // loaded) when leaving this screen, so nothing heavy is held in the bg.
             DisposableEffect(Unit) {
                 onDispose {
-                    engine.release()
+                    // КРИТИЧНО: НЕ освобождать движок, пока он играет ЛОКАЛЬНОЕ аудио.
+                    // engine.release() закрывает Oboe-устройство и уничтожает общий
+                    // gEngine — музыка на JUCE мгновенно глохнет (позиция→0), а сессия
+                    // думает, что играет. Это и был баг «звук пропадает после
+                    // переключения вкладок» — уход с вкладки Settings дёргал onDispose.
+                    if (!com.liquidmusicglass.engine.PlayerController.isLocalJucePlaybackActive) {
+                        runCatching { engine.release() }
+                    } else {
+                        com.liquidmusicglass.debug.DebugLog.add("Settings.onDispose: engine.release SKIPPED (local JUCE active)")
+                    }
                     if (autoMixLazy.isInitialized()) runCatching { autoMixLazy.value.release() }
                     if (handoffLazy.isInitialized()) runCatching { handoffLazy.value.release() }
                 }
