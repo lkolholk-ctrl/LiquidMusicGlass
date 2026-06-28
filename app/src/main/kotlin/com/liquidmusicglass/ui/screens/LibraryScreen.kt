@@ -1,7 +1,12 @@
 package com.liquidmusicglass.ui.screens
 
 import android.content.Context
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
@@ -30,6 +35,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -72,7 +78,7 @@ import kotlinx.coroutines.Dispatchers
 
 private val AppleRed = Color(0xFFFC3C44)
 
-private enum class LibraryView { MAIN, FAVORITES, DOWNLOADS, LOCAL_PLAYLISTS, IMPORTED }
+private enum class LibraryView { MAIN, FAVORITES, DOWNLOADS, LOCAL_PLAYLISTS, IMPORTED, LOCAL_AUDIO }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -192,8 +198,24 @@ fun LibraryScreen(
                                 currentView = LibraryView.IMPORTED
                             }
                         )
+
+                        // 5. Local Audio Card (device music via MediaStore) — Stage 7b
+                        MenuCard(
+                            title = "Local Audio",
+                            subtitle = "Music on this device",
+                            icon = Icons.Rounded.MusicNote,
+                            tint = Color(0xFFFF9F0A),
+                            onClick = { currentView = LibraryView.LOCAL_AUDIO }
+                        )
                     }
                 }
+            }
+
+            LibraryView.LOCAL_AUDIO -> {
+                LocalAudioView(
+                    context = context,
+                    onBack = { currentView = LibraryView.MAIN }
+                )
             }
 
             LibraryView.FAVORITES -> {
@@ -672,6 +694,168 @@ private fun MenuCard(
         }
 
         Icon(Icons.Rounded.ChevronRight, null, tint = lc.textTertiary, modifier = Modifier.size(24.dp))
+    }
+}
+
+/**
+ * Stage 7b — экран локальной музыки (MediaStore). Запрашивает READ_MEDIA_AUDIO
+ * (13+) / READ_EXTERNAL_STORAGE, сканирует библиотеку, играет через Media3
+ * (PlayerController.playFromList) — content:// URI проходит как локальный файл.
+ */
+@Composable
+private fun LocalAudioView(
+    context: Context,
+    onBack: () -> Unit
+) {
+    val lc = LiquidTheme.colors
+    val scope = rememberCoroutineScope()
+
+    val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        android.Manifest.permission.READ_MEDIA_AUDIO
+    } else {
+        android.Manifest.permission.READ_EXTERNAL_STORAGE
+    }
+    var hasPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+    var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
+    var loading by remember { mutableStateOf(false) }
+
+    fun scan() {
+        scope.launch {
+            loading = true
+            tracks = com.liquidmusicglass.data.local.LocalAudioRepository.load(context)
+            loading = false
+        }
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasPermission = granted
+        if (granted) scan()
+    }
+
+    LaunchedEffect(Unit) {
+        if (hasPermission) scan() else permissionLauncher.launch(permission)
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        SubHeader("Local Audio", onBack = onBack) {
+            if (tracks.isNotEmpty()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = {
+                        PlayerController.playFromList(
+                            context = context,
+                            tracks = tracks.shuffled(),
+                            startIndex = 0,
+                            // Playlist-контекст = статичная локальная очередь без
+                            // онлайн-рефилла «волны» (тот гейтится на Global).
+                            autoRefillType = "playlist",
+                            autoRefillId = "local_audio",
+                            autoRefillName = "Local Audio"
+                        )
+                    }) {
+                        Icon(Icons.Default.Shuffle, null, tint = Color(0xFFFF9F0A), modifier = Modifier.size(22.dp))
+                    }
+                }
+            }
+        }
+
+        when {
+            !hasPermission -> {
+                Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Rounded.MusicNote, null, tint = lc.iconMuted, modifier = Modifier.size(64.dp))
+                        Spacer(Modifier.height(16.dp))
+                        Text("Allow access to your music", color = lc.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "Grant permission to scan and play audio stored on this device.",
+                            color = lc.textSecondary,
+                            fontSize = 14.sp,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            lineHeight = 20.sp
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        ActionButton("Grant Permission", Icons.Default.PlayArrow, onClick = { permissionLauncher.launch(permission) })
+                    }
+                }
+            }
+            loading -> {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = Color(0xFFFF9F0A))
+                }
+            }
+            tracks.isEmpty() -> {
+                EmptyState("No local audio found", Icons.Rounded.MusicNote)
+            }
+            else -> {
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 120.dp)
+                ) {
+                    items(tracks, key = { it.id }) { track ->
+                        LocalTrackRow(
+                            track = track,
+                            onClick = {
+                                val startIndex = tracks.indexOfFirst { it.id == track.id }
+                                if (startIndex >= 0) {
+                                    PlayerController.playFromList(
+                                        context = context,
+                                        tracks = tracks,
+                                        startIndex = startIndex,
+                                        autoRefillType = "playlist",
+                                        autoRefillId = "local_audio",
+                                        autoRefillName = "Local Audio"
+                                    )
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LocalTrackRow(
+    track: Track,
+    onClick: () -> Unit
+) {
+    val lc = LiquidTheme.colors
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(remember { MutableInteractionSource() }, null, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(lc.glassTint),
+            contentAlignment = Alignment.Center
+        ) {
+            // Иконка-заглушка снизу; обложка (если есть) рисуется поверх.
+            Icon(Icons.Rounded.MusicNote, null, tint = lc.iconMuted, modifier = Modifier.size(22.dp))
+            AsyncImage(
+                model = track.albumArtUri,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(track.title, color = lc.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(track.artist, color = lc.textSecondary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
     }
 }
 
