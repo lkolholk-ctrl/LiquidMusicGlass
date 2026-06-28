@@ -409,6 +409,15 @@ class MainActivity : ComponentActivity() {
         wasStopped = true
     }
 
+    // Системные оверлеи/переходы (пикер файла/фото, экран «о приложении», шторка,
+    // сворачивание) забирают фокус ДО onStop. Замораживаем тяжёлый AGSL-дым на это
+    // время, чтобы наш рендер не конкурировал с аудио-колбэком JUCE за GPU/CPU и
+    // не давал цикличных заеданий звука в момент перехода.
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        com.liquidmusicglass.ui.EffectsLifecycle.hasWindowFocus = hasFocus
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         com.liquidmusicglass.engine.automix.JuceContextHolder.clear(this)

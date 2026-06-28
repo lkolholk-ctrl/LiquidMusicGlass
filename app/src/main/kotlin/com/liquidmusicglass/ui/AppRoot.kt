@@ -223,7 +223,11 @@ fun AppRoot() {
                     !authOpen &&
                     !profileOpen &&
                     !youtubeSearchOpen &&
-                    expandProgress.value < 0.05f
+                    expandProgress.value < 0.05f &&
+                    // При потере фокуса окна (пикер файла/фото, «о приложении», шторка,
+                    // сворачивание) замораживаем тяжёлый дым — чтобы наш рендер не душил
+                    // аудио-колбэк JUCE именно в момент системного перехода.
+                    EffectsLifecycle.hasWindowFocus
 
             // ── Main screens ──
             when (selectedIndex) {

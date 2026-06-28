@@ -2,6 +2,7 @@ package com.liquidmusicglass.ui
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 
 /**
@@ -25,6 +26,15 @@ object EffectsLifecycle {
 
     var epoch by mutableIntStateOf(0)
         private set
+
+    /**
+     * true пока окно приложения в фокусе. Системные оверлеи/переходы (пикер файла
+     * и фото, экран «о приложении», шторка, сворачивание) забирают фокус — тогда
+     * тяжёлый AGSL-дым/мудкарточки ЗАМОРАЖИВАЮТСЯ, чтобы наш рендер не спайкал
+     * RenderThread и не душил аудио-колбэк JUCE именно в момент перехода.
+     * Пишется из MainActivity.onWindowFocusChanged, читается в @Composable.
+     */
+    var hasWindowFocus by mutableStateOf(true)
 
     /** Вызвать при реальном возврате из фона (onStart после предшествующего onStop). */
     fun onReturnedToForeground() {
