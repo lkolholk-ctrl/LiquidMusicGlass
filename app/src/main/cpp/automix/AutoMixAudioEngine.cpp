@@ -11,7 +11,11 @@ AutoMixAudioEngine::AutoMixAudioEngine()
     // WAV + AIFF always; FLAC + Ogg Vorbis because we enabled them in CMake.
     formatManager.registerBasicFormats();
     // One read-ahead thread serves both decks' BufferingAudioSources.
-    readAheadThread.startThread();
+    // Высокий приоритет: при переключении приложений система кратко тротлит
+    // фоновые потоки. Если поток предчтения декодирует mp3 на обычном приоритете,
+    // он отстаёт → буфер транспорта осушается → ~2с заикания. High держит декод
+    // впереди под нагрузкой (но НИЖЕ realtime-потока Oboe — аудио-колбэк не голодает).
+    readAheadThread.startThread (juce::Thread::Priority::high);
 }
 
 AutoMixAudioEngine::~AutoMixAudioEngine()
@@ -80,7 +84,9 @@ bool AutoMixAudioEngine::loadDeck (Deck& deck, const juce::String& path)
     {
         deck.sourceSampleRate = reader->sampleRate;
         deck.readerSource = std::make_unique<juce::AudioFormatReaderSource> (reader, true);
-        deck.transport.setSource (deck.readerSource.get(), 32768, &readAheadThread, reader->sampleRate, 2);
+        // ~3с предчтения (переживает кратковременный тротлинг при уходе в фон).
+        deck.transport.setSource (deck.readerSource.get(), (int) (reader->sampleRate * 3.0),
+                                  &readAheadThread, reader->sampleRate, 2);
         deck.transport.setPosition (0.0);
         deck.path = path;
         deck.hasTrack.store (true);
@@ -93,9 +99,11 @@ bool AutoMixAudioEngine::loadDeck (Deck& deck, const juce::String& path)
     {
         deck.sourceSampleRate = streaming->getSampleRate();
         deck.mediaCodecSource = std::move (streaming);
-        // 64k-frame look-ahead (~1.3 s @ 48k) on the shared read-ahead thread.
-        deck.transport.setSource (deck.mediaCodecSource.get(), 1 << 16, &readAheadThread,
-                                  deck.sourceSampleRate, 2);
+        // ~5с предчтения (декод mp3 тяжелее, чем чтение wav): при переключении
+        // приложений система тротлит CPU на ~2с — большой буфер не даёт транспорту
+        // осушиться, поэтому звук не заикается. ~1.9 МБ/дек @48k stereo float.
+        deck.transport.setSource (deck.mediaCodecSource.get(), (int) (deck.sourceSampleRate * 5.0),
+                                  &readAheadThread, deck.sourceSampleRate, 2);
         deck.transport.setPosition (0.0);
         deck.path = path;
         deck.hasTrack.store (true);
