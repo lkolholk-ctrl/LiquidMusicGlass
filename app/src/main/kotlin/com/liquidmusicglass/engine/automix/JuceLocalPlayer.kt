@@ -126,6 +126,7 @@ class JuceLocalPlayer(
         startIndex: Int,
         startPositionMs: Long
     ): ListenableFuture<*> {
+        android.util.Log.d("JUCELocalDbg", "handleSetMediaItems n=${mediaItems.size} start=$startIndex pos=$startPositionMs", Throwable("caller"))
         playlist = mediaItems.toList()
         currentIndex = if (startIndex == C.INDEX_UNSET) 0 else startIndex.coerceIn(0, playlist.lastIndex.coerceAtLeast(0))
         loadCurrent(if (startPositionMs == C.TIME_UNSET) 0L else startPositionMs)
@@ -140,6 +141,7 @@ class JuceLocalPlayer(
     }
 
     override fun handleSetPlayWhenReady(playWhenReady: Boolean): ListenableFuture<*> {
+        android.util.Log.d("JUCELocalDbg", "handleSetPlayWhenReady=$playWhenReady", Throwable("caller"))
         playWhenReadyFlag = playWhenReady
         // Движок дёргаем на фоновом потоке (вызовы @Synchronized могут встать за
         // идущим декодом — нельзя блокировать main). Если идёт загрузка, она сама
@@ -170,6 +172,7 @@ class JuceLocalPlayer(
     }
 
     override fun handleStop(): ListenableFuture<*> {
+        android.util.Log.d("JUCELocalDbg", "handleStop", Throwable("caller"))
         playWhenReadyFlag = false
         loadHandler.post { if (!released) runCatching { engine.stop() } }
         invalidateState()
@@ -201,6 +204,7 @@ class JuceLocalPlayer(
         val mi = playlist.getOrNull(currentIndex) ?: return
         val uri = mi.localConfiguration?.uri ?: return
 
+        android.util.Log.d("JUCELocalDbg", "loadCurrent idx=$currentIndex pos=$positionMs pwr=$playWhenReadyFlag")
         val seq = loadSeq.incrementAndGet()
         loading = true
         invalidateState()                      // сразу показать BUFFERING (на main)
@@ -233,9 +237,9 @@ class JuceLocalPlayer(
     private fun maybeAdvanceAtEnd() {
         if (loading || !prepared || !playWhenReadyFlag || playlist.isEmpty()) return
         val len = engine.lengthMsCurrent().toLong()
-        if (len <= 0L) return
+        if (len <= 1000L) return                 // длина ещё не известна/мусор — не дёргаем
         val pos = engine.positionMsCurrent().toLong()
-        if (pos >= len - 300L) {
+        if (pos > 1000L && pos >= len - 300L) {   // требуем реально доигранный трек
             if (currentIndex < playlist.lastIndex) {
                 currentIndex++
                 loadCurrent(0L)
