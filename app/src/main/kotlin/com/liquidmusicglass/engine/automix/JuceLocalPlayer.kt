@@ -3,8 +3,10 @@ package com.liquidmusicglass.engine.automix
 import android.content.Context
 import android.net.Uri
 import android.os.Handler
+import android.os.HandlerThread
 import android.os.Looper
 import android.provider.MediaStore
+import java.util.concurrent.atomic.AtomicInteger
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
@@ -25,8 +27,10 @@ import com.google.common.util.concurrent.ListenableFuture
  * Только локальные источники: JUCE читает файлы с диска, поэтому content://
  * (MediaStore) резолвится в путь файла. Стриминг остаётся на ExoPlayer.
  *
- * ВНИМАНИЕ: этот класс пока НЕ подключён в AudioService — это компайл-этап.
- * Подключение (session.setPlayer при локальной очереди) — следующий шаг 8b.
+ * Тяжёлая загрузка (JUCE init + полный декод mp3/aac) выполняется на выделенном
+ * фоновом потоке; главный поток только читает лёгкие atomics в getState(), так
+ * что UI/нотификация не замирают. Все мутирующие @Synchronized-вызовы движка
+ * тоже идут на фоновом потоке.
  */
 @UnstableApi
 class JuceLocalPlayer(
@@ -37,11 +41,19 @@ class JuceLocalPlayer(
     private val engine = AutoMixNativeEngine
     private val handler = Handler(looper)
 
+    // Тяжёлая загрузка трека (JUCE init + полный декод mp3/aac) НИКОГДА не должна
+    // идти на главном потоке — иначе UI замирает на секунды (ANR/«колом»). Грузим
+    // на выделенном фоновом потоке; по готовности дёргаем invalidateState на main.
+    private val loadThread = HandlerThread("juce-local-load").apply { start() }
+    private val loadHandler = Handler(loadThread.looper)
+    private val loadSeq = AtomicInteger(0)   // защита от гонок при быстром переключении
+    @Volatile private var loading = false
+
     private var playlist: List<MediaItem> = emptyList()
     private var currentIndex = 0
-    private var playWhenReadyFlag = false
+    @Volatile private var playWhenReadyFlag = false   // пишется на main, читается фоном
     private var prepared = false
-    private var released = false
+    @Volatile private var released = false
 
     // Периодический пинок состояния, чтобы позиция/прогресс в сессии шли «живо».
     private val ticker = object : Runnable {
@@ -88,7 +100,11 @@ class JuceLocalPlayer(
             b.build()
         }
 
-        val state = if (!prepared || playlist.isEmpty()) Player.STATE_IDLE else Player.STATE_READY
+        val state = when {
+            !prepared || playlist.isEmpty() -> Player.STATE_IDLE
+            loading -> Player.STATE_BUFFERING   // фоновый декод идёт — UI крутит спиннер
+            else -> Player.STATE_READY
+        }
         val posMs = engine.positionMsCurrent().toLong().coerceAtLeast(0L)
 
         val builder = State.Builder()
@@ -125,7 +141,13 @@ class JuceLocalPlayer(
 
     override fun handleSetPlayWhenReady(playWhenReady: Boolean): ListenableFuture<*> {
         playWhenReadyFlag = playWhenReady
-        if (playWhenReady) engine.playCurrent() else engine.pause()
+        // Движок дёргаем на фоновом потоке (вызовы @Synchronized могут встать за
+        // идущим декодом — нельзя блокировать main). Если идёт загрузка, она сама
+        // стартует по флагу playWhenReadyFlag по завершении.
+        loadHandler.post {
+            if (released) return@post
+            if (playWhenReady) engine.playCurrent() else engine.pause()
+        }
         invalidateState()
         return Futures.immediateVoidFuture()
     }
@@ -140,7 +162,8 @@ class JuceLocalPlayer(
             currentIndex = target
             loadCurrent(if (positionMs == C.TIME_UNSET) 0L else positionMs)
         } else {
-            engine.seekCurrent((if (positionMs == C.TIME_UNSET) 0L else positionMs).toDouble())
+            val to = (if (positionMs == C.TIME_UNSET) 0L else positionMs).toDouble()
+            loadHandler.post { if (!released && !loading) engine.seekCurrent(to) }
         }
         invalidateState()
         return Futures.immediateVoidFuture()
@@ -148,7 +171,7 @@ class JuceLocalPlayer(
 
     override fun handleStop(): ListenableFuture<*> {
         playWhenReadyFlag = false
-        runCatching { engine.stop() }
+        loadHandler.post { if (!released) runCatching { engine.stop() } }
         invalidateState()
         return Futures.immediateVoidFuture()
     }
@@ -156,28 +179,59 @@ class JuceLocalPlayer(
     override fun handleRelease(): ListenableFuture<*> {
         released = true
         handler.removeCallbacksAndMessages(null)
-        runCatching { engine.release() }
+        loadHandler.removeCallbacksAndMessages(null)
+        // release() движка тоже @Synchronized — на фоне, чтобы не ждать монитор на
+        // main. quitSafely даёт этой задаче выполниться перед остановкой потока.
+        loadHandler.post { runCatching { engine.release() } }
+        loadThread.quitSafely()
         return Futures.immediateVoidFuture()
     }
 
     // ── Internal ──────────────────────────────────────────────────────────────
 
-    /** Загрузить текущий трек в JUCE (текущий дек = A) и при необходимости играть. */
+    /**
+     * Загрузить текущий трек в JUCE (текущий дек = A) и при необходимости играть.
+     *
+     * Тяжёлая часть (JUCE init + полный декод mp3/aac) идёт на фоновом потоке —
+     * главный поток НЕ блокируется. Пока грузится — состояние BUFFERING. По
+     * готовности применяем play/invalidateState на main, но только если это всё
+     * ещё актуальная загрузка (пользователь не переключил трек) — loadSeq guard.
+     */
     private fun loadCurrent(positionMs: Long) {
         val mi = playlist.getOrNull(currentIndex) ?: return
-        val path = resolveFilePath(mi.localConfiguration?.uri ?: return) ?: return
-        engine.init(context)
-        runCatching { engine.stop() }          // current deck back to A
-        engine.clearDeck(1)                    // incoming empty
-        engine.setBassSwap(true)
-        engine.loadTrackA(path)
-        if (positionMs > 0L) engine.seekCurrent(positionMs.toDouble())
-        if (playWhenReadyFlag) engine.playCurrent()
+        val uri = mi.localConfiguration?.uri ?: return
+
+        val seq = loadSeq.incrementAndGet()
+        loading = true
+        invalidateState()                      // сразу показать BUFFERING (на main)
+
+        loadHandler.post {
+            val path = resolveFilePath(uri)
+            var ok = false
+            if (path != null) {
+                runCatching {
+                    engine.init(context)
+                    engine.stop()              // current deck back to A
+                    engine.clearDeck(1)        // incoming empty
+                    engine.setBassSwap(true)
+                    ok = engine.loadTrackA(path)
+                    if (ok && positionMs > 0L) engine.seekCurrent(positionMs.toDouble())
+                    // Старт здесь же, на фоне — main не дёргает @Synchronized движок.
+                    if (ok && playWhenReadyFlag && seq == loadSeq.get()) engine.playCurrent()
+                }
+            }
+            // Состояние применяем на main — только если загрузка ещё актуальна.
+            handler.post {
+                if (released || seq != loadSeq.get()) return@post
+                loading = false
+                invalidateState()
+            }
+        }
     }
 
     /** Конец трека (без AutoMix) → следующий; на последнем — стоп. */
     private fun maybeAdvanceAtEnd() {
-        if (!prepared || !playWhenReadyFlag || playlist.isEmpty()) return
+        if (loading || !prepared || !playWhenReadyFlag || playlist.isEmpty()) return
         val len = engine.lengthMsCurrent().toLong()
         if (len <= 0L) return
         val pos = engine.positionMsCurrent().toLong()
@@ -187,7 +241,7 @@ class JuceLocalPlayer(
                 loadCurrent(0L)
             } else {
                 playWhenReadyFlag = false
-                runCatching { engine.pause() }
+                loadHandler.post { if (!released) runCatching { engine.pause() } }
             }
             invalidateState()
         }
