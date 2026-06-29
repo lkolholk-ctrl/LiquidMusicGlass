@@ -1,7 +1,9 @@
 package com.liquidmusicglass.ui.screens
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -43,6 +45,7 @@ import com.liquidmusicglass.engine.LrcLibPublisher
 import com.liquidmusicglass.engine.LyricsParser
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.Track
+import com.liquidmusicglass.ui.lyrics.MarkupPreviewView
 import com.liquidmusicglass.ui.theme.LiquidColors
 import com.liquidmusicglass.ui.theme.LiquidTheme
 import kotlinx.coroutines.launch
@@ -281,6 +284,7 @@ fun LrcPublishScreen(track: Track, onBack: () -> Unit) {
 }
 
 // ── Режим разметки синхронизации ─────────────────────────────────────────────
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SyncTaggingMode(
     track: Track,
@@ -294,9 +298,22 @@ private fun SyncTaggingMode(
     val times = remember { mutableStateListOf<Long?>().apply { repeat(lines.size) { add(null) } } }
     var nextIndex by remember { mutableStateOf(0) }
     val scroll = rememberScrollState()
+    var previewFrom by remember { mutableStateOf<Int?>(null) }
+    var started by remember { mutableStateOf(false) }
+
+    // Тест: проиграть с подсветкой по текущей разметке (с выбранной строки).
+    previewFrom?.let { from ->
+        val ly = remember(from) { LyricsParser.parseLyrics(buildLrc(lines, times)) }
+        MarkupPreviewView(ly, from.coerceIn(0, (lines.size - 1).coerceAtLeast(0)), lc.accent,
+            onBackToEdit = { previewFrom = null })
+        return
+    }
 
     // Запускаем именно этот трек с начала, чтобы тапать строки под музыку.
+    // started-гард: не перезапускать при возврате из «Теста».
     LaunchedEffect(track.id) {
+        if (started) return@LaunchedEffect
+        started = true
         runCatching { PlayerController.playFromList(context, listOf(track), 0) }
     }
 
@@ -314,7 +331,7 @@ private fun SyncTaggingMode(
                         .clickable { onDone(buildLrc(lines, times)) }
                         .padding(horizontal = 10.dp, vertical = 6.dp))
             }
-            Text("Тапни по строке в момент, когда она звучит.",
+            Text("Тапни по строке в момент звучания. Долгий тап по строке — тест с неё.",
                 color = lc.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(vertical = 6.dp))
 
             // транспорт
@@ -324,7 +341,12 @@ private fun SyncTaggingMode(
                 }
                 Spacer(Modifier.width(12.dp))
                 RoundIcon(Icons.Rounded.Replay, lc) { PlayerController.seekTo(0) }
-                Spacer(Modifier.width(16.dp))
+                Spacer(Modifier.width(12.dp))
+                Text("ТЕСТ", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(lc.accentGreen)
+                        .clickable { previewFrom = (nextIndex - 1).coerceAtLeast(0) }
+                        .padding(horizontal = 12.dp, vertical = 10.dp))
+                Spacer(Modifier.width(12.dp))
                 Text(
                     "TAP (строка ${(nextIndex + 1).coerceAtMost(lines.size)})",
                     color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold,
@@ -346,10 +368,13 @@ private fun SyncTaggingMode(
                     Row(
                         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
                             .background(if (i == nextIndex) lc.accent.copy(alpha = 0.15f) else Color.Transparent)
-                            .clickable {
-                                times[i] = PlayerController.getSmoothPositionMs().coerceAtLeast(0)
-                                if (i + 1 > nextIndex) nextIndex = i + 1
-                            }
+                            .combinedClickable(
+                                onClick = {
+                                    times[i] = PlayerController.getSmoothPositionMs().coerceAtLeast(0)
+                                    if (i + 1 > nextIndex) nextIndex = i + 1
+                                },
+                                onLongClick = { previewFrom = i }
+                            )
                             .padding(horizontal = 10.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -366,7 +391,7 @@ private fun SyncTaggingMode(
 }
 
 // ── Режим ПОСЛОВНОЙ разметки (Enhanced LRC, мой источник) ─────────────────────
-@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 private fun SyncWordTaggingMode(
     track: Track,
@@ -391,8 +416,27 @@ private fun SyncWordTaggingMode(
     val times = remember(total) { mutableStateListOf<Long?>().apply { repeat(total) { add(null) } } }
     var nextIndex by remember { mutableStateOf(0) }
     val scroll = rememberScrollState()
+    var previewFrom by remember { mutableStateOf<Int?>(null) }
+    var started by remember { mutableStateOf(false) }
+
+    // строка, содержащая глобальный индекс слова gi
+    fun lineOf(gi: Int): Int {
+        var li = 0
+        for (i in wordRows.indices) { if (lineStart[i] <= gi) li = i else break }
+        return li
+    }
+
+    // Тест: проиграть с пословной подсветкой по текущей разметке (с выбранной строки).
+    previewFrom?.let { from ->
+        val ly = remember(from) { LyricsParser.parseLyrics(buildEnhancedLrc(wordRows, lineStart, times)) }
+        MarkupPreviewView(ly, from.coerceIn(0, (wordRows.size - 1).coerceAtLeast(0)), lc.accent,
+            onBackToEdit = { previewFrom = null })
+        return
+    }
 
     LaunchedEffect(track.id) {
+        if (started) return@LaunchedEffect
+        started = true
         runCatching { PlayerController.playFromList(context, listOf(track), 0) }
     }
 
@@ -410,7 +454,7 @@ private fun SyncWordTaggingMode(
                         .clickable { onDone(buildEnhancedLrc(wordRows, lineStart, times)) }
                         .padding(horizontal = 10.dp, vertical = 6.dp))
             }
-            Text("Тапни по каждому слову в момент, когда оно звучит (караоке).",
+            Text("Тапни по каждому слову в момент звучания. Долгий тап по слову — тест с его строки.",
                 color = lc.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(vertical = 6.dp))
 
             // транспорт + большой TAP
@@ -420,7 +464,12 @@ private fun SyncWordTaggingMode(
                 }
                 Spacer(Modifier.width(12.dp))
                 RoundIcon(Icons.Rounded.Replay, lc) { PlayerController.seekTo(0) }
-                Spacer(Modifier.width(16.dp))
+                Spacer(Modifier.width(12.dp))
+                Text("ТЕСТ", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(lc.accentGreen)
+                        .clickable { previewFrom = lineOf((nextIndex - 1).coerceAtLeast(0)) }
+                        .padding(horizontal = 12.dp, vertical = 10.dp))
+                Spacer(Modifier.width(12.dp))
                 Text(
                     "TAP (слово ${(nextIndex + 1).coerceAtMost(total)}/$total)",
                     color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold,
@@ -465,10 +514,13 @@ private fun SyncWordTaggingMode(
                                             else -> Color.Transparent
                                         }
                                     )
-                                    .clickable {
-                                        times[gi] = PlayerController.getSmoothPositionMs().coerceAtLeast(0)
-                                        if (gi + 1 > nextIndex) nextIndex = gi + 1
-                                    }
+                                    .combinedClickable(
+                                        onClick = {
+                                            times[gi] = PlayerController.getSmoothPositionMs().coerceAtLeast(0)
+                                            if (gi + 1 > nextIndex) nextIndex = gi + 1
+                                        },
+                                        onLongClick = { previewFrom = li }
+                                    )
                                     .padding(horizontal = 8.dp, vertical = 5.dp)
                             )
                         }

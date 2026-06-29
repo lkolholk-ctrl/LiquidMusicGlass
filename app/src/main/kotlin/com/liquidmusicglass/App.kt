@@ -95,6 +95,9 @@ class App : Application(), ImageLoaderFactory {
         // Аудио-обработка (DataStore) — загрузка сохранённых EQ/эффектов
         com.liquidmusicglass.engine.AudioFxController.init(this)
 
+        // Настройки пословной подсветки лирики (эффект/плавность)
+        com.liquidmusicglass.engine.LyricsFxController.init(this)
+
         // Монитор маршрута вывода (BT/гарнитура) — переоткрывает Oboe на смене устройства
         com.liquidmusicglass.engine.AudioRouteMonitor.init(this)
 
