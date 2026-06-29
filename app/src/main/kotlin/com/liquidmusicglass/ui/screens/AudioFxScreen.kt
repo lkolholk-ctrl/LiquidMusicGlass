@@ -14,13 +14,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material3.Icon
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
@@ -37,9 +35,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.liquidmusicglass.engine.AudioFxController
+import com.liquidmusicglass.ui.liquid.LiquidSlider
+import com.liquidmusicglass.ui.liquid.LiquidToggle
 import com.liquidmusicglass.ui.theme.LiquidColors
 import com.liquidmusicglass.ui.theme.LiquidTheme
+import com.kyant.backdrop.Backdrop
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import kotlin.math.roundToInt
+
+/** Стеклянный backdrop экрана для ползунков (LiquidSlider преломляет контент). */
+private val LocalFxBackdrop = compositionLocalOf<Backdrop?> { null }
 
 @Composable
 fun AudioFxScreen(onBack: () -> Unit) {
@@ -47,10 +53,14 @@ fun AudioFxScreen(onBack: () -> Unit) {
     val scroll = rememberScrollState()
 
     val master by AudioFxController.masterEnabled.collectAsState()
+    // Стекло для ползунков: контент экрана захватывается в слой, ползунки его преломляют.
+    val screenBackdrop = rememberLayerBackdrop()
 
-    Box(modifier = Modifier.fillMaxSize().background(lc.settingsBackground)) {
+    CompositionLocalProvider(LocalFxBackdrop provides screenBackdrop) {
+        Box(modifier = Modifier.fillMaxSize().background(lc.settingsBackground)) {
         Column(
-            modifier = Modifier.fillMaxSize().verticalScroll(scroll).padding(horizontal = 20.dp)
+            modifier = Modifier.fillMaxSize().layerBackdrop(screenBackdrop)
+                .verticalScroll(scroll).padding(horizontal = 20.dp)
         ) {
             Spacer(modifier = Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
             Spacer(modifier = Modifier.height(12.dp))
@@ -85,6 +95,7 @@ fun AudioFxScreen(onBack: () -> Unit) {
                 }
             }
             Spacer(modifier = Modifier.height(40.dp))
+        }
         }
     }
 }
@@ -265,30 +276,34 @@ private fun LabelValue(label: String, value: String, lc: LiquidColors) {
     }
 }
 
+/** Ползунок «из фулл-плеера» — LiquidSlider СО СТЕКЛОМ (преломляет фон экрана). */
 @Composable
 private fun FxSlider(
     value: Float, range: ClosedFloatingPointRange<Float>, enabled: Boolean,
     onChange: (Float) -> Unit, lc: LiquidColors
 ) {
-    Slider(
-        value = value, onValueChange = onChange, valueRange = range, enabled = enabled,
-        colors = SliderDefaults.colors(
-            thumbColor = lc.accent, activeTrackColor = lc.accent,
-            inactiveTrackColor = if (lc.isDark) Color(0xFF2C2C2E) else Color(0xFFE5E5EA)
+    val fallback = rememberLayerBackdrop()
+    val backdrop = LocalFxBackdrop.current ?: fallback
+    Box(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp).alpha(if (enabled) 1f else 0.5f)) {
+        LiquidSlider(
+            value = { value },
+            onValueChange = { if (enabled) onChange(it) },
+            valueRange = range,
+            backdrop = backdrop,
+            accentColor = lc.accent,
+            trackColor = (if (lc.isDark) Color.White else Color.Black).copy(alpha = 0.18f)
         )
-    )
+    }
 }
 
+/** Тумблер «как в настройках» — LiquidToggle БЕЗ стекла (пустой backdrop). */
 @Composable
 private fun FxSwitch(checked: Boolean, enabled: Boolean = true, onCheckedChange: (Boolean) -> Unit) {
-    val lc = LiquidTheme.colors
-    Switch(
-        checked = checked, onCheckedChange = onCheckedChange, enabled = enabled,
-        colors = SwitchDefaults.colors(
-            checkedThumbColor = Color.White, checkedTrackColor = lc.accent,
-            uncheckedThumbColor = Color.White,
-            uncheckedTrackColor = if (lc.isDark) Color(0xFF3A3A3C) else Color(0xFFD1D1D6)
-        )
+    val emptyBackdrop = rememberLayerBackdrop()   // без стекла: ничего не преломляет
+    LiquidToggle(
+        selected = { checked },
+        onSelect = { if (enabled) onCheckedChange(it) },
+        backdrop = emptyBackdrop
     )
 }
 
