@@ -72,6 +72,14 @@ interface LocalTracksDao {
     @Query("UPDATE local_tracks SET title = :title, artist = :artist, albumName = :album, trackNumber = :track, year = :year WHERE id = :id")
     suspend fun updateTags(id: String, title: String, artist: String, album: String, track: Int, year: Int)
 
+    /** Массовое: перезаписать только заполненные поля (пустые — не трогаем). */
+    @Query("""UPDATE local_tracks SET
+                artist = CASE WHEN :artist != '' THEN :artist ELSE artist END,
+                albumName = CASE WHEN :album != '' THEN :album ELSE albumName END,
+                year = CASE WHEN :year > 0 THEN :year ELSE year END
+              WHERE id = :id""")
+    suspend fun updateTagsBulk(id: String, artist: String, album: String, year: Int)
+
     // ── треки (сортировки) ──
     @Query("SELECT * FROM local_tracks ORDER BY title COLLATE NOCASE")
     fun tracksByTitle(): Flow<List<LocalTrackEntity>>

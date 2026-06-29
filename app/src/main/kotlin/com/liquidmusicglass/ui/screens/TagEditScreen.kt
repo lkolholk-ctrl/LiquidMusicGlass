@@ -200,6 +200,148 @@ fun TagEditScreen(track: Track, onBack: () -> Unit) {
     }
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+//  Массовое редактирование: общие поля для нескольких выбранных треков
+// ══════════════════════════════════════════════════════════════════════════════
+@Composable
+fun BulkTagEditScreen(tracks: List<Track>, onBack: () -> Unit) {
+    val lc = LiquidTheme.colors
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val scroll = rememberScrollState()
+    val total = tracks.size
+
+    var artist by remember { mutableStateOf("") }
+    var album by remember { mutableStateOf("") }
+    var albumArtist by remember { mutableStateOf("") }
+    var year by remember { mutableStateOf("") }
+    var genre by remember { mutableStateOf("") }
+
+    var saving by remember { mutableStateOf(false) }
+    var status by remember { mutableStateOf("") }
+    var okTotal by remember { mutableStateOf(0) }
+    var failTotal by remember { mutableStateOf(0) }
+
+    // очередь дозаписи (для API 29 — по файлу за раз) и перенос разрешения через состояние
+    var remaining by remember { mutableStateOf<List<TagEditor.BulkItem>>(emptyList()) }
+    var pendingFields by remember { mutableStateOf<List<Pair<org.jaudiotagger.tag.FieldKey, String>>>(emptyList()) }
+    var pendingPermission by remember { mutableStateOf<android.content.IntentSender?>(null) }
+
+    fun fields(): List<Pair<org.jaudiotagger.tag.FieldKey, String>> = buildList {
+        if (artist.isNotBlank()) add(org.jaudiotagger.tag.FieldKey.ARTIST to artist.trim())
+        if (album.isNotBlank()) add(org.jaudiotagger.tag.FieldKey.ALBUM to album.trim())
+        if (albumArtist.isNotBlank()) add(org.jaudiotagger.tag.FieldKey.ALBUM_ARTIST to albumArtist.trim())
+        if (year.isNotBlank()) add(org.jaudiotagger.tag.FieldKey.YEAR to year.trim())
+        if (genre.isNotBlank()) add(org.jaudiotagger.tag.FieldKey.GENRE to genre.trim())
+    }
+
+    suspend fun drain(items: List<TagEditor.BulkItem>, f: List<Pair<org.jaudiotagger.tag.FieldKey, String>>) {
+        val out = TagEditor.writePartialMany(context, items, f)
+        okTotal += out.okCount; failTotal += out.failCount
+        out.doneTrackIds.forEach { id ->
+            runCatching {
+                LocalLibraryStore.updateTagsBulk(
+                    context, id, artist.trim(), album.trim(), year.trim().toIntOrNull() ?: 0
+                )
+            }
+        }
+        if (out.needPermission != null) {
+            remaining = out.remaining; pendingFields = f
+            status = "Запрос разрешения…"
+            pendingPermission = out.needPermission           // запустит лаунчер через LaunchedEffect
+        } else {
+            saving = false
+            status = "Готово: $okTotal из $total" + if (failTotal > 0) " · пропущено $failTotal" else ""
+        }
+    }
+
+    val permLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        pendingPermission = null
+        if (result.resultCode == Activity.RESULT_OK) {
+            scope.launch { drain(remaining, pendingFields) }
+        } else {
+            saving = false; status = "Доступ к файлам не выдан"
+        }
+    }
+
+    // Запрос разрешения вынесен в состояние, чтобы не было цикла объявлений drain↔launcher.
+    LaunchedEffect(pendingPermission) {
+        pendingPermission?.let { permLauncher.launch(IntentSenderRequest.Builder(it).build()) }
+    }
+
+    fun onApply() {
+        if (saving) return
+        val f = fields()
+        if (f.isEmpty()) { status = "Заполни хотя бы одно поле"; return }
+        saving = true; okTotal = 0; failTotal = 0; status = "Подготовка…"
+        pendingFields = f
+        scope.launch {
+            val items = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                tracks.map { TagEditor.BulkItem(it.id, it.uri, TagEditor.displayName(context, it.uri)) }
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                remaining = items
+                val isender = TagEditor.createWriteRequest(context, items.map { it.uri })
+                if (isender != null) { status = "Запрос разрешения…"; pendingPermission = isender; return@launch }
+            }
+            drain(items, f)   // API 29 — попросит разрешение по файлам по ходу
+        }
+    }
+
+    Box(Modifier.fillMaxSize().background(lc.settingsBackground)) {
+        Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(horizontal = 20.dp)) {
+            Spacer(Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
+            Spacer(Modifier.height(12.dp))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                CircleBack(lc, onBack)
+                Spacer(Modifier.width(14.dp))
+                Column {
+                    Text("Теги пачкой", color = lc.textPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                    Text("Выбрано треков: $total", color = lc.textSecondary, fontSize = 13.sp)
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Заполненные поля применятся ко ВСЕМ выбранным трекам. Пустые поля не трогаем. " +
+                    "Название и номер трека здесь не меняются.",
+                color = lc.textTertiary, fontSize = 12.sp, modifier = Modifier.padding(vertical = 4.dp)
+            )
+            Spacer(Modifier.height(8.dp))
+
+            Box(Modifier.alpha(if (saving) 0.5f else 1f)) {
+                Column {
+                    EditField("Артист", artist, lc) { artist = it }
+                    EditField("Альбом", album, lc) { album = it }
+                    EditField("Артист альбома", albumArtist, lc) { albumArtist = it }
+                    EditField("Год", year, lc, number = true) { year = it.filter { c -> c.isDigit() } }
+                    EditField("Жанр", genre, lc) { genre = it }
+                }
+            }
+            Spacer(Modifier.height(20.dp))
+            Box(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+                    .background(if (saving) lc.cardSurface else lc.accent)
+                    .clickable(enabled = !saving) { onApply() }
+                    .padding(vertical = 14.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(if (saving) "…" else "Применить к $total",
+                    color = if (saving) lc.textSecondary else Color.White,
+                    fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            }
+            if (status.isNotEmpty()) {
+                Spacer(Modifier.height(10.dp))
+                Text(status, color = lc.textSecondary, fontSize = 13.sp,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            }
+            Spacer(Modifier.height(40.dp))
+        }
+    }
+}
+
 @Composable
 private fun EditField(label: String, value: String, lc: LiquidColors, number: Boolean = false, onChange: (String) -> Unit) {
     Column(Modifier.padding(vertical = 6.dp)) {

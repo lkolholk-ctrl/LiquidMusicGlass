@@ -166,6 +166,16 @@ object LocalLibraryStore {
         }
     }
 
+    /** Массовое: после записи общих полей в файлы — обновить только заполненные поля в индексе. */
+    suspend fun updateTagsBulk(
+        context: Context, trackId: String, artist: String, album: String, year: Int
+    ) = withContext(Dispatchers.IO) {
+        runCatching {
+            AppDatabase.getInstance(context).localTracksDao()
+                .updateTagsBulk(trackId, artist, album, year)
+        }
+    }
+
     /** Играть локальную выборку с указанной позиции — через существующий JUCE-путь. */
     fun play(context: Context, tracks: List<LocalTrackEntity>, startIndex: Int) {
         if (tracks.isEmpty()) return

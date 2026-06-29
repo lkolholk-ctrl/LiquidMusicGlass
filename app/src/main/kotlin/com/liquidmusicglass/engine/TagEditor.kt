@@ -138,6 +138,87 @@ object TagEditor {
             WriteResult.Ok
         }
 
+    // ── Массовое редактирование ──────────────────────────────────────────────
+    data class BulkItem(val trackId: String, val uri: Uri, val name: String?)
+
+    data class BulkOutcome(
+        val doneTrackIds: List<String>,   // успешно записанные (для точечного апдейта Room)
+        val okCount: Int,
+        val failCount: Int,               // пропущено (формат/ошибка)
+        val needPermission: IntentSender?,// требуется разрешение (остановились на этом файле)
+        val remaining: List<BulkItem>     // что осталось (включая файл, которому нужно разрешение)
+    )
+
+    /**
+     * Записать ТОЛЬКО указанные непустые поля, НЕ трогая остальные теги (название и т.п.).
+     * Для массового редактирования (например проставить общего артиста кучи треков).
+     */
+    suspend fun writePartial(context: Context, uri: Uri, name: String?, fields: List<Pair<FieldKey, String>>): WriteResult =
+        withContext(Dispatchers.IO) {
+            val ext = extOf(name)
+            if (ext !in SUPPORTED) return@withContext WriteResult.Unsupported
+            val applied = fields.filter { it.second.isNotBlank() }
+            if (applied.isEmpty()) return@withContext WriteResult.Ok
+
+            val tmp = copyToTemp(context, uri, ext) ?: return@withContext WriteResult.Error("Не удалось прочитать файл")
+            try {
+                quietLogging()
+                val af = AudioFileIO.read(tmp)
+                val tag = af.tagOrCreateAndSetDefault
+                for ((k, v) in applied) runCatching { tag.setField(k, v) }
+                af.commit()
+            } catch (e: Exception) {
+                tmp.delete(); return@withContext WriteResult.Error("Не удалось записать теги: ${e.message}")
+            }
+            try {
+                context.contentResolver.openFileDescriptor(uri, "rwt")?.use { pfd ->
+                    FileOutputStream(pfd.fileDescriptor).use { out -> tmp.inputStream().use { it.copyTo(out) } }
+                } ?: run { tmp.delete(); return@withContext WriteResult.Error("Нет доступа к файлу") }
+            } catch (e: RecoverableSecurityException) {
+                tmp.delete(); return@withContext WriteResult.NeedsPermission(e.userAction.actionIntent.intentSender)
+            } catch (e: SecurityException) {
+                tmp.delete(); return@withContext WriteResult.Error("Нет разрешения на запись файла")
+            } catch (e: Exception) {
+                tmp.delete(); return@withContext WriteResult.Error("Ошибка сохранения: ${e.message}")
+            }
+            tmp.delete()
+            runCatching {
+                val cv = ContentValues().apply {
+                    for ((k, v) in applied) when (k) {
+                        FieldKey.ARTIST -> put(MediaStore.Audio.Media.ARTIST, v)
+                        FieldKey.ALBUM -> put(MediaStore.Audio.Media.ALBUM, v)
+                        FieldKey.YEAR -> v.toIntOrNull()?.let { put(MediaStore.Audio.Media.YEAR, it) }
+                        else -> {}
+                    }
+                }
+                if (cv.size() > 0) context.contentResolver.update(uri, cv, null, null)
+            }
+            WriteResult.Ok
+        }
+
+    /**
+     * Прогнать пачку файлов. На API 30+ перед вызовом стоит запросить разрешение
+     * на ВСЕ uri разом (createWriteRequest(list)) — тогда needPermission не возникнет.
+     * На API 29 остановится на первом файле, которому нужно разрешение, и вернёт его
+     * intentSender + остаток (вызывающий запрашивает и повторяет на remaining).
+     */
+    suspend fun writePartialMany(
+        context: Context, items: List<BulkItem>, fields: List<Pair<FieldKey, String>>
+    ): BulkOutcome = withContext(Dispatchers.IO) {
+        val done = ArrayList<String>()
+        var ok = 0; var fail = 0
+        for ((idx, it) in items.withIndex()) {
+            when (val r = writePartial(context, it.uri, it.name, fields)) {
+                is WriteResult.Ok -> { done.add(it.trackId); ok++ }
+                is WriteResult.NeedsPermission ->
+                    return@withContext BulkOutcome(done, ok, fail, r.intentSender, items.drop(idx))
+                is WriteResult.Unsupported -> fail++
+                is WriteResult.Error -> fail++
+            }
+        }
+        BulkOutcome(done, ok, fail, null, emptyList())
+    }
+
     /** API 30+: PendingIntent на изменение файла(ов). API 29 — null (там через
      *  RecoverableSecurityException из write()). */
     fun createWriteRequest(context: Context, uris: List<Uri>): IntentSender? =
