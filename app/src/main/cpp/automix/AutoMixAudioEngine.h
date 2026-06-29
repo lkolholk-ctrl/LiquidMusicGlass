@@ -148,9 +148,17 @@ private:
 
     juce::AudioDeviceManager deviceManager;
     juce::AudioFormatManager formatManager;
-    juce::TimeSliceThread readAheadThread { "automix-readahead" };
+    // ОДИН read-ahead поток на оба дека starve'ил играющий дек: при свводе загрузка
+    // incoming-дека запрашивает ~5с пред-декода, и общий поток на эту вспышку
+    // переставал кормить буфер играющего дека → музыка замирала на ~секунду в
+    // начале AutoMix. Отдельный поток на КАЖДЫЙ дек убирает конкуренцию: загрузка
+    // одного дека не трогает предчтение другого.
+    juce::TimeSliceThread readAheadThreadA { "automix-readahead-A" };
+    juce::TimeSliceThread readAheadThreadB { "automix-readahead-B" };
 
     Deck deckA, deckB;
+    // Поток предчтения соответствующего дека (для setSource буферизации).
+    juce::TimeSliceThread& threadForDeck (Deck& d) { return (&d == &deckA) ? readAheadThreadA : readAheadThreadB; }
     juce::AudioBuffer<float> scratchA, scratchB; // per-block pull buffers (audio thread)
     juce::CriticalSection deckMutationLock;      // protects source swaps vs audio callback
 

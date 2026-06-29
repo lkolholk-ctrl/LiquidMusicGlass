@@ -36,12 +36,14 @@ AutoMixAudioEngine::AutoMixAudioEngine()
     formatManager.registerBasicFormats();
     for (auto& g : eqGainsDb)
         g.store (0.0f);
-    // One read-ahead thread serves both decks' BufferingAudioSources.
+    // По одному read-ahead потоку на дек (см. заголовок: общий поток starve'ил
+    // играющий дек при загрузке incoming во время свода).
     // Высокий приоритет: при переключении приложений система кратко тротлит
     // фоновые потоки. Если поток предчтения декодирует mp3 на обычном приоритете,
     // он отстаёт → буфер транспорта осушается → ~2с заикания. High держит декод
     // впереди под нагрузкой (но НИЖЕ realtime-потока Oboe — аудио-колбэк не голодает).
-    readAheadThread.startThread (juce::Thread::Priority::high);
+    readAheadThreadA.startThread (juce::Thread::Priority::high);
+    readAheadThreadB.startThread (juce::Thread::Priority::high);
 }
 
 AutoMixAudioEngine::~AutoMixAudioEngine()
@@ -52,7 +54,8 @@ AutoMixAudioEngine::~AutoMixAudioEngine()
         clearDeckUnlocked (deckA);
         clearDeckUnlocked (deckB);
     }
-    readAheadThread.stopThread (2000);
+    readAheadThreadA.stopThread (2000);
+    readAheadThreadB.stopThread (2000);
 }
 
 bool AutoMixAudioEngine::init()
@@ -163,7 +166,7 @@ bool AutoMixAudioEngine::loadDeck (Deck& deck, const juce::String& path)
         deck.readerSource = std::move (readerSource);
         // ~3с предчтения (переживает кратковременный тротлинг при уходе в фон).
         deck.transport.setSource (deck.readerSource.get(), (int) (sourceRate * 3.0),
-                                  &readAheadThread, sourceRate, 2);
+                                  &threadForDeck (deck), sourceRate, 2);
         deck.transport.setPosition (0.0);
         deck.path = path;
         deck.hasTrack.store (true);
@@ -184,7 +187,7 @@ bool AutoMixAudioEngine::loadDeck (Deck& deck, const juce::String& path)
         // приложений система тротлит CPU на ~2с — большой буфер не даёт транспорту
         // осушиться, поэтому звук не заикается. ~1.9 МБ/дек @48k stereo float.
         deck.transport.setSource (deck.mediaCodecSource.get(), (int) (sourceRate * 5.0),
-                                  &readAheadThread, sourceRate, 2);
+                                  &threadForDeck (deck), sourceRate, 2);
         deck.transport.setPosition (0.0);
         deck.path = path;
         deck.hasTrack.store (true);
@@ -290,7 +293,7 @@ bool AutoMixAudioEngine::loadDeckFd (Deck& deck, int fd, long long offset, long 
     deck.sourceSampleRate = sourceRate;
     deck.mediaCodecSource = std::move (streaming);
     deck.transport.setSource (deck.mediaCodecSource.get(), (int) (sourceRate * 5.0),
-                              &readAheadThread, sourceRate, 2);
+                              &threadForDeck (deck), sourceRate, 2);
     deck.transport.setPosition (0.0);
     deck.path = {};
     deck.hasTrack.store (true);
