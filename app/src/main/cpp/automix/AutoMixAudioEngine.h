@@ -143,6 +143,14 @@ private:
     juce::AudioBuffer<float> scratchA, scratchB; // per-block pull buffers (audio thread)
     juce::CriticalSection deckMutationLock;      // protects source swaps vs audio callback
 
+    // Lock-free transport reporting. The audio callback publishes each deck's
+    // position/length into these atomics (under the lock it already holds); the
+    // main-thread getters read them WITHOUT taking deckMutationLock. This kills
+    // the every-100ms ticker / Media3 getState() contention that otherwise made
+    // the callback's tryEnter() fail and emit silence blocks → audible stutter.
+    std::array<std::atomic<double>, 2> reportedPosMs { { {0.0}, {0.0} } };
+    std::array<std::atomic<double>, 2> reportedLenMs { { {0.0}, {0.0} } };
+
     // Bass-swap: one low-pass per deck per channel extracts the low band so we
     // can scale each deck's bass with a scalar (fixed coefficients -> no clicks).
     std::array<juce::dsp::IIR::Filter<float>, 2> lowpassA, lowpassB;

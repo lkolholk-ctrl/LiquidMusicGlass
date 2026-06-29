@@ -414,20 +414,25 @@ void AutoMixAudioEngine::playCurrent()
 
 void AutoMixAudioEngine::seekCurrent (double ms)
 {
+    const double clamped = (ms < 0.0 ? 0.0 : ms);
     const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
-    deckRef (currentDeck.load()).transport.setPosition ((ms < 0.0 ? 0.0 : ms) / 1000.0);
+    const int cur = currentDeck.load();
+    deckRef (cur).transport.setPosition (clamped / 1000.0);
+    // Reflect the seek immediately for the lock-free getter (next callback will
+    // refresh it anyway, but this avoids a one-tick lag in the UI position).
+    reportedPosMs[(size_t) cur].store (clamped, std::memory_order_relaxed);
 }
 
 double AutoMixAudioEngine::positionMsCurrent()
 {
-    const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
-    return deckRef (currentDeck.load()).transport.getCurrentPosition() * 1000.0;
+    // Lock-free: read the value the audio callback last published. No contention
+    // with the realtime callback (no tryEnter() failures → no silence blocks).
+    return reportedPosMs[(size_t) currentDeck.load()].load (std::memory_order_relaxed);
 }
 
 double AutoMixAudioEngine::lengthMsCurrent()
 {
-    const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
-    return deckRef (currentDeck.load()).transport.getLengthInSeconds() * 1000.0;
+    return reportedLenMs[(size_t) currentDeck.load()].load (std::memory_order_relaxed);
 }
 
 bool AutoMixAudioEngine::isCrossfadeActive()
@@ -454,14 +459,12 @@ void AutoMixAudioEngine::setBassSwap (bool enabled)
 
 double AutoMixAudioEngine::positionMsA()
 {
-    const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
-    return deckA.transport.getCurrentPosition() * 1000.0;
+    return reportedPosMs[0].load (std::memory_order_relaxed);
 }
 
 double AutoMixAudioEngine::lengthMsA()
 {
-    const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
-    return deckA.transport.getLengthInSeconds() * 1000.0;
+    return reportedLenMs[0].load (std::memory_order_relaxed);
 }
 
 //==============================================================================
@@ -521,6 +524,14 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
         output.clear();
         return;
     }
+
+    // Publish transport position/length for the lock-free main-thread getters.
+    // Done under the lock we already hold, so the getters never need to acquire
+    // it (no contention → no dropped audio blocks).
+    reportedPosMs[0].store (deckA.transport.getCurrentPosition()  * 1000.0, std::memory_order_relaxed);
+    reportedPosMs[1].store (deckB.transport.getCurrentPosition()  * 1000.0, std::memory_order_relaxed);
+    reportedLenMs[0].store (deckA.transport.getLengthInSeconds()  * 1000.0, std::memory_order_relaxed);
+    reportedLenMs[1].store (deckB.transport.getLengthInSeconds()  * 1000.0, std::memory_order_relaxed);
 
     const bool aHas = deckA.hasTrack.load();
     const bool bHas = deckB.hasTrack.load();
