@@ -217,6 +217,28 @@ object LyricsParser {
         finalizeLrc(raw, title, artist, trackId)
     }
 
+    /**
+     * Сохранить только что ОПУБЛИКОВАННЫЙ в LRCLIB текст в локальный кэш, чтобы он
+     * сразу работал в существующем UI лирики (без повторного запроса в сеть).
+     * lrcText — syncedLyrics (LRC) если есть, иначе plainLyrics. Зовётся после успеха.
+     */
+    fun cachePublishedLyrics(
+        context: Context,
+        artist: String,
+        title: String,
+        album: String,
+        durationSec: Int,
+        lrcText: String,
+        trackId: String?
+    ) {
+        if (lrcText.isBlank()) return
+        writeTextSafe(lrcCacheFile(context, cacheKey(artist, title, album, durationSec)), lrcText)
+        if (!trackId.isNullOrBlank()) {
+            val parsed = parseLyrics(lrcText)
+            if (parsed.lines.isNotEmpty()) cacheLyrics(trackId, parsed.copy(title = title, artist = artist, source = "lrclib"))
+        }
+    }
+
     private fun finalizeLrc(raw: String, title: String, artist: String, trackId: String?): Lyrics {
         val parsed = parseLyrics(raw)
         if (parsed.lines.isEmpty()) return Lyrics.EMPTY
