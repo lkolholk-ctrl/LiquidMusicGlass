@@ -74,6 +74,11 @@ class AudioService : MediaSessionService() {
     private val mainScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private val fadeHandler = Handler(Looper.getMainLooper())
     private val fadeGeneration = AtomicInteger(0)
+    @Volatile private var fadeActive = false           // во время фейда громкостью владеет фейд
+    // Дакинг по аудио-фокусу — с дебаунсом: другое приложение (напр. Яндекс Музыка)
+    // при переключении гоняет фокус LOSS↔GAIN пачкой, и прямой дак/андак громкости
+    // давал слышимую «цикличку». Коалесцируем в одно применение финального состояния.
+    private val duckHandler = Handler(Looper.getMainLooper())
 
     private lateinit var player: ExoPlayer
     private var session: MediaSession? = null
@@ -114,24 +119,24 @@ class AudioService : MediaSessionService() {
 
     private val focusChangeListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
         when (focusChange) {
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
-                android.util.Log.d("VOIDPIXEL_MEDIA", "[AUDIO_FOCUS] LOSS_TRANSIENT_CAN_DUCK — ducking volume to 20%")
-                setDucked(true)
-            }
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> requestDuck(true)
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
-                android.util.Log.d("VOIDPIXEL_MEDIA", "[AUDIO_FOCUS] LOSS_TRANSIENT — maintaining playback, NOT pausing")
-                // Do NOT pause on transient loss — playback continues
+                // Не паузим на временной потере — воспроизведение продолжается.
             }
-            AudioManager.AUDIOFOCUS_GAIN -> {
-                android.util.Log.d("VOIDPIXEL_MEDIA", "[AUDIO_FOCUS] GAIN — restoring volume")
-                setDucked(false)
-            }
+            AudioManager.AUDIOFOCUS_GAIN -> requestDuck(false)
             AudioManager.AUDIOFOCUS_LOSS -> {
-                android.util.Log.d("VOIDPIXEL_MEDIA", "[AUDIO_FOCUS] LOSS (permanent) — pausing playback")
+                // Перманентная потеря — паузим сразу (без дебаунса), снимаем отложенный дак.
+                duckHandler.removeCallbacksAndMessages(null)
                 setDucked(false)
-                activePlayer().pause()
+                runCatching { activePlayer().pause() }
             }
         }
+    }
+
+    /** Дебаунс дака по фокусу: коалесцируем пачку LOSS↔GAIN в финальное состояние. */
+    private fun requestDuck(target: Boolean) {
+        duckHandler.removeCallbacksAndMessages(null)
+        duckHandler.postDelayed({ setDucked(target) }, 250L)
     }
 
     /** Solid service-scoped queue reference — never garbage collected in background */
@@ -795,7 +800,9 @@ class AudioService : MediaSessionService() {
     }
 
     fun setDucked(ducked: Boolean) {
+        if (_isDucked.value == ducked) return            // дедуп — без лишних записей громкости
         _isDucked.value = ducked
+        if (fadeActive) return                           // во время фейда громкостью владеет фейд
         runCatching { activePlayer().volume = if (ducked) 0.2f else 1f }
     }
 
@@ -912,12 +919,14 @@ class AudioService : MediaSessionService() {
         val steps = (durationMs / stepMs).toInt().coerceAtLeast(1)
         val generation = fadeGeneration.incrementAndGet()
         fadeHandler.removeCallbacksAndMessages(null)
+        fadeActive = true                                 // фейд владеет громкостью — дак не клобберит
         for (i in 0..steps) {
             fadeHandler.postDelayed({
                 if (generation != fadeGeneration.get() || session?.player !== player) return@postDelayed
                 val t = i.toFloat() / steps
                 val g = kotlin.math.cos(t * (Math.PI.toFloat() / 2f))
                 player.volume = g.coerceIn(0f, 1f)
+                if (i == steps) fadeActive = false
             }, i * stepMs)
         }
     }
@@ -932,8 +941,10 @@ class AudioService : MediaSessionService() {
     private fun cancelCrossfadeFade(resetVolume: Boolean) {
         fadeGeneration.incrementAndGet()
         fadeHandler.removeCallbacksAndMessages(null)
+        fadeActive = false
         if (resetVolume && this::player.isInitialized) {
-            player.volume = 1f
+            // Уважаем текущее состояние дака, чтобы фейд не «снимал» дакинг.
+            player.volume = if (_isDucked.value) 0.2f else 1f
         }
     }
 

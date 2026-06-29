@@ -11,24 +11,32 @@ import android.util.Log
 import com.liquidmusicglass.engine.automix.AutoMixNativeEngine
 
 /**
- * Следит за маршрутом аудио-вывода (подключение/отключение Bluetooth, гарнитуры)
- * через [AudioManager.AudioDeviceCallback] — это тот же триггер, что Oboe-событие
- * DISCONNECTED, но доступный нам без патча JUCE. При смене маршрута сообщает
- * движку, чтобы он переоткрыл Oboe-поток на текущем устройстве с правильным
- * буфером (BT → без fast-path; встроенный/проводной → fast-path/RT). Позиция
- * воспроизведения при этом сохраняется (движок не сбрасывает транспорты).
+ * Следит за маршрутом аудио-вывода (BT/гарнитура) через [AudioManager.AudioDeviceCallback]
+ * и сообщает движку, чтобы он переоткрыл Oboe-поток с правильным буфером (BT → без
+ * fast-path; встроенный → fast-path/RT). Позиция воспроизведения сохраняется.
  *
- * Колбэк и вызовы движка идут на ФОНОВОМ потоке: переоткрытие устройства внутри
- * JUCE (close/reopen) нельзя делать ни на audio-, ни на main-потоке.
+ * ВАЖНО против рывков/«циклички»:
+ *  • DEBOUNCE — при смене маршрута система шлёт пачку add/removed подряд; коалесцируем
+ *    их в ОДНО применение после паузы (settle), иначе шла череда close/reopen = рывки.
+ *  • DEDUP — дёргаем движок ТОЛЬКО когда BT-состояние реально изменилось; иначе любые
+ *    события устройств (в т.ч. наш собственный reopen, переключение из другого
+ *    приложения) повторно переоткрывали поток → петля.
+ *
+ * Колбэк/вызовы движка — на фоновом потоке (close/reopen нельзя на audio/main).
  */
 object AudioRouteMonitor {
 
     private const val TAG = "AudioRouteMonitor"
+    private const val SETTLE_MS = 700L
 
     private var audioManager: AudioManager? = null
     private var thread: HandlerThread? = null
     private var handler: Handler? = null
-    @Volatile private var registered = false
+
+    // Последнее ПРИМЕНЁННОЕ BT-состояние. null = ещё не применяли (форс на первом).
+    @Volatile private var lastAppliedBt: Boolean? = null
+
+    private val applyRunnable = Runnable { applyIfChanged() }
 
     fun init(context: Context) {
         if (audioManager != null) return
@@ -41,21 +49,30 @@ object AudioRouteMonitor {
 
         runCatching {
             am.registerAudioDeviceCallback(object : AudioDeviceCallback() {
-                override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) = pushRoute()
-                override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>?) = pushRoute()
+                override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) = schedule()
+                override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>?) = schedule()
             }, handler)
-            registered = true
         }.onFailure { Log.w(TAG, "registerAudioDeviceCallback failed", it) }
     }
 
-    /** Переотправить текущий маршрут в движок (после ленивого подъёма движка). */
+    /** Применить текущий маршрут к движку (после ленивого подъёма движка). Форсим. */
     fun reapplyToEngine() {
-        val h = handler
-        if (h != null) h.post { pushRoute() } else pushRoute()
+        val h = handler ?: return
+        h.post { lastAppliedBt = null; applyIfChanged() }
     }
 
-    private fun pushRoute() {
-        AutoMixNativeEngine.setOutputRouteBluetooth(isBluetoothActive())
+    /** Коалесцируем пачку событий устройств в одно применение после паузы. */
+    private fun schedule() {
+        val h = handler ?: return
+        h.removeCallbacks(applyRunnable)
+        h.postDelayed(applyRunnable, SETTLE_MS)
+    }
+
+    private fun applyIfChanged() {
+        val bt = isBluetoothActive()
+        if (bt == lastAppliedBt) return        // маршрут реально не изменился → движок НЕ трогаем
+        lastAppliedBt = bt
+        AutoMixNativeEngine.setOutputRouteBluetooth(bt)
     }
 
     /** Активен ли беспроводной (BT) выход. SCO (звонки) не считаем — музыка идёт по A2DP/BLE. */
