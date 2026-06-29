@@ -372,6 +372,14 @@ Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeStopTone(
 }
 
 JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeSetOutputRouteBluetooth(
+        JNIEnv* /*env*/, jobject /*thiz*/, jboolean isBluetooth)
+{
+    if (gEngine != nullptr)
+        gEngine->onOutputRouteChanged (isBluetooth == JNI_TRUE);
+}
+
+JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeRelease(
         JNIEnv* /*env*/, jobject /*thiz*/)
 {

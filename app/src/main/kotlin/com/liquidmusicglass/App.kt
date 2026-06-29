@@ -95,6 +95,9 @@ class App : Application(), ImageLoaderFactory {
         // Аудио-обработка (DataStore) — загрузка сохранённых EQ/эффектов
         com.liquidmusicglass.engine.AudioFxController.init(this)
 
+        // Монитор маршрута вывода (BT/гарнитура) — переоткрывает Oboe на смене устройства
+        com.liquidmusicglass.engine.AudioRouteMonitor.init(this)
+
         // Реактивный детектор энергосбережения (упрощает эффекты, не выключает)
         com.liquidmusicglass.ui.PowerSaveMonitor.init(this)
 

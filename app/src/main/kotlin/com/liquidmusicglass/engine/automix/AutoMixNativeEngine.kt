@@ -81,8 +81,11 @@ object AutoMixNativeEngine {
         }
         initialised = ok
         // Движок поднялся (лениво, на первом проигрывании) — переотправляем
-        // сохранённые настройки аудио-обработки, иначе старт «плоский».
-        if (ok) runCatching { com.liquidmusicglass.engine.AudioFxController.applyToEngine() }
+        // сохранённые настройки аудио-обработки и текущий маршрут вывода.
+        if (ok) {
+            runCatching { com.liquidmusicglass.engine.AudioFxController.applyToEngine() }
+            runCatching { com.liquidmusicglass.engine.AudioRouteMonitor.reapplyToEngine() }
+        }
         return ok
     }
 
@@ -250,6 +253,17 @@ object AutoMixNativeEngine {
         runCatching { nativeFxSetLimiter(on, threshDb, releaseMs) }.onFailure { Log.w(TAG, "fxLimiter failed", it) }
     }
 
+    /**
+     * Сменился маршрут вывода (BT подключён/отключён): переоткрыть Oboe-поток на
+     * текущем устройстве с правильным буфером. Зовётся из AudioRouteMonitor на
+     * ФОНОВОМ потоке (внутри идёт close/reopen устройства — нельзя на audio/main).
+     */
+    @Synchronized fun setOutputRouteBluetooth(isBluetooth: Boolean) {
+        if (!isLoaded || !initialised) return
+        runCatching { nativeSetOutputRouteBluetooth(isBluetooth) }
+            .onFailure { Log.w(TAG, "nativeSetOutputRouteBluetooth failed", it) }
+    }
+
     // ── Stage 8: full LOCAL player (ping-pong decks) ────────────────────────
 
     /** Load a track into the NON-current (incoming) deck. */
@@ -412,6 +426,7 @@ object AutoMixNativeEngine {
     private external fun nativeFxSetStereoWidth(width: Float)
     private external fun nativeFxSetCompressor(on: Boolean, threshDb: Float, ratio: Float, attackMs: Float, releaseMs: Float)
     private external fun nativeFxSetLimiter(on: Boolean, threshDb: Float, releaseMs: Float)
+    private external fun nativeSetOutputRouteBluetooth(isBluetooth: Boolean)
     private external fun nativeLoadIncoming(path: String): Boolean
     private external fun nativeLoadIncomingFd(fd: Int, offset: Long, length: Long): Boolean
     private external fun nativeStartTransition(durationMs: Double, entryMs: Double)

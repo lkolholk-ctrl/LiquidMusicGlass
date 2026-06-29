@@ -31,6 +31,11 @@ public:
     bool init();
     void release();
 
+    /** Маршрут вывода сменился (BT подключён/отключён и т.п.): переоткрыть Oboe-поток
+     *  на текущем устройстве с правильным буфером (BT → без fast-path; встроенный →
+     *  fast-path/RT). Позиция воспроизведения сохраняется. Зовётся НЕ из аудио-потока. */
+    void onOutputRouteChanged (bool isBluetooth);
+
     // Stage 1 diagnostic tone (only when neither deck has a track) -----------
     void startTone();
     void stopTone();
@@ -156,6 +161,7 @@ private:
     bool loadDeckFd (Deck& deck, int fd, long long offset, long long size);
     bool decodeFullPCM (const juce::String& path, juce::AudioBuffer<float>& out, double& rate);
     void clearDeckUnlocked (Deck& deck);
+    void applyBufferForRoute (bool isBluetooth, bool forceReopen);  // not on audio thread
     Deck& deckRef (int index) { return index == 0 ? deckA : deckB; }
 
     juce::AudioDeviceManager deviceManager;
@@ -194,6 +200,11 @@ private:
 
     std::atomic<bool> initialised { false };
     std::atomic<bool> toneOn { false };
+
+    // Текущий маршрут вывода (true = Bluetooth). routeEverApplied — чтобы первый
+    // вызов с тем же значением всё равно применился, а последующие без изменения — нет.
+    std::atomic<bool> routeIsBluetooth { false };
+    std::atomic<bool> routeEverApplied { false };
 
     // Crossfade state. crossfadeStart is latched by the audio thread so the
     // sample position resets in sync; everything else is plain atomics.

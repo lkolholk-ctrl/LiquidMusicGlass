@@ -63,40 +63,75 @@ bool AutoMixAudioEngine::init()
         return false;
     }
 
-    // RT-режим (low-latency). Раньше тут НАМЕРЕННО раздували буфер до 4096–8192,
-    // чтобы пережить тротлинг. Побочка: большой буфер уводит Oboe/AAudio с MMAP
-    // fast-path на Legacy-микшер с колбэком ОБЫЧНОГО приоритета — он и голодает,
-    // когда система рисует уведомление/шторку → заикания возвращаются.
-    //
-    // Теперь запрашиваем НАТИВНЫЙ burst-кратный буфер: тогда Oboe держит
-    // low-latency fast-path, а его аудио-колбэк планируется audioserver'ом как
-    // real-time (SCHED_FIFO) и переживает скачки CPU приложения. Берём 2×burst —
-    // всё ещё fast-path, но с небольшим запасом кадров против единичного пропуска.
-    {
-        auto setup = deviceManager.getAudioDeviceSetup();
-        int rtBuffer = 0;
-        if (auto* dev = deviceManager.getCurrentAudioDevice())
-        {
-            const int burst = dev->getDefaultBufferSize();   // нативный low-latency burst
-            const auto sizes = dev->getAvailableBufferSizes();
-            if (burst > 0)
-                rtBuffer = burst * 2;
-            else if (! sizes.isEmpty())
-                rtBuffer = sizes.getFirst();                  // самый маленький поддерживаемый
-            // не опускаемся ниже минимально поддерживаемого размера устройства
-            if (! sizes.isEmpty())
-                rtBuffer = juce::jmax (rtBuffer, sizes.getFirst());
-        }
-        if (rtBuffer > 0 && setup.bufferSize != rtBuffer)
-        {
-            setup.bufferSize = rtBuffer;
-            deviceManager.setAudioDeviceSetup (setup, true);
-        }
-    }
+    // Буфер под текущий маршрут: встроенный/проводной → 2×burst (low-latency
+    // fast-path/RT), Bluetooth → крупный буфер (BT высоколатентный, fast-path не
+    // тянет). Детали — в applyBufferForRoute. На старте устройство уже открыто
+    // initialiseWithDefaultDevices, поэтому реопен не форсируем.
+    initialised.store (true);
+    applyBufferForRoute (routeIsBluetooth.load(), /*forceReopen=*/false);
+    routeEverApplied.store (true);
 
     deviceManager.addAudioCallback (this);
     initialised.store (true);
     return true;
+}
+
+// Подобрать размер буфера под маршрут и (при необходимости) переоткрыть Oboe-поток
+// на ТЕКУЩЕМ устройстве по умолчанию. Зовётся не из аудио-потока (init / смена
+// маршрута с фонового потока монитора). Позиция воспроизведения сохраняется:
+// транспорты не сбрасываются, releaseResources/prepareToPlay не трогают позицию.
+void AutoMixAudioEngine::applyBufferForRoute (bool isBluetooth, bool forceReopen)
+{
+    if (! initialised.load())
+        return;
+
+    auto setup = deviceManager.getAudioDeviceSetup();
+    int target = setup.bufferSize;
+
+    if (auto* dev = deviceManager.getCurrentAudioDevice())
+    {
+        const int  burst = dev->getDefaultBufferSize();           // нативный low-latency burst
+        const auto sizes = dev->getAvailableBufferSizes();
+        if (isBluetooth)
+        {
+            // BT — высоколатентный беспроводной маршрут. Маленький буфер уводит на
+            // fast-path, который BT-микшер не тянет → underrun/заикания. Берём
+            // крупный буфер: Oboe уходит на обычный микшер, звук стабилен.
+            target = juce::jmax (burst > 0 ? burst * 8 : 4096, 3840);
+        }
+        else
+        {
+            // Встроенный/проводной — держим low-latency fast-path/RT (2×burst).
+            target = (burst > 0) ? burst * 2 : (sizes.isEmpty() ? 1024 : sizes.getFirst());
+        }
+        if (! sizes.isEmpty())
+            target = juce::jmax (target, sizes.getFirst());        // не ниже минимума устройства
+    }
+
+    // Принудительный реопен нужен, когда маршрут сменился, а размер буфера совпал
+    // (например проводная гарнитура → встроенный динамик): иначе setAudioDeviceSetup
+    // увидит идентичный setup и НЕ переоткроет поток на новый маршрут.
+    if (forceReopen)
+        deviceManager.closeAudioDevice();
+
+    if (forceReopen || setup.bufferSize != target)
+    {
+        setup.bufferSize = target;
+        deviceManager.setAudioDeviceSetup (setup, true); // реопен на текущий default-маршрут
+    }
+}
+
+// Маршрут вывода сменился (BT подключён/отключён, гарнитура и т.п.). Зовётся из
+// Kotlin-монитора AudioDeviceCallback на ФОНОВОМ потоке (не main, не audio).
+void AutoMixAudioEngine::onOutputRouteChanged (bool isBluetooth)
+{
+    const bool prev = routeIsBluetooth.exchange (isBluetooth);
+    if (! initialised.load())
+        return;                                   // применится при init()
+    if (routeEverApplied.load() && prev == isBluetooth)
+        return;                                   // маршрут не изменился — не дёргаем поток
+    routeEverApplied.store (true);
+    applyBufferForRoute (isBluetooth, /*forceReopen=*/true);
 }
 
 void AutoMixAudioEngine::release()
