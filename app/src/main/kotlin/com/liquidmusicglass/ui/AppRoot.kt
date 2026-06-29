@@ -67,6 +67,9 @@ import com.liquidmusicglass.ui.screens.LibraryScreen
 import com.liquidmusicglass.ui.screens.AlbumDetailScreen
 import com.liquidmusicglass.ui.screens.ArtistDetailScreen
 import com.liquidmusicglass.ui.screens.AudioFxScreen
+import com.liquidmusicglass.ui.screens.LocalLibraryScreen
+import com.liquidmusicglass.ui.screens.LocalArtistDetailScreen
+import com.liquidmusicglass.ui.screens.LocalAlbumDetailScreen
 import com.liquidmusicglass.ui.screens.NewScreen
 import com.liquidmusicglass.ui.screens.PlaylistDetailScreen
 import com.liquidmusicglass.ui.screens.SettingsScreen
@@ -99,6 +102,10 @@ fun AppRoot() {
     var authOpen by remember { mutableStateOf(false) }
     var profileOpen by remember { mutableStateOf(false) }
     var youtubeSearchOpen by remember { mutableStateOf(false) }
+    // Локальная медиатека (Артисты/Альбомы/Треки + поиск)
+    var localLibraryOpen by remember { mutableStateOf(false) }
+    var localArtistName by remember { mutableStateOf<String?>(null) }
+    var localAlbum by remember { mutableStateOf<Pair<Long, String>?>(null) }
 
     val currentTrack by PlayerController.currentTrack.collectAsState()
     val isPlaying by PlayerController.isPlaying.collectAsState()
@@ -166,9 +173,12 @@ fun AppRoot() {
     val rootBackdrop: LayerBackdrop = rememberLayerBackdrop()
 
     // Back handler: close detail screens first, then player, then app
-    BackHandler(enabled = lrcPublishTrack != null || detailAlbumId != null || detailArtistId != null || equalizerOpen || playlistDetailId != null || settingsOpen || authOpen || profileOpen || youtubeSearchOpen || expandProgress.value > 0.5f) {
+    BackHandler(enabled = lrcPublishTrack != null || localAlbum != null || localArtistName != null || localLibraryOpen || detailAlbumId != null || detailArtistId != null || equalizerOpen || playlistDetailId != null || settingsOpen || authOpen || profileOpen || youtubeSearchOpen || expandProgress.value > 0.5f) {
         when {
             lrcPublishTrack != null -> lrcPublishTrack = null
+            localAlbum != null -> localAlbum = null
+            localArtistName != null -> localArtistName = null
+            localLibraryOpen -> localLibraryOpen = false
             settingsOpen -> settingsOpen = false
             authOpen -> authOpen = false
             profileOpen -> profileOpen = false
@@ -262,7 +272,8 @@ fun AppRoot() {
                 2 -> LibraryScreen(
                     onNavigateToAlbum = { detailAlbumId = it },
                     onNavigateToArtist = { detailArtistId = it },
-                    onOpenPlaylist = { playlistDetailId = it }
+                    onOpenPlaylist = { playlistDetailId = it },
+                    onOpenLocalLibrary = { localLibraryOpen = true }
                 )
                 3 -> SettingsScreen(
                     onBack = {},
@@ -341,6 +352,43 @@ fun AppRoot() {
                 ) + fadeOut(tween(150))
             ) {
                 AudioFxScreen(onBack = { equalizerOpen = false })
+            }
+
+            // ── Local library: Артисты / Альбомы / Треки + поиск ──
+            AnimatedVisibility(
+                visible = localLibraryOpen,
+                enter = slideInVertically(initialOffsetY = { it }, animationSpec = spring(dampingRatio = 0.88f, stiffness = 300f)) + fadeIn(tween(200)),
+                exit = slideOutVertically(targetOffsetY = { it }, animationSpec = spring(dampingRatio = 0.92f, stiffness = 400f)) + fadeOut(tween(150))
+            ) {
+                LocalLibraryScreen(
+                    onBack = { localLibraryOpen = false },
+                    onOpenArtist = { localArtistName = it },
+                    onOpenAlbum = { id, name -> localAlbum = id to name }
+                )
+            }
+
+            AnimatedVisibility(
+                visible = localArtistName != null,
+                enter = slideInHorizontally(initialOffsetX = { it }, animationSpec = spring(dampingRatio = 0.9f, stiffness = 300f)) + fadeIn(tween(200)),
+                exit = slideOutHorizontally(targetOffsetX = { it }, animationSpec = spring(dampingRatio = 0.92f, stiffness = 400f)) + fadeOut(tween(150))
+            ) {
+                localArtistName?.let { name ->
+                    LocalArtistDetailScreen(
+                        artistName = name,
+                        onBack = { localArtistName = null },
+                        onOpenAlbum = { id, n -> localAlbum = id to n }
+                    )
+                }
+            }
+
+            AnimatedVisibility(
+                visible = localAlbum != null,
+                enter = slideInHorizontally(initialOffsetX = { it }, animationSpec = spring(dampingRatio = 0.9f, stiffness = 300f)) + fadeIn(tween(200)),
+                exit = slideOutHorizontally(targetOffsetX = { it }, animationSpec = spring(dampingRatio = 0.92f, stiffness = 400f)) + fadeOut(tween(150))
+            ) {
+                localAlbum?.let { (id, name) ->
+                    LocalAlbumDetailScreen(albumId = id, albumName = name, onBack = { localAlbum = null })
+                }
             }
 
 

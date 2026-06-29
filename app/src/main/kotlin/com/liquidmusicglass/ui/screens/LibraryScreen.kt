@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.*
@@ -87,6 +88,7 @@ fun LibraryScreen(
     onNavigateToAlbum: (String) -> Unit = {},
     onNavigateToArtist: (String) -> Unit = {},
     onOpenPlaylist: (String) -> Unit = {},
+    onOpenLocalLibrary: () -> Unit = {},
     backdrop: LayerBackdrop? = null
 ) {
     val lc = LiquidTheme.colors
@@ -207,6 +209,13 @@ fun LibraryScreen(
                             icon = Icons.Rounded.MusicNote,
                             tint = Color(0xFFFF9F0A),
                             onClick = { currentView = LibraryView.LOCAL_AUDIO }
+                        )
+                        MenuCard(
+                            title = "Медиатека",
+                            subtitle = "Артисты · Альбомы · Треки · Поиск",
+                            icon = Icons.Rounded.LibraryMusic,
+                            tint = Color(0xFF34C759),
+                            onClick = onOpenLocalLibrary
                         )
                     }
                 }
