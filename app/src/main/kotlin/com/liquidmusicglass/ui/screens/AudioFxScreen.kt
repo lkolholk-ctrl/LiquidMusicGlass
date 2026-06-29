@@ -16,9 +16,7 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
@@ -39,13 +37,8 @@ import com.liquidmusicglass.ui.liquid.LiquidSlider
 import com.liquidmusicglass.ui.liquid.LiquidToggle
 import com.liquidmusicglass.ui.theme.LiquidColors
 import com.liquidmusicglass.ui.theme.LiquidTheme
-import com.kyant.backdrop.Backdrop
-import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import kotlin.math.roundToInt
-
-/** Стеклянный backdrop экрана для ползунков (LiquidSlider преломляет контент). */
-private val LocalFxBackdrop = compositionLocalOf<Backdrop?> { null }
 
 @Composable
 fun AudioFxScreen(onBack: () -> Unit) {
@@ -53,14 +46,10 @@ fun AudioFxScreen(onBack: () -> Unit) {
     val scroll = rememberScrollState()
 
     val master by AudioFxController.masterEnabled.collectAsState()
-    // Стекло для ползунков: контент экрана захватывается в слой, ползунки его преломляют.
-    val screenBackdrop = rememberLayerBackdrop()
 
-    CompositionLocalProvider(LocalFxBackdrop provides screenBackdrop) {
-        Box(modifier = Modifier.fillMaxSize().background(lc.settingsBackground)) {
+    Box(modifier = Modifier.fillMaxSize().background(lc.settingsBackground)) {
         Column(
-            modifier = Modifier.fillMaxSize().layerBackdrop(screenBackdrop)
-                .verticalScroll(scroll).padding(horizontal = 20.dp)
+            modifier = Modifier.fillMaxSize().verticalScroll(scroll).padding(horizontal = 20.dp)
         ) {
             Spacer(modifier = Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
             Spacer(modifier = Modifier.height(12.dp))
@@ -95,7 +84,6 @@ fun AudioFxScreen(onBack: () -> Unit) {
                 }
             }
             Spacer(modifier = Modifier.height(40.dp))
-        }
         }
     }
 }
@@ -142,8 +130,7 @@ private fun EqSection(lc: LiquidColors, master: Boolean) {
 /** Горизонтальная полоса EQ: [частота] [LiquidSlider со стеклом] [дБ]. */
 @Composable
 private fun EqBandRow(band: Int, gain: Float, label: String, active: Boolean, lc: LiquidColors) {
-    val fallback = rememberLayerBackdrop()
-    val backdrop = LocalFxBackdrop.current ?: fallback
+    val backdrop = rememberLayerBackdrop()   // СВОЙ слой — без самоссылки (иначе HWUI overflow)
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).alpha(if (active) 1f else 0.5f),
         verticalAlignment = Alignment.CenterVertically
@@ -305,8 +292,7 @@ private fun FxSlider(
     value: Float, range: ClosedFloatingPointRange<Float>, enabled: Boolean,
     onChange: (Float) -> Unit, lc: LiquidColors
 ) {
-    val fallback = rememberLayerBackdrop()
-    val backdrop = LocalFxBackdrop.current ?: fallback
+    val backdrop = rememberLayerBackdrop()   // СВОЙ слой — без самоссылки (иначе HWUI overflow)
     Box(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp).alpha(if (enabled) 1f else 0.5f)) {
         LiquidSlider(
             value = { value },
