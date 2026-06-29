@@ -36,7 +36,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -394,7 +396,7 @@ private fun SyncTaggingMode(
 }
 
 // ── Режим ПОСЛОВНОЙ разметки (Enhanced LRC, мой источник) ─────────────────────
-@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SyncWordTaggingMode(
     track: Track,
@@ -492,10 +494,9 @@ private fun SyncWordTaggingMode(
             LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 itemsIndexed(wordRows) { li, words ->
                     if (words.isNotEmpty()) {
-                        FlowRow(
+                        WrapRow(
                             modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                            hGap = 6.dp, vGap = 4.dp
                         ) {
                             words.forEachIndexed { wi, word ->
                                 val gi = lineStart[li] + wi
@@ -533,6 +534,38 @@ private fun SyncWordTaggingMode(
                 }
                 item { Spacer(Modifier.height(40.dp)) }
             }
+        }
+    }
+}
+
+/**
+ * Простой перенос по словам (замена FlowRow). Использует стабильный Layout —
+ * не зависит от версии compose-foundation (FlowRow на устройстве мог быть старее
+ * скомпилированной сигнатуры → NoSuchMethodError/ANR).
+ */
+@Composable
+private fun WrapRow(
+    modifier: Modifier = Modifier,
+    hGap: androidx.compose.ui.unit.Dp = 6.dp,
+    vGap: androidx.compose.ui.unit.Dp = 4.dp,
+    content: @Composable () -> Unit
+) {
+    Layout(content = content, modifier = modifier) { measurables, constraints ->
+        val h = hGap.roundToPx()
+        val v = vGap.roundToPx()
+        val maxW = constraints.maxWidth
+        val placeables = measurables.map { it.measure(constraints.copy(minWidth = 0, minHeight = 0)) }
+        var x = 0; var y = 0; var rowH = 0
+        val pos = ArrayList<IntOffset>(placeables.size)
+        for (p in placeables) {
+            if (x > 0 && x + p.width > maxW) { x = 0; y += rowH + v; rowH = 0 }
+            pos.add(IntOffset(x, y))
+            x += p.width + h
+            rowH = maxOf(rowH, p.height)
+        }
+        val totalH = y + rowH
+        layout(maxW, totalH) {
+            placeables.forEachIndexed { i, p -> p.place(pos[i]) }
         }
     }
 }
