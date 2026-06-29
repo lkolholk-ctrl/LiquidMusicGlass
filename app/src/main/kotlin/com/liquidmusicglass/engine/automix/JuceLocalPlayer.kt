@@ -76,6 +76,7 @@ class JuceLocalPlayer(
     private val autoMixController by lazy { AutoMixController(context.applicationContext) }
     @Volatile private var autoMixAnalyzedIndex = -1
     private val AUTOMIX_LEAD_MS = 40_000L   // окно до конца трека для анализа (хватает на свод ≤30с)
+    private val TICK_MS = 100L              // точка свода должна ловиться плотнее, чем UI polling
 
     // ── Stage 8c (ШАГ 2: РЕАЛЬНЫЙ СВОД) ──────────────────────────────────────
     // Когда модель сказала ready и подобрала параметры — у точки свода реально
@@ -104,12 +105,12 @@ class JuceLocalPlayer(
             maybeRunAutoMixTransition()    // шаг 2: реальный кроссфейд по плану модели
             maybeAdvanceAtEnd()            // обычное переключение (если свода нет)
             invalidateState()
-            handler.postDelayed(this, 500L)
+            handler.postDelayed(this, TICK_MS)
         }
     }
 
     init {
-        handler.postDelayed(ticker, 500L)
+        handler.postDelayed(ticker, TICK_MS)
     }
 
     // ── State ───────────────────────────────────────────────────────────────

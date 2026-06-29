@@ -132,6 +132,7 @@ private:
     bool loadDeck (Deck& deck, const juce::String& path);
     bool loadDeckFd (Deck& deck, int fd, long long offset, long long size);
     bool decodeFullPCM (const juce::String& path, juce::AudioBuffer<float>& out, double& rate);
+    void clearDeckUnlocked (Deck& deck);
     Deck& deckRef (int index) { return index == 0 ? deckA : deckB; }
 
     juce::AudioDeviceManager deviceManager;
@@ -140,6 +141,7 @@ private:
 
     Deck deckA, deckB;
     juce::AudioBuffer<float> scratchA, scratchB; // per-block pull buffers (audio thread)
+    juce::CriticalSection deckMutationLock;      // protects source swaps vs audio callback
 
     // Bass-swap: one low-pass per deck per channel extracts the low band so we
     // can scale each deck's bass with a scalar (fixed coefficients -> no clicks).

@@ -44,7 +44,7 @@ object AutoMixCoordinator {
     private const val MARGIN_MS = 1_500L        // запас в извлекаемом окне
     private const val LOCKSTEP_MS = 500L        // B играет в JUCE и Media3 параллельно перед сменой источника
     private const val SAFETY_MS = 2_000L        // запас хвоста A, чтобы он не доиграл до нашего seek
-    private const val POLL_MS = 200L
+    private const val POLL_MS = 50L
 
     private val engine = AutoMixNativeEngine
 
@@ -127,7 +127,8 @@ object AutoMixCoordinator {
                 if (PlayerController.isLocalJucePlaybackActive) return
                 // Трек сменился под нами (skip/ошибка) — выходим.
                 if (PlayerController.currentTrack.value?.id != current.id) return
-                val pos = PlayerController.currentPositionMs.value
+                val pos = PlayerController.audioServiceRef?.activePlaybackPositionMs()
+                    ?: PlayerController.currentPositionMs.value
 
                 if (!armed && pos >= (cueMs - PREARM_LEAD_MS).coerceAtLeast(0L)) {
                     armed = true

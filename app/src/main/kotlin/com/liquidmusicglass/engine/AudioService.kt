@@ -8,6 +8,8 @@ import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -52,6 +54,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * AudioService — один ExoPlayer, один Listener, один MediaSession.
@@ -69,6 +72,8 @@ class AudioService : MediaSessionService() {
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     /** Dedicated main-thread scope for ALL ExoPlayer operations */
     private val mainScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private val fadeHandler = Handler(Looper.getMainLooper())
+    private val fadeGeneration = AtomicInteger(0)
 
     private lateinit var player: ExoPlayer
     private var session: MediaSession? = null
@@ -534,6 +539,7 @@ class AudioService : MediaSessionService() {
     override fun onDestroy() {
         PlayerController.logFinalPlayback()
         positionJob?.cancel()
+        cancelCrossfadeFade(resetVolume = false)
         abandonAudioFocus()
 
         // Release WakeLock
@@ -751,6 +757,7 @@ class AudioService : MediaSessionService() {
     fun setQueue(mediaItems: List<MediaItem>, startIndex: Int = 0, startPositionMs: Long = 0L) {
         currentQueueItems = mediaItems.toList()
         mainScope.launch {
+            cancelCrossfadeFade(resetVolume = true)
             bindExoPlayer()                            // стриминг → ExoPlayer (с JUCE при необходимости)
             player.stop()
             player.clearMediaItems()
@@ -800,6 +807,17 @@ class AudioService : MediaSessionService() {
     /** Плеер, которым сейчас управляет сессия (JUCE — локальное, Exo — стриминг). */
     private fun activePlayer(): Player = session?.player ?: player
 
+    /** Текущая позиция фактического session.player, минуя 500ms StateFlow polling. */
+    fun activePlaybackPositionMs(): Long {
+        return if (Looper.myLooper() == Looper.getMainLooper()) {
+            activePlayer().currentPosition
+        } else {
+            kotlinx.coroutines.runBlocking(Dispatchers.Main) {
+                activePlayer().currentPosition
+            }
+        }
+    }
+
     /** Лениво создать JUCE-плеер локального аудио (на главном looper'е). */
     private fun ensureJucePlayer(): com.liquidmusicglass.engine.automix.JuceLocalPlayer {
         juceLocalPlayer?.let { return it }
@@ -813,6 +831,7 @@ class AudioService : MediaSessionService() {
     private fun bindExoPlayer() {
         if (session?.player !== player) {
             DebugLog.add("SVC.bindExoPlayer (session JUCE->EXO) | ${DebugLog.caller()}")
+            cancelCrossfadeFade(resetVolume = true)
             runCatching { juceLocalPlayer?.stop() }    // заглушить JUCE — без двойного звука
             session?.player = player
         }
@@ -826,6 +845,7 @@ class AudioService : MediaSessionService() {
     fun playLocalQueue(mediaItems: List<MediaItem>, startIndex: Int = 0) {
         DebugLog.add("SVC.playLocalQueue items=${mediaItems.size} start=$startIndex sessionNull=${session==null}")
         mainScope.launch {
+            cancelCrossfadeFade(resetVolume = true)
             currentQueueItems = mediaItems.toList()
             val juce = ensureJucePlayer()
             if (session?.player !== juce) {
@@ -849,11 +869,16 @@ class AudioService : MediaSessionService() {
     // Во время JUCE-свода Media3 ПОЛНОСТЬЮ заглушается и встаёт на паузу —
     // это и убирает двойной звук, и не даёт ExoPlayer самому перейти на B.
     /** У точки свода: заглушить (volume 0) и приостановить текущий трек A. */
-    fun handoffPause() = withPlayerOnMain { it.volume = 0f; it.pause() }
+    fun handoffPause() = withPlayerOnMain {
+        cancelCrossfadeFade(resetVolume = false)
+        it.volume = 0f
+        it.pause()
+    }
 
     /** После свода: перейти на следующий item (B) и встать на позицию, где
      *  JUCE закончил свод (entryOffset + crossfade), вернуть звук и играть. */
     fun handoffToNext(positionMs: Long) = withPlayerOnMain {
+        cancelCrossfadeFade(resetVolume = false)
         val nextIndex = it.currentMediaItemIndex + 1
         if (nextIndex < it.mediaItemCount) {
             it.seekTo(nextIndex, positionMs.coerceAtLeast(0L))
@@ -873,7 +898,11 @@ class AudioService : MediaSessionService() {
     }
 
     /** Завершение hand-back: B уже на позиции и буферизован — вернуть звук и играть. */
-    fun handoffPlay() = withPlayerOnMain { it.volume = 1f; it.play() }
+    fun handoffPlay() = withPlayerOnMain {
+        cancelCrossfadeFade(resetVolume = false)
+        it.volume = 1f
+        it.play()
+    }
 
     /** Stage 7 наложенный кроссфейд: плавно гасит громкость A по equal-power
      *  cos за durationMs, НЕ останавливая воспроизведение (B одновременно
@@ -881,9 +910,11 @@ class AudioService : MediaSessionService() {
     fun crossfadeFadeOutA(durationMs: Long) {
         val stepMs = 30L
         val steps = (durationMs / stepMs).toInt().coerceAtLeast(1)
-        val h = android.os.Handler(android.os.Looper.getMainLooper())
+        val generation = fadeGeneration.incrementAndGet()
+        fadeHandler.removeCallbacksAndMessages(null)
         for (i in 0..steps) {
-            h.postDelayed({
+            fadeHandler.postDelayed({
+                if (generation != fadeGeneration.get() || session?.player !== player) return@postDelayed
                 val t = i.toFloat() / steps
                 val g = kotlin.math.cos(t * (Math.PI.toFloat() / 2f))
                 player.volume = g.coerceIn(0f, 1f)
@@ -892,7 +923,19 @@ class AudioService : MediaSessionService() {
     }
 
     /** Свод отменён/сорвался: вернуть звук и продолжить как обычно (fallback). */
-    fun handoffAbort() = withPlayerOnMain { it.volume = 1f; it.play() }
+    fun handoffAbort() = withPlayerOnMain {
+        cancelCrossfadeFade(resetVolume = false)
+        it.volume = 1f
+        it.play()
+    }
+
+    private fun cancelCrossfadeFade(resetVolume: Boolean) {
+        fadeGeneration.incrementAndGet()
+        fadeHandler.removeCallbacksAndMessages(null)
+        if (resetVolume && this::player.isInitialized) {
+            player.volume = 1f
+        }
+    }
 
     private fun updateNotificationLayout() {
         val session = session ?: return

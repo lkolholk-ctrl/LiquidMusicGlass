@@ -6,6 +6,24 @@
 #include <cmath>
 #include <memory>
 
+namespace
+{
+    struct TryAudioLock
+    {
+        explicit TryAudioLock (juce::CriticalSection& lockToUse)
+            : lock (lockToUse), locked (lock.tryEnter()) {}
+
+        ~TryAudioLock()
+        {
+            if (locked)
+                lock.exit();
+        }
+
+        juce::CriticalSection& lock;
+        bool locked;
+    };
+}
+
 AutoMixAudioEngine::AutoMixAudioEngine()
 {
     // WAV + AIFF always; FLAC + Ogg Vorbis because we enabled them in CMake.
@@ -21,10 +39,11 @@ AutoMixAudioEngine::AutoMixAudioEngine()
 AutoMixAudioEngine::~AutoMixAudioEngine()
 {
     release();
-    deckA.transport.setSource (nullptr);
-    deckB.transport.setSource (nullptr);
-    deckA.readerSource.reset(); deckA.memorySource.reset(); deckA.mediaCodecSource.reset();
-    deckB.readerSource.reset(); deckB.memorySource.reset(); deckB.mediaCodecSource.reset();
+    {
+        const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
+        clearDeckUnlocked (deckA);
+        clearDeckUnlocked (deckB);
+    }
     readAheadThread.stopThread (2000);
 }
 
@@ -79,8 +98,11 @@ bool AutoMixAudioEngine::init()
 void AutoMixAudioEngine::release()
 {
     toneOn.store (false);
-    deckA.transport.stop();
-    deckB.transport.stop();
+    {
+        const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
+        deckA.transport.stop();
+        deckB.transport.stop();
+    }
 
     if (initialised.load())
     {
@@ -94,14 +116,25 @@ void AutoMixAudioEngine::startTone() { toneOn.store (true); }
 void AutoMixAudioEngine::stopTone()  { toneOn.store (false); }
 
 //==============================================================================
-bool AutoMixAudioEngine::loadDeck (Deck& deck, const juce::String& path)
+void AutoMixAudioEngine::clearDeckUnlocked (Deck& deck)
 {
-    deck.transport.stop();
     deck.hasTrack.store (false);
+    deck.transport.stop();
     deck.transport.setSource (nullptr);
     deck.readerSource.reset();
     deck.memorySource.reset();
     deck.mediaCodecSource.reset();
+    deck.decodedBuffer.setSize (0, 0);
+    deck.path = {};
+    deck.sourceSampleRate = 0.0;
+}
+
+bool AutoMixAudioEngine::loadDeck (Deck& deck, const juce::String& path)
+{
+    {
+        const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
+        clearDeckUnlocked (deck);
+    }
 
     const juce::File file (path);
     if (! file.existsAsFile())
@@ -113,11 +146,16 @@ bool AutoMixAudioEngine::loadDeck (Deck& deck, const juce::String& path)
     // wav/aiff/flac/ogg via JUCE.
     if (auto* reader = formatManager.createReaderFor (file))
     {
-        deck.sourceSampleRate = reader->sampleRate;
-        deck.readerSource = std::make_unique<juce::AudioFormatReaderSource> (reader, true);
+        const double sourceRate = reader->sampleRate;
+        auto readerSource = std::make_unique<juce::AudioFormatReaderSource> (reader, true);
+
+        const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
+        clearDeckUnlocked (deck);
+        deck.sourceSampleRate = sourceRate;
+        deck.readerSource = std::move (readerSource);
         // ~3с предчтения (переживает кратковременный тротлинг при уходе в фон).
-        deck.transport.setSource (deck.readerSource.get(), (int) (reader->sampleRate * 3.0),
-                                  &readAheadThread, reader->sampleRate, 2);
+        deck.transport.setSource (deck.readerSource.get(), (int) (sourceRate * 3.0),
+                                  &readAheadThread, sourceRate, 2);
         deck.transport.setPosition (0.0);
         deck.path = path;
         deck.hasTrack.store (true);
@@ -128,13 +166,17 @@ bool AutoMixAudioEngine::loadDeck (Deck& deck, const juce::String& path)
     // (only codec config up front), decode happens on the read-ahead thread.
     if (auto streaming = automix::MediaCodecAudioSource::create (path))
     {
-        deck.sourceSampleRate = streaming->getSampleRate();
+        const double sourceRate = streaming->getSampleRate();
+
+        const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
+        clearDeckUnlocked (deck);
+        deck.sourceSampleRate = sourceRate;
         deck.mediaCodecSource = std::move (streaming);
         // ~5с предчтения (декод mp3 тяжелее, чем чтение wav): при переключении
         // приложений система тротлит CPU на ~2с — большой буфер не даёт транспорту
         // осушиться, поэтому звук не заикается. ~1.9 МБ/дек @48k stereo float.
-        deck.transport.setSource (deck.mediaCodecSource.get(), (int) (deck.sourceSampleRate * 5.0),
-                                  &readAheadThread, deck.sourceSampleRate, 2);
+        deck.transport.setSource (deck.mediaCodecSource.get(), (int) (sourceRate * 5.0),
+                                  &readAheadThread, sourceRate, 2);
         deck.transport.setPosition (0.0);
         deck.path = path;
         deck.hasTrack.store (true);
@@ -169,13 +211,21 @@ bool AutoMixAudioEngine::decodeFullPCM (const juce::String& path, juce::AudioBuf
 
 bool AutoMixAudioEngine::prepareStretchB (double bpmA, double bpmB)
 {
-    if (! deckB.hasTrack.load() || deckB.path.isEmpty() || bpmA <= 0.0 || bpmB <= 0.0)
+    if (bpmA <= 0.0 || bpmB <= 0.0)
         return false;
+
+    juce::String sourcePath;
+    {
+        const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
+        if (! deckB.hasTrack.load() || deckB.path.isEmpty())
+            return false;
+        sourcePath = deckB.path;
+    }
 
     // Full source PCM of B (independent of the currently-set playing source).
     juce::AudioBuffer<float> srcB;
     double srcRate = 0.0;
-    if (! decodeFullPCM (deckB.path, srcB, srcRate))
+    if (! decodeFullPCM (sourcePath, srcB, srcRate))
         return false;
 
     // Match B's tempo to A: speed factor = bpmA/bpmB, so duration ratio = bpmB/bpmA.
@@ -186,15 +236,16 @@ bool AutoMixAudioEngine::prepareStretchB (double bpmA, double bpmB)
         return false;
 
     // Swap deck B to play the beat-matched buffer.
-    deckB.transport.stop();
-    deckB.transport.setSource (nullptr);
-    deckB.readerSource.reset();
-    deckB.memorySource.reset();                 // release ref to old decodedBuffer
+    const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
+    if (deckB.path != sourcePath)
+        return false;
+    clearDeckUnlocked (deckB);
     deckB.decodedBuffer = std::move (stretched);
     deckB.memorySource = std::make_unique<juce::MemoryAudioSource> (deckB.decodedBuffer, false, false);
     deckB.transport.setSource (deckB.memorySource.get(), 0, nullptr, srcRate, 2);
     deckB.transport.setPosition (0.0);
     deckB.sourceSampleRate = srcRate;
+    deckB.path = sourcePath;
     deckB.hasTrack.store (true);
     return true;
 }
@@ -212,12 +263,10 @@ bool AutoMixAudioEngine::loadTrackAFd (int fd, long long offset, long long size)
 // все распространённые форматы.
 bool AutoMixAudioEngine::loadDeckFd (Deck& deck, int fd, long long offset, long long size)
 {
-    deck.transport.stop();
-    deck.hasTrack.store (false);
-    deck.transport.setSource (nullptr);
-    deck.readerSource.reset();
-    deck.memorySource.reset();
-    deck.mediaCodecSource.reset();
+    {
+        const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
+        clearDeckUnlocked (deck);
+    }
 
     auto streaming = automix::MediaCodecAudioSource::createFromFd (fd, (int64_t) offset, (int64_t) size);
     if (streaming == nullptr)
@@ -226,10 +275,14 @@ bool AutoMixAudioEngine::loadDeckFd (Deck& deck, int fd, long long offset, long 
         return false;
     }
 
-    deck.sourceSampleRate = streaming->getSampleRate();
+    const double sourceRate = streaming->getSampleRate();
+
+    const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
+    clearDeckUnlocked (deck);
+    deck.sourceSampleRate = sourceRate;
     deck.mediaCodecSource = std::move (streaming);
-    deck.transport.setSource (deck.mediaCodecSource.get(), (int) (deck.sourceSampleRate * 5.0),
-                              &readAheadThread, deck.sourceSampleRate, 2);
+    deck.transport.setSource (deck.mediaCodecSource.get(), (int) (sourceRate * 5.0),
+                              &readAheadThread, sourceRate, 2);
     deck.transport.setPosition (0.0);
     deck.path = {};
     deck.hasTrack.store (true);
@@ -238,18 +291,21 @@ bool AutoMixAudioEngine::loadDeckFd (Deck& deck, int fd, long long offset, long 
 
 void AutoMixAudioEngine::play()
 {
+    const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
     if (deckA.hasTrack.load())
         deckA.transport.start();
 }
 
 void AutoMixAudioEngine::pause()
 {
+    const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
     deckA.transport.stop();
     deckB.transport.stop();
 }
 
 void AutoMixAudioEngine::stop()
 {
+    const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
     deckA.transport.stop();
     deckA.transport.setPosition (0.0);
     deckB.transport.stop();
@@ -272,6 +328,7 @@ void AutoMixAudioEngine::startCrossfade (double durationMs)
     // Both decks must be running for the mix. Stage 7 hand-off: deck A can be
     // positioned at the Media3 cue (entryOffsetMsA) so the blend continues
     // seamlessly from where Media3 left off; 0 keeps Stage 3-6 behaviour.
+    const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
     if (deckA.hasTrack.load())
     {
         const double aOff = entryOffsetMsA.load();
@@ -303,13 +360,8 @@ void AutoMixAudioEngine::setEntryOffsetA (double ms)
 
 void AutoMixAudioEngine::clearDeckA()
 {
-    deckA.hasTrack.store (false); // audio thread stops pulling deck A first
-    deckA.transport.stop();
-    deckA.transport.setSource (nullptr);
-    deckA.readerSource.reset();
-    deckA.memorySource.reset();
-    deckA.mediaCodecSource.reset();
-    deckA.decodedBuffer.setSize (0, 0);
+    const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
+    clearDeckUnlocked (deckA);
 }
 
 // ── Stage 8: full LOCAL player (ping-pong decks) ───────────────────────────
@@ -337,6 +389,7 @@ void AutoMixAudioEngine::startTransition (double durationMs, double entryMs)
     Deck& outDeck = deckRef (out);
     Deck& inDeck  = deckRef (in);
 
+    const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
     if (inDeck.hasTrack.load())
     {
         inDeck.transport.setPosition ((entryMs < 0.0 ? 0.0 : entryMs) / 1000.0);
@@ -353,6 +406,7 @@ void AutoMixAudioEngine::startTransition (double durationMs, double entryMs)
 
 void AutoMixAudioEngine::playCurrent()
 {
+    const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
     Deck& d = deckRef (currentDeck.load());
     if (d.hasTrack.load())
         d.transport.start();
@@ -360,16 +414,19 @@ void AutoMixAudioEngine::playCurrent()
 
 void AutoMixAudioEngine::seekCurrent (double ms)
 {
+    const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
     deckRef (currentDeck.load()).transport.setPosition ((ms < 0.0 ? 0.0 : ms) / 1000.0);
 }
 
 double AutoMixAudioEngine::positionMsCurrent()
 {
+    const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
     return deckRef (currentDeck.load()).transport.getCurrentPosition() * 1000.0;
 }
 
 double AutoMixAudioEngine::lengthMsCurrent()
 {
+    const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
     return deckRef (currentDeck.load()).transport.getLengthInSeconds() * 1000.0;
 }
 
@@ -385,14 +442,9 @@ int AutoMixAudioEngine::currentDeckIndex()
 
 void AutoMixAudioEngine::clearDeck (int index)
 {
+    const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
     Deck& d = deckRef (index);
-    d.hasTrack.store (false);
-    d.transport.stop();
-    d.transport.setSource (nullptr);
-    d.readerSource.reset();
-    d.memorySource.reset();
-    d.mediaCodecSource.reset();
-    d.decodedBuffer.setSize (0, 0);
+    clearDeckUnlocked (d);
 }
 
 void AutoMixAudioEngine::setBassSwap (bool enabled)
@@ -402,11 +454,13 @@ void AutoMixAudioEngine::setBassSwap (bool enabled)
 
 double AutoMixAudioEngine::positionMsA()
 {
+    const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
     return deckA.transport.getCurrentPosition() * 1000.0;
 }
 
 double AutoMixAudioEngine::lengthMsA()
 {
+    const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
     return deckA.transport.getLengthInSeconds() * 1000.0;
 }
 
@@ -423,10 +477,16 @@ void AutoMixAudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
     if (currentBlockSize  <= 0)   currentBlockSize  = 512;
 
     phase = 0.0;
-    deckA.transport.prepareToPlay (currentBlockSize, currentSampleRate);
-    deckB.transport.prepareToPlay (currentBlockSize, currentSampleRate);
-    scratchA.setSize (2, currentBlockSize);
-    scratchB.setSize (2, currentBlockSize);
+    {
+        const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
+        deckA.transport.prepareToPlay (currentBlockSize, currentSampleRate);
+        deckB.transport.prepareToPlay (currentBlockSize, currentSampleRate);
+    }
+
+    const int scratchChannels = 8;
+    const int scratchSamples = juce::jmax (currentBlockSize * 4, 4096);
+    scratchA.setSize (scratchChannels, scratchSamples, false, true, false);
+    scratchB.setSize (scratchChannels, scratchSamples, false, true, false);
 
     // Bass-swap low-pass: same fixed coefficients for every deck/channel; only a
     // scalar changes at runtime, so there are no coefficient-swap clicks.
@@ -437,6 +497,7 @@ void AutoMixAudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
 
 void AutoMixAudioEngine::audioDeviceStopped()
 {
+    const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
     deckA.transport.releaseResources();
     deckB.transport.releaseResources();
     phase = 0.0;
@@ -453,6 +514,13 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
         return;
 
     juce::AudioBuffer<float> output (outputChannelData, numOutputChannels, numSamples);
+
+    TryAudioLock deckGuard (deckMutationLock);
+    if (! deckGuard.locked)
+    {
+        output.clear();
+        return;
+    }
 
     const bool aHas = deckA.hasTrack.load();
     const bool bHas = deckB.hasTrack.load();
@@ -479,15 +547,6 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
         return;
     }
 
-    // Pull each deck into its scratch buffer (silence when a deck isn't playing).
-    scratchA.setSize (numOutputChannels, numSamples, false, false, true);
-    scratchB.setSize (numOutputChannels, numSamples, false, false, true);
-
-    if (aHas) { const juce::AudioSourceChannelInfo ia (&scratchA, 0, numSamples); deckA.transport.getNextAudioBlock (ia); }
-    else        scratchA.clear();
-    if (bHas) { const juce::AudioSourceChannelInfo ib (&scratchB, 0, numSamples); deckB.transport.getNextAudioBlock (ib); }
-    else        scratchB.clear();
-
     // Latch a crossfade start so its sample position begins exactly here.
     if (crossfadeStart.exchange (false))
     {
@@ -503,6 +562,25 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
     const double halfPi  = juce::MathConstants<double>::halfPi;
 
     const int ch = juce::jmin (numOutputChannels, 8);
+    if (numSamples > scratchA.getNumSamples() || numSamples > scratchB.getNumSamples()
+        || ch > scratchA.getNumChannels() || ch > scratchB.getNumChannels())
+    {
+        output.clear();
+        return;
+    }
+
+    // Pull only audible decks. After a crossfade, the faded-out deck remains loaded
+    // for reuse, but gain=0 means we must not keep decoding it every callback.
+    scratchA.setSize (ch, numSamples, false, false, true);
+    scratchB.setSize (ch, numSamples, false, false, true);
+
+    const bool pullA = aHas && (active || bgA > 0.0001f);
+    const bool pullB = bHas && (active || bgB > 0.0001f);
+    if (pullA) { const juce::AudioSourceChannelInfo ia (&scratchA, 0, numSamples); deckA.transport.getNextAudioBlock (ia); }
+    else       scratchA.clear();
+    if (pullB) { const juce::AudioSourceChannelInfo ib (&scratchB, 0, numSamples); deckB.transport.getNextAudioBlock (ib); }
+    else       scratchB.clear();
+
     float*       o[8];
     const float* a[8];
     const float* b[8];
