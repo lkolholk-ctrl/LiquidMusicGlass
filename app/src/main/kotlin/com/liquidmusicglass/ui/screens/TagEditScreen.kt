@@ -278,7 +278,7 @@ fun BulkTagEditScreen(tracks: List<Track>, onBack: () -> Unit) {
         saving = true; okTotal = 0; failTotal = 0; status = "Подготовка…"
         pendingFields = f
         scope.launch {
-            val items = withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val items = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 tracks.map { TagEditor.BulkItem(it.id, it.uri, TagEditor.displayName(context, it.uri)) }
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
