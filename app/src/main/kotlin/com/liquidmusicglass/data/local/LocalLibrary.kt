@@ -155,6 +155,17 @@ object LocalLibraryStore {
         source = "local"
     )
 
+    /** После редактирования тегов — точечно обновить запись в индексе (Медиатека/поиск сразу актуальны). */
+    suspend fun updateTags(
+        context: Context, trackId: String,
+        title: String, artist: String, album: String, trackNumber: Int, year: Int
+    ) = withContext(Dispatchers.IO) {
+        runCatching {
+            AppDatabase.getInstance(context).localTracksDao()
+                .updateTags(trackId, title, artist, album, trackNumber, year)
+        }
+    }
+
     /** Играть локальную выборку с указанной позиции — через существующий JUCE-путь. */
     fun play(context: Context, tracks: List<LocalTrackEntity>, startIndex: Int) {
         if (tracks.isEmpty()) return

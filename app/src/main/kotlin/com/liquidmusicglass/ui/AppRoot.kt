@@ -98,6 +98,7 @@ fun AppRoot() {
     var detailArtistId by remember { mutableStateOf<String?>(null) }
     var equalizerOpen by remember { mutableStateOf(false) }
     var lrcPublishTrack by remember { mutableStateOf<com.liquidmusicglass.engine.Track?>(null) }
+    var tagEditTrack by remember { mutableStateOf<com.liquidmusicglass.engine.Track?>(null) }
     var playlistDetailId by remember { mutableStateOf<String?>(null) }
     var authOpen by remember { mutableStateOf(false) }
     var profileOpen by remember { mutableStateOf(false) }
@@ -173,8 +174,9 @@ fun AppRoot() {
     val rootBackdrop: LayerBackdrop = rememberLayerBackdrop()
 
     // Back handler: close detail screens first, then player, then app
-    BackHandler(enabled = lrcPublishTrack != null || localAlbum != null || localArtistName != null || localLibraryOpen || detailAlbumId != null || detailArtistId != null || equalizerOpen || playlistDetailId != null || settingsOpen || authOpen || profileOpen || youtubeSearchOpen || expandProgress.value > 0.5f) {
+    BackHandler(enabled = tagEditTrack != null || lrcPublishTrack != null || localAlbum != null || localArtistName != null || localLibraryOpen || detailAlbumId != null || detailArtistId != null || equalizerOpen || playlistDetailId != null || settingsOpen || authOpen || profileOpen || youtubeSearchOpen || expandProgress.value > 0.5f) {
         when {
+            tagEditTrack != null -> tagEditTrack = null
             lrcPublishTrack != null -> lrcPublishTrack = null
             localAlbum != null -> localAlbum = null
             localArtistName != null -> localArtistName = null
@@ -488,7 +490,8 @@ fun AppRoot() {
             onNavigateToArtist = { artistId ->
                 detailArtistId = artistId
             },
-            onPublishLyrics = { track -> lrcPublishTrack = track }
+            onPublishLyrics = { track -> lrcPublishTrack = track },
+            onEditTags = { track -> tagEditTrack = track }
         )
         }
 
@@ -508,6 +511,26 @@ fun AppRoot() {
                 com.liquidmusicglass.ui.screens.LrcPublishScreen(
                     track = track,
                     onBack = { lrcPublishTrack = null }
+                )
+            }
+        }
+
+        // ── Редактирование тегов (открывается из меню трека в плеере) ──
+        AnimatedVisibility(
+            visible = tagEditTrack != null,
+            enter = slideInVertically(
+                initialOffsetY = { it },
+                animationSpec = spring(dampingRatio = 0.88f, stiffness = 300f)
+            ) + fadeIn(tween(200)),
+            exit = slideOutVertically(
+                targetOffsetY = { it },
+                animationSpec = spring(dampingRatio = 0.92f, stiffness = 400f)
+            ) + fadeOut(tween(150))
+        ) {
+            tagEditTrack?.let { track ->
+                com.liquidmusicglass.ui.screens.TagEditScreen(
+                    track = track,
+                    onBack = { tagEditTrack = null }
                 )
             }
         }

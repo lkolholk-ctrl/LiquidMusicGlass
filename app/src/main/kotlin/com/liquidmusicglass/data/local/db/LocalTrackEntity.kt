@@ -68,6 +68,10 @@ interface LocalTracksDao {
     @Query("DELETE FROM local_tracks")
     suspend fun clear()
 
+    /** Точечное обновление тегов одного трека после редактирования (без полного скана). */
+    @Query("UPDATE local_tracks SET title = :title, artist = :artist, albumName = :album, trackNumber = :track, year = :year WHERE id = :id")
+    suspend fun updateTags(id: String, title: String, artist: String, album: String, track: Int, year: Int)
+
     // ── треки (сортировки) ──
     @Query("SELECT * FROM local_tracks ORDER BY title COLLATE NOCASE")
     fun tracksByTitle(): Flow<List<LocalTrackEntity>>

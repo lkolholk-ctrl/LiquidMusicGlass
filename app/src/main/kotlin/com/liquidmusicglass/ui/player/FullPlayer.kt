@@ -155,7 +155,8 @@ fun FullPlayer(
     onVolumeChange: (Float) -> Unit,
     onOpenSettings: () -> Unit,
     onNavigateToArtist: (String) -> Unit = {},
-    onPublishLyrics: (com.liquidmusicglass.engine.Track) -> Unit = {}
+    onPublishLyrics: (com.liquidmusicglass.engine.Track) -> Unit = {},
+    onEditTags: (com.liquidmusicglass.engine.Track) -> Unit = {}
 ) {
     if (expandProgress <= 0.005f) return
 
@@ -1076,6 +1077,40 @@ fun FullPlayer(
                             Spacer(modifier = Modifier.width(16.dp))
                             Text(
                                 text = "Publish lyrics to LRCLIB",
+                                color = Color.White,
+                                fontSize = 17.sp,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(0.5.dp)
+                                .background(Color.White.copy(alpha = 0.10f))
+                        )
+                        // Редактировать теги — ТОЛЬКО для локального трека
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    scope.launch {
+                                        trackMenuSheetState.hide()
+                                        showTrackMenu = false
+                                        onEditTags(publishTrack)
+                                    }
+                                }
+                                .padding(vertical = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Edit,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Text(
+                                text = "Редактировать теги",
                                 color = Color.White,
                                 fontSize = 17.sp,
                                 modifier = Modifier.weight(1f)
