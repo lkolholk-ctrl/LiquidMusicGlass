@@ -50,7 +50,8 @@ AutoMixAudioEngine::~AutoMixAudioEngine()
 {
     release();
     {
-        const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
+        const juce::CriticalSection::ScopedLockType slA (deckA.mutationLock);
+        const juce::CriticalSection::ScopedLockType slB (deckB.mutationLock);
         clearDeckUnlocked (deckA);
         clearDeckUnlocked (deckB);
     }
@@ -110,7 +111,8 @@ void AutoMixAudioEngine::release()
 {
     toneOn.store (false);
     {
-        const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
+        const juce::CriticalSection::ScopedLockType slA (deckA.mutationLock);
+        const juce::CriticalSection::ScopedLockType slB (deckB.mutationLock);
         deckA.transport.stop();
         deckB.transport.stop();
     }
@@ -143,7 +145,7 @@ void AutoMixAudioEngine::clearDeckUnlocked (Deck& deck)
 bool AutoMixAudioEngine::loadDeck (Deck& deck, const juce::String& path)
 {
     {
-        const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
+        const juce::CriticalSection::ScopedLockType sl (deck.mutationLock);
         clearDeckUnlocked (deck);
     }
 
@@ -160,7 +162,7 @@ bool AutoMixAudioEngine::loadDeck (Deck& deck, const juce::String& path)
         const double sourceRate = reader->sampleRate;
         auto readerSource = std::make_unique<juce::AudioFormatReaderSource> (reader, true);
 
-        const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
+        const juce::CriticalSection::ScopedLockType sl (deck.mutationLock);
         clearDeckUnlocked (deck);
         deck.sourceSampleRate = sourceRate;
         deck.readerSource = std::move (readerSource);
@@ -179,7 +181,7 @@ bool AutoMixAudioEngine::loadDeck (Deck& deck, const juce::String& path)
     {
         const double sourceRate = streaming->getSampleRate();
 
-        const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
+        const juce::CriticalSection::ScopedLockType sl (deck.mutationLock);
         clearDeckUnlocked (deck);
         deck.sourceSampleRate = sourceRate;
         deck.mediaCodecSource = std::move (streaming);
@@ -227,7 +229,7 @@ bool AutoMixAudioEngine::prepareStretchB (double bpmA, double bpmB)
 
     juce::String sourcePath;
     {
-        const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
+        const juce::CriticalSection::ScopedLockType sl (deckB.mutationLock);
         if (! deckB.hasTrack.load() || deckB.path.isEmpty())
             return false;
         sourcePath = deckB.path;
@@ -247,7 +249,7 @@ bool AutoMixAudioEngine::prepareStretchB (double bpmA, double bpmB)
         return false;
 
     // Swap deck B to play the beat-matched buffer.
-    const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
+    const juce::CriticalSection::ScopedLockType sl (deckB.mutationLock);
     if (deckB.path != sourcePath)
         return false;
     clearDeckUnlocked (deckB);
@@ -275,7 +277,7 @@ bool AutoMixAudioEngine::loadTrackAFd (int fd, long long offset, long long size)
 bool AutoMixAudioEngine::loadDeckFd (Deck& deck, int fd, long long offset, long long size)
 {
     {
-        const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
+        const juce::CriticalSection::ScopedLockType sl (deck.mutationLock);
         clearDeckUnlocked (deck);
     }
 
@@ -288,7 +290,7 @@ bool AutoMixAudioEngine::loadDeckFd (Deck& deck, int fd, long long offset, long 
 
     const double sourceRate = streaming->getSampleRate();
 
-    const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
+    const juce::CriticalSection::ScopedLockType sl (deck.mutationLock);
     clearDeckUnlocked (deck);
     deck.sourceSampleRate = sourceRate;
     deck.mediaCodecSource = std::move (streaming);
@@ -302,21 +304,23 @@ bool AutoMixAudioEngine::loadDeckFd (Deck& deck, int fd, long long offset, long 
 
 void AutoMixAudioEngine::play()
 {
-    const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
+    const juce::CriticalSection::ScopedLockType sl (deckA.mutationLock);
     if (deckA.hasTrack.load())
         deckA.transport.start();
 }
 
 void AutoMixAudioEngine::pause()
 {
-    const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
+    const juce::CriticalSection::ScopedLockType slA (deckA.mutationLock);
+    const juce::CriticalSection::ScopedLockType slB (deckB.mutationLock);
     deckA.transport.stop();
     deckB.transport.stop();
 }
 
 void AutoMixAudioEngine::stop()
 {
-    const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
+    const juce::CriticalSection::ScopedLockType slA (deckA.mutationLock);
+    const juce::CriticalSection::ScopedLockType slB (deckB.mutationLock);
     deckA.transport.stop();
     deckA.transport.setPosition (0.0);
     deckB.transport.stop();
@@ -339,7 +343,8 @@ void AutoMixAudioEngine::startCrossfade (double durationMs)
     // Both decks must be running for the mix. Stage 7 hand-off: deck A can be
     // positioned at the Media3 cue (entryOffsetMsA) so the blend continues
     // seamlessly from where Media3 left off; 0 keeps Stage 3-6 behaviour.
-    const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
+    const juce::CriticalSection::ScopedLockType slA (deckA.mutationLock);
+    const juce::CriticalSection::ScopedLockType slB (deckB.mutationLock);
     if (deckA.hasTrack.load())
     {
         const double aOff = entryOffsetMsA.load();
@@ -371,7 +376,7 @@ void AutoMixAudioEngine::setEntryOffsetA (double ms)
 
 void AutoMixAudioEngine::clearDeckA()
 {
-    const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
+    const juce::CriticalSection::ScopedLockType sl (deckA.mutationLock);
     clearDeckUnlocked (deckA);
 }
 
@@ -400,7 +405,10 @@ void AutoMixAudioEngine::startTransition (double durationMs, double entryMs)
     Deck& outDeck = deckRef (out);
     Deck& inDeck  = deckRef (in);
 
-    const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
+    // Fixed A→B lock order (decks ping-pong, so in/out aren't always A/B) — avoids
+    // any deadlock against other both-deck sections.
+    const juce::CriticalSection::ScopedLockType slA (deckA.mutationLock);
+    const juce::CriticalSection::ScopedLockType slB (deckB.mutationLock);
     if (inDeck.hasTrack.load())
     {
         inDeck.transport.setPosition ((entryMs < 0.0 ? 0.0 : entryMs) / 1000.0);
@@ -417,8 +425,8 @@ void AutoMixAudioEngine::startTransition (double durationMs, double entryMs)
 
 void AutoMixAudioEngine::playCurrent()
 {
-    const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
     Deck& d = deckRef (currentDeck.load());
+    const juce::CriticalSection::ScopedLockType sl (d.mutationLock);
     if (d.hasTrack.load())
         d.transport.start();
 }
@@ -426,8 +434,8 @@ void AutoMixAudioEngine::playCurrent()
 void AutoMixAudioEngine::seekCurrent (double ms)
 {
     const double clamped = (ms < 0.0 ? 0.0 : ms);
-    const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
     const int cur = currentDeck.load();
+    const juce::CriticalSection::ScopedLockType sl (deckRef (cur).mutationLock);
     deckRef (cur).transport.setPosition (clamped / 1000.0);
     // Reflect the seek immediately for the lock-free getter (next callback will
     // refresh it anyway, but this avoids a one-tick lag in the UI position).
@@ -458,8 +466,8 @@ int AutoMixAudioEngine::currentDeckIndex()
 
 void AutoMixAudioEngine::clearDeck (int index)
 {
-    const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
     Deck& d = deckRef (index);
+    const juce::CriticalSection::ScopedLockType sl (d.mutationLock);
     clearDeckUnlocked (d);
 }
 
@@ -547,7 +555,8 @@ void AutoMixAudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
 
     phase = 0.0;
     {
-        const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
+        const juce::CriticalSection::ScopedLockType slA (deckA.mutationLock);
+        const juce::CriticalSection::ScopedLockType slB (deckB.mutationLock);
         deckA.transport.prepareToPlay (currentBlockSize, currentSampleRate);
         deckB.transport.prepareToPlay (currentBlockSize, currentSampleRate);
     }
@@ -566,7 +575,8 @@ void AutoMixAudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
 
 void AutoMixAudioEngine::audioDeviceStopped()
 {
-    const juce::CriticalSection::ScopedLockType sl (deckMutationLock);
+    const juce::CriticalSection::ScopedLockType slA (deckA.mutationLock);
+    const juce::CriticalSection::ScopedLockType slB (deckB.mutationLock);
     deckA.transport.releaseResources();
     deckB.transport.releaseResources();
     phase = 0.0;
@@ -586,20 +596,11 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
 
     juce::AudioBuffer<float> output (outputChannelData, numOutputChannels, numSamples);
 
-    TryAudioLock deckGuard (deckMutationLock);
-    if (! deckGuard.locked)
-    {
-        output.clear();
-        return;
-    }
-
-    // Publish transport position/length for the lock-free main-thread getters.
-    // Done under the lock we already hold, so the getters never need to acquire
-    // it (no contention → no dropped audio blocks).
-    reportedPosMs[0].store (deckA.transport.getCurrentPosition()  * 1000.0, std::memory_order_relaxed);
-    reportedPosMs[1].store (deckB.transport.getCurrentPosition()  * 1000.0, std::memory_order_relaxed);
-    reportedLenMs[0].store (deckA.transport.getLengthInSeconds()  * 1000.0, std::memory_order_relaxed);
-    reportedLenMs[1].store (deckB.transport.getLengthInSeconds()  * 1000.0, std::memory_order_relaxed);
+    // NO global lock here. Each deck is guarded by its OWN lock during its pull
+    // (below), so loading the incoming deck — which holds only that deck's lock
+    // across the ~5s buffer swap — never blocks mixing the PLAYING deck. That was
+    // the rt-fix regression: one global lock meant an incoming load silenced the
+    // whole output for the swap window → ~1s freeze at the start of AutoMix.
 
     const bool aHas = deckA.hasTrack.load();
     const bool bHas = deckB.hasTrack.load();
@@ -655,10 +656,33 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
 
     const bool pullA = aHas && (active || bgA > 0.0001f);
     const bool pullB = bHas && (active || bgB > 0.0001f);
-    if (pullA) { const juce::AudioSourceChannelInfo ia (&scratchA, 0, numSamples); deckA.transport.getNextAudioBlock (ia); }
-    else       scratchA.clear();
-    if (pullB) { const juce::AudioSourceChannelInfo ib (&scratchB, 0, numSamples); deckB.transport.getNextAudioBlock (ib); }
-    else       scratchB.clear();
+
+    // Each deck under its OWN lock. tryEnter never blocks the realtime thread; if a
+    // deck is mid-swap (loading), we just silence THAT deck's scratch for this block
+    // (inaudible — an incoming deck enters at gain≈0). Position/length are published
+    // here too, so the lock-free getters stay current without ever contending.
+    {
+        TryAudioLock la (deckA.mutationLock);
+        if (la.locked)
+        {
+            reportedPosMs[0].store (deckA.transport.getCurrentPosition() * 1000.0, std::memory_order_relaxed);
+            reportedLenMs[0].store (deckA.transport.getLengthInSeconds() * 1000.0, std::memory_order_relaxed);
+            if (pullA) { const juce::AudioSourceChannelInfo ia (&scratchA, 0, numSamples); deckA.transport.getNextAudioBlock (ia); }
+            else       scratchA.clear();
+        }
+        else scratchA.clear();
+    }
+    {
+        TryAudioLock lb (deckB.mutationLock);
+        if (lb.locked)
+        {
+            reportedPosMs[1].store (deckB.transport.getCurrentPosition() * 1000.0, std::memory_order_relaxed);
+            reportedLenMs[1].store (deckB.transport.getLengthInSeconds() * 1000.0, std::memory_order_relaxed);
+            if (pullB) { const juce::AudioSourceChannelInfo ib (&scratchB, 0, numSamples); deckB.transport.getNextAudioBlock (ib); }
+            else       scratchB.clear();
+        }
+        else scratchB.clear();
+    }
 
     float*       o[8];
     const float* a[8];

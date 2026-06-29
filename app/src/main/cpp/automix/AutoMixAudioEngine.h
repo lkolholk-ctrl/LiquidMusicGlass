@@ -134,6 +134,10 @@ private:
         std::atomic<bool> hasTrack { false };
         juce::String path;                                           // for re-decode/stretch
         double sourceSampleRate { 0.0 };
+        // ОДИН лок на дек (не общий!). Свод грузит incoming-дек под ЕГО локом, а
+        // аудио-колбэк тянет играющий дек под ДРУГИМ — играющий не блокируется
+        // загрузкой соседа, поэтому музыка не замирает в начале AutoMix.
+        juce::CriticalSection mutationLock;
 
         Deck() = default;
         JUCE_DECLARE_NON_COPYABLE (Deck)
@@ -160,13 +164,12 @@ private:
     // Поток предчтения соответствующего дека (для setSource буферизации).
     juce::TimeSliceThread& threadForDeck (Deck& d) { return (&d == &deckA) ? readAheadThreadA : readAheadThreadB; }
     juce::AudioBuffer<float> scratchA, scratchB; // per-block pull buffers (audio thread)
-    juce::CriticalSection deckMutationLock;      // protects source swaps vs audio callback
 
     // Lock-free transport reporting. The audio callback publishes each deck's
-    // position/length into these atomics (under the lock it already holds); the
-    // main-thread getters read them WITHOUT taking deckMutationLock. This kills
-    // the every-100ms ticker / Media3 getState() contention that otherwise made
-    // the callback's tryEnter() fail and emit silence blocks → audible stutter.
+    // position/length into these atomics (under that deck's lock); the main-thread
+    // getters read them WITHOUT taking any lock. This kills the every-100ms ticker /
+    // Media3 getState() contention that otherwise made the callback's tryEnter()
+    // fail and emit silence blocks → audible stutter.
     std::array<std::atomic<double>, 2> reportedPosMs { { {0.0}, {0.0} } };
     std::array<std::atomic<double>, 2> reportedLenMs { { {0.0}, {0.0} } };
 
