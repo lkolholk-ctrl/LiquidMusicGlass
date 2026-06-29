@@ -5,7 +5,9 @@ import android.media.MediaMetadataRetriever
 import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -114,7 +116,9 @@ object LyricsParser {
     }
 
     /**
-     * Полный поиск: сначала ICM API, потом embedded.
+     * Полный поиск.
+     * ЛОКАЛЬНОЕ аудио → LRCLIB (синхро-текст) + локальный кэш, потом embedded.
+     * СТРИМИНГ/ICM → как было (ICM API, потом embedded). LRCLIB для стриминга НЕ трогаем.
      */
     suspend fun loadLyrics(
         context: Context,
@@ -124,6 +128,19 @@ object LyricsParser {
         durationMs: Long,
         trackId: String? = null
     ): Lyrics {
+        // ── ЛОКАЛЬНЫЙ трек: источник синхро-текстов — LRCLIB (только для локального) ──
+        if (isLocalTrack(uri, trackId)) {
+            val lrc = fetchLrcLib(context, uri, title, artist, durationMs, trackId)
+            if (lrc.lines.isNotEmpty()) return lrc
+            // запасной — embedded из тегов (если вдруг есть)
+            if (uri != null) {
+                val embedded = extractLyrics(context, uri)
+                if (embedded.lines.isNotEmpty()) return embedded
+            }
+            return Lyrics.EMPTY
+        }
+
+        // ── СТРИМИНГ/ICM: без изменений ──
         // 1. Try ICM API lyrics (primary source)
         if (!trackId.isNullOrBlank()) {
             val icm = fetchOnlineLyrics(trackId, title, artist)
@@ -137,6 +154,161 @@ object LyricsParser {
         }
 
         return Lyrics.EMPTY
+    }
+
+    /** Локальный трек: content:// (MediaStore) / file:// или trackId "local:…". Стриминг — https. */
+    private fun isLocalTrack(uri: Uri?, trackId: String?): Boolean {
+        if (trackId?.startsWith("local:") == true) return true
+        return when (uri?.scheme) {
+            "content", "file" -> true
+            else -> false
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  LRCLIB (lrclib.net) — ТОЛЬКО для локального аудио
+    // ═══════════════════════════════════════════════════════════
+
+    private const val USER_AGENT =
+        "LiquidMusicGlass/2026.05.30 (https://github.com/lkolholk-ctrl/liquidmusicglass)"
+
+    /**
+     * Тянет синхро-текст из LRCLIB по метаданным локального трека. Сначала локальный
+     * кэш (.lrc в cacheDir → офлайн), затем сеть (/api/get → фолбэк /api/search).
+     * Любая ошибка/404/нет сети → Lyrics.EMPTY (UI покажет «нет текста»), без краша.
+     */
+    suspend fun fetchLrcLib(
+        context: Context,
+        uri: Uri?,
+        title: String,
+        artist: String,
+        durationMs: Long,
+        trackId: String?
+    ): Lyrics = withContext(Dispatchers.IO) {
+        if (title.isBlank() && artist.isBlank()) return@withContext Lyrics.EMPTY
+
+        // Память: уже искали этот трек в сессии (в т.ч. негатив EMPTY) — не дёргаем снова.
+        if (!trackId.isNullOrBlank()) lyricsCache[trackId]?.let { return@withContext it }
+
+        val album = readAlbumTag(context, uri)
+        val durationSec = (durationMs / 1000L).toInt()
+        val cacheFile = lrcCacheFile(context, cacheKey(artist, title, album, durationSec))
+
+        // 1. Локальный .lrc кэш (работает офлайн)
+        readTextOrNull(cacheFile)?.let { cached ->
+            return@withContext finalizeLrc(cached, title, artist, trackId)
+        }
+
+        // 2. Сеть: /api/get (точное совпадение) → /api/search (фолбэк по track+artist)
+        val raw = try {
+            httpGetLrcLib(buildGetUrl(artist, title, album, durationSec))
+                ?: httpGetLrcLib(buildSearchUrl(artist, title))
+        } catch (_: Exception) {
+            null
+        }
+
+        if (raw.isNullOrBlank()) {
+            // нет текста / 404 / сеть недоступна → негатив в память (на сессию), на диск не пишем
+            if (!trackId.isNullOrBlank()) cacheLyrics(trackId, Lyrics.EMPTY)
+            return@withContext Lyrics.EMPTY
+        }
+
+        writeTextSafe(cacheFile, raw)             // на диск → офлайн в будущем
+        finalizeLrc(raw, title, artist, trackId)
+    }
+
+    private fun finalizeLrc(raw: String, title: String, artist: String, trackId: String?): Lyrics {
+        val parsed = parseLyrics(raw)
+        if (parsed.lines.isEmpty()) return Lyrics.EMPTY
+        val result = parsed.copy(title = title, artist = artist, source = "lrclib")
+        if (!trackId.isNullOrBlank()) cacheLyrics(trackId, result)
+        return result
+    }
+
+    /** GET с User-Agent. 200 → текст LRC (synced приоритетнее plain); иначе null. */
+    private fun httpGetLrcLib(urlStr: String): String? {
+        val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 6000
+            readTimeout = 8000
+            instanceFollowRedirects = true
+            setRequestProperty("User-Agent", USER_AGENT)
+            setRequestProperty("Accept", "application/json")
+        }
+        return try {
+            if (conn.responseCode != 200) return null
+            val body = conn.inputStream.bufferedReader().use { it.readText() }
+            extractLrcFromJson(body)
+        } catch (_: Exception) {
+            null
+        } finally {
+            try { conn.disconnect() } catch (_: Exception) {}
+        }
+    }
+
+    /** /api/get → объект; /api/search → массив. Возвращает syncedLyrics, иначе plainLyrics. */
+    private fun extractLrcFromJson(body: String): String? {
+        val trimmed = body.trim()
+        return if (trimmed.startsWith("[")) {
+            val arr = JSONArray(trimmed)
+            var plain: String? = null
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                if (o.optBoolean("instrumental", false)) continue
+                val synced = jsonStr(o, "syncedLyrics")
+                if (!synced.isNullOrBlank()) return synced           // первый со синхро — лучший
+                if (plain == null) jsonStr(o, "plainLyrics")?.let { if (it.isNotBlank()) plain = it }
+            }
+            plain
+        } else {
+            val o = JSONObject(trimmed)
+            if (o.optBoolean("instrumental", false)) return null
+            jsonStr(o, "syncedLyrics")?.takeIf { it.isNotBlank() }
+                ?: jsonStr(o, "plainLyrics")?.takeIf { it.isNotBlank() }
+        }
+    }
+
+    private fun jsonStr(o: JSONObject, key: String): String? =
+        if (o.isNull(key)) null else o.optString(key, "")
+
+    private fun readAlbumTag(context: Context, uri: Uri?): String {
+        if (uri == null) return ""
+        val mmr = MediaMetadataRetriever()
+        return try {
+            mmr.setDataSource(context, uri)
+            mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM) ?: ""
+        } catch (_: Exception) {
+            ""
+        } finally {
+            try { mmr.release() } catch (_: Exception) {}
+        }
+    }
+
+    private fun buildGetUrl(artist: String, title: String, album: String, durationSec: Int): String =
+        "$LRCLIB_BASE/get?artist_name=${enc(artist)}&track_name=${enc(title)}" +
+            "&album_name=${enc(album)}&duration=$durationSec"
+
+    private fun buildSearchUrl(artist: String, title: String): String =
+        "$LRCLIB_BASE/search?track_name=${enc(title)}&artist_name=${enc(artist)}"
+
+    private fun cacheKey(artist: String, title: String, album: String, durationSec: Int): String {
+        val raw = "$artist|$title|$album|$durationSec".lowercase()
+        return "lrc_" + Integer.toHexString(raw.hashCode()) + "_$durationSec"
+    }
+
+    private fun lrcCacheFile(context: Context, key: String): File {
+        val dir = File(context.cacheDir, "lrclib").apply { if (!exists()) mkdirs() }
+        return File(dir, "$key.lrc")
+    }
+
+    private fun readTextOrNull(file: File): String? = try {
+        if (file.exists() && file.length() > 0) file.readText() else null
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun writeTextSafe(file: File, text: String) {
+        try { file.writeText(text) } catch (_: Exception) {}
     }
 
     // ═══════════════════════════════════════════════════════════
