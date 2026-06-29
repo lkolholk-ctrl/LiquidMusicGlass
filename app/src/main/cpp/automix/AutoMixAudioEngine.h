@@ -103,6 +103,16 @@ public:
      */
     bool prepareStretchB (double bpmA, double bpmB);
 
+    // ── Graphic equalizer (10 bands, applied to the final LOCAL mix) ─────────
+    // Octave-spaced peaking filters, gain ±12 dB each. Covers ALL local audio
+    // (single deck or an AutoMix crossfade), because it post-processes the mixed
+    // output. The main thread sets target gains; the audio thread recomputes
+    // coefficients only when they change — no cross-thread coefficient races.
+    static constexpr int kEqBands = 10;
+    void setEqEnabled  (bool enabled);
+    void setEqBandGain (int band, float gainDb);
+    void setEqBands    (const float* gainsDb, int count);
+
     // juce::AudioIODeviceCallback
     void audioDeviceAboutToStart (juce::AudioIODevice* device) override;
     void audioDeviceStopped() override;
@@ -133,6 +143,7 @@ private:
     bool loadDeckFd (Deck& deck, int fd, long long offset, long long size);
     bool decodeFullPCM (const juce::String& path, juce::AudioBuffer<float>& out, double& rate);
     void clearDeckUnlocked (Deck& deck);
+    void recomputeEqCoeffs();   // audio-thread: rebuild biquad coeffs from gains
     Deck& deckRef (int index) { return index == 0 ? deckA : deckB; }
 
     juce::AudioDeviceManager deviceManager;
@@ -156,6 +167,18 @@ private:
     std::array<juce::dsp::IIR::Filter<float>, 2> lowpassA, lowpassB;
     static constexpr float kBassCutoffHz = 150.0f;
     std::atomic<bool> bassSwapEnabled { true }; // off for Stage 7 overlap (A on Media3)
+
+    // Graphic EQ state. Gains + flags are atomics (main thread writes); coeffs,
+    // filter state, and the design-rate cache are touched ONLY by the audio
+    // thread, so they need no locking.
+    struct EqBiquad { float b0 { 1.0f }, b1 { 0.0f }, b2 { 0.0f }, a1 { 0.0f }, a2 { 0.0f }; };
+    std::array<std::atomic<float>, (size_t) kEqBands> eqGainsDb; // init 0 in ctor
+    std::atomic<bool> eqEnabled { false };
+    std::atomic<bool> eqDirty   { true };
+    std::array<EqBiquad, (size_t) kEqBands> eqCoeffs {};
+    std::array<std::array<float, 2>, (size_t) kEqBands> eqZ1 {}, eqZ2 {}; // [band][ch]
+    bool   eqWasEnabled  { false };  // audio-thread only: detect enable edge
+    double eqDesignedRate { 0.0 };   // audio-thread only: recompute on rate change
 
     std::atomic<bool> initialised { false };
     std::atomic<bool> toneOn { false };

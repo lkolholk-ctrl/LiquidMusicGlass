@@ -144,6 +144,40 @@ Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeSetBassSwap(
         gEngine->setBassSwap (enabled == JNI_TRUE);
 }
 
+// ── Graphic EQ ──────────────────────────────────────────────────────────────
+
+JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeSetEqEnabled(
+        JNIEnv* /*env*/, jobject /*thiz*/, jboolean enabled)
+{
+    if (gEngine != nullptr)
+        gEngine->setEqEnabled (enabled == JNI_TRUE);
+}
+
+JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeSetEqBandGain(
+        JNIEnv* /*env*/, jobject /*thiz*/, jint band, jfloat gainDb)
+{
+    if (gEngine != nullptr)
+        gEngine->setEqBandGain ((int) band, (float) gainDb);
+}
+
+JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeSetEqBands(
+        JNIEnv* env, jobject /*thiz*/, jfloatArray gains)
+{
+    if (gEngine == nullptr || gains == nullptr)
+        return;
+    const jsize n = env->GetArrayLength (gains);
+    if (n <= 0)
+        return;
+    jfloat* vals = env->GetFloatArrayElements (gains, nullptr);
+    if (vals == nullptr)
+        return;
+    gEngine->setEqBands ((const float*) vals, (int) n);
+    env->ReleaseFloatArrayElements (gains, vals, JNI_ABORT); // read-only, don't copy back
+}
+
 // ── Stage 8: full LOCAL player (ping-pong decks) ───────────────────────────
 
 JNIEXPORT jboolean JNICALL

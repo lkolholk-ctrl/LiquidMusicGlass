@@ -80,6 +80,9 @@ object AutoMixNativeEngine {
             }
         }
         initialised = ok
+        // Движок поднялся (лениво, на первом проигрывании) — переотправляем
+        // сохранённые настройки эквалайзера, иначе он стартует «плоским».
+        if (ok) runCatching { com.liquidmusicglass.engine.EqualizerController.applyToEngine() }
         return ok
     }
 
@@ -177,6 +180,30 @@ object AutoMixNativeEngine {
     fun setBassSwap(enabled: Boolean) {
         if (!isLoaded || !initialised) return
         runCatching { nativeSetBassSwap(enabled) }.onFailure { Log.w(TAG, "nativeSetBassSwap failed", it) }
+    }
+
+    // ── Graphic equalizer (10 bands, applied to all local JUCE audio) ───────
+
+    /** Enable/disable the 10-band graphic EQ. */
+    @Synchronized
+    fun setEqEnabled(enabled: Boolean) {
+        if (!isLoaded || !initialised) return
+        runCatching { nativeSetEqEnabled(enabled) }.onFailure { Log.w(TAG, "nativeSetEqEnabled failed", it) }
+    }
+
+    /** Set one band's gain in dB (band 0..9, clamped to ±12 dB natively). */
+    @Synchronized
+    fun setEqBandGain(band: Int, gainDb: Float) {
+        if (!isLoaded || !initialised) return
+        runCatching { nativeSetEqBandGain(band, gainDb) }
+            .onFailure { Log.w(TAG, "nativeSetEqBandGain failed", it) }
+    }
+
+    /** Set all 10 band gains at once (for presets / bulk apply). */
+    @Synchronized
+    fun setEqBands(gainsDb: FloatArray) {
+        if (!isLoaded || !initialised) return
+        runCatching { nativeSetEqBands(gainsDb) }.onFailure { Log.w(TAG, "nativeSetEqBands failed", it) }
     }
 
     // ── Stage 8: full LOCAL player (ping-pong decks) ────────────────────────
@@ -330,6 +357,9 @@ object AutoMixNativeEngine {
     private external fun nativeSetEntryOffsetA(ms: Double)
     private external fun nativeClearDeckA()
     private external fun nativeSetBassSwap(enabled: Boolean)
+    private external fun nativeSetEqEnabled(enabled: Boolean)
+    private external fun nativeSetEqBandGain(band: Int, gainDb: Float)
+    private external fun nativeSetEqBands(gainsDb: FloatArray)
     private external fun nativeLoadIncoming(path: String): Boolean
     private external fun nativeLoadIncomingFd(fd: Int, offset: Long, length: Long): Boolean
     private external fun nativeStartTransition(durationMs: Double, entryMs: Double)

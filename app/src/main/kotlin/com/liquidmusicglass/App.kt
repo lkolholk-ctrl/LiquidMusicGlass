@@ -92,6 +92,9 @@ class App : Application(), ImageLoaderFactory {
         // Player settings (DataStore) — лёгкая инициализация
         com.liquidmusicglass.engine.PlayerSettings.init(this)
 
+        // Эквалайзер (DataStore) — загрузка сохранённых полос/пресета
+        com.liquidmusicglass.engine.EqualizerController.init(this)
+
         // Реактивный детектор энергосбережения (упрощает эффекты, не выключает)
         com.liquidmusicglass.ui.PowerSaveMonitor.init(this)
 

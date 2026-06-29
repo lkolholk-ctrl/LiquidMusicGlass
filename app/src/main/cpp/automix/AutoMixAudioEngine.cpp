@@ -22,12 +22,20 @@ namespace
         juce::CriticalSection& lock;
         bool locked;
     };
+
+    // Graphic-EQ band centres (ISO octave spacing) and Q (~1 octave wide).
+    constexpr std::array<float, 10> kEqCenters {
+        31.0f, 62.0f, 125.0f, 250.0f, 500.0f, 1000.0f, 2000.0f, 4000.0f, 8000.0f, 16000.0f
+    };
+    constexpr float kEqQ = 1.41f;
 }
 
 AutoMixAudioEngine::AutoMixAudioEngine()
 {
     // WAV + AIFF always; FLAC + Ogg Vorbis because we enabled them in CMake.
     formatManager.registerBasicFormats();
+    for (auto& g : eqGainsDb)
+        g.store (0.0f);
     // One read-ahead thread serves both decks' BufferingAudioSources.
     // Высокий приоритет: при переключении приложений система кратко тротлит
     // фоновые потоки. Если поток предчтения декодирует mp3 на обычном приоритете,
@@ -457,6 +465,61 @@ void AutoMixAudioEngine::setBassSwap (bool enabled)
     bassSwapEnabled.store (enabled);
 }
 
+// ── Graphic EQ ──────────────────────────────────────────────────────────────
+void AutoMixAudioEngine::setEqEnabled (bool enabled)
+{
+    eqEnabled.store (enabled);
+    eqDirty.store (true);
+}
+
+void AutoMixAudioEngine::setEqBandGain (int band, float gainDb)
+{
+    if (band < 0 || band >= kEqBands)
+        return;
+    eqGainsDb[(size_t) band].store (juce::jlimit (-12.0f, 12.0f, gainDb));
+    eqDirty.store (true);
+}
+
+void AutoMixAudioEngine::setEqBands (const float* gainsDb, int count)
+{
+    if (gainsDb == nullptr)
+        return;
+    const int n = juce::jmin (count, (int) kEqBands);
+    for (int i = 0; i < n; ++i)
+        eqGainsDb[(size_t) i].store (juce::jlimit (-12.0f, 12.0f, gainsDb[i]));
+    eqDirty.store (true);
+}
+
+// Audio-thread: rebuild the 10 peaking biquads (RBJ cookbook) from the current
+// gains. Called only when eqDirty / the sample rate changed, never per sample.
+void AutoMixAudioEngine::recomputeEqCoeffs()
+{
+    const double fs = currentSampleRate > 0.0 ? currentSampleRate : 44100.0;
+    eqDesignedRate = fs;
+    for (int band = 0; band < kEqBands; ++band)
+    {
+        const double f0    = juce::jmin ((double) kEqCenters[(size_t) band], fs * 0.45);
+        const double A     = std::pow (10.0, (double) eqGainsDb[(size_t) band].load() / 40.0);
+        const double w0    = juce::MathConstants<double>::twoPi * f0 / fs;
+        const double cw    = std::cos (w0);
+        const double alpha = std::sin (w0) / (2.0 * (double) kEqQ);
+
+        const double b0 = 1.0 + alpha * A;
+        const double b1 = -2.0 * cw;
+        const double b2 = 1.0 - alpha * A;
+        const double a0 = 1.0 + alpha / A;
+        const double a1 = -2.0 * cw;
+        const double a2 = 1.0 - alpha / A;
+
+        auto& c = eqCoeffs[(size_t) band];
+        c.b0 = (float) (b0 / a0);
+        c.b1 = (float) (b1 / a0);
+        c.b2 = (float) (b2 / a0);
+        c.a1 = (float) (a1 / a0);
+        c.a2 = (float) (a2 / a0);
+    }
+}
+
 double AutoMixAudioEngine::positionMsA()
 {
     return reportedPosMs[0].load (std::memory_order_relaxed);
@@ -515,6 +578,8 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
 {
     if (numOutputChannels <= 0)
         return;
+
+    juce::ScopedNoDenormals noDenormals; // flush IIR (bass-swap + EQ) denormals
 
     juce::AudioBuffer<float> output (outputChannelData, numOutputChannels, numSamples);
 
@@ -658,6 +723,46 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
 
             o[c][i] = av * ga + bv * gb;
         }
+    }
+
+    // ── Graphic EQ on the final LOCAL mix (stereo) ──────────────────────────
+    // Runs after the deck mix, so it covers ALL local audio: a single deck or an
+    // AutoMix crossfade. Skipped entirely when disabled (no CPU cost when off).
+    {
+        const bool eqOn = eqEnabled.load();
+        if (eqOn)
+        {
+            if (! eqWasEnabled)               // enable edge: clear stale state, force recompute
+            {
+                for (auto& z : eqZ1) z.fill (0.0f);
+                for (auto& z : eqZ2) z.fill (0.0f);
+                eqDirty.store (true);
+            }
+            if (eqDirty.exchange (false) || eqDesignedRate != currentSampleRate)
+                recomputeEqCoeffs();
+
+            const int eqCh = juce::jmin (ch, 2);
+            for (int c = 0; c < eqCh; ++c)
+            {
+                float* d = o[c];
+                for (int i = 0; i < numSamples; ++i)
+                {
+                    float x = d[i];
+                    for (int band = 0; band < kEqBands; ++band) // 10-band cascade
+                    {
+                        const auto& bc = eqCoeffs[(size_t) band];
+                        float& z1 = eqZ1[(size_t) band][(size_t) c];
+                        float& z2 = eqZ2[(size_t) band][(size_t) c];
+                        const float y = bc.b0 * x + z1;          // transposed direct form II
+                        z1 = bc.b1 * x - bc.a1 * y + z2;
+                        z2 = bc.b2 * x - bc.a2 * y;
+                        x = y;
+                    }
+                    d[i] = x;
+                }
+            }
+        }
+        eqWasEnabled = eqOn;
     }
 
     // Clear any channels beyond the 8 we mixed (phones are stereo; just in case).
