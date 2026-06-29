@@ -167,11 +167,15 @@ fun WaveHomeScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Spacer(Modifier.height(24.dp))
+                        // Весь блок «артист + обложка + контролы» опущен чуть ниже.
+                        Spacer(Modifier.height(40.dp))
                         Text(
                             text = track.artist,
                             color = Color.White,
-                            fontSize = 40.sp,
+                            fontSize = 44.sp,
+                            // Межстрочный интервал — чтобы при переносе (длинное имя)
+                            // строки не налезали друг на друга.
+                            lineHeight = 50.sp,
                             fontWeight = FontWeight.Black,
                             fontFamily = AppFontFamily,
                             textAlign = TextAlign.Center,
@@ -181,7 +185,7 @@ fun WaveHomeScreen(
                                 .fillMaxWidth()
                                 .padding(horizontal = 24.dp)
                         )
-                        Spacer(Modifier.height(24.dp))
+                        Spacer(Modifier.height(26.dp))
                         AlbumArtImage(
                             uri = track.displayArtUri,
                             coverUrl = track.coverUrl,
@@ -193,7 +197,7 @@ fun WaveHomeScreen(
                                 .clip(RoundedCornerShape(28.dp))
                                 .clickable { onOpenPlayer() }
                         )
-                        Spacer(Modifier.height(20.dp))
+                        Spacer(Modifier.height(28.dp))
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -245,7 +249,8 @@ fun WaveHomeScreen(
 
             // ── Animated mood tiles ──
             item {
-                Spacer(Modifier.height(8.dp))
+                // Блобы опущены заметно ниже контролов (больше воздуха сверху).
+                Spacer(Modifier.height(36.dp))
                 WaveMoodTiles(
                     onSelect = { mood -> viewModel.buildMoodWave(context, mood.query, mood.label) },
                     animate = animationsActive
