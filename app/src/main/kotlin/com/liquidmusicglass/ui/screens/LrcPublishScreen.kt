@@ -6,6 +6,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -362,8 +364,9 @@ private fun SyncTaggingMode(
                 )
             }
 
-            Column(modifier = Modifier.weight(1f).verticalScroll(scroll)) {
-                lines.forEachIndexed { i, text ->
+            // LAZY: компонуем только видимые строки.
+            LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                itemsIndexed(lines) { i, text ->
                     val t = times.getOrNull(i)
                     Row(
                         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
@@ -384,7 +387,7 @@ private fun SyncTaggingMode(
                         Text(text, color = lc.textPrimary, fontSize = 15.sp, modifier = Modifier.weight(1f))
                     }
                 }
-                Spacer(Modifier.height(40.dp))
+                item { Spacer(Modifier.height(40.dp)) }
             }
         }
     }
@@ -485,48 +488,50 @@ private fun SyncWordTaggingMode(
                 )
             }
 
-            Column(modifier = Modifier.weight(1f).verticalScroll(scroll)) {
-                wordRows.forEachIndexed { li, words ->
-                    if (words.isEmpty()) return@forEachIndexed
-                    FlowRow(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        words.forEachIndexed { wi, word ->
-                            val gi = lineStart[li] + wi
-                            val tagged = times.getOrNull(gi) != null
-                            val isNext = gi == nextIndex
-                            Text(
-                                word,
-                                color = when {
-                                    isNext -> Color.White
-                                    tagged -> lc.accent
-                                    else -> lc.textPrimary
-                                },
-                                fontSize = 16.sp,
-                                fontWeight = if (isNext) FontWeight.Bold else FontWeight.Normal,
-                                modifier = Modifier.clip(RoundedCornerShape(8.dp))
-                                    .background(
-                                        when {
-                                            isNext -> lc.accent
-                                            tagged -> lc.accent.copy(alpha = 0.15f)
-                                            else -> Color.Transparent
-                                        }
-                                    )
-                                    .combinedClickable(
-                                        onClick = {
-                                            times[gi] = PlayerController.getSmoothPositionMs().coerceAtLeast(0)
-                                            if (gi + 1 > nextIndex) nextIndex = gi + 1
-                                        },
-                                        onLongClick = { previewFrom = li }
-                                    )
-                                    .padding(horizontal = 8.dp, vertical = 5.dp)
-                            )
+            // LAZY: компонуем только видимые строки (полный текст = сотни слов).
+            LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                itemsIndexed(wordRows) { li, words ->
+                    if (words.isNotEmpty()) {
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            words.forEachIndexed { wi, word ->
+                                val gi = lineStart[li] + wi
+                                val tagged = times.getOrNull(gi) != null
+                                val isNext = gi == nextIndex
+                                Text(
+                                    word,
+                                    color = when {
+                                        isNext -> Color.White
+                                        tagged -> lc.accent
+                                        else -> lc.textPrimary
+                                    },
+                                    fontSize = 16.sp,
+                                    fontWeight = if (isNext) FontWeight.Bold else FontWeight.Normal,
+                                    modifier = Modifier.clip(RoundedCornerShape(8.dp))
+                                        .background(
+                                            when {
+                                                isNext -> lc.accent
+                                                tagged -> lc.accent.copy(alpha = 0.15f)
+                                                else -> Color.Transparent
+                                            }
+                                        )
+                                        .combinedClickable(
+                                            onClick = {
+                                                times[gi] = PlayerController.getSmoothPositionMs().coerceAtLeast(0)
+                                                if (gi + 1 > nextIndex) nextIndex = gi + 1
+                                            },
+                                            onLongClick = { previewFrom = li }
+                                        )
+                                        .padding(horizontal = 8.dp, vertical = 5.dp)
+                                )
+                            }
                         }
                     }
                 }
-                Spacer(Modifier.height(40.dp))
+                item { Spacer(Modifier.height(40.dp)) }
             }
         }
     }
