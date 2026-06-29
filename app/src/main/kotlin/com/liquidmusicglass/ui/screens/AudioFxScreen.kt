@@ -130,20 +130,43 @@ private fun EqSection(lc: LiquidColors, master: Boolean) {
                 Chip(p.name, preset == i, lc, active) { AudioFxController.applyEqPreset(i) }
             }
         }
-        Spacer(Modifier.height(14.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth().alpha(if (active) 1f else 0.4f),
-            horizontalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
+        Spacer(Modifier.height(10.dp))
+        Column {
             for (band in 0 until AudioFxController.BAND_COUNT) {
-                val g = gains.getOrElse(band) { 0f }
-                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    BandSlider(g, AudioFxController.BAND_LABELS[band], lc, active) {
-                        AudioFxController.setEqBand(band, it)
-                    }
-                }
+                EqBandRow(band, gains.getOrElse(band) { 0f }, AudioFxController.BAND_LABELS[band], active, lc)
             }
         }
+    }
+}
+
+/** Горизонтальная полоса EQ: [частота] [LiquidSlider со стеклом] [дБ]. */
+@Composable
+private fun EqBandRow(band: Int, gain: Float, label: String, active: Boolean, lc: LiquidColors) {
+    val fallback = rememberLayerBackdrop()
+    val backdrop = LocalFxBackdrop.current ?: fallback
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).alpha(if (active) 1f else 0.5f),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, modifier = Modifier.width(40.dp), color = lc.textSecondary,
+            fontSize = 12.sp, fontWeight = FontWeight.Medium)
+        Box(modifier = Modifier.weight(1f)) {
+            LiquidSlider(
+                value = { gain },
+                onValueChange = { if (active) AudioFxController.setEqBand(band, it) },
+                valueRange = AudioFxController.EQ_MIN_DB..AudioFxController.EQ_MAX_DB,
+                backdrop = backdrop,
+                accentColor = lc.accent,
+                trackColor = (if (lc.isDark) Color.White else Color.Black).copy(alpha = 0.18f)
+            )
+        }
+        Text(
+            text = "${if (gain > 0) "+" else ""}${gain.roundToInt()}",
+            modifier = Modifier.width(34.dp),
+            textAlign = androidx.compose.ui.text.style.TextAlign.End,
+            color = if (gain != 0f) lc.accent else lc.textSecondary,
+            fontSize = 12.sp, fontWeight = FontWeight.SemiBold
+        )
     }
 }
 
@@ -317,55 +340,6 @@ private fun Chip(label: String, selected: Boolean, lc: LiquidColors, enabled: Bo
     ) {
         Text(label, color = if (selected) Color.White else lc.textSecondary,
             fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-    }
-}
-
-/** Вертикальный слайдер полосы EQ: центр = 0 дБ, вверх boost, вниз cut. */
-@Composable
-private fun BandSlider(value: Float, label: String, lc: LiquidColors, interactive: Boolean, onChange: (Float) -> Unit) {
-    val range = AudioFxController.EQ_MAX_DB - AudioFxController.EQ_MIN_DB // 24
-    var trackHeightPx by remember { mutableFloatStateOf(1f) }
-
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("${if (value > 0) "+" else ""}${value.roundToInt()}",
-            color = if (value != 0f) lc.accent else lc.textSecondary,
-            fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-        Spacer(modifier = Modifier.height(8.dp))
-        Box(
-            modifier = Modifier.height(160.dp).width(34.dp).pointerInput(interactive) {
-                if (!interactive) return@pointerInput
-                detectVerticalDragGestures { change, dragAmount ->
-                    change.consume()
-                    val deltaDb = -(dragAmount / trackHeightPx) * range
-                    onChange((value + deltaDb).coerceIn(AudioFxController.EQ_MIN_DB, AudioFxController.EQ_MAX_DB))
-                }
-            },
-            contentAlignment = Alignment.Center
-        ) {
-            val trackColor = if (lc.isDark) Color(0xFF2C2C2E) else Color(0xFFE5E5EA)
-            Canvas(modifier = Modifier.fillMaxHeight().width(6.dp)) {
-                trackHeightPx = size.height
-                val w = size.width; val h = size.height; val r = w / 2f
-                drawRoundRect(color = trackColor, topLeft = Offset(0f, 0f), size = Size(w, h),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(r, r))
-                val t = (AudioFxController.EQ_MAX_DB - value) / range
-                val thumbY = (t * h).coerceIn(0f, h)
-                val centerY = h / 2f
-                val top = minOf(centerY, thumbY); val bot = maxOf(centerY, thumbY)
-                drawRoundRect(color = lc.accent, topLeft = Offset(0f, top),
-                    size = Size(w, (bot - top).coerceAtLeast(1f)),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(r, r))
-            }
-            Canvas(modifier = Modifier.fillMaxHeight().width(34.dp)) {
-                val h = size.height; val cx = size.width / 2f
-                val t = (AudioFxController.EQ_MAX_DB - value) / range
-                val y = (t * h).coerceIn(0f, h)
-                drawCircle(color = Color.White, radius = 11.dp.toPx(), center = Offset(cx, y))
-                drawCircle(color = lc.accent, radius = 7.dp.toPx(), center = Offset(cx, y))
-            }
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(label, color = lc.textSecondary, fontSize = 10.sp, fontWeight = FontWeight.Medium)
     }
 }
 
