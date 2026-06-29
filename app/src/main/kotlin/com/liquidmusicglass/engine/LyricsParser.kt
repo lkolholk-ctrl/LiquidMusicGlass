@@ -36,9 +36,17 @@ object LyricsParser {
         lyricsCache[trackId] = lyrics
     }
 
+    /** Одно слово с таймкодом (word-level / Enhanced LRC). */
+    data class LyricWord(
+        val timeMs: Long,
+        val text: String
+    )
+
     data class LyricLine(
         val timeMs: Long,    // -1 если нет таймстампа
-        val text: String
+        val text: String,
+        /** Непусто → у строки есть пословные тайминги (Enhanced LRC). */
+        val words: List<LyricWord> = emptyList()
     )
 
     data class Lyrics(
@@ -46,8 +54,12 @@ object LyricsParser {
         val isSynced: Boolean,
         val title: String?,
         val artist: String?,
-        val source: String = "none" // "embedded", "lrclib", "none"
+        // источники: "embedded", "lrclib", "icm", "mine_word" (моя пословная), "none"
+        val source: String = "none"
     ) {
+        /** Есть ли пословная разметка (караоке-подсветка вместо построчной). */
+        val isWordLevel: Boolean get() = lines.any { it.words.isNotEmpty() }
+
         companion object {
             val EMPTY = Lyrics(emptyList(), false, null, null, "none")
         }
@@ -128,6 +140,15 @@ object LyricsParser {
         durationMs: Long,
         trackId: String? = null
     ): Lyrics {
+        // ── 0. МОЯ пословная разметка (Enhanced LRC) — ВЫСШИЙ приоритет. Если есть,
+        //       используем ТОЛЬКО её и к API НЕ обращаемся (один источник за раз). ──
+        loadMyWordLyrics(context, title, artist, durationMs)?.let { mine ->
+            if (mine.lines.isNotEmpty()) {
+                if (!trackId.isNullOrBlank()) cacheLyrics(trackId, mine)
+                return mine
+            }
+        }
+
         // ── ЛОКАЛЬНЫЙ трек: источник синхро-текстов — LRCLIB (только для локального) ──
         if (isLocalTrack(uri, trackId)) {
             val lrc = fetchLrcLib(context, uri, title, artist, durationMs, trackId)
@@ -334,6 +355,62 @@ object LyricsParser {
     }
 
     // ═══════════════════════════════════════════════════════════
+    //  МОЯ пословная разметка (Enhanced LRC) — ОТДЕЛЬНОЕ хранилище.
+    //  Лежит в filesDir/mylyrics (НЕ в cache — не чистится), НЕ перезаписывает
+    //  API-кэш. При загрузке проверяется ПЕРВОЙ и замещает любой источник API.
+    // ═══════════════════════════════════════════════════════════
+
+    private fun myKey(artist: String, title: String, durationSec: Int): String {
+        val raw = "$artist|$title|$durationSec".lowercase()
+        return "mine_" + Integer.toHexString(raw.hashCode()) + "_$durationSec"
+    }
+
+    private fun myLyricsFile(context: Context, key: String): File {
+        val dir = File(context.filesDir, "mylyrics").apply { if (!exists()) mkdirs() }
+        return File(dir, "$key.elrc")
+    }
+
+    /** Есть ли МОЯ пословная разметка для этого трека. */
+    fun hasMyWordLyrics(context: Context, artist: String, title: String, durationMs: Long): Boolean {
+        val sec = (durationMs / 1000L).toInt()
+        val f = myLyricsFile(context, myKey(artist, title, sec))
+        return f.exists() && f.length() > 0
+    }
+
+    /** Сохранить МОЮ пословную разметку (Enhanced LRC) как мой источник (локально). */
+    fun saveMyWordLyrics(
+        context: Context, artist: String, title: String, durationMs: Long,
+        enhancedLrc: String, trackId: String?
+    ) {
+        if (enhancedLrc.isBlank()) return
+        val sec = (durationMs / 1000L).toInt()
+        writeTextSafe(myLyricsFile(context, myKey(artist, title, sec)), enhancedLrc)
+        // Сразу в in-memory кэш по trackId → экран лирики подхватит без перезагрузки.
+        if (!trackId.isNullOrBlank()) {
+            val parsed = parseLyrics(enhancedLrc)
+            if (parsed.lines.isNotEmpty()) {
+                cacheLyrics(trackId, parsed.copy(title = title, artist = artist, source = "mine_word"))
+            }
+        }
+    }
+
+    /** Удалить МОЮ пословную разметку (вернёт трек к источникам API). */
+    fun deleteMyWordLyrics(context: Context, artist: String, title: String, durationMs: Long, trackId: String?) {
+        val sec = (durationMs / 1000L).toInt()
+        runCatching { myLyricsFile(context, myKey(artist, title, sec)).delete() }
+        if (!trackId.isNullOrBlank()) lyricsCache.remove(trackId)
+    }
+
+    /** Прочитать МОЮ пословную разметку, если есть. */
+    private fun loadMyWordLyrics(context: Context, title: String, artist: String, durationMs: Long): Lyrics? {
+        val sec = (durationMs / 1000L).toInt()
+        val raw = readTextOrNull(myLyricsFile(context, myKey(artist, title, sec))) ?: return null
+        val parsed = parseLyrics(raw)
+        if (parsed.lines.isEmpty()) return null
+        return parsed.copy(title = title, artist = artist, source = "mine_word")
+    }
+
+    // ═══════════════════════════════════════════════════════════
     //  Embedded & Parsing
     // ═══════════════════════════════════════════════════════════
 
@@ -383,12 +460,21 @@ object LyricsParser {
                         val v = f.toLongOrNull() ?: 0L
                         if (f.length == 2) v * 10 else v
                     }
-                    val text = match.groupValues[4].trim()
+                    val rawContent = match.groupValues[4]              // НЕ триммим: нужны пробелы для слов
                     val timeMs = minutes * 60000 + seconds * 1000 + fraction
 
-                    if (text.isNotBlank()) {
-                        lyricLines.add(LyricLine(timeMs, text))
+                    // Enhanced LRC: внутри строки есть пословные теги <mm:ss.xx>слово.
+                    val words = parseWordTokens(rawContent)
+                    if (words.isNotEmpty()) {
+                        val joined = words.joinToString(" ") { it.text }
+                        lyricLines.add(LyricLine(timeMs, joined, words))
                         hasSyncedLines = true
+                    } else {
+                        val text = rawContent.trim()
+                        if (text.isNotBlank()) {
+                            lyricLines.add(LyricLine(timeMs, text))
+                            hasSyncedLines = true
+                        }
                     }
                 }
             } else if (trimmed.isNotBlank() && !trimmed.startsWith("[")) {
@@ -401,6 +487,30 @@ object LyricsParser {
         }
 
         return Lyrics(lyricLines, hasSyncedLines, title, artist)
+    }
+
+    /** Пословные теги Enhanced LRC: <mm:ss.xx>слово <mm:ss.xx>слово … */
+    private val WORD_TAG = Regex("""<(\d{1,3}):(\d{2})(?:[.:])(\d{2,3})>""")
+
+    /** Разбирает содержимое строки на слова с таймкодами. Пусто → строка без word-тегов. */
+    private fun parseWordTokens(content: String): List<LyricWord> {
+        val tags = WORD_TAG.findAll(content).toList()
+        if (tags.isEmpty()) return emptyList()
+        val words = ArrayList<LyricWord>(tags.size)
+        for ((i, m) in tags.withIndex()) {
+            val minutes = m.groupValues[1].toLongOrNull() ?: 0L
+            val seconds = m.groupValues[2].toLongOrNull() ?: 0L
+            val fraction = m.groupValues[3].let { f ->
+                val v = f.toLongOrNull() ?: 0L
+                if (f.length == 2) v * 10 else v
+            }
+            val ts = minutes * 60000 + seconds * 1000 + fraction
+            val from = m.range.last + 1
+            val to = if (i + 1 < tags.size) tags[i + 1].range.first else content.length
+            val w = if (from <= to) content.substring(from, to).trim() else ""
+            if (w.isNotEmpty()) words.add(LyricWord(ts, w))
+        }
+        return words
     }
 
     fun findCurrentLine(lyrics: Lyrics, positionMs: Long): Int {

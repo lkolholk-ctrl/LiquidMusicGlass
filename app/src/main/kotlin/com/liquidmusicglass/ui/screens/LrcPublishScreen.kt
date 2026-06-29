@@ -70,11 +70,17 @@ fun LrcPublishScreen(track: Track, onBack: () -> Unit) {
     var instrumental by remember { mutableStateOf(false) }
 
     var taggingMode by remember { mutableStateOf(false) }
+    var wordTaggingMode by remember { mutableStateOf(false) }
 
     var publishing by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("") }
     var resultMsg by remember { mutableStateOf<String?>(null) }
     var resultOk by remember { mutableStateOf(false) }
+
+    // Уже есть моя пословная разметка для этого трека?
+    var hasMine by remember(track.id) {
+        mutableStateOf(LyricsParser.hasMyWordLyrics(context, track.artist, track.title, track.durationMs))
+    }
 
     if (taggingMode) {
         SyncTaggingMode(
@@ -83,6 +89,27 @@ fun LrcPublishScreen(track: Track, onBack: () -> Unit) {
             lines = plainLyrics.lines().map { it.trim() }.filter { it.isNotEmpty() },
             onDone = { lrc -> syncedLyrics = lrc; taggingMode = false },
             onCancel = { taggingMode = false }
+        )
+        return
+    }
+
+    if (wordTaggingMode) {
+        SyncWordTaggingMode(
+            track = track,
+            lc = lc,
+            lines = plainLyrics.lines().map { it.trim() }.filter { it.isNotEmpty() },
+            onDone = { enhanced ->
+                runCatching {
+                    LyricsParser.saveMyWordLyrics(
+                        context, artistName.trim(), trackName.trim(), track.durationMs, enhanced, track.id
+                    )
+                }
+                hasMine = true
+                wordTaggingMode = false
+                resultOk = true
+                resultMsg = "Пословная разметка сохранена ✓ (показывается ваш текст)"
+            },
+            onCancel = { wordTaggingMode = false }
         )
         return
     }
@@ -134,12 +161,12 @@ fun LrcPublishScreen(track: Track, onBack: () -> Unit) {
                 }
                 Spacer(Modifier.height(12.dp))
                 Card(lc) {
+                    val canTag = plainLyrics.lines().any { it.isNotBlank() }
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                         Text("Синхронизированный (LRC)", color = lc.textSecondary, fontSize = 12.sp,
                             modifier = Modifier.weight(1f))
-                        val canTag = plainLyrics.lines().any { it.isNotBlank() }
                         Text(
-                            "Разметить ▶",
+                            "По строкам ▶",
                             color = if (canTag) lc.accent else lc.textSecondary,
                             fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.clip(RoundedCornerShape(8.dp))
@@ -150,6 +177,45 @@ fun LrcPublishScreen(track: Track, onBack: () -> Unit) {
                     Spacer(Modifier.height(8.dp))
                     LabeledField("", syncedLyrics, { syncedLyrics = it }, lc,
                         singleLine = false, minHeight = 100.dp, placeholder = "[mm:ss.xx] строка …")
+                }
+                Spacer(Modifier.height(12.dp))
+
+                // ── Пословная (Enhanced LRC) — МОЙ источник, локально, высший приоритет ──
+                Card(lc) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Пословная разметка (караоке)", color = lc.textPrimary, fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold)
+                            Text(
+                                if (hasMine) "Сохранена — показывается ваш текст (замещает LRCLIB)."
+                                else "Тап по каждому слову. Хранится локально, выше LRCLIB.",
+                                color = lc.textSecondary, fontSize = 12.sp
+                            )
+                        }
+                        val canWord = plainLyrics.lines().any { it.isNotBlank() }
+                        Text(
+                            "По словам ▶",
+                            color = if (canWord) lc.accent else lc.textSecondary,
+                            fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.clip(RoundedCornerShape(8.dp))
+                                .clickable(enabled = canWord) { wordTaggingMode = true }
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                    if (hasMine) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "Удалить мою разметку",
+                            color = lc.accentRed, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.clip(RoundedCornerShape(8.dp))
+                                .clickable {
+                                    LyricsParser.deleteMyWordLyrics(context, track.artist, track.title, track.durationMs, track.id)
+                                    hasMine = false
+                                    resultOk = true; resultMsg = "Пословная разметка удалена"
+                                }
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
                 }
             }
 
@@ -299,6 +365,121 @@ private fun SyncTaggingMode(
     }
 }
 
+// ── Режим ПОСЛОВНОЙ разметки (Enhanced LRC, мой источник) ─────────────────────
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun SyncWordTaggingMode(
+    track: Track,
+    lc: LiquidColors,
+    lines: List<String>,
+    onDone: (String) -> Unit,
+    onCancel: () -> Unit
+) {
+    val context = LocalContext.current
+    val isPlaying by PlayerController.isPlaying.collectAsState()
+
+    val wordRows = remember(lines) {
+        lines.map { it.split(Regex("\\s+")).filter { w -> w.isNotEmpty() } }
+    }
+    val lineStart = remember(wordRows) {
+        IntArray(wordRows.size).also { arr ->
+            var acc = 0
+            for (i in wordRows.indices) { arr[i] = acc; acc += wordRows[i].size }
+        }
+    }
+    val total = remember(wordRows) { wordRows.sumOf { it.size } }
+    val times = remember(total) { mutableStateListOf<Long?>().apply { repeat(total) { add(null) } } }
+    var nextIndex by remember { mutableStateOf(0) }
+    val scroll = rememberScrollState()
+
+    LaunchedEffect(track.id) {
+        runCatching { PlayerController.playFromList(context, listOf(track), 0) }
+    }
+
+    Box(modifier = Modifier.fillMaxSize().background(lc.settingsBackground)) {
+        Column(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
+            Spacer(Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
+            Spacer(Modifier.height(12.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                CircleBack(lc, onCancel)
+                Spacer(Modifier.width(16.dp))
+                Text("По словам", color = lc.textPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f))
+                Text("Готово", color = lc.accent, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.clip(RoundedCornerShape(8.dp))
+                        .clickable { onDone(buildEnhancedLrc(wordRows, lineStart, times)) }
+                        .padding(horizontal = 10.dp, vertical = 6.dp))
+            }
+            Text("Тапни по каждому слову в момент, когда оно звучит (караоке).",
+                color = lc.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(vertical = 6.dp))
+
+            // транспорт + большой TAP
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 8.dp)) {
+                RoundIcon(if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, lc) {
+                    PlayerController.togglePlayPause(context)
+                }
+                Spacer(Modifier.width(12.dp))
+                RoundIcon(Icons.Rounded.Replay, lc) { PlayerController.seekTo(0) }
+                Spacer(Modifier.width(16.dp))
+                Text(
+                    "TAP (слово ${(nextIndex + 1).coerceAtMost(total)}/$total)",
+                    color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(lc.accent)
+                        .clickable(enabled = nextIndex < total) {
+                            if (nextIndex < total) {
+                                times[nextIndex] = PlayerController.getSmoothPositionMs().coerceAtLeast(0)
+                                nextIndex++
+                            }
+                        }
+                        .padding(vertical = 12.dp),
+                    textAlign = TextAlign.Center
+                )
+            }
+
+            Column(modifier = Modifier.weight(1f).verticalScroll(scroll)) {
+                wordRows.forEachIndexed { li, words ->
+                    if (words.isEmpty()) return@forEachIndexed
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        words.forEachIndexed { wi, word ->
+                            val gi = lineStart[li] + wi
+                            val tagged = times.getOrNull(gi) != null
+                            val isNext = gi == nextIndex
+                            Text(
+                                word,
+                                color = when {
+                                    isNext -> Color.White
+                                    tagged -> lc.accent
+                                    else -> lc.textPrimary
+                                },
+                                fontSize = 16.sp,
+                                fontWeight = if (isNext) FontWeight.Bold else FontWeight.Normal,
+                                modifier = Modifier.clip(RoundedCornerShape(8.dp))
+                                    .background(
+                                        when {
+                                            isNext -> lc.accent
+                                            tagged -> lc.accent.copy(alpha = 0.15f)
+                                            else -> Color.Transparent
+                                        }
+                                    )
+                                    .clickable {
+                                        times[gi] = PlayerController.getSmoothPositionMs().coerceAtLeast(0)
+                                        if (gi + 1 > nextIndex) nextIndex = gi + 1
+                                    }
+                                    .padding(horizontal = 8.dp, vertical = 5.dp)
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(40.dp))
+            }
+        }
+    }
+}
+
 // ── мелкие части ──────────────────────────────────────────────────────────────
 @Composable
 private fun Card(lc: LiquidColors, content: @Composable ColumnScope.() -> Unit) {
@@ -392,4 +573,27 @@ private fun buildLrc(lines: List<String>, times: List<Long?>): String {
         last = t
         fmtTs(t) + text
     }.joinToString("\n")
+}
+
+/**
+ * Enhanced LRC из пословных таймкодов:
+ *   [mm:ss.xx]<mm:ss.xx>слово <mm:ss.xx>слово …
+ * Таймкод строки = таймкод первого слова. Неотмеченные слова наследуют предыдущий.
+ */
+private fun buildEnhancedLrc(wordRows: List<List<String>>, lineStart: IntArray, times: List<Long?>): String {
+    var last = 0L
+    val t = LongArray(times.size)
+    for (i in times.indices) { val v = times[i] ?: last; last = v; t[i] = v }
+    val sb = StringBuilder()
+    for ((li, words) in wordRows.withIndex()) {
+        if (words.isEmpty()) continue
+        val base = lineStart[li]
+        sb.append(fmtTs(t[base]))                                  // [mm:ss.xx] начало строки
+        for (wi in words.indices) {
+            sb.append('<').append(fmtTimeShort(t[base + wi])).append('>').append(words[wi])
+            if (wi < words.size - 1) sb.append(' ')
+        }
+        sb.append('\n')
+    }
+    return sb.toString().trimEnd()
 }

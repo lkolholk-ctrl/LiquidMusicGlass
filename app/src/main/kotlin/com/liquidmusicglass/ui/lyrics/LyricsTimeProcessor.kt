@@ -111,12 +111,45 @@ class LyricsTimeProcessor(
     init {
         val fills = ArrayList<LineFill>(lyrics.lines.size)
         for ((idx, line) in lyrics.lines.withIndex()) {
-            val start = line.timeMs
             val next = lyrics.lines.getOrNull(idx + 1)?.timeMs
-            val text = line.text.replace(DUET_TAG, "").trim()
-            fills.add(buildLineFill(start, next, text))
+            val fill = if (line.words.isNotEmpty()) {
+                // Word-level (Enhanced LRC): закрас идёт по таймкодам слов (караоке).
+                buildWordLineFill(line, next)
+            } else {
+                val text = line.text.replace(DUET_TAG, "").trim()
+                buildLineFill(line.timeMs, next, text)
+            }
+            fills.add(fill)
         }
         lineFills = fills
+    }
+
+    /** Таймлайн заливки строки по ПОСЛОВНЫМ таймкодам (Enhanced LRC). */
+    private fun buildWordLineFill(line: LyricsParser.LyricLine, nextStartMs: Long?): LineFill {
+        val words = line.words
+        val spans = ArrayList<WordSpan>(words.size)
+        var charPos = 0
+        for ((i, w) in words.withIndex()) {
+            val start = w.timeMs
+            val end = if (i + 1 < words.size) words[i + 1].timeMs
+                      else (nextStartMs ?: (start + LAST_LINE_MS))
+            // длина слова + пробел после (кроме последнего) — закрас «течёт» и через пробел
+            val len = (w.text.length + if (i < words.size - 1) 1 else 0).coerceAtLeast(1)
+            spans.add(WordSpan(charPos, len, start, end.coerceAtLeast(start + 1)))
+            charPos += len
+        }
+        val totalChars = charPos.coerceAtLeast(1)
+        val lastEnd = spans.lastOrNull()?.endMs ?: (line.timeMs + LAST_LINE_MS)
+        val estMs = (lastEnd - line.timeMs).coerceAtLeast(1L)
+        return LineFill(
+            startMs = line.timeMs,
+            nextStartMs = nextStartMs ?: lastEnd,
+            hasNext = nextStartMs != null,
+            totalChars = totalChars,
+            estMs = estMs,
+            segments = emptyList(),
+            wordTimeline = spans
+        )
     }
 
     /** Строит таймлайн заливки одной строки. */
@@ -206,8 +239,12 @@ class LyricsTimeProcessor(
         }
 
         val lf = lineFills[currentLine]
-        val now = (safePosition - lf.startMs).coerceAtLeast(0L)
-        _currentLineProgress.value = segmentProgress(lf, now).coerceIn(0f, 1f)
+        val progress = if (lf.wordTimeline != null) {
+            wordProgress(lf, safePosition)            // караоке по словам
+        } else {
+            segmentProgress(lf, (safePosition - lf.startMs).coerceAtLeast(0L))
+        }
+        _currentLineProgress.value = progress.coerceIn(0f, 1f)
 
         // Waiting: строка докрашена полностью И до следующей строки реальный разрыв.
         val fullyDrawnAt = lf.startMs + lf.estMs
@@ -240,6 +277,23 @@ class LyricsTimeProcessor(
             }
         }
         return 1f
+    }
+
+    /** Доля закрашенных символов строки по ПОСЛОВНЫМ таймкодам (абсолютная позиция). */
+    private fun wordProgress(lf: LineFill, posMs: Long): Float {
+        val spans = lf.wordTimeline ?: return 0f
+        var filled = 0f
+        for (w in spans) {
+            when {
+                posMs >= w.endMs -> filled = (w.charStart + w.charLen).toFloat()
+                posMs >= w.startMs -> {
+                    val f = (posMs - w.startMs).toFloat() / (w.endMs - w.startMs).coerceAtLeast(1L)
+                    return ((w.charStart + w.charLen * f.coerceIn(0f, 1f)) / lf.totalChars).coerceIn(0f, 1f)
+                }
+                else -> return (w.charStart.toFloat() / lf.totalChars).coerceIn(0f, 1f)
+            }
+        }
+        return (filled / lf.totalChars).coerceIn(0f, 1f)
     }
 
     /** Binary search по стартам строк — только при ручной перемотке. */
@@ -295,6 +349,14 @@ class LyricsTimeProcessor(
         val holdMs: Long
     )
 
+    /** Слово с позицией в символах строки и временным диапазоном (Enhanced LRC). */
+    private class WordSpan(
+        val charStart: Int,
+        val charLen: Int,
+        val startMs: Long,
+        val endMs: Long
+    )
+
     /** Предрасчитанный таймлайн заливки строки. */
     private class LineFill(
         val startMs: Long,
@@ -302,6 +364,8 @@ class LyricsTimeProcessor(
         val hasNext: Boolean,
         val totalChars: Int,
         val estMs: Long,
-        val segments: List<Segment>
+        val segments: List<Segment>,
+        /** Непусто → закрас по словам (караоке), а не по сегментно-пунктуационной модели. */
+        val wordTimeline: List<WordSpan>? = null
     )
 }
