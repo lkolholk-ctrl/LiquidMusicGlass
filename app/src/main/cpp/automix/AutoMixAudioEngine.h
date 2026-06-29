@@ -7,6 +7,8 @@
 #include <atomic>
 #include <memory>
 
+#include "AudioFxChain.h"
+
 namespace automix { class MediaCodecAudioSource; }
 
 /**
@@ -103,15 +105,22 @@ public:
      */
     bool prepareStretchB (double bpmA, double bpmB);
 
-    // ── Graphic equalizer (10 bands, applied to the final LOCAL mix) ─────────
-    // Octave-spaced peaking filters, gain ±12 dB each. Covers ALL local audio
-    // (single deck or an AutoMix crossfade), because it post-processes the mixed
-    // output. The main thread sets target gains; the audio thread recomputes
-    // coefficients only when they change — no cross-thread coefficient races.
+    // ── Professional audio FX chain (applied to the final LOCAL mix) ─────────
+    // Post-processes the mixed output, so it covers ALL local audio (single deck
+    // or an AutoMix crossfade). Implemented by AudioFxChain (RT-safe juce::dsp).
+    // These just forward to it; никакого влияния на AutoMix/RT/fast-path.
     static constexpr int kEqBands = 10;
-    void setEqEnabled  (bool enabled);
-    void setEqBandGain (int band, float gainDb);
-    void setEqBands    (const float* gainsDb, int count);
+    void setFxMasterEnabled (bool on);
+    void setPreampGainDb    (float db);
+    void setEqEnabled       (bool enabled);
+    void setEqBandGain      (int band, float gainDb);
+    void setEqBands         (const float* gainsDb, int count);
+    void setBassBoost       (bool on, float freqHz, float gainDb);
+    void setLoudnessEnabled (bool on);
+    void setCurrentVolume   (float v01);
+    void setStereoWidth     (float width);
+    void setCompressorFx    (bool on, float threshDb, float ratio, float attackMs, float releaseMs);
+    void setLimiterFx       (bool on, float threshDb, float releaseMs);
 
     // juce::AudioIODeviceCallback
     void audioDeviceAboutToStart (juce::AudioIODevice* device) override;
@@ -147,7 +156,6 @@ private:
     bool loadDeckFd (Deck& deck, int fd, long long offset, long long size);
     bool decodeFullPCM (const juce::String& path, juce::AudioBuffer<float>& out, double& rate);
     void clearDeckUnlocked (Deck& deck);
-    void recomputeEqCoeffs();   // audio-thread: rebuild biquad coeffs from gains
     Deck& deckRef (int index) { return index == 0 ? deckA : deckB; }
 
     juce::AudioDeviceManager deviceManager;
@@ -179,17 +187,10 @@ private:
     static constexpr float kBassCutoffHz = 150.0f;
     std::atomic<bool> bassSwapEnabled { true }; // off for Stage 7 overlap (A on Media3)
 
-    // Graphic EQ state. Gains + flags are atomics (main thread writes); coeffs,
-    // filter state, and the design-rate cache are touched ONLY by the audio
-    // thread, so they need no locking.
-    struct EqBiquad { float b0 { 1.0f }, b1 { 0.0f }, b2 { 0.0f }, a1 { 0.0f }, a2 { 0.0f }; };
-    std::array<std::atomic<float>, (size_t) kEqBands> eqGainsDb; // init 0 in ctor
-    std::atomic<bool> eqEnabled { false };
-    std::atomic<bool> eqDirty   { true };
-    std::array<EqBiquad, (size_t) kEqBands> eqCoeffs {};
-    std::array<std::array<float, 2>, (size_t) kEqBands> eqZ1 {}, eqZ2 {}; // [band][ch]
-    bool   eqWasEnabled  { false };  // audio-thread only: detect enable edge
-    double eqDesignedRate { 0.0 };   // audio-thread only: recompute on rate change
+    // Профессиональная DSP-цепочка (Preamp→EQ→Bass→Loudness→Width→Comp→Limiter),
+    // применяется к уже сведённому локальному миксу. Вся обработка и RT-безопасные
+    // апдейты коэффициентов — внутри AudioFxChain.
+    AudioFxChain audioFx;
 
     std::atomic<bool> initialised { false };
     std::atomic<bool> toneOn { false };

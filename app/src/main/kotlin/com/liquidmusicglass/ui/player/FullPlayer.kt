@@ -825,6 +825,7 @@ fun FullPlayer(
                             if (newStep != lastVolumeStep[0]) {
                                 lastVolumeStep[0] = newStep
                                 audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, newStep, 0)
+                                com.liquidmusicglass.engine.AudioFxController.refreshSystemVolume()
                             }
                         },
                         backdrop = playerBackdrop,

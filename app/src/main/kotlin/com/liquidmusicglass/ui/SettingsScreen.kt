@@ -160,8 +160,8 @@ fun SettingsScreen(
                 )
                 PlainDivider()
                 SettingsActionItem(
-                    title = "Equalizer",
-                    subtitle = "Bass Boost, Surround, Presets",
+                    title = "Audio",
+                    subtitle = "EQ, Bass, Loudness, Compressor, Limiter",
                     icon = Icons.Rounded.Equalizer,
                     onClick = onOpenEqualizer
                 )

@@ -94,6 +94,7 @@ add_library(
     automix_juce
     SHARED
     automix/AutoMixAudioEngine.cpp
+    automix/AudioFxChain.cpp
     automix/AutoMixJni.cpp
     automix/MediaCodecDecoder.cpp
     automix/MediaCodecAudioSource.cpp

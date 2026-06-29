@@ -81,8 +81,8 @@ object AutoMixNativeEngine {
         }
         initialised = ok
         // Движок поднялся (лениво, на первом проигрывании) — переотправляем
-        // сохранённые настройки эквалайзера, иначе он стартует «плоским».
-        if (ok) runCatching { com.liquidmusicglass.engine.EqualizerController.applyToEngine() }
+        // сохранённые настройки аудио-обработки, иначе старт «плоский».
+        if (ok) runCatching { com.liquidmusicglass.engine.AudioFxController.applyToEngine() }
         return ok
     }
 
@@ -204,6 +204,50 @@ object AutoMixNativeEngine {
     fun setEqBands(gainsDb: FloatArray) {
         if (!isLoaded || !initialised) return
         runCatching { nativeSetEqBands(gainsDb) }.onFailure { Log.w(TAG, "nativeSetEqBands failed", it) }
+    }
+
+    // ── Профессиональная FX-цепочка (Preamp→EQ→Bass→Loudness→Width→Comp→Limiter) ──
+
+    @Synchronized fun fxSetMasterEnabled(on: Boolean) {
+        if (!isLoaded || !initialised) return
+        runCatching { nativeFxSetMasterEnabled(on) }.onFailure { Log.w(TAG, "fxMaster failed", it) }
+    }
+
+    @Synchronized fun fxSetPreampGainDb(db: Float) {
+        if (!isLoaded || !initialised) return
+        runCatching { nativeFxSetPreampGainDb(db) }.onFailure { Log.w(TAG, "fxPreamp failed", it) }
+    }
+
+    @Synchronized fun fxSetBassBoost(on: Boolean, freqHz: Float, gainDb: Float) {
+        if (!isLoaded || !initialised) return
+        runCatching { nativeFxSetBassBoost(on, freqHz, gainDb) }.onFailure { Log.w(TAG, "fxBass failed", it) }
+    }
+
+    @Synchronized fun fxSetLoudnessEnabled(on: Boolean) {
+        if (!isLoaded || !initialised) return
+        runCatching { nativeFxSetLoudnessEnabled(on) }.onFailure { Log.w(TAG, "fxLoud failed", it) }
+    }
+
+    /** Текущая системная громкость (0..1) — для loudness-компенсации. Зовётся часто, не @Synchronized. */
+    fun fxSetCurrentVolume(v01: Float) {
+        if (!isLoaded || !initialised) return
+        runCatching { nativeFxSetCurrentVolume(v01) }
+    }
+
+    @Synchronized fun fxSetStereoWidth(width: Float) {
+        if (!isLoaded || !initialised) return
+        runCatching { nativeFxSetStereoWidth(width) }.onFailure { Log.w(TAG, "fxWidth failed", it) }
+    }
+
+    @Synchronized fun fxSetCompressor(on: Boolean, threshDb: Float, ratio: Float, attackMs: Float, releaseMs: Float) {
+        if (!isLoaded || !initialised) return
+        runCatching { nativeFxSetCompressor(on, threshDb, ratio, attackMs, releaseMs) }
+            .onFailure { Log.w(TAG, "fxComp failed", it) }
+    }
+
+    @Synchronized fun fxSetLimiter(on: Boolean, threshDb: Float, releaseMs: Float) {
+        if (!isLoaded || !initialised) return
+        runCatching { nativeFxSetLimiter(on, threshDb, releaseMs) }.onFailure { Log.w(TAG, "fxLimiter failed", it) }
     }
 
     // ── Stage 8: full LOCAL player (ping-pong decks) ────────────────────────
@@ -360,6 +404,14 @@ object AutoMixNativeEngine {
     private external fun nativeSetEqEnabled(enabled: Boolean)
     private external fun nativeSetEqBandGain(band: Int, gainDb: Float)
     private external fun nativeSetEqBands(gainsDb: FloatArray)
+    private external fun nativeFxSetMasterEnabled(on: Boolean)
+    private external fun nativeFxSetPreampGainDb(db: Float)
+    private external fun nativeFxSetBassBoost(on: Boolean, freqHz: Float, gainDb: Float)
+    private external fun nativeFxSetLoudnessEnabled(on: Boolean)
+    private external fun nativeFxSetCurrentVolume(v01: Float)
+    private external fun nativeFxSetStereoWidth(width: Float)
+    private external fun nativeFxSetCompressor(on: Boolean, threshDb: Float, ratio: Float, attackMs: Float, releaseMs: Float)
+    private external fun nativeFxSetLimiter(on: Boolean, threshDb: Float, releaseMs: Float)
     private external fun nativeLoadIncoming(path: String): Boolean
     private external fun nativeLoadIncomingFd(fd: Int, offset: Long, length: Long): Boolean
     private external fun nativeStartTransition(durationMs: Double, entryMs: Double)

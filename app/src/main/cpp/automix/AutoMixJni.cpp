@@ -178,6 +178,67 @@ Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeSetEqBands(
     env->ReleaseFloatArrayElements (gains, vals, JNI_ABORT); // read-only, don't copy back
 }
 
+// ── Профессиональная FX-цепочка ──────────────────────────────────────────────
+
+JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeFxSetMasterEnabled(
+        JNIEnv* /*env*/, jobject /*thiz*/, jboolean on)
+{
+    if (gEngine != nullptr) gEngine->setFxMasterEnabled (on == JNI_TRUE);
+}
+
+JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeFxSetPreampGainDb(
+        JNIEnv* /*env*/, jobject /*thiz*/, jfloat db)
+{
+    if (gEngine != nullptr) gEngine->setPreampGainDb ((float) db);
+}
+
+JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeFxSetBassBoost(
+        JNIEnv* /*env*/, jobject /*thiz*/, jboolean on, jfloat freqHz, jfloat gainDb)
+{
+    if (gEngine != nullptr) gEngine->setBassBoost (on == JNI_TRUE, (float) freqHz, (float) gainDb);
+}
+
+JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeFxSetLoudnessEnabled(
+        JNIEnv* /*env*/, jobject /*thiz*/, jboolean on)
+{
+    if (gEngine != nullptr) gEngine->setLoudnessEnabled (on == JNI_TRUE);
+}
+
+JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeFxSetCurrentVolume(
+        JNIEnv* /*env*/, jobject /*thiz*/, jfloat v01)
+{
+    if (gEngine != nullptr) gEngine->setCurrentVolume ((float) v01);
+}
+
+JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeFxSetStereoWidth(
+        JNIEnv* /*env*/, jobject /*thiz*/, jfloat width)
+{
+    if (gEngine != nullptr) gEngine->setStereoWidth ((float) width);
+}
+
+JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeFxSetCompressor(
+        JNIEnv* /*env*/, jobject /*thiz*/, jboolean on,
+        jfloat threshDb, jfloat ratio, jfloat attackMs, jfloat releaseMs)
+{
+    if (gEngine != nullptr)
+        gEngine->setCompressorFx (on == JNI_TRUE, (float) threshDb, (float) ratio,
+                                  (float) attackMs, (float) releaseMs);
+}
+
+JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeFxSetLimiter(
+        JNIEnv* /*env*/, jobject /*thiz*/, jboolean on, jfloat threshDb, jfloat releaseMs)
+{
+    if (gEngine != nullptr) gEngine->setLimiterFx (on == JNI_TRUE, (float) threshDb, (float) releaseMs);
+}
+
 // ── Stage 8: full LOCAL player (ping-pong decks) ───────────────────────────
 
 JNIEXPORT jboolean JNICALL

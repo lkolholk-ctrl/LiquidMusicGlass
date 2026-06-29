@@ -66,7 +66,7 @@ import com.liquidmusicglass.ui.screens.SearchScreen
 import com.liquidmusicglass.ui.screens.LibraryScreen
 import com.liquidmusicglass.ui.screens.AlbumDetailScreen
 import com.liquidmusicglass.ui.screens.ArtistDetailScreen
-import com.liquidmusicglass.ui.screens.EqualizerScreen
+import com.liquidmusicglass.ui.screens.AudioFxScreen
 import com.liquidmusicglass.ui.screens.NewScreen
 import com.liquidmusicglass.ui.screens.PlaylistDetailScreen
 import com.liquidmusicglass.ui.screens.SettingsScreen
@@ -338,7 +338,7 @@ fun AppRoot() {
                     animationSpec = spring(dampingRatio = 0.92f, stiffness = 400f)
                 ) + fadeOut(tween(150))
             ) {
-                EqualizerScreen(onBack = { equalizerOpen = false })
+                AudioFxScreen(onBack = { equalizerOpen = false })
             }
 
 
