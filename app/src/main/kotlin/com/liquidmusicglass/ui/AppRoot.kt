@@ -94,6 +94,7 @@ fun AppRoot() {
     var detailAlbumId by remember { mutableStateOf<String?>(null) }
     var detailArtistId by remember { mutableStateOf<String?>(null) }
     var equalizerOpen by remember { mutableStateOf(false) }
+    var lrcPublishTrack by remember { mutableStateOf<com.liquidmusicglass.engine.Track?>(null) }
     var playlistDetailId by remember { mutableStateOf<String?>(null) }
     var authOpen by remember { mutableStateOf(false) }
     var profileOpen by remember { mutableStateOf(false) }
@@ -165,8 +166,9 @@ fun AppRoot() {
     val rootBackdrop: LayerBackdrop = rememberLayerBackdrop()
 
     // Back handler: close detail screens first, then player, then app
-    BackHandler(enabled = detailAlbumId != null || detailArtistId != null || equalizerOpen || playlistDetailId != null || settingsOpen || authOpen || profileOpen || youtubeSearchOpen || expandProgress.value > 0.5f) {
+    BackHandler(enabled = lrcPublishTrack != null || detailAlbumId != null || detailArtistId != null || equalizerOpen || playlistDetailId != null || settingsOpen || authOpen || profileOpen || youtubeSearchOpen || expandProgress.value > 0.5f) {
         when {
+            lrcPublishTrack != null -> lrcPublishTrack = null
             settingsOpen -> settingsOpen = false
             authOpen -> authOpen = false
             profileOpen -> profileOpen = false
@@ -437,8 +439,29 @@ fun AppRoot() {
             onOpenSettings = { settingsOpen = true },
             onNavigateToArtist = { artistId ->
                 detailArtistId = artistId
-            }
+            },
+            onPublishLyrics = { track -> lrcPublishTrack = track }
         )
+        }
+
+        // ── Публикация текста в LRCLIB (открывается из меню трека в плеере) ──
+        AnimatedVisibility(
+            visible = lrcPublishTrack != null,
+            enter = slideInVertically(
+                initialOffsetY = { it },
+                animationSpec = spring(dampingRatio = 0.88f, stiffness = 300f)
+            ) + fadeIn(tween(200)),
+            exit = slideOutVertically(
+                targetOffsetY = { it },
+                animationSpec = spring(dampingRatio = 0.92f, stiffness = 400f)
+            ) + fadeOut(tween(150))
+        ) {
+            lrcPublishTrack?.let { track ->
+                com.liquidmusicglass.ui.screens.LrcPublishScreen(
+                    track = track,
+                    onBack = { lrcPublishTrack = null }
+                )
+            }
         }
 
         AnimatedVisibility(
