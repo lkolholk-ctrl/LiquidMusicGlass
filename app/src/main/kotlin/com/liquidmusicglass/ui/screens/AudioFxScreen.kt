@@ -32,13 +32,26 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.ui.graphics.Brush
 import com.liquidmusicglass.engine.AudioFxController
 import com.liquidmusicglass.ui.liquid.LiquidSlider
 import com.liquidmusicglass.ui.liquid.LiquidToggle
 import com.liquidmusicglass.ui.theme.LiquidColors
 import com.liquidmusicglass.ui.theme.LiquidTheme
+import com.kyant.backdrop.Backdrop
+import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import kotlin.math.roundToInt
+
+/**
+ * Backdrop для стеклянных ползунков. По правилу автора Kyant: стекло (drawBackdrop)
+ * НЕЛЬЗЯ вкладывать внутрь layer-backdrop, который оно преломляет — иначе цикл в
+ * дереве рендера → рекурсия → краш RenderThread. Поэтому захваченный фон лежит в
+ * слое-СИБЛИНГЕ (рядом), а ползунки преломляют его, НЕ находясь внутри него.
+ */
+private val LocalFxBackdrop = compositionLocalOf<Backdrop?> { null }
 
 @Composable
 fun AudioFxScreen(onBack: () -> Unit) {
@@ -46,8 +59,20 @@ fun AudioFxScreen(onBack: () -> Unit) {
     val scroll = rememberScrollState()
 
     val master by AudioFxController.masterEnabled.collectAsState()
+    val screenBackdrop = rememberLayerBackdrop()
 
     Box(modifier = Modifier.fillMaxSize().background(lc.settingsBackground)) {
+        // СЛОЙ-СИБЛИНГ: захватываем фон (лёгкий градиент) в screenBackdrop. Ползунки
+        // его преломляют, НО сами тут НЕ лежат (иначе backdrop вложен в себя → краш).
+        Spacer(
+            modifier = Modifier.fillMaxSize().layerBackdrop(screenBackdrop).background(
+                Brush.verticalGradient(
+                    listOf(lc.accent.copy(alpha = 0.10f), Color.Transparent, lc.accent.copy(alpha = 0.06f))
+                )
+            )
+        )
+        // ФОРЕГРАУНД-СИБЛИНГ: контент с ползунками (преломляет screenBackdrop, beside).
+        CompositionLocalProvider(LocalFxBackdrop provides screenBackdrop) {
         Column(
             modifier = Modifier.fillMaxSize().verticalScroll(scroll).padding(horizontal = 20.dp)
         ) {
@@ -84,6 +109,7 @@ fun AudioFxScreen(onBack: () -> Unit) {
                 }
             }
             Spacer(modifier = Modifier.height(40.dp))
+        }
         }
     }
 }
@@ -130,7 +156,8 @@ private fun EqSection(lc: LiquidColors, master: Boolean) {
 /** Горизонтальная полоса EQ: [частота] [LiquidSlider со стеклом] [дБ]. */
 @Composable
 private fun EqBandRow(band: Int, gain: Float, label: String, active: Boolean, lc: LiquidColors) {
-    val backdrop = rememberLayerBackdrop()   // СВОЙ слой — без самоссылки (иначе HWUI overflow)
+    val fallback = rememberLayerBackdrop()
+    val backdrop = LocalFxBackdrop.current ?: fallback   // сиблинг-слой (beside), не вложенный
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).alpha(if (active) 1f else 0.5f),
         verticalAlignment = Alignment.CenterVertically
@@ -292,7 +319,8 @@ private fun FxSlider(
     value: Float, range: ClosedFloatingPointRange<Float>, enabled: Boolean,
     onChange: (Float) -> Unit, lc: LiquidColors
 ) {
-    val backdrop = rememberLayerBackdrop()   // СВОЙ слой — без самоссылки (иначе HWUI overflow)
+    val fallback = rememberLayerBackdrop()
+    val backdrop = LocalFxBackdrop.current ?: fallback   // сиблинг-слой (beside), не вложенный
     Box(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp).alpha(if (enabled) 1f else 0.5f)) {
         LiquidSlider(
             value = { value },
