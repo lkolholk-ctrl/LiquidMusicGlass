@@ -6,35 +6,27 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.unit.dp
-import com.liquidmusicglass.ui.glass.AlbumArtImage
 import com.liquidmusicglass.ui.glass.AlbumColors
 
-import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 
 import androidx.compose.ui.graphics.toArgb
 
 /**
- * Apple Music стиль — статичный градиентный фон из обложки.
+ * Apple Music стиль — статичный градиентный фон из палитры обложки.
  *
- * Техника:
- * 1. Несколько копий обложки разных размеров
- * 2. Тяжёлый blur поверх всего
- * 3. Gradient overlay для глубины
- *
- * Анимация (вращение/дрифт) убрана — фон статичный.
- * Плавный переход (crossfade) цветов и изображений при смене песен.
+ * Важно для локального JUCE-воспроизведения: фон не декодирует bitmap. Раньше тут
+ * было три AlbumArtImage + blur-слоя; для локальных треков каждый слой запускал
+ * MediaMetadataRetriever/loadThumbnail, и открытие FullPlayer из уведомления могло
+ * дать пачку тяжёлых декодов + GPU blur на первом кадре. Это забивало main/render
+ * и приводило к ANR, а аудио в это время циклично повторяло последний блок.
  */
 @Composable
+@Suppress("UNUSED_PARAMETER")
 fun AnimatedPlayerBackground(
     albumArtUri: Uri?,
     coverUrl: String? = null,
@@ -69,81 +61,21 @@ fun AnimatedPlayerBackground(
         label = "boostedLightVibrant"
     )
 
-    data class ArtState(
-        val albumArtUri: Uri?,
-        val coverUrl: String?,
-        val audioFileUri: Uri?,
-        val albumId: Long
-    )
-    val artState = remember(albumArtUri, coverUrl, audioFileUri, albumId) {
-        ArtState(albumArtUri, coverUrl, audioFileUri, albumId)
-    }
-
     Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
-
-        // ── Crossfade for static background images to prevent abrupt pops ──
-        Crossfade(
-            targetState = artState,
-            animationSpec = tween(durationMillis = 1000),
-            modifier = Modifier.fillMaxSize(),
-            label = "backgroundCrossfade"
-        ) { state ->
-            Box(modifier = Modifier.fillMaxSize()) {
-                // ── Layer 1: базовый слой, заполняет всё ──
-                AlbumArtImage(
-                    uri = state.albumArtUri,
-                    coverUrl = state.coverUrl,
-                    audioFileUri = state.audioFileUri,
-                    albumId = state.albumId,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer {
-                            scaleX = 2.2f
-                            scaleY = 2.2f
-                            alpha = 0.70f
-                        }
-                        .blur(60.dp)
+        // ── Base palette field. Cheap and deterministic on first frame. ──
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(
+                            boostedLightVibrant.copy(alpha = 0.52f),
+                            boostedVibrant.copy(alpha = 0.36f),
+                            Color.Black
+                        )
+                    )
                 )
-
-                // ── Layer 2: средний слой ──
-                AlbumArtImage(
-                    uri = state.albumArtUri,
-                    coverUrl = state.coverUrl,
-                    audioFileUri = state.audioFileUri,
-                    albumId = state.albumId,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer {
-                            scaleX = 1.5f
-                            scaleY = 1.5f
-                            alpha = 0.60f
-                        }
-                        .blur(50.dp)
-                )
-
-                // ── Layer 3: яркий акцент ──
-                AlbumArtImage(
-                    uri = state.albumArtUri,
-                    coverUrl = state.coverUrl,
-                    audioFileUri = state.audioFileUri,
-                    albumId = state.albumId,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer {
-                            scaleX = 1.1f
-                            scaleY = 1.1f
-                            alpha = 0.50f
-                        }
-                        .blur(40.dp)
-                )
-            }
-        }
+        )
 
         // ── Saturation boost — цветной слой от palette ──
         Box(
@@ -203,4 +135,3 @@ private fun rememberSaturationBoost(color: Color, boost: Float = 2.5f): Color {
         androidx.compose.ui.graphics.Color(android.graphics.Color.HSVToColor(hsv))
     }
 }
-

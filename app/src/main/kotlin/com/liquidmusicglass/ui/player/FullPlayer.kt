@@ -109,14 +109,10 @@ import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
-import com.kyant.backdrop.drawBackdrop
-import com.kyant.backdrop.effects.blur
-import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.effects.vibrancy
 import com.kyant.backdrop.highlight.Highlight
 import com.kyant.backdrop.shadow.InnerShadow
 import com.kyant.backdrop.shadow.Shadow
-import com.kyant.shapes.Capsule
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.UiLogger
 import com.liquidmusicglass.api.icm.IcmRepository
@@ -210,25 +206,6 @@ fun FullPlayer(
     val swipeOffsetX = remember { Animatable(0f) }
     var swipeTriggered by remember { mutableStateOf(false) }
 
-    // Предзагрузка AGSL шейдеров — 1x1dp invisible, компилирует blur/lens/chromatic при первом compose
-    val shadersWarmedUp = remember { mutableStateOf(false) }
-    if (!shadersWarmedUp.value) {
-        Box(
-            Modifier
-                .size(1.dp)
-                .graphicsLayer { alpha = 0f }
-                .drawBackdrop(
-                    backdrop = playerBackdrop,
-                    shape = { Capsule() },
-                    effects = {
-                        blur(1f)
-                        lens(1f, 1f, chromaticAberration = true)
-                    }
-                )
-        )
-        LaunchedEffect(Unit) { shadersWarmedUp.value = true }
-    }
-
     val trackProgressState = remember { mutableFloatStateOf(0f) }
     var userDragFraction by remember { mutableStateOf<Float?>(null) }
 
@@ -264,6 +241,8 @@ fun FullPlayer(
 
     val controlsAlpha = ((expandProgress - 0.4f) / 0.6f).coerceIn(0f, 1f)
     val bgAlpha = (expandProgress * 1.5f).coerceIn(0f, 1f)
+    val controlsMounted = expandProgress > 0.35f || showLyrics || showQueue ||
+        showAirPlay || showDebugPanel || showArtistSheet || showTrackMenu
 
     // ── Morphing parameters ──
     // Album art: 44dp → fullscreen, corners 10dp → 0dp
@@ -457,7 +436,7 @@ fun FullPlayer(
         // Видны всегда, когда лирика и очередь закрыты. Когда открыты — только
         // если controlsVisible (по тапу), и автоматически прячутся через 3 сек.
         AnimatedVisibility(
-            visible = (!showLyrics && !showQueue) || controlsVisible,
+            visible = controlsMounted && ((!showLyrics && !showQueue) || controlsVisible),
             enter = fadeIn(tween(250)),
             exit = fadeOut(tween(250))
         ) {

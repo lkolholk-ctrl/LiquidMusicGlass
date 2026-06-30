@@ -36,6 +36,8 @@ import kotlinx.coroutines.withContext
 
 /** Минимальный размер стороны чтобы считать обложку HQ */
 private const val MIN_HQ_SIZE = 500
+/** Верхняя граница декода: FullPlayer не должен поднимать 2048+ bitmap и выбивать RAM. */
+private const val MAX_ART_SIZE = 1024
 
 /**
  * Универсальный компонент для отображения обложки альбома.
@@ -79,9 +81,20 @@ fun AlbumArtImage(
             loadFailed = true
             return@LaunchedEffect
         }
+
         val result = withContext(Dispatchers.IO) {
-            // Собираем все кандидаты, берём самый крупный
-            val candidates = mutableListOf<Bitmap>()
+            var best: Bitmap? = null
+
+            fun consider(candidate: Bitmap?) {
+                if (candidate == null) return
+                val current = best
+                if (current == null || candidate.width * candidate.height > current.width * current.height) {
+                    if (current != null && current !== candidate) current.recycle()
+                    best = candidate
+                } else {
+                    candidate.recycle()
+                }
+            }
 
             // 1) MMR — embedded picture из аудиофайла (обычно оригинал)
             audioFileUri?.let { fileUri ->
@@ -91,11 +104,7 @@ fun AlbumArtImage(
                         try {
                             retriever.setDataSource(pfd.fileDescriptor)
                             retriever.embeddedPicture?.let { bytes ->
-                                val opts = BitmapFactory.Options().apply {
-                                    inPreferredConfig = Bitmap.Config.ARGB_8888
-                                }
-                                BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
-                                    ?.let { candidates.add(it) }
+                                consider(decodeSampledByteArray(bytes, MAX_ART_SIZE))
                             }
                         } finally {
                             retriever.release()
@@ -108,8 +117,8 @@ fun AlbumArtImage(
             audioFileUri?.let { fileUri ->
                 try {
                     val bmp = context.contentResolver
-                        .loadThumbnail(fileUri, Size(2048, 2048), null)
-                    candidates.add(bmp)
+                        .loadThumbnail(fileUri, Size(MAX_ART_SIZE, MAX_ART_SIZE), null)
+                    consider(bmp)
                 } catch (_: Exception) {}
             }
 
@@ -120,8 +129,8 @@ fun AlbumArtImage(
                         MediaStore.Audio.Albums.EXTERNAL_CONTENT_URI, albumId
                     )
                     val bmp = context.contentResolver
-                        .loadThumbnail(albumUri, Size(2048, 2048), null)
-                    candidates.add(bmp)
+                        .loadThumbnail(albumUri, Size(MAX_ART_SIZE, MAX_ART_SIZE), null)
+                    consider(bmp)
                 } catch (_: Exception) {}
             }
 
@@ -131,21 +140,17 @@ fun AlbumArtImage(
                     context.contentResolver.openInputStream(artUri)?.use { stream ->
                         val opts = BitmapFactory.Options().apply {
                             inPreferredConfig = Bitmap.Config.ARGB_8888
+                            inSampleSize = 2
                         }
                         BitmapFactory.decodeStream(stream, null, opts)
-                            ?.let { candidates.add(it) }
+                            ?.let { consider(it) }
                     }
                 } catch (_: Exception) {}
             }
 
-            // Берём самый большой по площади
-            val best = candidates.maxByOrNull { it.width * it.height }
-
-            // Recycle остальных
-            candidates.forEach { if (it !== best) it.recycle() }
-
             best?.asImageBitmap()
         }
+
         if (result != null) {
             bitmap = result
         } else {
@@ -165,6 +170,21 @@ fun AlbumArtImage(
     } else if (loadFailed) {
         PlaceholderArt(modifier = modifier)
     }
+}
+
+private fun decodeSampledByteArray(bytes: ByteArray, maxSide: Int): Bitmap? {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+    var sample = 1
+    while ((bounds.outWidth / sample) > maxSide || (bounds.outHeight / sample) > maxSide) {
+        sample *= 2
+    }
+    val opts = BitmapFactory.Options().apply {
+        inPreferredConfig = Bitmap.Config.ARGB_8888
+        inSampleSize = sample.coerceAtLeast(1)
+    }
+    return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
 }
 
 @Composable
