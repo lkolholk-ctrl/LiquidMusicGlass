@@ -78,5 +78,10 @@ jobs:
               --prerelease \
               --target "${GITHUB_SHA}"
           fi
+          gh release edit "$TAG" \
+            --title "Release build · ${GITHUB_REF_NAME}" \
+            --notes "Automated release build from ${GITHUB_SHA}" \
+            --prerelease \
+            --target "${GITHUB_SHA}"
           gh release upload "$TAG" "$OUT" --clobber
           echo "APK published to release '$TAG'."
