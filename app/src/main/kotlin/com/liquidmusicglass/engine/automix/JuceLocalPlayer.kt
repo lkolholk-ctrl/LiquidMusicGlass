@@ -333,7 +333,11 @@ class JuceLocalPlayer(
         // стартует по флагу playWhenReadyFlag по завершении.
         loadHandler.post {
             if (released) return@post
-            if (playWhenReady) engine.playCurrent() else engine.pause()
+            if (playWhenReady) {
+                if (playWhenReadyFlag) engine.playCurrent()
+            } else {
+                if (!playWhenReadyFlag) engine.pause()
+            }
         }
         invalidateState()
         return Futures.immediateVoidFuture()
