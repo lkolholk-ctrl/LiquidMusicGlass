@@ -211,11 +211,6 @@ fun LyricsScreen(
     val lineEffect = if (isWordLevel) wordEffect else LyricsFxController.WordEffect.FILL
     val sungTweenMs = if (isWordLevel) (90f + wordSmoothness * 360f).toInt() else 180
 
-    // Получаем слова текущей строки для пословного караоке
-    val currentWords = remember(currentLineIndex, smoothPositionMs) {
-        timeProcessor?.getCurrentLineWords() ?: emptyList()
-    }
-
     // Waiting считает сам LyricsTimeProcessor (сегментная модель): строка докрашена
     // ПОЛНОСТЬЮ + до следующей строки реальный разрыв > WAIT_GAP_MS. VAD выключен.
     val showWaiting = isInterlude
@@ -321,7 +316,7 @@ fun LyricsScreen(
                         item { Spacer(Modifier.height(100.dp)) }
 
                         // Waiting dots before first line starts
-                        if (lyrics.isSynced && smoothPositionMs < lyrics.lines.firstOrNull()?.timeMs ?: 0L) {
+                        if (lyrics.isSynced && currentLineIndex < 0) {
                             item {
                                 Box(
                                     modifier = Modifier

@@ -234,12 +234,13 @@ object TagEditor {
     }.getOrNull()
 
     private fun copyToTemp(context: Context, uri: Uri, ext: String): File? {
+        val tmp = File(context.cacheDir, "tagedit_${System.nanoTime()}.$ext")
         return try {
-            val tmp = File(context.cacheDir, "tagedit_${System.nanoTime()}.$ext")
-            val input = context.contentResolver.openInputStream(uri) ?: return null
+            val input = context.contentResolver.openInputStream(uri) ?: run { tmp.delete(); return null }
             input.use { inp -> tmp.outputStream().use { inp.copyTo(it) } }
             tmp
         } catch (e: Exception) {
+            tmp.delete()              // не оставляем частичный temp в cache при ошибке
             null
         }
     }
