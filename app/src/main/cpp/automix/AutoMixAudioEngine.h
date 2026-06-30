@@ -178,6 +178,8 @@ private:
     // Поток предчтения соответствующего дека (для setSource буферизации).
     juce::TimeSliceThread& threadForDeck (Deck& d) { return (&d == &deckA) ? readAheadThreadA : readAheadThreadB; }
     juce::AudioBuffer<float> scratchA, scratchB; // per-block pull buffers (audio thread)
+    juce::AudioBuffer<float> holdA, holdB;       // last good block: masks short deck-lock misses
+    std::array<std::atomic<bool>, 2> holdValid { { {false}, {false} } };
 
     // Lock-free transport reporting. The audio callback publishes each deck's
     // position/length into these atomics (under that deck's lock); the main-thread

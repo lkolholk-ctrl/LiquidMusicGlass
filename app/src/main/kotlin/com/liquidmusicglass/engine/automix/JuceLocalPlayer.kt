@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import com.liquidmusicglass.engine.PlayerController
@@ -77,6 +78,8 @@ class JuceLocalPlayer(
     @Volatile private var autoMixAnalyzedIndex = -1
     private val AUTOMIX_LEAD_MS = 40_000L   // окно до конца трека для анализа (хватает на свод ≤30с)
     private val TICK_MS = 100L              // точка свода должна ловиться плотнее, чем UI polling
+    private val STATE_TICK_MS = 500L        // MediaSession state не надо инвалидировать 10 раз/с
+    private var lastStateInvalidateMs = 0L
 
     // ── Stage 8c (ШАГ 2: РЕАЛЬНЫЙ СВОД) ──────────────────────────────────────
     // Когда модель сказала ready и подобрала параметры — у точки свода реально
@@ -104,7 +107,7 @@ class JuceLocalPlayer(
             maybeAnalyzeForAutoMix()       // шаг 1: анализ пары моделью + план свода
             maybeRunAutoMixTransition()    // шаг 2: реальный кроссфейд по плану модели
             maybeAdvanceAtEnd()            // обычное переключение (если свода нет)
-            invalidateState()
+            invalidateStateFromTicker()
             handler.postDelayed(this, TICK_MS)
         }
     }
@@ -491,6 +494,13 @@ class JuceLocalPlayer(
         playlist.getOrNull(currentIndex)?.mediaId?.takeIf { it.isNotBlank() }?.let {
             PlayerController.onTrackChanged(it)
         }
+    }
+
+    private fun invalidateStateFromTicker() {
+        val now = SystemClock.uptimeMillis()
+        if (now - lastStateInvalidateMs < STATE_TICK_MS && !loading && transitionState == 0) return
+        lastStateInvalidateMs = now
+        invalidateState()
     }
 
     /**

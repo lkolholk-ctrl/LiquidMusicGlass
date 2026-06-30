@@ -77,6 +77,7 @@ namespace automix
         // by leftoverStart, compacted periodically to keep memory bounded.
         std::vector<float> leftBuf, rightBuf;
         size_t leftoverStart = 0;
+        size_t compactThresholdFrames = 1u << 16;
 
         juce::CriticalSection lock;         // read vs seek (both on the read-ahead thread)
 

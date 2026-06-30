@@ -115,6 +115,11 @@ bool MediaCodecAudioSource::configureFromExtractor()
     AMediaFormat_getInt32 (format, AMEDIAFORMAT_KEY_CHANNEL_COUNT, &ch);
     if (sr > 0) sampleRate  = (double) sr;
     outChannels = (ch > 0) ? ch : 2;
+    compactThresholdFrames = (size_t) juce::jmax (65536, (int) (sampleRate * 5.0));
+    const size_t reserveFrames = (size_t) juce::jmax ((int) compactThresholdFrames,
+                                                      (int) (sampleRate * 8.0));
+    leftBuf.reserve (reserveFrames);
+    rightBuf.reserve (reserveFrames);
 
     int64_t durationUs = 0;
     if (AMediaFormat_getInt64 (format, AMEDIAFORMAT_KEY_DURATION, &durationUs) && durationUs > 0)
@@ -268,7 +273,7 @@ void MediaCodecAudioSource::getNextAudioBlock (const juce::AudioSourceChannelInf
     }
 
     // Compact consumed prefix so the buffers don't grow without bound.
-    if (leftoverStart > (1u << 16))
+    if (leftoverStart > compactThresholdFrames)
     {
         leftBuf.erase  (leftBuf.begin(),  leftBuf.begin()  + (long) leftoverStart);
         rightBuf.erase (rightBuf.begin(), rightBuf.begin() + (long) leftoverStart);

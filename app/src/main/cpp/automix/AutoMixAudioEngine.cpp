@@ -22,6 +22,35 @@ namespace
         juce::CriticalSection& lock;
         bool locked;
     };
+
+    void copyLastGoodBlockOrClear (juce::AudioBuffer<float>& dst,
+                                   const juce::AudioBuffer<float>& lastGood,
+                                   int channels,
+                                   int samples,
+                                   bool audible,
+                                   bool valid)
+    {
+        if (! audible || ! valid || lastGood.getNumChannels() < channels || lastGood.getNumSamples() < samples)
+        {
+            dst.clear();
+            return;
+        }
+
+        for (int c = 0; c < channels; ++c)
+            dst.copyFrom (c, 0, lastGood, c, 0, samples);
+    }
+
+    void rememberLastGoodBlock (juce::AudioBuffer<float>& lastGood,
+                                const juce::AudioBuffer<float>& src,
+                                int channels,
+                                int samples)
+    {
+        if (lastGood.getNumChannels() < channels || lastGood.getNumSamples() < samples)
+            return;
+
+        for (int c = 0; c < channels; ++c)
+            lastGood.copyFrom (c, 0, src, c, 0, samples);
+    }
 }
 
 AutoMixAudioEngine::AutoMixAudioEngine()
@@ -63,8 +92,8 @@ bool AutoMixAudioEngine::init()
         return false;
     }
 
-    // Буфер под текущий маршрут: встроенный/проводной → 2×burst (low-latency
-    // fast-path/RT), Bluetooth → крупный буфер (BT высоколатентный, fast-path не
+    // Буфер под текущий маршрут: встроенный/проводной → умеренный low-latency
+    // буфер, Bluetooth → крупный буфер (BT высоколатентный, fast-path не
     // тянет). Детали — в applyBufferForRoute. На старте устройство уже открыто
     // initialiseWithDefaultDevices, поэтому реопен не форсируем.
     initialised.store (true);
@@ -101,8 +130,13 @@ void AutoMixAudioEngine::applyBufferForRoute (bool isBluetooth, bool forceReopen
         }
         else
         {
-            // Встроенный/проводной — держим low-latency fast-path/RT (2×burst).
-            target = (burst > 0) ? burst * 2 : (sizes.isEmpty() ? 1024 : sizes.getFirst());
+            // Встроенный/проводной — держим low-latency путь, но с запасом.
+            // 2×burst (~8-10 мс на многих телефонах) слишком хрупок для JUCE +
+            // MediaCodec + FX: при шторке/переключении приложений read-ahead и mixer
+            // получают короткий CPU stall, и fast-path уходит в underrun. Для музыки
+            // 20-30 мс системной задержки не критичны, зато Oboe перестаёт щёлкать.
+            target = (burst > 0) ? juce::jmax (burst * 4, 1024)
+                                 : (sizes.isEmpty() ? 1024 : sizes.getFirst());
         }
         if (! sizes.isEmpty())
             target = juce::jmax (target, sizes.getFirst());        // не ниже минимума устройства
@@ -158,6 +192,7 @@ void AutoMixAudioEngine::stopTone()  { toneOn.store (false); }
 //==============================================================================
 void AutoMixAudioEngine::clearDeckUnlocked (Deck& deck)
 {
+    holdValid[(size_t) (&deck == &deckA ? 0 : 1)].store (false, std::memory_order_release);
     deck.hasTrack.store (false);
     deck.transport.stop();
     deck.transport.setSource (nullptr);
@@ -551,6 +586,12 @@ void AutoMixAudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
     const int scratchSamples = juce::jmax (currentBlockSize * 4, 4096);
     scratchA.setSize (scratchChannels, scratchSamples, false, true, false);
     scratchB.setSize (scratchChannels, scratchSamples, false, true, false);
+    holdA.setSize (scratchChannels, scratchSamples, false, true, false);
+    holdB.setSize (scratchChannels, scratchSamples, false, true, false);
+    holdA.clear();
+    holdB.clear();
+    holdValid[0].store (false, std::memory_order_release);
+    holdValid[1].store (false, std::memory_order_release);
 
     // Bass-swap low-pass: same fixed coefficients for every deck/channel; only a
     // scalar changes at runtime, so there are no coefficient-swap clicks.
@@ -633,7 +674,9 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
 
     const int ch = juce::jmin (numOutputChannels, 8);
     if (numSamples > scratchA.getNumSamples() || numSamples > scratchB.getNumSamples()
-        || ch > scratchA.getNumChannels() || ch > scratchB.getNumChannels())
+        || numSamples > holdA.getNumSamples() || numSamples > holdB.getNumSamples()
+        || ch > scratchA.getNumChannels() || ch > scratchB.getNumChannels()
+        || ch > holdA.getNumChannels() || ch > holdB.getNumChannels())
     {
         output.clear();
         return;
@@ -647,20 +690,30 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
     const bool pullA = aHas && (active || bgA > 0.0001f);
     const bool pullB = bHas && (active || bgB > 0.0001f);
 
-    // Each deck under its OWN lock. tryEnter never blocks the realtime thread; if a
-    // deck is mid-swap (loading), we just silence THAT deck's scratch for this block
-    // (inaudible — an incoming deck enters at gain≈0). Position/length are published
-    // here too, so the lock-free getters stay current without ever contending.
+    // Each deck under its OWN lock. tryEnter never blocks the realtime thread. If an
+    // audible deck is briefly mid-swap/seek, reuse its previous good block instead of
+    // injecting hard zeroes; that turns a one-buffer contention spike into a short hold
+    // rather than a click/dropout. Incoming muted decks still clear to silence.
     {
         TryAudioLock la (deckA.mutationLock);
         if (la.locked)
         {
             reportedPosMs[0].store (deckA.transport.getCurrentPosition() * 1000.0, std::memory_order_relaxed);
             reportedLenMs[0].store (deckA.transport.getLengthInSeconds() * 1000.0, std::memory_order_relaxed);
-            if (pullA) { const juce::AudioSourceChannelInfo ia (&scratchA, 0, numSamples); deckA.transport.getNextAudioBlock (ia); }
-            else       scratchA.clear();
+            if (pullA)
+            {
+                const juce::AudioSourceChannelInfo ia (&scratchA, 0, numSamples);
+                deckA.transport.getNextAudioBlock (ia);
+                rememberLastGoodBlock (holdA, scratchA, ch, numSamples);
+                holdValid[0].store (true, std::memory_order_release);
+            }
+            else
+            {
+                scratchA.clear();
+            }
         }
-        else scratchA.clear();
+        else copyLastGoodBlockOrClear (scratchA, holdA, ch, numSamples, pullA,
+                                       holdValid[0].load (std::memory_order_acquire));
     }
     {
         TryAudioLock lb (deckB.mutationLock);
@@ -668,10 +721,20 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
         {
             reportedPosMs[1].store (deckB.transport.getCurrentPosition() * 1000.0, std::memory_order_relaxed);
             reportedLenMs[1].store (deckB.transport.getLengthInSeconds() * 1000.0, std::memory_order_relaxed);
-            if (pullB) { const juce::AudioSourceChannelInfo ib (&scratchB, 0, numSamples); deckB.transport.getNextAudioBlock (ib); }
-            else       scratchB.clear();
+            if (pullB)
+            {
+                const juce::AudioSourceChannelInfo ib (&scratchB, 0, numSamples);
+                deckB.transport.getNextAudioBlock (ib);
+                rememberLastGoodBlock (holdB, scratchB, ch, numSamples);
+                holdValid[1].store (true, std::memory_order_release);
+            }
+            else
+            {
+                scratchB.clear();
+            }
         }
-        else scratchB.clear();
+        else copyLastGoodBlockOrClear (scratchB, holdB, ch, numSamples, pullB,
+                                       holdValid[1].load (std::memory_order_acquire));
     }
 
     float*       o[8];

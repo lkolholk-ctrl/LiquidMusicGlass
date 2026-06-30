@@ -46,7 +46,13 @@ public:
     void setBassBoost     (bool on, float freqHz, float gainDb);
 
     void setLoudnessEnabled (bool on)     { loudnessEnabled.store (on); dirty.store (true); }
-    void setCurrentVolume   (float v01)   { currentVolume.store (juce::jlimit (0.0f, 1.0f, v01)); dirty.store (true); }
+    void setCurrentVolume   (float v01)
+    {
+        const float clamped = juce::jlimit (0.0f, 1.0f, v01);
+        const float prev = currentVolume.exchange (clamped);
+        if (prev != clamped && loudnessEnabled.load())
+            dirty.store (true);
+    }
 
     void setStereoWidth   (float width)   { stereoWidth.store (juce::jlimit (0.0f, 2.0f, width)); }
 
