@@ -179,6 +179,9 @@ class LibraryRepository private constructor(context: Context) {
                     imageUrl = track.coverUrl,
                     artistId = track.artists.firstOrNull()?.id,
                     collectionId = track.albumName.takeIf { it.isNotBlank() },
+                    genre = track.genre,
+                    isExplicit = track.isExplicit,
+                    source = track.source,
                     isSynced = false,
                     pendingDelete = false
                 )
@@ -298,7 +301,10 @@ class LibraryRepository private constructor(context: Context) {
             durationMs = durationMs,
             albumId = collectionId?.hashCode()?.toLong() ?: trackId.hashCode().toLong(),
             coverUrl = imageUrl,
-            artists = emptyList()
+            artists = emptyList(),
+            isExplicit = isExplicit,
+            source = source,
+            genre = genre
         )
     }
 

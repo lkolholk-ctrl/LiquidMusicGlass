@@ -394,7 +394,7 @@ object IcmRepository {
                         artist = response.track.artist ?: "Unknown Artist",
                         cover = response.track.cover,
                         duration = response.track.durationMs,
-                        source = "wave"
+                        source = response.track.source
                     ))
                 }
             } catch (_: Exception) {
@@ -1320,6 +1320,9 @@ object IcmRepository {
                     durationMs = item.durationMs,
                     albumId = item.collectionId?.hashCode()?.toLong() ?: -1L,
                     coverUrl = item.cover,
+                    isExplicit = item.isExplicit,
+                    isCustom = item.isCustom,
+                    source = item.source,
                     genre = genre // присваиваем жанр из запроса
                 )
             }?.take(limit) ?: emptyList()

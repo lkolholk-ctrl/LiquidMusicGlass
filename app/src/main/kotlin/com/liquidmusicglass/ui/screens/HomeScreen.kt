@@ -88,7 +88,10 @@ private fun IcmHomeItem.toTrack(): Track {
         uri = Uri.parse("https://byicloud.online/track/$id"),
         durationMs = durationMs,
         albumId = collectionId?.hashCode()?.toLong() ?: -1L,
-        coverUrl = cover
+        coverUrl = cover,
+        isExplicit = isExplicit,
+        source = source,
+        genre = genre
     )
 }
 
