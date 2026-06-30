@@ -348,6 +348,14 @@ Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativePause(
 }
 
 JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeSilenceOutput(
+        JNIEnv* /*env*/, jobject /*thiz*/)
+{
+    if (gEngine != nullptr)
+        gEngine->silenceOutput();
+}
+
+JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeStop(
         JNIEnv* /*env*/, jobject /*thiz*/)
 {

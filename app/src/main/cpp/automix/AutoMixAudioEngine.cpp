@@ -28,7 +28,8 @@ namespace
                                    int channels,
                                    int samples,
                                    bool audible,
-                                   bool valid)
+                                   bool valid,
+                                   std::atomic<int>& repeatCounter)
     {
         if (! audible || ! valid || lastGood.getNumChannels() < channels || lastGood.getNumSamples() < samples)
         {
@@ -36,12 +37,24 @@ namespace
             return;
         }
 
+        // Reusing the same block for several callbacks sounds like a buzz/whine.
+        // Keep only a single short, faded hold for an isolated lock miss.
+        if (repeatCounter.fetch_add (1, std::memory_order_acq_rel) > 0)
+        {
+            dst.clear();
+            return;
+        }
+
         for (int c = 0; c < channels; ++c)
+        {
             dst.copyFrom (c, 0, lastGood, c, 0, samples);
+            dst.applyGainRamp (c, 0, samples, 1.0f, 0.0f);
+        }
     }
 
     void rememberLastGoodBlock (juce::AudioBuffer<float>& lastGood,
                                 const juce::AudioBuffer<float>& src,
+                                std::atomic<int>& repeatCounter,
                                 int channels,
                                 int samples)
     {
@@ -50,6 +63,7 @@ namespace
 
         for (int c = 0; c < channels; ++c)
             lastGood.copyFrom (c, 0, src, c, 0, samples);
+        repeatCounter.store (0, std::memory_order_release);
     }
 }
 
@@ -171,6 +185,7 @@ void AutoMixAudioEngine::onOutputRouteChanged (bool isBluetooth)
 void AutoMixAudioEngine::release()
 {
     toneOn.store (false);
+    outputMuted.store (true, std::memory_order_release);
     invalidateAllHolds();
     fxResetRequested.store (true, std::memory_order_release);
     {
@@ -208,13 +223,17 @@ void AutoMixAudioEngine::clearDeckUnlocked (Deck& deck)
 
 void AutoMixAudioEngine::invalidateHoldForDeck (const Deck& deck)
 {
-    holdValid[(size_t) deckIndex (deck)].store (false, std::memory_order_release);
+    const auto index = (size_t) deckIndex (deck);
+    holdValid[index].store (false, std::memory_order_release);
+    holdRepeats[index].store (0, std::memory_order_release);
 }
 
 void AutoMixAudioEngine::invalidateAllHolds()
 {
     holdValid[0].store (false, std::memory_order_release);
     holdValid[1].store (false, std::memory_order_release);
+    holdRepeats[0].store (0, std::memory_order_release);
+    holdRepeats[1].store (0, std::memory_order_release);
 }
 
 bool AutoMixAudioEngine::loadDeck (Deck& deck, const juce::String& path)
@@ -384,6 +403,7 @@ bool AutoMixAudioEngine::loadDeckFd (Deck& deck, int fd, long long offset, long 
 
 void AutoMixAudioEngine::play()
 {
+    outputMuted.store (false, std::memory_order_release);
     const juce::CriticalSection::ScopedLockType sl (deckA.mutationLock);
     if (deckA.hasTrack.load())
         deckA.transport.start();
@@ -391,6 +411,7 @@ void AutoMixAudioEngine::play()
 
 void AutoMixAudioEngine::pause()
 {
+    outputMuted.store (true, std::memory_order_release);
     invalidateAllHolds();
     fxResetRequested.store (true, std::memory_order_release);
     const juce::CriticalSection::ScopedLockType slA (deckA.mutationLock);
@@ -401,6 +422,7 @@ void AutoMixAudioEngine::pause()
 
 void AutoMixAudioEngine::stop()
 {
+    outputMuted.store (true, std::memory_order_release);
     invalidateAllHolds();
     fxResetRequested.store (true, std::memory_order_release);
     const juce::CriticalSection::ScopedLockType slA (deckA.mutationLock);
@@ -418,8 +440,16 @@ void AutoMixAudioEngine::stop()
     baseGainB.store (0.0f);
 }
 
+void AutoMixAudioEngine::silenceOutput()
+{
+    outputMuted.store (true, std::memory_order_release);
+    invalidateAllHolds();
+    fxResetRequested.store (true, std::memory_order_release);
+}
+
 void AutoMixAudioEngine::startCrossfade (double durationMs)
 {
+    outputMuted.store (false, std::memory_order_release);
     long long total = (long long) (durationMs * currentSampleRate / 1000.0);
     if (total < 1) total = 1;
     crossfadeTotal.store (total);
@@ -479,6 +509,7 @@ bool AutoMixAudioEngine::loadIncomingFd (int fd, long long offset, long long siz
 
 void AutoMixAudioEngine::startTransition (double durationMs, double entryMs)
 {
+    outputMuted.store (false, std::memory_order_release);
     long long total = (long long) (durationMs * currentSampleRate / 1000.0);
     if (total < 1) total = 1;
     crossfadeTotal.store (total);
@@ -510,6 +541,7 @@ void AutoMixAudioEngine::startTransition (double durationMs, double entryMs)
 
 void AutoMixAudioEngine::playCurrent()
 {
+    outputMuted.store (false, std::memory_order_release);
     Deck& d = deckRef (currentDeck.load());
     const juce::CriticalSection::ScopedLockType sl (d.mutationLock);
     if (d.hasTrack.load())
@@ -618,6 +650,8 @@ void AutoMixAudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
     holdB.clear();
     holdValid[0].store (false, std::memory_order_release);
     holdValid[1].store (false, std::memory_order_release);
+    holdRepeats[0].store (0, std::memory_order_release);
+    holdRepeats[1].store (0, std::memory_order_release);
 
     // Bass-swap low-pass: same fixed coefficients for every deck/channel; only a
     // scalar changes at runtime, so there are no coefficient-swap clicks.
@@ -655,6 +689,12 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
 
     if (fxResetRequested.exchange (false, std::memory_order_acq_rel))
         audioFx.reset();
+
+    if (outputMuted.load (std::memory_order_acquire))
+    {
+        output.clear();
+        return;
+    }
 
     // NO global lock here. Each deck is guarded by its OWN lock during its pull
     // (below), so loading the incoming deck — which holds only that deck's lock
@@ -733,7 +773,7 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
             {
                 const juce::AudioSourceChannelInfo ia (&scratchA, 0, numSamples);
                 deckA.transport.getNextAudioBlock (ia);
-                rememberLastGoodBlock (holdA, scratchA, ch, numSamples);
+                rememberLastGoodBlock (holdA, scratchA, holdRepeats[0], ch, numSamples);
                 holdValid[0].store (true, std::memory_order_release);
             }
             else
@@ -742,7 +782,7 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
             }
         }
         else copyLastGoodBlockOrClear (scratchA, holdA, ch, numSamples, pullA,
-                                       holdValid[0].load (std::memory_order_acquire));
+                                       holdValid[0].load (std::memory_order_acquire), holdRepeats[0]);
     }
     {
         TryAudioLock lb (deckB.mutationLock);
@@ -754,7 +794,7 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
             {
                 const juce::AudioSourceChannelInfo ib (&scratchB, 0, numSamples);
                 deckB.transport.getNextAudioBlock (ib);
-                rememberLastGoodBlock (holdB, scratchB, ch, numSamples);
+                rememberLastGoodBlock (holdB, scratchB, holdRepeats[1], ch, numSamples);
                 holdValid[1].store (true, std::memory_order_release);
             }
             else
@@ -763,7 +803,7 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
             }
         }
         else copyLastGoodBlockOrClear (scratchB, holdB, ch, numSamples, pullB,
-                                       holdValid[1].load (std::memory_order_acquire));
+                                       holdValid[1].load (std::memory_order_acquire), holdRepeats[1]);
     }
 
     float*       o[8];

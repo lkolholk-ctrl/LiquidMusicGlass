@@ -249,6 +249,7 @@ class JuceLocalPlayer(
                 currentIndex = 0
                 playWhenReadyFlag = false
                 ended = false
+                engine.silenceOutput()
                 loadHandler.post { if (!released) runCatching { engine.stop() } }
             }
             removedCurrent -> {
@@ -326,6 +327,7 @@ class JuceLocalPlayer(
         DebugLog.add("JUCE.setPWR=$playWhenReady | ${DebugLog.caller()}")
         if (playWhenReady) ended = false
         playWhenReadyFlag = playWhenReady
+        if (!playWhenReady) engine.silenceOutput()
         // Движок дёргаем на фоновом потоке (вызовы @Synchronized могут встать за
         // идущим декодом — нельзя блокировать main). Если идёт загрузка, она сама
         // стартует по флагу playWhenReadyFlag по завершении.
@@ -364,6 +366,7 @@ class JuceLocalPlayer(
         transitionState = 0
         transitionFromIndex = -1
         autoMixPlan = null
+        engine.silenceOutput()
         loadHandler.post { if (!released) runCatching { engine.stop() } }
         invalidateState()
         return Futures.immediateVoidFuture()
@@ -371,6 +374,7 @@ class JuceLocalPlayer(
 
     override fun handleRelease(): ListenableFuture<*> {
         released = true
+        engine.silenceOutput()
         runCatching { autoMixScope.cancel() }
         handler.removeCallbacksAndMessages(null)
         loadHandler.removeCallbacksAndMessages(null)
@@ -401,6 +405,7 @@ class JuceLocalPlayer(
         transitionState = 0
         transitionFromIndex = -1
         autoMixPlan = null
+        engine.silenceOutput()
         val seq = loadSeq.incrementAndGet()
         loading = true
         ended = false
@@ -483,6 +488,7 @@ class JuceLocalPlayer(
             } else {
                 playWhenReadyFlag = false
                 ended = true
+                engine.silenceOutput()
                 loadHandler.post { if (!released) runCatching { engine.pause() } }
                 PlayerController.onTrackEnded()
             }

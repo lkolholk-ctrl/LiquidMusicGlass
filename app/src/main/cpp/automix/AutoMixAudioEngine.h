@@ -50,6 +50,8 @@ public:
     void play();
     void pause();
     void stop();
+    /** RT-safe emergency mute. Used before async pause/skip/load reaches the engine. */
+    void silenceOutput();
 
     /** Equal-power crossfade deck A -> deck B over durationMs. Starts both decks. */
     void startCrossfade (double durationMs);
@@ -183,6 +185,7 @@ private:
     juce::AudioBuffer<float> scratchA, scratchB; // per-block pull buffers (audio thread)
     juce::AudioBuffer<float> holdA, holdB;       // last good block: masks short deck-lock misses
     std::array<std::atomic<bool>, 2> holdValid { { {false}, {false} } };
+    std::array<std::atomic<int>, 2> holdRepeats { { {0}, {0} } };
 
     // Lock-free transport reporting. The audio callback publishes each deck's
     // position/length into these atomics (under that deck's lock); the main-thread
@@ -205,6 +208,7 @@ private:
 
     std::atomic<bool> initialised { false };
     std::atomic<bool> toneOn { false };
+    std::atomic<bool> outputMuted { false };
     std::atomic<bool> fxResetRequested { false };
 
     // Текущий маршрут вывода (true = Bluetooth). routeEverApplied — чтобы первый

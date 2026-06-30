@@ -375,6 +375,12 @@ object AutoMixNativeEngine {
         runCatching { nativePause() }.onFailure { Log.w(TAG, "nativePause failed", it) }
     }
 
+    /** Immediately mute the audio callback without waiting for deck locks or load queue. */
+    fun silenceOutput() {
+        if (!isLoaded || !initialised) return
+        runCatching { nativeSilenceOutput() }.onFailure { Log.w(TAG, "nativeSilenceOutput failed", it) }
+    }
+
     /** Stop playback and rewind to the start. */
     @Synchronized
     fun stop() {
@@ -441,6 +447,7 @@ object AutoMixNativeEngine {
     private external fun nativeLengthMsA(): Double
     private external fun nativePlay()
     private external fun nativePause()
+    private external fun nativeSilenceOutput()
     private external fun nativeStop()
     private external fun nativeStartTone()
     private external fun nativeStopTone()
