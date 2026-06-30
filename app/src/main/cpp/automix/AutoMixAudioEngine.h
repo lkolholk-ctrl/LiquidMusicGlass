@@ -161,6 +161,9 @@ private:
     bool loadDeckFd (Deck& deck, int fd, long long offset, long long size);
     bool decodeFullPCM (const juce::String& path, juce::AudioBuffer<float>& out, double& rate);
     void clearDeckUnlocked (Deck& deck);
+    int deckIndex (const Deck& deck) const { return &deck == &deckA ? 0 : 1; }
+    void invalidateHoldForDeck (const Deck& deck);
+    void invalidateAllHolds();
     void applyBufferForRoute (bool isBluetooth, bool forceReopen);  // not on audio thread
     Deck& deckRef (int index) { return index == 0 ? deckA : deckB; }
 
@@ -202,6 +205,7 @@ private:
 
     std::atomic<bool> initialised { false };
     std::atomic<bool> toneOn { false };
+    std::atomic<bool> fxResetRequested { false };
 
     // Текущий маршрут вывода (true = Bluetooth). routeEverApplied — чтобы первый
     // вызов с тем же значением всё равно применился, а последующие без изменения — нет.

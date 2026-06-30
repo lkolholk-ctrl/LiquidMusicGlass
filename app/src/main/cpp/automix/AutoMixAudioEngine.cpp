@@ -171,6 +171,8 @@ void AutoMixAudioEngine::onOutputRouteChanged (bool isBluetooth)
 void AutoMixAudioEngine::release()
 {
     toneOn.store (false);
+    invalidateAllHolds();
+    fxResetRequested.store (true, std::memory_order_release);
     {
         const juce::CriticalSection::ScopedLockType slA (deckA.mutationLock);
         const juce::CriticalSection::ScopedLockType slB (deckB.mutationLock);
@@ -192,7 +194,7 @@ void AutoMixAudioEngine::stopTone()  { toneOn.store (false); }
 //==============================================================================
 void AutoMixAudioEngine::clearDeckUnlocked (Deck& deck)
 {
-    holdValid[(size_t) (&deck == &deckA ? 0 : 1)].store (false, std::memory_order_release);
+    invalidateHoldForDeck (deck);
     deck.hasTrack.store (false);
     deck.transport.stop();
     deck.transport.setSource (nullptr);
@@ -204,8 +206,22 @@ void AutoMixAudioEngine::clearDeckUnlocked (Deck& deck)
     deck.sourceSampleRate = 0.0;
 }
 
+void AutoMixAudioEngine::invalidateHoldForDeck (const Deck& deck)
+{
+    holdValid[(size_t) deckIndex (deck)].store (false, std::memory_order_release);
+}
+
+void AutoMixAudioEngine::invalidateAllHolds()
+{
+    holdValid[0].store (false, std::memory_order_release);
+    holdValid[1].store (false, std::memory_order_release);
+}
+
 bool AutoMixAudioEngine::loadDeck (Deck& deck, const juce::String& path)
 {
+    // A controlled source swap must not replay the previous audio block while the
+    // deck lock is held; that sounds like a short buzz before skip/pause completes.
+    invalidateHoldForDeck (deck);
     {
         const juce::CriticalSection::ScopedLockType sl (deck.mutationLock);
         clearDeckUnlocked (deck);
@@ -311,6 +327,7 @@ bool AutoMixAudioEngine::prepareStretchB (double bpmA, double bpmB)
         return false;
 
     // Swap deck B to play the beat-matched buffer.
+    invalidateHoldForDeck (deckB);
     const juce::CriticalSection::ScopedLockType sl (deckB.mutationLock);
     if (deckB.path != sourcePath)
         return false;
@@ -338,6 +355,7 @@ bool AutoMixAudioEngine::loadTrackAFd (int fd, long long offset, long long size)
 // все распространённые форматы.
 bool AutoMixAudioEngine::loadDeckFd (Deck& deck, int fd, long long offset, long long size)
 {
+    invalidateHoldForDeck (deck);
     {
         const juce::CriticalSection::ScopedLockType sl (deck.mutationLock);
         clearDeckUnlocked (deck);
@@ -373,6 +391,8 @@ void AutoMixAudioEngine::play()
 
 void AutoMixAudioEngine::pause()
 {
+    invalidateAllHolds();
+    fxResetRequested.store (true, std::memory_order_release);
     const juce::CriticalSection::ScopedLockType slA (deckA.mutationLock);
     const juce::CriticalSection::ScopedLockType slB (deckB.mutationLock);
     deckA.transport.stop();
@@ -381,6 +401,8 @@ void AutoMixAudioEngine::pause()
 
 void AutoMixAudioEngine::stop()
 {
+    invalidateAllHolds();
+    fxResetRequested.store (true, std::memory_order_release);
     const juce::CriticalSection::ScopedLockType slA (deckA.mutationLock);
     const juce::CriticalSection::ScopedLockType slB (deckB.mutationLock);
     deckA.transport.stop();
@@ -438,6 +460,7 @@ void AutoMixAudioEngine::setEntryOffsetA (double ms)
 
 void AutoMixAudioEngine::clearDeckA()
 {
+    invalidateHoldForDeck (deckA);
     const juce::CriticalSection::ScopedLockType sl (deckA.mutationLock);
     clearDeckUnlocked (deckA);
 }
@@ -497,8 +520,10 @@ void AutoMixAudioEngine::seekCurrent (double ms)
 {
     const double clamped = (ms < 0.0 ? 0.0 : ms);
     const int cur = currentDeck.load();
-    const juce::CriticalSection::ScopedLockType sl (deckRef (cur).mutationLock);
-    deckRef (cur).transport.setPosition (clamped / 1000.0);
+    Deck& deck = deckRef (cur);
+    invalidateHoldForDeck (deck);
+    const juce::CriticalSection::ScopedLockType sl (deck.mutationLock);
+    deck.transport.setPosition (clamped / 1000.0);
     // Reflect the seek immediately for the lock-free getter (next callback will
     // refresh it anyway, but this avoids a one-tick lag in the UI position).
     reportedPosMs[(size_t) cur].store (clamped, std::memory_order_relaxed);
@@ -529,6 +554,7 @@ int AutoMixAudioEngine::currentDeckIndex()
 void AutoMixAudioEngine::clearDeck (int index)
 {
     Deck& d = deckRef (index);
+    invalidateHoldForDeck (d);
     const juce::CriticalSection::ScopedLockType sl (d.mutationLock);
     clearDeckUnlocked (d);
 }
@@ -626,6 +652,9 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
     juce::ScopedNoDenormals noDenormals; // flush IIR (bass-swap + EQ) denormals
 
     juce::AudioBuffer<float> output (outputChannelData, numOutputChannels, numSamples);
+
+    if (fxResetRequested.exchange (false, std::memory_order_acq_rel))
+        audioFx.reset();
 
     // NO global lock here. Each deck is guarded by its OWN lock during its pull
     // (below), so loading the incoming deck — which holds only that deck's lock
