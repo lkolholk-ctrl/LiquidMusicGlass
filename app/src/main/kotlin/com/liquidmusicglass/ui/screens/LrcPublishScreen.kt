@@ -4,6 +4,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -326,13 +327,13 @@ private fun SyncTaggingMode(
             Spacer(Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
             Spacer(Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                CircleBack(lc, onCancel)
+                CircleBack(lc) { PlayerController.setPlaybackSpeed(1f); onCancel() }
                 Spacer(Modifier.width(16.dp))
                 Text("Разметка", color = lc.textPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f))
                 Text("Готово", color = lc.accent, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.clip(RoundedCornerShape(8.dp))
-                        .clickable { onDone(buildLrc(lines, times)) }
+                        .clickable { PlayerController.setPlaybackSpeed(1f); onDone(buildLrc(lines, times)) }
                         .padding(horizontal = 10.dp, vertical = 6.dp))
             }
             Text("Тапни по строке в момент звучания. Долгий тап по строке — тест с неё.",
@@ -365,6 +366,8 @@ private fun SyncTaggingMode(
                     textAlign = TextAlign.Center
                 )
             }
+
+            SpeedRow(lc)
 
             // LAZY: компонуем только видимые строки.
             LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth()) {
@@ -450,13 +453,13 @@ private fun SyncWordTaggingMode(
             Spacer(Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
             Spacer(Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                CircleBack(lc, onCancel)
+                CircleBack(lc) { PlayerController.setPlaybackSpeed(1f); onCancel() }
                 Spacer(Modifier.width(16.dp))
                 Text("По словам", color = lc.textPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f))
                 Text("Готово", color = lc.accent, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.clip(RoundedCornerShape(8.dp))
-                        .clickable { onDone(buildEnhancedLrc(wordRows, lineStart, times)) }
+                        .clickable { PlayerController.setPlaybackSpeed(1f); onDone(buildEnhancedLrc(wordRows, lineStart, times)) }
                         .padding(horizontal = 10.dp, vertical = 6.dp))
             }
             Text("Тапни по каждому слову в момент звучания. Долгий тап по слову — тест с его строки.",
@@ -489,6 +492,8 @@ private fun SyncWordTaggingMode(
                     textAlign = TextAlign.Center
                 )
             }
+
+            SpeedRow(lc)
 
             // LAZY: компонуем только видимые строки (полный текст = сотни слов).
             LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth()) {
@@ -566,6 +571,32 @@ private fun WrapRow(
         val totalH = y + rowH
         layout(maxW, totalH) {
             placeables.forEachIndexed { i, p -> p.place(pos[i]) }
+        }
+    }
+}
+
+/** Регулятор скорости проигрывания для разметки: 1.0×…0.1× (шаг 0.1×). */
+@Composable
+private fun SpeedRow(lc: LiquidColors) {
+    val speed by PlayerController.playbackSpeed.collectAsState()
+    Row(
+        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text("Скорость:", color = lc.textSecondary, fontSize = 12.sp)
+        for (i in 10 downTo 1) {
+            val v = i / 10f
+            val sel = kotlin.math.abs(speed - v) < 0.01f
+            Text(
+                "$v×",
+                color = if (sel) Color.White else lc.textSecondary,
+                fontSize = 13.sp, fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal,
+                modifier = Modifier.clip(RoundedCornerShape(8.dp))
+                    .background(if (sel) lc.accent else lc.cardSurface)
+                    .clickable { PlayerController.setPlaybackSpeed(v) }
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            )
         }
     }
 }

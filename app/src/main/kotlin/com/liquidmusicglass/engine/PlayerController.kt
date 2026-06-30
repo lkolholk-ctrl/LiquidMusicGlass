@@ -203,7 +203,8 @@ object PlayerController {
     fun setPlaybackSpeed(speed: Float) {
         // re-anchor at current speed before switching, so position doesn't jump
         reanchorSmoothPosition()
-        _playbackSpeed.value = speed.coerceIn(0.5f, 2.0f)
+        // нижняя граница 0.1 — для медленной разметки лирики (успеть тапать слова)
+        _playbackSpeed.value = speed.coerceIn(0.1f, 2.0f)
         audioServiceRef?.setPlaybackSpeed(_playbackSpeed.value)
     }
 

@@ -2,8 +2,10 @@ package com.liquidmusicglass.ui.lyrics
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -86,6 +88,7 @@ fun MarkupPreviewView(
 
     val effect by LyricsFxController.effect.collectAsState()
     val smooth by LyricsFxController.smoothness.collectAsState()
+    val speed by PlayerController.playbackSpeed.collectAsState()
 
     val listState = rememberLazyListState()
     val density = LocalDensity.current
@@ -174,6 +177,30 @@ fun MarkupPreviewView(
                     else "Построчно — проверь тайминг строк",
                     color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp
                 )
+            }
+
+            // ── Скорость (можно проверять и в замедлении) ──
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Скорость:", color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp)
+                for (i in 10 downTo 1) {
+                    val v = i / 10f
+                    val sel = kotlin.math.abs(speed - v) < 0.01f
+                    Text(
+                        "$v×", color = Color.White, fontSize = 13.sp,
+                        fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal,
+                        modifier = Modifier.clip(RoundedCornerShape(8.dp))
+                            .background(if (sel) accent else Color.White.copy(alpha = 0.12f))
+                            .clickable(remember { MutableInteractionSource() }, null) {
+                                PlayerController.setPlaybackSpeed(v)
+                            }
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    )
+                }
             }
 
             // ── Эффекты + плавность (применяются глобально, сохраняются) ──

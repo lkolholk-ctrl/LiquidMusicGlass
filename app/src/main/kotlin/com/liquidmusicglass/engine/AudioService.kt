@@ -794,7 +794,8 @@ class AudioService : MediaSessionService() {
         }
     }
     fun setPlaybackSpeed(speed: Float) {
-        val clamped = speed.coerceIn(0.5f, 2.0f)
+        // нижняя граница 0.1 — медленная разметка лирики (ExoPlayer/Sonic тянет slow-down)
+        val clamped = speed.coerceIn(0.1f, 2.0f)
         runCatching { activePlayer().setPlaybackParameters(PlaybackParameters(clamped)) }
         _playbackSpeed.value = clamped
     }
