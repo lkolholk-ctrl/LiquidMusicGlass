@@ -5,6 +5,9 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build_release:
     name: Build Release APK
@@ -56,9 +59,24 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew assembleRelease --stacktrace
 
-      - name: Upload Release APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: LiquidMusicGlass-Release
-          path: app/build/outputs/apk/release/*.apk
-          retention-days: 30
+      - name: Publish APK to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          SAFE="${GITHUB_REF_NAME//\//-}"
+          TAG="release-${SAFE}"
+          APK="$(ls app/build/outputs/apk/release/*.apk | head -n1)"
+          OUT="LiquidMusicGlass-${SAFE}.apk"
+          cp "$APK" "$OUT"
+          echo "Built: $APK -> $OUT"
+
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --title "Release build · ${GITHUB_REF_NAME}" \
+              --notes "Automated release build from ${GITHUB_SHA}" \
+              --prerelease \
+              --target "${GITHUB_SHA}"
+          fi
+          gh release upload "$TAG" "$OUT" --clobber
+          echo "APK published to release '$TAG'."
