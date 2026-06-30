@@ -213,7 +213,7 @@ class HomeViewModel : ViewModel() {
      * via search, then builds a wave around it (wave/next?seed_track_id). Auto-refill
      * continues the same station via the stored seed.
      */
-    fun buildMoodWave(context: Context, query: String) {
+    fun buildMoodWave(context: Context, query: String, name: String? = null) {
         if (_isBuildingWave.value) return
         if (!isLinked()) { _needsLink.value = true; return }
         _isBuildingWave.value = true
@@ -237,6 +237,7 @@ class HomeViewModel : ViewModel() {
                         tracks = tracks,
                         startIndex = 0,
                         autoRefillType = "WAVE",
+                        autoRefillName = name,
                         seedTrackId = seedId
                     )
                 }

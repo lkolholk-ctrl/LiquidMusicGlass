@@ -1,12 +1,52 @@
 package com.liquidmusicglass.api.icm
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonDecoder
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.longOrNull
+
+/**
+ * Терпимый к битым элементам десериализатор списка: декодирует массив поэлементно
+ * и ПРОПУСКАЕТ элементы, которые не распарсились (кривой/частичный объект, неверный
+ * тип, отсутствует обязательное поле), вместо того чтобы уронить ВЕСЬ список.
+ *
+ * Применять к UI-спискам: `@Serializable(with = TolerantListSerializer::class)`.
+ * Компилятор kotlinx сам подставит сериализатор элемента в конструктор.
+ */
+class TolerantListSerializer<T>(
+    private val element: KSerializer<T>
+) : KSerializer<List<T>> {
+    private val delegate = ListSerializer(element)
+    override val descriptor: SerialDescriptor = delegate.descriptor
+
+    override fun serialize(encoder: Encoder, value: List<T>) =
+        delegate.serialize(encoder, value)
+
+    override fun deserialize(decoder: Decoder): List<T> {
+        // Не-JSON формат — обычное поведение.
+        val jsonDecoder = decoder as? JsonDecoder ?: return delegate.deserialize(decoder)
+        val arr = jsonDecoder.decodeJsonElement() as? JsonArray ?: return emptyList()
+        val out = ArrayList<T>(arr.size)
+        for (e in arr) {
+            try {
+                out.add(jsonDecoder.json.decodeFromJsonElement(element, e))
+            } catch (_: Throwable) {
+                // битый элемент — пропускаем, список не роняем
+            }
+        }
+        return out
+    }
+}
 
 // ─── Health ───
 
@@ -79,7 +119,8 @@ data class IcmSearchResponse(
     val query: String,
     val region: String,
     val source: String? = null,
-    val items: List<IcmSearchItem>
+    @Serializable(with = TolerantListSerializer::class)
+    val items: List<IcmSearchItem> = emptyList()
 )
 
 @Serializable
@@ -150,16 +191,20 @@ data class IcmTrackResponse(
 @Serializable
 data class IcmAlbumResponse(
     val album: IcmAlbum,
-    val tracks: List<IcmAlbumTrack>
+    // tolerant: пропущенный/null tracks не должен ронять парс всего альбома
+    @Serializable(with = TolerantListSerializer::class)
+    val tracks: List<IcmAlbumTrack> = emptyList()
 )
 
 @Serializable
 data class IcmAlbum(
-    val id: String,
-    val title: String,
-    val artist: String,
+    val id: String = "",
+    // Дефолты обязательны: если сервер не прислал title/artist/cover (часто у Apple/VK),
+    // без них kotlinx уронил бы парс ВСЕГО альбома → "Unknown Album · 0 tracks".
+    val title: String = "",
+    val artist: String = "",
     @SerialName("artistId") val artistId: String? = null,
-    val cover: String,
+    val cover: String = "",
     @SerialName("motionCoverUrl") val motionCoverUrl: String? = null,
     @SerialName("releaseDate") val releaseDate: String? = null,
     val year: String? = null,
@@ -170,11 +215,12 @@ data class IcmAlbum(
 
 @Serializable
 data class IcmAlbumTrack(
-    val id: String,
-    val title: String,
-    val artist: String,
+    val id: String = "",
+    val title: String = "",
+    val artist: String = "",
     @SerialName("artistId") val artistId: String? = null,
-    val cover: String,
+    // Дефолт: одна обложка-null на одном треке не должна ронять весь альбом.
+    val cover: String = "",
     @SerialName("collectionId") val collectionId: String? = null,
     @SerialName("is_explicit") val isExplicit: Boolean = false,
     @SerialName("isCustom") val isCustom: Boolean = false,
@@ -203,8 +249,11 @@ data class IcmArtistResponse(
     val bio: String? = null,
     val followers: Long? = null,
     @SerialName("editorialVideoUrl") val editorialVideoUrl: String? = null,
-    @SerialName("topSongs") val topSongs: List<IcmArtistSong> = emptyList(),
+    @SerialName("topSongs")
+    @Serializable(with = TolerantListSerializer::class)
+    val topSongs: List<IcmArtistSong> = emptyList(),
     @SerialName("latestRelease") val latestRelease: IcmArtistAlbum? = null,
+    @Serializable(with = TolerantListSerializer::class)
     val albums: List<IcmArtistAlbum> = emptyList(),
     val singles: List<IcmArtistAlbum> = emptyList(),
     val featuring: List<IcmArtistAlbum> = emptyList(),
@@ -219,12 +268,14 @@ data class IcmArtistResponse(
 
 @Serializable
 data class IcmArtistSong(
-    val id: String,
-    val title: String,
-    val artist: String,
+    val id: String = "",
+    // Дефолты: один трек артиста без cover/artist раньше ронял парс ВСЕГО
+    // ответа артиста (топ-треки + дискография). coerceInputValues маппит null → "".
+    val title: String = "",
+    val artist: String = "",
     @SerialName("artistId") val artistId: String? = null,
     val artists: List<IcmMiniArtist> = emptyList(),
-    val cover: String,
+    val cover: String = "",
     @SerialName("albumName") val albumName: String? = null,
     @SerialName("isAlbum") val isAlbum: Boolean = false,
     @SerialName("is_explicit") val isExplicit: Boolean = false,
@@ -255,13 +306,14 @@ data class IcmMiniArtist(
 
 @Serializable
 data class IcmArtistAlbum(
-    val id: String,
-    val title: String,
-    val artist: String,
+    val id: String = "",
+    // Дефолты: одна строка дискографии без cover/title не должна ронять весь ответ артиста.
+    val title: String = "",
+    val artist: String = "",
     val artists: List<IcmMiniArtist> = emptyList(),
     val year: String? = null,
     val date: String? = null,
-    val cover: String,
+    val cover: String = "",
     val type: String? = null,
     @SerialName("isAlbum") val isAlbum: Boolean = false
 )
@@ -292,6 +344,7 @@ data class IcmChart(
     val name: String,
     val query: String,
     val cover: String? = null,
+    @Serializable(with = TolerantListSerializer::class)
     val tracks: List<IcmSearchItem> = emptyList()
 )
 
@@ -299,12 +352,14 @@ data class IcmChart(
 
 @Serializable
 data class IcmTrackMeta(
-    val id: String,
+    val id: String = "",
     @SerialName("collectionId") val collectionId: String? = null,
-    val title: String,
-    val artist: String,
-    val cover: String,
-    val duration: Long
+    // Дефолты: cover/duration часто отсутствуют у VK/secondary треков — раньше
+    // одно отсутствующее поле обнуляло весь ответ getTrackMeta.
+    val title: String = "",
+    val artist: String = "",
+    val cover: String = "",
+    val duration: Long = 0L
 )
 
 // ─── Playlist ───
@@ -316,6 +371,7 @@ data class IcmPlaylist(
     val curator: String? = null,
     val description: String? = null,
     val cover: String? = null,
+    @Serializable(with = TolerantListSerializer::class)
     val tracks: List<IcmPlaylistTrack> = emptyList()
 )
 
@@ -609,7 +665,7 @@ data class IcmUserProfile(
 @Serializable
 data class IcmWaveResponse(
     val track: IcmWaveTrack? = null,
-    val status: String,
+    val status: String = "",
     val region: String? = null
 )
 
@@ -653,6 +709,7 @@ data class IcmWaveTrack(
 
 @Serializable
 data class IcmLibraryLikesResponse(
+    @Serializable(with = TolerantListSerializer::class)
     val items: List<IcmLibraryTrack> = emptyList(),
     val count: Int? = null,
     val total: Int? = null,
@@ -856,6 +913,7 @@ data class IcmHomeBlock(
     val id: String,
     val title: String,
     val type: String, // "banner", "new_releases", "charts", "recommendations"
+    @Serializable(with = TolerantListSerializer::class)
     val items: List<IcmHomeItem> = emptyList()
 )
 
@@ -880,8 +938,17 @@ data class IcmHomeItem(
     @SerialName("trackId") val trackId: String? = null,
     @SerialName("rank") val rank: Int? = null,
     @SerialName("subtitle") val subtitle: String? = null,
-    @SerialName("genre") val genre: String? = null
+    @SerialName("genre") val genre: String? = null,
+    // Тип сущности. Раньше его теряли при конвертации search→home, и UI решал
+    // «альбом или трек» по наличию collectionId — но трек по API ТОЖЕ несёт
+    // collectionId (id своего альбома), поэтому тап по треку открывал альбом.
+    @SerialName("isAlbum") val isAlbum: Boolean = false,
+    @SerialName("isArtist") val isArtist: Boolean = false
 ) {
+    /** Трек = не альбом и не артист (как в /search: оба флага false). */
+    val isTrack: Boolean
+        get() = !isAlbum && !isArtist
+
     val displayArtist: String
         get() = artist?.takeIf { it.isNotBlank() && it != "Исполнитель" }
             ?: artistName?.takeIf { it.isNotBlank() && it != "Исполнитель" }
@@ -1142,7 +1209,9 @@ data class IcmUserPlaylist(
 @Serializable
 data class IcmUserPlaylistTracksResponse(
     @SerialName("playlist") val playlist: IcmUserPlaylistInfo? = null,
-    @SerialName("tracks") val tracks: List<IcmUserPlaylistTrack> = emptyList()
+    @SerialName("tracks")
+    @Serializable(with = TolerantListSerializer::class)
+    val tracks: List<IcmUserPlaylistTrack> = emptyList()
 )
 
 @Serializable

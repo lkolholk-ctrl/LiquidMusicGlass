@@ -27,9 +27,16 @@ object IcmRateGate {
     private const val DEFAULT_BAN_MS = 60_000L // если сервер не прислал Retry-After
     private const val MAX_BAN_MS = 3_600_000L  // не блокируем дольше часа
 
+    // ─── Circuit breaker по СЕТЕВЫМ фейлам (host лежит/недоступен) ───
+    // После N подряд connection/timeout-ошибок перестаём ходить в сеть на cooldown,
+    // чтобы не плодить десятки висящих TLS-коннектов (они воруют CPU у RenderThread).
+    private const val FAIL_THRESHOLD = 4
+    private const val FAIL_COOLDOWN_MS = 15_000L
+
     private val lock = Any()
     private var tokens = BURST
     private var lastRefillNs = System.nanoTime()
+    private var consecutiveFails = 0
 
     @Volatile private var bannedUntilMs = 0L
 
@@ -54,7 +61,28 @@ object IcmRateGate {
 
     /** Сбросить бан (например, по кнопке/после восстановления сети). */
     fun reset() {
-        synchronized(lock) { bannedUntilMs = 0L }
+        synchronized(lock) { bannedUntilMs = 0L; consecutiveFails = 0 }
+    }
+
+    /** Успешный сетевой ответ получен (любой HTTP-код) → хост жив, сбрасываем счётчик. */
+    fun recordSuccess() {
+        synchronized(lock) { consecutiveFails = 0 }
+    }
+
+    /**
+     * Сетевой ФЕЙЛ без ответа (timeout/connect/TLS). После [FAIL_THRESHOLD] подряд
+     * открываем circuit-breaker на [FAIL_COOLDOWN_MS]: запросы мгновенно фейлятся,
+     * новые коннекты не плодятся — даём CPU рендеру.
+     */
+    fun recordFailure() {
+        synchronized(lock) {
+            consecutiveFails++
+            if (consecutiveFails >= FAIL_THRESHOLD) {
+                val until = System.currentTimeMillis() + FAIL_COOLDOWN_MS
+                if (until > bannedUntilMs) bannedUntilMs = until
+                consecutiveFails = 0
+            }
+        }
     }
 
     /** Возвращает 0, если токен выдан немедленно, иначе — сколько мс ждать. */

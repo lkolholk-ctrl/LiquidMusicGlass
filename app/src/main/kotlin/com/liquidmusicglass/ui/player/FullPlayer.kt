@@ -63,6 +63,7 @@ import androidx.compose.material.icons.rounded.ThumbDown
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Edit
 // import androidx.compose.material.icons.rounded.ThumbUp  // DISABLED
 // import androidx.compose.material.icons.rounded.ThumbDown // DISABLED
 import androidx.compose.material.icons.rounded.Download
@@ -153,7 +154,9 @@ fun FullPlayer(
     onSeek: (Long) -> Unit,
     onVolumeChange: (Float) -> Unit,
     onOpenSettings: () -> Unit,
-    onNavigateToArtist: (String) -> Unit = {}
+    onNavigateToArtist: (String) -> Unit = {},
+    onPublishLyrics: (com.liquidmusicglass.engine.Track) -> Unit = {},
+    onEditTags: (com.liquidmusicglass.engine.Track) -> Unit = {}
 ) {
     if (expandProgress <= 0.005f) return
 
@@ -825,6 +828,7 @@ fun FullPlayer(
                             if (newStep != lastVolumeStep[0]) {
                                 lastVolumeStep[0] = newStep
                                 audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, newStep, 0)
+                                com.liquidmusicglass.engine.AudioFxController.refreshSystemVolume()
                             }
                         },
                         backdrop = playerBackdrop,
@@ -1045,6 +1049,80 @@ fun FullPlayer(
                             .height(0.5.dp)
                             .background(Color.White.copy(alpha = 0.10f))
                     )
+                    // Опубликовать текст в LRCLIB — ТОЛЬКО для локального трека
+                    val publishTrack = currentTrackObj
+                    val isLocalForLrc = publishTrack?.let {
+                        it.source == "local" || it.uri.scheme == "content" || it.uri.scheme == "file"
+                    } ?: false
+                    if (isLocalForLrc && publishTrack != null) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    scope.launch {
+                                        trackMenuSheetState.hide()
+                                        showTrackMenu = false
+                                        onPublishLyrics(publishTrack)
+                                    }
+                                }
+                                .padding(vertical = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Edit,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Text(
+                                text = "Publish lyrics to LRCLIB",
+                                color = Color.White,
+                                fontSize = 17.sp,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(0.5.dp)
+                                .background(Color.White.copy(alpha = 0.10f))
+                        )
+                        // Редактировать теги — ТОЛЬКО для локального трека
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    scope.launch {
+                                        trackMenuSheetState.hide()
+                                        showTrackMenu = false
+                                        onEditTags(publishTrack)
+                                    }
+                                }
+                                .padding(vertical = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Edit,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Text(
+                                text = "Редактировать теги",
+                                color = Color.White,
+                                fontSize = 17.sp,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(0.5.dp)
+                                .background(Color.White.copy(alpha = 0.10f))
+                        )
+                    }
                     // Настройки
                     Row(
                         modifier = Modifier

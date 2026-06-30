@@ -528,11 +528,15 @@ object IcmAuthRepository {
         val result = IcmRepository.getUserSubscription()
         result?.let { sub ->
             _subscription.value = sub
-            _isPremium.value = sub.active
+            // isActive (active И не истёкшая), а не сырой sub.active — чтобы качество
+            // гейтилось ровно так же, как скачивание в FeatureAccessManager. Иначе
+            // подписка с active=true, но daysLeft=0 давала премиум-качество, при этом
+            // скачивание уже было отключено — рассинхрон с подпиской.
+            _isPremium.value = sub.isActive
             _premiumExpiresAt.value = sub.expiresAt ?: 0L
             // Persist to SharedPreferences
             prefs?.edit()?.apply {
-                putBoolean(KEY_IS_PREMIUM, sub.active)
+                putBoolean(KEY_IS_PREMIUM, sub.isActive)
                 putLong(KEY_PREMIUM_EXPIRES, sub.expiresAt ?: 0L)
                 apply()
             }

@@ -180,6 +180,8 @@ dependencies {
 
     implementation("com.github.wendykierp:JTransforms:3.2")
     implementation("com.mpatric:mp3agic:0.9.1")
+    // Редактирование тегов (mp3/flac/m4a/ogg) — Android-патченый форк JAudiotagger.
+    implementation("com.github.Adonai:jaudiotagger:2.3.15")
 
     // Kotlinx Serialization (ICM Partner API + Internal API)
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.0")

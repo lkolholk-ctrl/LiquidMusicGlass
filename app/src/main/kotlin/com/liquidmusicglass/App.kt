@@ -20,7 +20,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import okhttp3.Dispatcher
+import okhttp3.OkHttpClient
 import java.io.File
+import java.util.concurrent.TimeUnit
 
 import com.liquidmusicglass.engine.PlaylistManager
 
@@ -28,8 +31,33 @@ class App : Application(), ImageLoaderFactory {
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    // Свой OkHttp для обложек, ОТДЕЛЬНЫЙ от IcmApi и С ТАЙМАУТАМИ: зависший
+    // mzstatic/CDN не должен держать соединения вечно и копить потоки (в ANR дампе
+    // обложки висели в TLS-handshake). callTimeout рубит висяк за 20с. Держим ссылку,
+    // чтобы эвиктить пул при смене сети (VPN/Wi-Fi↔моб.).
+    private val coverHttpClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(5, TimeUnit.SECONDS)
+            .readTimeout(8, TimeUnit.SECONDS)
+            .callTimeout(12, TimeUnit.SECONDS)
+            // maxRequests=6 — ГЛОБАЛЬНЫЙ потолок одновременных загрузок обложек: на
+            // первом экране не выходим пачкой в TLS-handshake (в ANR-дампе обложки
+            // висели именно там). maxRequestsPerHost=4 — на один CDN.
+            .dispatcher(Dispatcher().apply { maxRequests = 6; maxRequestsPerHost = 4 })
+            .build()
+    }
+
+    /** Эвиктнуть пул соединений загрузчика обложек при смене сети. */
+    fun evictImageConnections() {
+        try {
+            coverHttpClient.dispatcher.cancelAll()
+            coverHttpClient.connectionPool.evictAll()
+        } catch (_: Throwable) {}
+    }
+
     override fun newImageLoader(): ImageLoader {
         return ImageLoader.Builder(this)
+            .okHttpClient { coverHttpClient }
             .components {
                 add(CoverSigningInterceptor())
             }
@@ -60,6 +88,21 @@ class App : Application(), ImageLoaderFactory {
 
         // Initialize AppSettings (SharedPreferences) — лёгкая, можно на main
         AppSettings.init(this)
+
+        // Player settings (DataStore) — лёгкая инициализация
+        com.liquidmusicglass.engine.PlayerSettings.init(this)
+
+        // Аудио-обработка (DataStore) — загрузка сохранённых EQ/эффектов
+        com.liquidmusicglass.engine.AudioFxController.init(this)
+
+        // Настройки пословной подсветки лирики (эффект/плавность)
+        com.liquidmusicglass.engine.LyricsFxController.init(this)
+
+        // Монитор маршрута вывода (BT/гарнитура) — переоткрывает Oboe на смене устройства
+        com.liquidmusicglass.engine.AudioRouteMonitor.init(this)
+
+        // Реактивный детектор энергосбережения (упрощает эффекты, не выключает)
+        com.liquidmusicglass.ui.PowerSaveMonitor.init(this)
 
         // Initialize PlayerController — просто сохраняет context
         PlayerController.init(this)

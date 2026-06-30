@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
@@ -41,10 +42,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.liquidmusicglass.engine.LyricsFxController
 import com.liquidmusicglass.engine.LyricsParser
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.ui.glass.AlbumArtImage
 import com.liquidmusicglass.ui.glass.AlbumColors
+import com.liquidmusicglass.engine.vad.VadLyricsEngine
 import com.liquidmusicglass.ui.glass.rememberAlbumColors
 import com.liquidmusicglass.ui.theme.AppFontFamily
 import kotlinx.coroutines.Dispatchers
@@ -153,6 +156,15 @@ fun LyricsScreen(
         timeProcessor?.reset()
     }
 
+    // ── VAD-лирики: модель крутится только пока открыт экран лирики с синхро-текстом.
+    // start() поднимает VocalState.enabled → BassAudioProcessor начинает кормить FFT-тап.
+    val isSyncedLyrics = lyrics.isSynced
+    DisposableEffect(isSyncedLyrics) {
+        if (isSyncedLyrics) VadLyricsEngine.start(context)
+        onDispose { VadLyricsEngine.stop() }
+    }
+    val isInterlude by timeProcessor?.isInterlude?.collectAsState() ?: remember { mutableStateOf(false) }
+
     // ── Smooth 60/120 FPS position ticker ──
     val isPlaying by PlayerController.isPlaying.collectAsState()
     var smoothPositionMs by remember { mutableLongStateOf(0L) }
@@ -192,29 +204,16 @@ fun LyricsScreen(
     val currentLineIndex by timeProcessor?.currentLineIndex?.collectAsState() ?: remember { mutableIntStateOf(-1) }
     val currentLineProgress by timeProcessor?.currentLineProgress?.collectAsState() ?: remember { mutableFloatStateOf(0f) }
 
-    // Получаем слова текущей строки для пословного караоке
-    val currentWords = remember(currentLineIndex, smoothPositionMs) {
-        timeProcessor?.getCurrentLineWords() ?: emptyList()
-    }
+    // ── Настройки пословной подсветки (эффект/плавность) — только для word-level ──
+    val isWordLevel = lyrics.isWordLevel
+    val wordEffect by LyricsFxController.effect.collectAsState()
+    val wordSmoothness by LyricsFxController.smoothness.collectAsState()
+    val lineEffect = if (isWordLevel) wordEffect else LyricsFxController.WordEffect.FILL
+    val sungTweenMs = if (isWordLevel) (90f + wordSmoothness * 360f).toInt() else 180
 
-    // ── Инструментальный проигрыш: текущая строка уже спета, а до следующей
-    // ещё далеко → показываем «waiting»-точки и не торопим заливку.
-    // Конец вокала строки оцениваем тем же капом, что и прогресс строки
-    // (LyricsTimeProcessor), т.к. в LRC хранится только время начала строки.
-    val showGapDots = remember(currentLineIndex, smoothPositionMs, lyrics) {
-        if (!lyrics.isSynced || currentLineIndex < 0 || currentLineIndex >= lyrics.lines.size) {
-            return@remember false
-        }
-        val lineStart = lyrics.lines[currentLineIndex].timeMs
-        val nextStart = lyrics.lines.getOrNull(currentLineIndex + 1)?.timeMs ?: return@remember false
-        val wordCount = lyrics.lines[currentLineIndex].text
-            .split(" ").count { it.isNotBlank() }.coerceAtLeast(1)
-        val rawDuration = (nextStart - lineStart).coerceAtLeast(1L)
-        val cappedDuration = minOf(rawDuration, (wordCount * 700L).coerceAtLeast(1500L))
-        val vocalEnd = lineStart + cappedDuration
-        // Проигрыш считается «инструментальным», только если он заметно длинный.
-        (nextStart - vocalEnd) >= INSTRUMENTAL_GAP_MS && smoothPositionMs in vocalEnd..nextStart
-    }
+    // Waiting считает сам LyricsTimeProcessor (сегментная модель): строка докрашена
+    // ПОЛНОСТЬЮ + до следующей строки реальный разрыв > WAIT_GAP_MS. VAD выключен.
+    val showWaiting = isInterlude
 
     // ── Auto-scroll с fluid gliding ──
     val listState = rememberLazyListState()
@@ -223,6 +222,8 @@ fun LyricsScreen(
     val screenHeightPx = with(density) { configuration.screenHeightDp.dp.toPx() }
     // Доступная ширина строки лирики (экран минус горизонтальные паддинги 24dp×2)
     val lineMaxWidthPx = with(density) { (configuration.screenWidthDp.dp - 48.dp).toPx().toInt() }
+    // Ширина мягкого края sweep (px) — из настройки плавности; 0 для line-level.
+    val edgeSoftPx = if (isWordLevel) (0.02f + wordSmoothness * 0.16f) * lineMaxWidthPx else 0f
 
     LaunchedEffect(currentLineIndex) {
         if (currentLineIndex >= 0) {
@@ -315,7 +316,7 @@ fun LyricsScreen(
                         item { Spacer(Modifier.height(100.dp)) }
 
                         // Waiting dots before first line starts
-                        if (lyrics.isSynced && smoothPositionMs < lyrics.lines.firstOrNull()?.timeMs ?: 0L) {
+                        if (lyrics.isSynced && currentLineIndex < 0) {
                             item {
                                 Box(
                                     modifier = Modifier
@@ -356,7 +357,7 @@ fun LyricsScreen(
                             val base = duetColor ?: Color.White
                             val sungColor by animateColorAsState(
                                 targetValue = base.copy(alpha = if (isCurrent) 1f else 0.55f),
-                                animationSpec = tween(durationMillis = 180),
+                                animationSpec = tween(durationMillis = sungTweenMs),
                                 label = "sung"
                             )
                             val unsungColor = base.copy(alpha = 0.30f)
@@ -374,11 +375,13 @@ fun LyricsScreen(
                                     unsungColor = unsungColor,
                                     isActive = isCurrent,
                                     maxWidthPx = lineMaxWidthPx,
-                                    glowColor = duetColor ?: resolvedColors.vibrant
+                                    glowColor = duetColor ?: resolvedColors.vibrant,
+                                    effect = lineEffect,
+                                    edgeSoftPx = if (isCurrent) edgeSoftPx else 0f
                                 )
                                 // Точки ожидания во время инструментального проигрыша
-                                // после уже спетой строки — крупные, по центру.
-                                if (isCurrent && showGapDots) {
+                                // (см. showWaiting: VAD решает, LRC-эвристика — fallback).
+                                if (isCurrent && showWaiting) {
                                     Spacer(Modifier.height(16.dp))
                                     Box(
                                         modifier = Modifier.fillMaxWidth(),
@@ -451,14 +454,16 @@ fun LyricsScreen(
  * до курсора, будущие — пусто). Одна непрерывная волна, без «подстрок».
  */
 @Composable
-private fun LyricLineSweep(
+internal fun LyricLineSweep(
     text: String,
     fillProgress: Float,
     sungColor: Color,
     unsungColor: Color,
     isActive: Boolean,
     maxWidthPx: Int,
-    glowColor: Color
+    glowColor: Color,
+    effect: LyricsFxController.WordEffect = LyricsFxController.WordEffect.FILL,
+    edgeSoftPx: Float = 0f
 ) {
     if (text.isEmpty()) return
 
@@ -518,7 +523,30 @@ private fun LyricLineSweep(
         }
         val swept = p * totalWidth
 
-        val clip = Path()
+        // FILL без мягкого края — ПРЕЖНИЙ жёсткий sweep (line-level не меняется).
+        if (effect == LyricsFxController.WordEffect.FILL && edgeSoftPx <= 0f) {
+            val clip = Path()
+            var acc = 0f
+            for (i in 0 until layout.lineCount) {
+                val left = layout.getLineLeft(i)
+                val right = layout.getLineRight(i)
+                val top = layout.getLineTop(i)
+                val bottom = layout.getLineBottom(i)
+                val w = right - left
+                when {
+                    swept >= acc + w -> clip.addRect(Rect(left, top, right, bottom))
+                    swept <= acc -> { }
+                    else -> clip.addRect(Rect(left, top, left + (swept - acc), bottom))
+                }
+                acc += w
+            }
+            clipPath(clip) { drawText(layout, color = sungColor) }
+            return@Canvas
+        }
+
+        // Мягкий край / эффекты (word-level): построчно с фезером у курсора.
+        val soft = (if (effect == LyricsFxController.WordEffect.FADE) edgeSoftPx * 2.2f else edgeSoftPx)
+            .coerceAtLeast(1f)
         var acc = 0f
         for (i in 0 until layout.lineCount) {
             val left = layout.getLineLeft(i)
@@ -526,17 +554,39 @@ private fun LyricLineSweep(
             val top = layout.getLineTop(i)
             val bottom = layout.getLineBottom(i)
             val w = right - left
+            val rowStart = acc
+            val rowEnd = acc + w
             when {
-                swept >= acc + w ->                     // ряд пройден целиком
-                    clip.addRect(Rect(left, top, right, bottom))
-                swept <= acc -> { /* ряд ещё не начат */ }
-                else ->                                  // текущий ряд — до позиции (плавно)
-                    clip.addRect(Rect(left, top, left + (swept - acc), bottom))
+                swept >= rowEnd ->
+                    clipRect(left, top, right, bottom) { drawText(layout, color = sungColor) }
+                swept <= rowStart -> { /* ряд ещё не начат */ }
+                else -> {
+                    val edge = left + (swept - rowStart)            // курсор в ряду
+                    val hard = (edge - soft).coerceAtLeast(left)
+                    if (hard > left) clipRect(left, top, hard, bottom) { drawText(layout, color = sungColor) }
+                    if (edge > hard) {
+                        val feather = Brush.horizontalGradient(
+                            0f to sungColor, 1f to sungColor.copy(alpha = 0f),
+                            startX = hard, endX = edge
+                        )
+                        clipRect(hard, top, edge, bottom) { drawText(layout, brush = feather) }
+                    }
+                    if (effect == LyricsFxController.WordEffect.RUNNING) {
+                        val gL = (edge - soft * 0.7f).coerceAtLeast(left)
+                        val gR = (edge + soft * 0.5f).coerceAtMost(right)
+                        if (gR > gL) {
+                            val glow = Brush.horizontalGradient(
+                                0f to glowColor.copy(alpha = 0f),
+                                0.5f to glowColor.copy(alpha = 0.85f),
+                                1f to glowColor.copy(alpha = 0f),
+                                startX = gL, endX = gR
+                            )
+                            clipRect(gL, top, gR, bottom) { drawText(layout, brush = glow) }
+                        }
+                    }
+                }
             }
             acc += w
-        }
-        clipPath(clip) {
-            drawText(layout, color = sungColor)
         }
     }
 }

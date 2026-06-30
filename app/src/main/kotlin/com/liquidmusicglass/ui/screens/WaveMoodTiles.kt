@@ -11,13 +11,18 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -71,6 +76,16 @@ private const val TAU = (2.0 * PI).toFloat()
 // Скорость медленного «дыхания» узора (доля фазы 0..1 в секунду).
 private const val PATTERN_SPEED = 0.07f
 
+// ── Отложенный прогрев AGSL-плиток (НЕ деградация) ──
+// Первые кадры экрана плитки рисуют ДЕШЁВЫМ статичным градиентом (никаких
+// RuntimeShader), чтобы холодный старт не давил GPU. Затем каждая ВИДИМАЯ плитка
+// включает свой шейдер ПО ОЧЕРЕДИ — отсчёт ведётся в РЕАЛЬНО отрисованных кадрах
+// (withFrameNanos), поэтому тяжёлая линковка AGSL-программы ложится на отдельный
+// кадр уже ПОСЛЕ стартового шторма, по одной плитке за раз. Эффект включается и
+// работает ПОСТОЯННО (не пропадает, не зависит от FPS-деградации).
+private const val TILE_WARMUP_FRAMES = 30  // ~0.5с отрисованных кадров до 1-й плитки
+private const val TILE_STAGGER_FRAMES = 6  // +~0.1с (кадров) на каждую следующую
+
 /**
  * AGSL-шейдер плитки: медленный перелив между двумя цветами муда (домен-варп
  * шумом) + лёгкий шумовой слой для ГЛУБИНЫ/бликов. Всё на GPU — недорого даже
@@ -117,10 +132,14 @@ half4 main(float2 fragCoord) {
 @Composable
 fun WaveMoodTiles(
     onSelect: (WaveMood) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    animate: Boolean = true
 ) {
     // Единый кадровый клок (секунды). Один на весь ряд — не плодим корутины.
-    val timeSec = produceState(0f) {
+    // Замораживается, когда Home перекрыт оверлеем (см. AuraBackground): меньше
+    // нагрузки на RenderThread при переходах.
+    val timeSec = produceState(0f, animate) {
+        if (!animate) return@produceState
         while (true) {
             withInfiniteAnimationFrameMillis { value = it / 1000f }
         }
@@ -131,11 +150,12 @@ fun WaveMoodTiles(
         contentPadding = PaddingValues(horizontal = 20.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        items(WAVE_MOODS, key = { it.label }) { mood ->
+        itemsIndexed(WAVE_MOODS, key = { _, m -> m.label }) { index, mood ->
             MoodTile(
                 mood = mood,
                 timeSec = timeSec,
-                seed = WAVE_MOODS.indexOf(mood) * 1.7f,
+                seed = index * 1.7f,
+                index = index,
                 onClick = { onSelect(mood) }
             )
         }
@@ -147,59 +167,85 @@ private fun MoodTile(
     mood: WaveMood,
     timeSec: State<Float>,
     seed: Float,
+    index: Int,
     onClick: () -> Unit
 ) {
-    // Шейдер живёт только на API 33+. Создаётся один раз на плитку.
-    val shader = remember(mood) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) RuntimeShader(TILE_AGSL) else null
+    // AGSL включаем НЕ на первом кадре, а со СТАГГЕРОМ по индексу в РЕАЛЬНО
+    // отрисованных кадрах — чтобы линковка AGSL-программ легла на разные кадры уже
+    // после стартового прогрева. Это отложенный старт, а НЕ FPS-деградация: однажды
+    // включившись, плитка остаётся с шейдером (эффект не пропадает).
+    val canShader = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+
+    // Энергосбережение: AGSL-плитка → статичный градиент (легче, не выключаем).
+    val powerSave = com.liquidmusicglass.ui.PowerSaveMonitor.active
+
+    // epoch меняется при возврате из фона → сбрасываем арминг и пере-прогреваем,
+    // создавая НОВЫЙ RuntimeShader (старый теряет GPU-контекст после onStop).
+    val epoch = com.liquidmusicglass.ui.EffectsLifecycle.epoch
+    var shaderArmed by remember { mutableStateOf(false) }
+    LaunchedEffect(index, epoch) {
+        shaderArmed = false
+        if (!canShader) return@LaunchedEffect
+        // Ждём N отрисованных кадров (+ стаггер по индексу), затем включаем шейдер.
+        // LazyRow держит в композиции только видимые плитки → таймеры идут лишь для них.
+        repeat(TILE_WARMUP_FRAMES + index * TILE_STAGGER_FRAMES) { withFrameNanos { } }
+        shaderArmed = true
+    }
+
+    val shader = remember(mood, shaderArmed, epoch) {
+        if (shaderArmed && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            RuntimeShader(TILE_AGSL)
+        } else null
     }
     val shaderBrush = remember(shader) { shader?.let { ShaderBrush(it) } }
 
     Box(
         modifier = Modifier
             .size(TILE_DP.dp)
-            .clip(RoundedCornerShape(44.dp))
+            // Менее скруглённые — ближе к прямоугольным карточкам (лёгкое скругление).
+            .clip(RoundedCornerShape(22.dp))
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = onClick
             )
             .drawBehind {
-                val ts = timeSec.value                       // читаем здесь → редроу только видимых
-                val patternPhase = ((ts * PATTERN_SPEED) + seed * 0.13f) % 1f
-
-                if (shader != null && shaderBrush != null) {
+                if (shader != null && shaderBrush != null && !powerSave) {
+                    // AGSL активна (плитка прогрелась). Клок читаем ТОЛЬКО здесь —
+                    // статичные плитки не инвалидируются каждый кадр.
+                    val ts = timeSec.value
+                    val patternPhase = ((ts * PATTERN_SPEED) + seed * 0.13f) % 1f
                     shader.setFloatUniform("uResolution", size.width, size.height)
                     shader.setFloatUniform("uTime", ts + seed)       // сдвиг фазы у каждой плитки
                     shader.setFloatUniform("uColorA", mood.colorA.red, mood.colorA.green, mood.colorA.blue)
                     shader.setFloatUniform("uColorB", mood.colorB.red, mood.colorB.green, mood.colorB.blue)
                     drawRect(shaderBrush)
+
+                    // ── узор (path-тяжёлый) — рисуем только когда шейдер активен ──
+                    clipRect {
+                        val a = mood.colorB
+                        when (mood.pattern) {
+                            MoodPattern.WAVES -> drawWaves(patternPhase, size.width, size.height, a)
+                            MoodPattern.DIAGONALS -> drawDiagonals(patternPhase, size.width, size.height, a)
+                            MoodPattern.CIRCLES -> drawCircles(patternPhase, size.width, size.height, a)
+                            MoodPattern.BLOBS -> drawBlobs(patternPhase, size.width, size.height, a)
+                            MoodPattern.DOTS -> drawDots(patternPhase, size.width, size.height, a)
+                            MoodPattern.RINGS -> drawRings(patternPhase, size.width, size.height, a)
+                        }
+                    }
                 } else {
-                    // CPU-фолбэк (<API33): медленно сдвигаемый диагональный градиент
-                    val shift = sin(patternPhase * TAU) * 0.5f
+                    // Прогрев (шейдер ещё не включён) / <API33 — ДЕШЁВЫЙ статичный
+                    // градиент. Клок НЕ читаем → плитка не перерисовывается каждый кадр.
                     drawRect(
                         Brush.linearGradient(
-                            colors = listOf(mood.colorA, mood.colorB, mood.colorA),
-                            start = Offset(size.width * shift, 0f),
-                            end = Offset(size.width * (shift + 1f), size.height)
+                            colors = listOf(mood.colorA, mood.colorB),
+                            start = Offset.Zero,
+                            end = Offset(size.width, size.height)
                         )
                     )
                 }
 
-                // ── узор (свой у каждого муда) ──
-                clipRect {
-                    val a = mood.colorB
-                    when (mood.pattern) {
-                        MoodPattern.WAVES -> drawWaves(patternPhase, size.width, size.height, a)
-                        MoodPattern.DIAGONALS -> drawDiagonals(patternPhase, size.width, size.height, a)
-                        MoodPattern.CIRCLES -> drawCircles(patternPhase, size.width, size.height, a)
-                        MoodPattern.BLOBS -> drawBlobs(patternPhase, size.width, size.height, a)
-                        MoodPattern.DOTS -> drawDots(patternPhase, size.width, size.height, a)
-                        MoodPattern.RINGS -> drawRings(patternPhase, size.width, size.height, a)
-                    }
-                }
-
-                // ── мягкий scrim к низу для читаемости подписи ──
+                // ── мягкий scrim к низу для читаемости подписи (всегда) ──
                 drawRect(
                     Brush.verticalGradient(
                         0.45f to Color.Transparent,
@@ -238,9 +284,9 @@ private fun DrawScope.softGlow(center: Offset, radius: Float, color: Color, alph
 
 // ── WAVES: слоёные текучие волны со свечением (glow-обводка + яркое ядро) ──
 private fun DrawScope.drawWaves(p: Float, w: Float, h: Float, accent: Color) {
-    val rows = 6
+    val rows = 8
     for (k in 0 until rows) {
-        val yBase = h * (0.10f + k * 0.155f)
+        val yBase = h * (0.06f + k * 0.122f)
         val amp = h * (0.045f + 0.02f * sin(k * 1.3f))
         val freq = 1.3f + k * 0.18f
         val phaseShift = p * TAU * (if (k % 2 == 0) 1f else -1f) + k * 0.7f
@@ -255,6 +301,23 @@ private fun DrawScope.drawWaves(p: Float, w: Float, h: Float, accent: Color) {
         val col = if (k % 2 == 0) Color.White else accent
         drawPath(path, col.copy(alpha = 0.05f), style = Stroke(width = 12f))  // glow
         drawPath(path, col.copy(alpha = 0.20f), style = Stroke(width = 2.2f)) // ядро
+    }
+    // Тонкие встречные волны-«рябь» (другой ритм) — для насыщенности.
+    for (k in 0 until 3) {
+        val yBase = h * (0.22f + k * 0.28f)
+        val path = Path(); path.moveTo(0f, yBase)
+        var x = 0f
+        while (x <= w) {
+            val y = yBase + h * 0.02f * sin(-p * TAU * 1.6f + x / w * TAU * (3.4f + k))
+            path.lineTo(x, y); x += w / 56f
+        }
+        drawPath(path, Color.White.copy(alpha = 0.10f), style = Stroke(width = 1.3f))
+    }
+    // Световые блики на гребне верхней волны.
+    for (i in 0 until 5) {
+        val fx = w * (0.12f + i * 0.19f)
+        val fy = h * 0.06f + h * 0.045f * sin(p * TAU + i * 0.9f)
+        softGlow(Offset(fx, fy), w * 0.045f, Color.White, 0.40f)
     }
 }
 
@@ -279,6 +342,22 @@ private fun DrawScope.drawDiagonals(p: Float, w: Float, h: Float, accent: Color)
                 size = Size(band, h * 3f)
             )
         }
+        // Яркие тонкие линии-лучи между полосами.
+        val n2 = 8
+        for (i in 0..n2) {
+            val x = ((i + p) / n2) * travel - w * 0.7f
+            drawLine(
+                Color.White.copy(alpha = 0.12f),
+                start = Offset(x, -h), end = Offset(x, h * 2f), strokeWidth = 1.4f
+            )
+        }
+    }
+    // Встречная штриховка (другой угол) — для «сетчатой» насыщенности.
+    rotate(degrees = 26f, pivot = Offset(w / 2f, h / 2f)) {
+        for (i in 0..6) {
+            val x = ((i - p) / 6f) * (w * 2.2f) - w * 0.6f
+            drawLine(accent.copy(alpha = 0.10f), Offset(x, -h), Offset(x, h * 2f), strokeWidth = 1.2f)
+        }
     }
 }
 
@@ -295,6 +374,24 @@ private fun DrawScope.drawCircles(p: Float, w: Float, h: Float, accent: Color) {
         drawCircle(col.copy(alpha = fade * 0.16f), radius = r, center = c, style = Stroke(width = 2.5f + fade * 4f))
     }
     softGlow(c, w * 0.30f, Color.White, 0.12f)
+
+    // Второй центр ряби (снизу-слева) — в противофазе.
+    val c2 = Offset(w * 0.22f, h * 0.82f)
+    val n2 = 5
+    for (i in 0 until n2) {
+        val frac = ((i.toFloat() / n2) + p + 0.5f) % 1f
+        val r = frac * w * 0.85f
+        val fade = (1f - frac)
+        drawCircle(accent.copy(alpha = fade * 0.16f), radius = r, center = c2, style = Stroke(width = 2f + fade * 3.5f))
+    }
+    softGlow(c2, w * 0.18f, accent, 0.12f)
+    // Рассеянные мелкие капли-блики.
+    for (i in 0 until 5) {
+        val a = (p + i * 0.21f) * TAU
+        val sx = w * (0.30f + 0.12f * i) + w * 0.05f * cos(a)
+        val sy = h * (0.45f + 0.05f * i) + h * 0.05f * sin(a * 1.3f)
+        softGlow(Offset(sx, sy), w * 0.03f, Color.White, 0.35f)
+    }
 }
 
 // ── BLOBS: слоёные дрейфующие световые сгустки + мелкие яркие блики ──
@@ -308,13 +405,24 @@ private fun DrawScope.drawBlobs(p: Float, w: Float, h: Float, accent: Color) {
     blob(0.00f, 0.30f, 0.34f, 0.46f, Color.White, 0.16f)
     blob(0.33f, 0.72f, 0.52f, 0.40f, accent, 0.24f)
     blob(0.66f, 0.46f, 0.80f, 0.34f, Color.White, 0.12f)
+    // ещё пара дрейфующих сгустков — насыщеннее
+    blob(0.18f, 0.62f, 0.22f, 0.26f, accent, 0.18f)
+    blob(0.50f, 0.18f, 0.62f, 0.22f, Color.White, 0.10f)
     // мелкие яркие блики
-    for (i in 0 until 3) {
+    for (i in 0 until 5) {
         val a = (p * (1f + i * 0.3f) + i * 0.4f) * TAU
-        val cx = w * (0.25f + 0.25f * i) + w * 0.06f * cos(a)
-        val cy = h * (0.3f + 0.18f * i) + h * 0.06f * sin(a)
-        softGlow(Offset(cx, cy), w * 0.07f, Color.White, 0.5f)
+        val cx = w * (0.18f + 0.18f * i) + w * 0.06f * cos(a)
+        val cy = h * (0.28f + 0.14f * i) + h * 0.06f * sin(a)
+        softGlow(Offset(cx, cy), w * 0.06f, Color.White, 0.5f)
     }
+    // светящаяся дуга, связывающая сгустки
+    val arc = Path()
+    arc.moveTo(w * 0.2f, h * 0.4f)
+    arc.quadraticBezierTo(
+        w * (0.5f + 0.06f * sin(p * TAU)), h * 0.2f,
+        w * 0.8f, h * 0.55f
+    )
+    drawPath(arc, Color.White.copy(alpha = 0.10f), style = Stroke(width = 1.6f))
 }
 
 // ── DOTS: боке — мягкие крупные пятна позади + сетка мерцающих точек ──
@@ -336,7 +444,24 @@ private fun DrawScope.drawDots(p: Float, w: Float, h: Float, accent: Color) {
             val y = h * (gy + 0.5f) / rows
             val tw = sin(p * TAU + (gx + gy) * 0.55f) * 0.5f + 0.5f
             drawCircle(Color.White.copy(alpha = 0.10f + tw * 0.22f), radius = r * (0.7f + tw * 0.6f), center = Offset(x, y))
+            // вокруг части точек — пульсирующие тонкие кольца
+            if ((gx + gy) % 3 == 0) {
+                drawCircle(
+                    accent.copy(alpha = 0.10f + tw * 0.12f),
+                    radius = r * (2.2f + tw * 1.6f), center = Offset(x, y),
+                    style = Stroke(width = 1.2f)
+                )
+            }
         }
+    }
+    // несколько ярких «плюс»-искр поверх
+    for (i in 0 until 4) {
+        val sx = w * (0.2f + 0.2f * i)
+        val sy = h * (0.3f + 0.15f * i)
+        val s = w * (0.02f + 0.015f * (sin(p * TAU + i) * 0.5f + 0.5f))
+        val col = Color.White.copy(alpha = 0.5f)
+        drawLine(col, Offset(sx - s, sy), Offset(sx + s, sy), strokeWidth = 1.6f)
+        drawLine(col, Offset(sx, sy - s), Offset(sx, sy + s), strokeWidth = 1.6f)
     }
 }
 
@@ -356,5 +481,21 @@ private fun DrawScope.drawRings(p: Float, w: Float, h: Float, accent: Color) {
             drawCircle(col.copy(alpha = fade * 0.18f), radius = r, center = c, style = Stroke(width = 2.5f + fade * 4.5f))
         }
         softGlow(c, w * 0.14f, col, 0.18f)
+        // радиальные «лучики» от центра — для насыщенности
+        val ticks = 10
+        val rIn = w * 0.10f
+        val rOut = w * 0.18f
+        for (j in 0 until ticks) {
+            val ang = j.toFloat() / ticks * TAU + p * TAU * 0.5f
+            val s = Offset(c.x + rIn * cos(ang), c.y + rIn * sin(ang))
+            val e = Offset(c.x + rOut * cos(ang), c.y + rOut * sin(ang))
+            drawLine(col.copy(alpha = 0.16f), s, e, strokeWidth = 1.4f)
+        }
+    }
+    // третий слабый центр-эхо (сверху-по центру)
+    val c3 = Offset(w * 0.52f, h * 0.16f)
+    for (i in 0 until 4) {
+        val frac = ((i.toFloat() / 4) + p + 0.25f) % 1f
+        drawCircle(Color.White.copy(alpha = (1f - frac) * 0.12f), radius = frac * w * 0.5f, center = c3, style = Stroke(width = 1.6f))
     }
 }

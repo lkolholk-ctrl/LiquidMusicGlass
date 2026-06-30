@@ -27,6 +27,20 @@ object IcmRepository {
 
     private var _lastException: Exception? = null
 
+    // ── Терминальные «бизнес-гейты» (анти-ANR: остановить серии ретраев) ──
+    // 403 subscription_required на /me/preferences и 405 на /library/likes — это НЕ
+    // сетевые ошибки, ретрай их не исправит. Один раз получив такую — больше не
+    // дёргаем эндпоинт (иначе recomposition/повторный init = «кричит на сервер»).
+    // Сбрасываются при новой сессии (логин).
+    @Volatile private var preferencesBlocked = false
+    @Volatile private var likesBlocked = false
+
+    /** Сбросить бизнес-гейты (на новый логин/сессию — состояние подписки могло измениться). */
+    fun resetBusinessGates() {
+        preferencesBlocked = false
+        likesBlocked = false
+    }
+
     /** Default region */
     var region: String
         get() = api.defaultRegion
@@ -68,11 +82,13 @@ object IcmRepository {
      */
     fun setPartnerUserId(partnerUserId: String?) {
         api.partnerUserId = partnerUserId
+        resetBusinessGates()  // авторизация изменилась — даём подписке/likes шанс заново
     }
 
     /** Update the session token (used after /session/issue or Telegram OAuth). */
     fun setSessionToken(sessionToken: String?) {
         api.sessionToken = sessionToken
+        resetBusinessGates()
     }
 
     /** Current partner user id used as X-Partner-User-Id. */
@@ -325,7 +341,10 @@ object IcmRepository {
                             source = item.source,
                             collectionId = item.collectionId,
                             album = item.album,
-                            genre = if (genreTag) query else null
+                            genre = if (genreTag) query else null,
+                            // Сохраняем тип сущности, чтобы UI не угадывал по collectionId.
+                            isAlbum = item.isAlbum,
+                            isArtist = item.isArtist
                         )
                         transform?.let { homeItem = it(homeItem) }
                         items.add(homeItem)
@@ -569,10 +588,14 @@ object IcmRepository {
         limit: Int? = null,
         offset: Int? = null
     ): IcmLibraryLikesResponse? {
+        // Терминально: 405 (метод не поддержан) / 403 → эндпоинт недоступен, не зовём.
+        if (likesBlocked) return null
         val result = api.getLibraryLikes(source, limit, offset)
         result.exceptionOrNull()?.let {
             _lastException = it as? Exception
             _lastError.value = it.message
+            val code = (it as? IcmApiException)?.code
+            if (code == 405 || code == 403) likesBlocked = true
         }
         return result.getOrNull()
     }
@@ -814,10 +837,13 @@ object IcmRepository {
      * Docs 8.5.
      */
     suspend fun getUserPreferences(): IcmUserPreferences? {
+        // Терминально: подписки нет (403) → не дёргаем эндпоинт повторно.
+        if (preferencesBlocked) return null
         val result = api.getUserPreferences()
         result.exceptionOrNull()?.let {
             _lastException = it as? Exception
             _lastError.value = it.message
+            if ((it as? IcmApiException)?.code == 403) preferencesBlocked = true
         }
         return result.getOrNull()
     }

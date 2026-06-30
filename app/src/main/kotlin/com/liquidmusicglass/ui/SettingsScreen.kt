@@ -4,6 +4,9 @@ import android.content.Context
 import android.content.Intent
 import android.media.audiofx.AudioEffect
 import android.net.Uri
+import android.provider.OpenableColumns
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -19,6 +22,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Equalizer
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.material.icons.rounded.SwapHoriz
+import androidx.compose.material.icons.rounded.LibraryMusic
+import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -40,21 +53,30 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.liquidmusicglass.engine.AppSettings
+import com.liquidmusicglass.engine.MediaCacheManager
 import com.liquidmusicglass.engine.PlayerController
+import com.liquidmusicglass.engine.PlayerSettings
 import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.ui.liquid.LiquidToggle
 import com.liquidmusicglass.ui.theme.LiquidTheme
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.File
 
-private val AppleRed = Color(0xFFFC3C44)
+// Единый акцент приложения — бледно-зелёный (заменил красный Apple-стиля).
+private val Accent = Color(0xFF7FB77E)
 
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
     onOpenEqualizer: () -> Unit = {},
+    showBack: Boolean = true,
     backdrop: LayerBackdrop
 ) {
     val context = LocalContext.current
@@ -85,25 +107,28 @@ fun SettingsScreen(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null
-                        ) { onBack() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                        contentDescription = null,
-                        tint = lc.iconDefault,
-                        modifier = Modifier.size(22.dp)
-                    )
+                // Кнопка «назад» только когда Settings открыт оверлеем; как таб — без неё.
+                if (showBack) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) { onBack() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                            contentDescription = null,
+                            tint = lc.iconDefault,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
                 }
-                Spacer(modifier = Modifier.width(16.dp))
                 Text(
                     text = "Settings",
                     color = lc.textPrimary,
@@ -135,8 +160,8 @@ fun SettingsScreen(
                 )
                 PlainDivider()
                 SettingsActionItem(
-                    title = "Equalizer",
-                    subtitle = "Bass Boost, Surround, Presets",
+                    title = "Audio",
+                    subtitle = "EQ, Bass, Loudness, Compressor, Limiter",
                     icon = Icons.Rounded.Equalizer,
                     onClick = onOpenEqualizer
                 )
@@ -245,7 +270,7 @@ fun SettingsScreen(
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
                                         text = quality,
-                                        color = if (isSelected) AppleRed else lc.textPrimary,
+                                        color = if (isSelected) Accent else lc.textPrimary,
                                         fontSize = 16.sp,
                                         fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
                                     )
@@ -275,7 +300,7 @@ fun SettingsScreen(
                                     modifier = Modifier
                                         .size(20.dp)
                                         .clip(CircleShape)
-                                        .background(AppleRed),
+                                        .background(Accent),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(
@@ -335,7 +360,7 @@ fun SettingsScreen(
                     themeLabels.forEachIndexed { index, label ->
                         val isSelected = themeMode == index
                         val isDark = lc.isDark
-                        val itemBg = if (isSelected) AppleRed else (if (isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
+                        val itemBg = if (isSelected) Accent else (if (isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
                         val unselectedTextColor = if (isDark) Color.White.copy(alpha = 0.45f) else Color.Black.copy(alpha = 0.45f)
 
                         Box(
@@ -371,9 +396,496 @@ fun SettingsScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(28.dp))
+
+            // ── AUTOMIX & SOUND ──
+            SectionLabel("AUTOMIX & SOUND")
+
+            val autoMix by PlayerSettings.autoMix.collectAsState()
+            val volumeNorm by PlayerSettings.volumeNormalization.collectAsState()
+            PlainCard {
+                SettingsToggleItem(
+                    title = "AutoMix",
+                    subtitle = "Модель дирижирует JUCE-сводом между треками (локальные + стриминг) + авто-волна",
+                    selected = autoMix,
+                    onSelect = { PlayerSettings.setAutoMix(it) }
+                )
+                PlainDivider()
+                SettingsToggleItem(
+                    title = "Sound Check",
+                    subtitle = "Normalize volume across tracks",
+                    selected = volumeNorm,
+                    onSelect = { PlayerSettings.setVolumeNormalization(it) }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(28.dp))
+
+            // ── AUDIO CACHE ──
+            SectionLabel("AUDIO CACHE")
+
+            val cacheBytes by PlayerSettings.audioCacheBytes.collectAsState()
+            var cacheUsed by remember { mutableStateOf(-1L) }
+            var cacheRefresh by remember { mutableStateOf(0) }
+            LaunchedEffect(cacheBytes, cacheRefresh) {
+                cacheUsed = MediaCacheManager.getCacheSizeBytes()
+            }
+            PlainCard {
+                Column(modifier = Modifier.padding(vertical = 6.dp)) {
+                    CacheSizeSelector(
+                        options = PlayerSettings.CACHE_OPTIONS_BYTES,
+                        selected = cacheBytes,
+                        onSelect = { bytes ->
+                            PlayerSettings.setAudioCacheBytes(bytes)
+                            MediaCacheManager.applyCacheSizeChange()
+                            scope.launch {
+                                delay(600)
+                                cacheRefresh++
+                            }
+                        }
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (cacheBytes <= 0L) "Cache is off"
+                            else "Currently used: ${formatBytes(cacheUsed.coerceAtLeast(0L))}",
+                            color = lc.textSecondary,
+                            fontSize = 12.sp,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            text = "Clear",
+                            color = Accent,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null
+                                ) {
+                                    scope.launch {
+                                        MediaCacheManager.clearCache()
+                                        delay(300)
+                                        cacheRefresh++
+                                    }
+                                }
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(28.dp))
+
+            // ── ACCESSIBILITY ──
+            SectionLabel("ACCESSIBILITY")
+
+            val increaseContrast by PlayerSettings.increaseContrast.collectAsState()
+            PlainCard {
+                SettingsToggleItem(
+                    title = "Increase Contrast",
+                    subtitle = "Stronger text & less glass transparency",
+                    selected = increaseContrast,
+                    onSelect = { PlayerSettings.setIncreaseContrast(it) }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(28.dp))
+
+            // ── DEV (temporary — JUCE Stage 1/2 verification) ──
+            SectionLabel("DEV")
+
+            var toneOn by remember { mutableStateOf(false) }
+            var devStatus by remember {
+                mutableStateOf("WAV/AIFF/FLAC/OGG (JUCE) + MP3/AAC/M4A (MediaCodec)")
+            }
+            var bpmA by remember { mutableStateOf("128") }
+            var bpmB by remember { mutableStateOf("100") }
+            var pathA by remember { mutableStateOf<String?>(null) }
+            var pathB by remember { mutableStateOf<String?>(null) }
+            var durationA by remember { mutableStateOf(0L) }
+            val engine = com.liquidmusicglass.engine.automix.AutoMixNativeEngine
+            // ЗАКРЕПЛЕНИЕ ФУНДАМЕНТА: dev-тест JUCE использует ТОТ ЖЕ глобальный
+            // движок, что и локальное воспроизведение. Пока играет локалка — не
+            // даём тесту трогать движок (init/play/stop/crossfade/tone), иначе он
+            // оборвёт живой звук (тот же класс бага, что engine.release в onDispose).
+            fun localJuceBusy(): Boolean =
+                if (com.liquidmusicglass.engine.PlayerController.isLocalJucePlaybackActive) {
+                    devStatus = "Локальное аудио играет на JUCE — тест движка недоступен"
+                    true
+                } else false
+            // LAZY: do NOT construct at composition — AutoMixController's ctor loads
+            // the TFLite model. It's built on first analysis, off the main thread,
+            // so the model never loads at app/cold start.
+            val autoMixLazy = remember { lazy { com.liquidmusicglass.automix.AutoMixController(context.applicationContext) } }
+            var autoMixJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+            // Stage 7a: hand-off controller (Media3 ↔ JUCE) on local files. LAZY —
+            // its ExoPlayer is built only when a hand-off actually runs.
+            val handoffLazy = remember {
+                lazy { com.liquidmusicglass.engine.automix.JuceHandoffController(context.applicationContext) }
+            }
+
+            // Free the JUCE/Oboe device + decoded buffers (and the ML model if it was
+            // loaded) when leaving this screen, so nothing heavy is held in the bg.
+            DisposableEffect(Unit) {
+                onDispose {
+                    // КРИТИЧНО: НЕ освобождать движок, пока он играет ЛОКАЛЬНОЕ аудио.
+                    // engine.release() закрывает Oboe-устройство и уничтожает общий
+                    // gEngine — музыка на JUCE мгновенно глохнет (позиция→0), а сессия
+                    // думает, что играет. Это и был баг «звук пропадает после
+                    // переключения вкладок» — уход с вкладки Settings дёргал onDispose.
+                    if (!com.liquidmusicglass.engine.PlayerController.isLocalJucePlaybackActive) {
+                        runCatching { engine.release() }
+                    } else {
+                        com.liquidmusicglass.debug.DebugLog.add("Settings.onDispose: engine.release SKIPPED (local JUCE active)")
+                    }
+                    if (autoMixLazy.isInitialized()) runCatching { autoMixLazy.value.release() }
+                    if (handoffLazy.isInitialized()) runCatching { handoffLazy.value.release() }
+                }
+            }
+
+            // Pickers ONLY copy + remember the path. They DO NOT touch JUCE — the
+            // engine (AAudio / NDK MediaCodec / TimeSliceThread) must stay asleep
+            // until a blend actually runs, so it's never on the cold-start budget.
+            val pickA = rememberLauncherForActivityResult(
+                ActivityResultContracts.OpenDocument()
+            ) { uri ->
+                if (uri != null) {
+                    scope.launch {
+                        devStatus = "Copying A…"
+                        val path = withContext(Dispatchers.IO) { copyUriToCache(context, uri, "A") }
+                        if (path == null) { devStatus = "A copy failed"; return@launch }
+                        pathA = path
+                        durationA = withContext(Dispatchers.IO) { audioDurationMs(File(path)) }
+                        devStatus = "A ready (${durationA / 1000}s) — pick B"
+                    }
+                }
+            }
+
+            val pickB = rememberLauncherForActivityResult(
+                ActivityResultContracts.OpenDocument()
+            ) { uri ->
+                if (uri != null) {
+                    scope.launch {
+                        devStatus = "Copying B…"
+                        val path = withContext(Dispatchers.IO) { copyUriToCache(context, uri, "B") }
+                        if (path == null) { devStatus = "B copy failed"; return@launch }
+                        pathB = path
+                        devStatus = "B ready — Arm AutoMix (or Manual blend)"
+                    }
+                }
+            }
+
+            PlainCard {
+                SettingsToggleItem(
+                    title = "JUCE Test Tone 440 Hz",
+                    subtitle = "Output check (only when no track loaded)",
+                    selected = toneOn,
+                    onSelect = { on ->
+                        if (!localJuceBusy()) {
+                            toneOn = on
+                            if (on) { engine.init(context); engine.startTone() } else engine.stopTone()
+                        }
+                    }
+                )
+                PlainDivider()
+                SettingsActionItem(
+                    title = "Deck A: Pick",
+                    subtitle = devStatus,
+                    icon = Icons.Rounded.PlayArrow,
+                    onClick = { pickA.launch(arrayOf("audio/*")) }
+                )
+                PlainDivider()
+                SettingsActionItem(
+                    title = "Deck B: Pick",
+                    subtitle = "Second track (no JUCE until blend)",
+                    icon = Icons.Rounded.LibraryMusic,
+                    onClick = { pickB.launch(arrayOf("audio/*")) }
+                )
+                PlainDivider()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedTextField(
+                        value = bpmA,
+                        onValueChange = { bpmA = it },
+                        label = { Text("BPM A") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = bpmB,
+                        onValueChange = { bpmB = it },
+                        label = { Text("BPM B") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                PlainDivider()
+                SettingsActionItem(
+                    title = "Manual blend now (A → B, 8s)",
+                    subtitle = "Wakes JUCE NOW: decode A+B, beat-match (if BPM), bass-swap crossfade",
+                    icon = Icons.Rounded.SwapHoriz,
+                    onClick = {
+                        if (!localJuceBusy()) scope.launch {
+                            val pa = pathA; val pb = pathB
+                            if (pa == null || pb == null) { devStatus = "Pick Deck A & B first"; return@launch }
+                            devStatus = "JUCE waking + decoding A/B…"
+                            val a = bpmA.toDoubleOrNull() ?: 0.0
+                            val b = bpmB.toDoubleOrNull() ?: 0.0
+                            withContext(Dispatchers.IO) {
+                                engine.init(context)               // JUCE wakes on this manual action
+                                engine.loadTrackA(pa)
+                                engine.loadTrackB(pb)
+                                if (a > 0.0 && b > 0.0) engine.prepareStretchB(a, b)
+                            }
+                            engine.play()
+                            engine.startCrossfade(8000.0)
+                            devStatus = "Manual blend running (8s)"
+                        }
+                    }
+                )
+                PlainDivider()
+                SettingsActionItem(
+                    title = "Pause",
+                    subtitle = "Pause both decks",
+                    icon = Icons.Rounded.Pause,
+                    onClick = { if (!localJuceBusy()) engine.pause() }
+                )
+                PlainDivider()
+                SettingsActionItem(
+                    title = "Stop",
+                    subtitle = "Stop & rewind both decks",
+                    icon = Icons.Rounded.Stop,
+                    onClick = { if (!localJuceBusy()) engine.stop() }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(28.dp))
+
+            // ── DEV: AutoMix model -> JUCE (Stage 6) ──
+            // Separate from the global AutoMix toggle. ON = the ML model analyses
+            // the picked A/B pair and JUCE executes the blend by its decisions.
+            SectionLabel("DEV — AUTOMIX (MODEL → JUCE)")
+            PlainCard {
+                // Реальным потоком управляет ГЛОБАЛЬНЫЙ тумблер AutoMix (секция
+                // AUTOMIX & SOUND). Здесь — только изолированные DEV-тесты на
+                // выбранной паре A/B.
+                SettingsActionItem(
+                    title = "Arm AutoMix (analyze bg → timed cue)",
+                    subtitle = devStatus,
+                    icon = Icons.Rounded.AutoAwesome,
+                    onClick = {
+                        if (localJuceBusy()) return@SettingsActionItem
+                        autoMixJob?.cancel()
+                        autoMixJob = scope.launch {
+                            val pa = pathA; val pb = pathB; val durA = durationA
+                            if (pa == null || pb == null || durA <= 0L) { devStatus = "Pick Deck A & B first"; return@launch }
+
+                            // 1) Analyse the pair in the BACKGROUND. JUCE stays ASLEEP —
+                            //    no engine calls here, so AAudio / NDK MediaCodec / the
+                            //    TimeSliceThread are never started during analysis.
+                            devStatus = "Model analysing (bg)… JUCE asleep"
+                            val feat = withContext(Dispatchers.Default) {
+                                autoMixLazy.value.analyzeTrackPair(Uri.fromFile(File(pa)), Uri.fromFile(File(pb)), durA)
+                            }
+                            android.util.Log.i(
+                                "JUCEAutoMix",
+                                "MODEL READY: xfade=${feat.crossfadeDurationMs}ms type=${feat.transitionType} " +
+                                    "start=${feat.transitionStartMs}ms entry=${feat.entryOffsetMs}ms " +
+                                    "bpmA=${feat.bpmA} bpmB=${feat.bpmB} compat=${feat.compatibility} ready=${feat.readyForTransition}"
+                            )
+                            if (!feat.readyForTransition) {
+                                devStatus = "Model: pair not compatible (compat=${"%.2f".format(feat.compatibility)}) — no transition"
+                                return@launch
+                            }
+
+                            // 2) Будим JUCE и СРАЗУ играем трек A — настоящий звук.
+                            //    JUCE грузится только ТУТ, по нажатию Arm (не на старте
+                            //    приложения), поэтому cold-start остаётся лёгким. Decode
+                            //    A+B, точку входа B и beat-match готовим заранее, чтобы
+                            //    кроссфейд стартовал без рывка.
+                            val controller = autoMixLazy.value
+                            val ba = feat.bpmA; val bb = feat.bpmB
+                            devStatus = "Waking JUCE · loading A+B…"
+                            withContext(Dispatchers.IO) {
+                                engine.init(context)
+                                engine.loadTrackA(pa)
+                                engine.loadTrackB(pb)
+                                engine.setEntryOffsetB(feat.entryOffsetMs.toDouble())
+                                if (ba != null && bb != null && ba > 0f && bb > 0f) {
+                                    engine.prepareStretchB(ba.toDouble(), bb.toDouble())
+                                }
+                            }
+                            withContext(Dispatchers.IO) { engine.play() }   // дек A играет с начала — звук слышен сразу
+                            android.util.Log.i(
+                                "JUCEAutoMix",
+                                "PLAYING A · cue @ ${feat.transitionStartMs}ms (model) · " +
+                                    "xfade ${feat.crossfadeDurationMs}ms type ${feat.transitionType}"
+                            )
+
+                            // 3) Крутим РЕАЛЬНУЮ позицию дека A. Когда модель скажет
+                            //    «пора» (shouldStartTransition по transitionStartMs) —
+                            //    запускаем кроссфейд A→B. И звук, и момент — от модели.
+                            var blended = false
+                            while (!blended) {
+                                delay(200)
+                                val posA = engine.positionMsA().toLong()
+                                val lenA = engine.lengthMsA().toLong().coerceAtLeast(durA)
+                                val remaining = (lenA - posA).coerceAtLeast(0L)
+                                val tr = controller.shouldStartTransition(posA, remaining, feat)
+                                if (tr.shouldStart) {
+                                    android.util.Log.i(
+                                        "JUCEAutoMix",
+                                        "MODEL CUE @ posA=${posA}ms → blend ${tr.crossfadeDurationMs}ms " +
+                                            "type ${tr.transitionType} entry ${tr.entryOffsetMs}ms"
+                                    )
+                                    withContext(Dispatchers.IO) {
+                                        engine.setEntryOffsetB(tr.entryOffsetMs.toDouble())
+                                        engine.startCrossfade(tr.crossfadeDurationMs.toDouble())
+                                    }
+                                    devStatus = "JUCE blend: ${tr.crossfadeDurationMs}ms · type ${tr.transitionType} · " +
+                                        "bpm ${ba?.toInt() ?: "?"}→${bb?.toInt() ?: "?"}"
+                                    blended = true
+                                } else {
+                                    devStatus = "Playing A · ${posA / 1000}s / cue ${feat.transitionStartMs / 1000}s of ${lenA / 1000}s"
+                                }
+                            }
+                        }
+                    }
+                )
+                PlainDivider()
+                SettingsActionItem(
+                    title = "Hand-off (Media3 → JUCE → Media3)",
+                    subtitle = "Stage 7a: Media3 plays A, JUCE blends at cue, Media3 continues B",
+                    icon = Icons.Rounded.SwapHoriz,
+                    onClick = {
+                        if (localJuceBusy()) return@SettingsActionItem
+                        autoMixJob?.cancel()
+                        autoMixJob = scope.launch {
+                            val pa = pathA; val pb = pathB; val durA = durationA
+                            if (pa == null || pb == null || durA <= 0L) { devStatus = "Pick Deck A & B first"; return@launch }
+
+                            // Анализ пары (Стадия 6) — JUCE спит. Модель даёт точку
+                            // перехода и параметры свода.
+                            devStatus = "Model analysing (bg)…"
+                            val feat = withContext(Dispatchers.Default) {
+                                autoMixLazy.value.analyzeTrackPair(
+                                    Uri.fromFile(File(pa)), Uri.fromFile(File(pb)), durA
+                                )
+                            }
+                            if (!feat.readyForTransition) {
+                                devStatus = "Model: pair not compatible — no hand-off"
+                                return@launch
+                            }
+                            android.util.Log.i(
+                                "JUCEAutoMix",
+                                "HANDOFF arm: cue=${feat.transitionStartMs}ms xfade=${feat.crossfadeDurationMs}ms " +
+                                    "entry=${feat.entryOffsetMs}ms type=${feat.transitionType}"
+                            )
+                            // Стадия 7a: Media3 ведёт A, JUCE сводит у точки модели,
+                            // Media3 продолжает B. JUCE поднимается лениво у cue.
+                            handoffLazy.value.handoff(
+                                engine = engine,
+                                pathA = pa,
+                                pathB = pb,
+                                transitionStartMs = feat.transitionStartMs,
+                                crossfadeMs = feat.crossfadeDurationMs,
+                                entryOffsetMs = feat.entryOffsetMs,
+                                bpmA = feat.bpmA,
+                                bpmB = feat.bpmB,
+                                status = { s -> devStatus = s }
+                            )
+                        }
+                    }
+                )
+                PlainDivider()
+                SettingsActionItem(
+                    title = "Cancel AutoMix arm",
+                    subtitle = "Stop playback / waiting for the cue",
+                    icon = Icons.Rounded.Stop,
+                    onClick = {
+                        autoMixJob?.cancel()
+                        // engine.stop() остановит и локалку (общий движок) — гард.
+                        if (!com.liquidmusicglass.engine.PlayerController.isLocalJucePlaybackActive) {
+                            runCatching { engine.stop() }
+                        }
+                        if (handoffLazy.isInitialized()) runCatching { handoffLazy.value.release() }
+                        devStatus = "AutoMix arm cancelled"
+                    }
+                )
+            }
+
+            // Нижний отступ под плавающий таб-бар (Settings теперь вкладка).
+            Spacer(modifier = Modifier.height(110.dp))
         }
     }
+}
+
+/** 0/200МБ/500МБ/1/2/5ГБ — две строки по три кнопки. */
+@Composable
+private fun CacheSizeSelector(
+    options: List<Long>,
+    selected: Long,
+    onSelect: (Long) -> Unit
+) {
+    Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
+        options.chunked(3).forEach { rowOptions ->
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                rowOptions.forEach { bytes ->
+                    val isSelected = selected == bytes
+                    val isDark = LiquidTheme.colors.isDark
+                    val itemBg = if (isSelected) Accent else (if (isDark) Color(0xFF1C1C1E) else Color(0xFFE5E5EA))
+                    val unselectedTextColor = if (isDark) Color.White.copy(alpha = 0.45f) else Color.Black.copy(alpha = 0.45f)
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(36.dp)
+                            .background(itemBg, RoundedCornerShape(50))
+                            .clip(RoundedCornerShape(50))
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                                onClick = { onSelect(bytes) }
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = cacheLabel(bytes),
+                            color = if (isSelected) Color.White else unselectedTextColor,
+                            fontSize = 13.sp,
+                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun cacheLabel(bytes: Long): String = when {
+    bytes <= 0L -> "Off"
+    bytes >= 1024L * 1024 * 1024 -> "${bytes / (1024L * 1024 * 1024)} GB"
+    else -> "${bytes / (1024L * 1024)} MB"
+}
+
+private fun formatBytes(bytes: Long): String = when {
+    bytes >= 1024L * 1024 * 1024 ->
+        String.format("%.1f GB", bytes / (1024.0 * 1024 * 1024))
+    else -> "${bytes / (1024L * 1024)} MB"
 }
 
 // ── UI Components ──
@@ -505,7 +1017,7 @@ private fun PreloadSelector(
         options.forEach { sec ->
             val isSelected = selectedSeconds == sec
             val isDark = LiquidTheme.colors.isDark
-            val itemBg = if (isSelected) AppleRed else (if (isDark) Color(0xFF1C1C1E) else Color(0xFFE5E5EA))
+            val itemBg = if (isSelected) Accent else (if (isDark) Color(0xFF1C1C1E) else Color(0xFFE5E5EA))
             val unselectedTextColor = if (isDark) Color.White.copy(alpha = 0.45f) else Color.Black.copy(alpha = 0.45f)
 
             Box(
@@ -552,7 +1064,7 @@ private fun SleepTimerSelector(
         options.forEach { minutes ->
             val isSelected = selectedMinutes == minutes
             val isDark = LiquidTheme.colors.isDark
-            val itemBg = if (isSelected) AppleRed else (if (isDark) Color(0xFF1C1C1E) else Color(0xFFE5E5EA))
+            val itemBg = if (isSelected) Accent else (if (isDark) Color(0xFF1C1C1E) else Color(0xFFE5E5EA))
             val unselectedTextColor = if (isDark) Color.White.copy(alpha = 0.45f) else Color.Black.copy(alpha = 0.45f)
 
             Box(
@@ -585,5 +1097,52 @@ private fun SleepTimerSelector(
                 )
             }
         }
+    }
+}
+
+/**
+ * DEV helper (Stage 2): copy a picked content:// audio file into the app cache so
+ * JUCE's AudioFormatManager can open it by path. Returns the absolute path, or
+ * null on failure. The extension is preserved so JUCE picks the right decoder.
+ */
+private fun copyUriToCache(context: Context, uri: Uri, slot: String): String? {
+    return try {
+        val resolver = context.contentResolver
+        var displayName: String? = null
+        resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+            if (c.moveToFirst()) {
+                val idx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (idx >= 0) displayName = c.getString(idx)
+            }
+        }
+        val ext = displayName?.substringAfterLast('.', "")?.takeIf { it.isNotBlank() } ?: "wav"
+        // Unique filename per pick. The model's AutoMixController caches its energy
+        // analysis by URI string (energyCache[uri.toString()]). A fixed name like
+        // "automix_A.wav" makes every pick reuse the same path -> same URI -> the
+        // cache returns the FIRST track's analysis forever, so swapping A<->B yielded
+        // identical params. A unique nonce per pick guarantees a fresh URI -> cache
+        // miss -> real inference (new BPM/crossfade/start) for the new track.
+        val prefix = "automix_${slot}_"
+        context.cacheDir.listFiles { f -> f.name.startsWith(prefix) }?.forEach { it.delete() }
+        val out = File(context.cacheDir, "$prefix${System.currentTimeMillis()}.$ext")
+        resolver.openInputStream(uri)?.use { input ->
+            out.outputStream().use { output -> input.copyTo(output) }
+        } ?: return null
+        out.absolutePath
+    } catch (t: Throwable) {
+        null
+    }
+}
+
+/** DEV helper: track duration (ms) for the AutoMix model analysis window. */
+private fun audioDurationMs(file: File): Long {
+    return try {
+        val r = android.media.MediaMetadataRetriever()
+        r.setDataSource(file.absolutePath)
+        val d = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
+        r.release()
+        d ?: 180_000L
+    } catch (_: Throwable) {
+        180_000L
     }
 }

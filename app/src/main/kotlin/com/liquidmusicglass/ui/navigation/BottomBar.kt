@@ -15,8 +15,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
-import androidx.compose.material.icons.rounded.Home
-import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -32,17 +33,15 @@ import com.liquidmusicglass.ui.theme.AppFontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
-import com.liquidmusicglass.api.icm.IcmAuthRepository
 import com.liquidmusicglass.ui.theme.LiquidTheme
 
 /**
  * Плоский нижний бар в стиле Яндекс Музыки — без стекла/блюра (тяжёлые
  * эффекты убраны ради производительности).
  *
- * Вкладки сопоставлены с глобальными индексами экранов в [AppRoot]:
- * Главная = 0, Плейлисты = 2, Профиль = 3. Индекс 1 (Поиск) убран из бара —
- * поиск теперь открывается с главного экрана.
+ * 4 вкладки сопоставлены с глобальными индексами экранов в [AppRoot]:
+ * Wave = 0, New = 4, Playlist = 2, Settings = 3. Индекс 1 (Поиск) не в баре —
+ * поиск открывается с экрана Wave. Профиль вынесен в иконку слева вверху Wave.
  */
 private data class BottomNavItem(
     val icon: ImageVector,
@@ -50,7 +49,8 @@ private data class BottomNavItem(
     val index: Int
 )
 
-private val WaveAccent = Color(0xFFFFE000)
+// Бледно-зелёный акцент выбранного таба (жёлтый Яндекса убран).
+private val WaveAccent = Color(0xFF88C088)
 
 @Composable
 fun BottomBar(
@@ -58,13 +58,12 @@ fun BottomBar(
     onItemSelected: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val avatarUrl by IcmAuthRepository.avatarUrl.collectAsState()
-
     val items = remember {
         listOf(
-            BottomNavItem(Icons.Rounded.Home, "Home", 0),
-            BottomNavItem(Icons.AutoMirrored.Rounded.PlaylistPlay, "Playlists", 2),
-            BottomNavItem(Icons.Rounded.Person, "Profile", 3)
+            BottomNavItem(Icons.Rounded.GraphicEq, "Wave", 0),
+            BottomNavItem(Icons.Rounded.AutoAwesome, "New", 4),
+            BottomNavItem(Icons.AutoMirrored.Rounded.PlaylistPlay, "Playlist", 2),
+            BottomNavItem(Icons.Rounded.Settings, "Settings", 3)
         )
     }
 
@@ -80,7 +79,6 @@ fun BottomBar(
             BottomTab(
                 item = item,
                 selected = item.index == selectedIndex,
-                avatarUrl = avatarUrl,
                 onClick = { onItemSelected(item.index) },
                 modifier = Modifier.weight(1f)
             )
@@ -92,7 +90,6 @@ fun BottomBar(
 private fun BottomTab(
     item: BottomNavItem,
     selected: Boolean,
-    avatarUrl: String?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -119,22 +116,12 @@ private fun BottomTab(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        if (item.index == 3 && !avatarUrl.isNullOrBlank()) {
-            AsyncImage(
-                model = avatarUrl,
-                contentDescription = item.label,
-                modifier = Modifier
-                    .size(24.dp)
-                    .clip(CircleShape)
-            )
-        } else {
-            Icon(
-                imageVector = item.icon,
-                contentDescription = item.label,
-                modifier = Modifier.size(24.dp),
-                tint = color
-            )
-        }
+        Icon(
+            imageVector = item.icon,
+            contentDescription = item.label,
+            modifier = Modifier.size(24.dp),
+            tint = color
+        )
         Spacer(modifier = Modifier.height(3.dp))
         Text(
             text = item.label,

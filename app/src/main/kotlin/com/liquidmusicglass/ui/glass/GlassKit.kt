@@ -1,55 +1,63 @@
 package com.liquidmusicglass.ui.glass
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.backdrops.LayerBackdrop
-import com.kyant.backdrop.drawBackdrop
-import com.kyant.backdrop.effects.blur
-import com.kyant.backdrop.effects.lens
-import com.kyant.backdrop.effects.vibrancy
-import com.kyant.backdrop.highlight.Highlight
-import com.kyant.backdrop.shadow.InnerShadow
-import com.kyant.backdrop.shadow.Shadow
-import com.kyant.shapes.Capsule
+import com.liquidmusicglass.ui.theme.LiquidTheme
 
 /**
- * GlassKit — единая система стеклянных компонентов Kyant0.
+ * GlassKit — общие «карточные» компоненты.
  *
- * Полный стек эффектов:
- *  - vibrancy()        → цветовая вибрация через стекло
- *  - blur()            → размытие фона
- *  - lens()            → рефракция (искажение) + chromaticAberration
- *  - highlight         → световой блик сверху (как отражение света)
- *  - shadow            → тень под элементом (глубина)
- *  - innerShadow       → внутренняя тень (вдавленность)
- *  - onDrawSurface     → тонировка + обводка
+ * iOS-стиль (Batch 5): на КОНТЕНТЕ стекла больше нет — это плоские светло-серые
+ * карточки-группы с крупными скруглениями (как эталонный Settings). Стекло
+ * (glassmorphism) осталось ТОЛЬКО на тумблерах (LiquidToggle). Параметр [backdrop]
+ * и tint/blur-параметры сохранены в сигнатурах ради совместимости вызовов, но
+ * больше не используются для захвата фона/блюра.
  */
 object GlassKit {
 
-    // ═══════════════════════════════════════════
-    //  Glass Card — карточка с полным стеклом
-    // ═══════════════════════════════════════════
+    private val Capsule: Shape = RoundedCornerShape(percent = 50)
 
+    /** Сплошная светло-серая подложка карточки под текущую тему (как Settings). */
+    @Composable
+    private fun cardSurface(): Color =
+        if (LiquidTheme.colors.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7)
+
+    @Composable
+    private fun cardBorder(): Color =
+        if (LiquidTheme.colors.isDark) Color.White.copy(alpha = 0.06f) else Color.Black.copy(alpha = 0.05f)
+
+    @Composable
+    private fun flatCard(shape: Shape, content: @Composable () -> Unit, modifier: Modifier) {
+        Box(
+            modifier = modifier
+                .clip(shape)
+                .background(cardSurface())
+                .border(0.8.dp, cardBorder(), shape)
+        ) { content() }
+    }
+
+    // ── Glass Card → плоская группа-карточка (крупный радиус) ──
     @Composable
     fun Card(
         backdrop: LayerBackdrop,
@@ -67,57 +75,17 @@ object GlassKit {
         content: @Composable () -> Unit
     ) {
         val shape = RoundedCornerShape(cornerRadius)
-
         Box(
             modifier = modifier
                 .fillMaxWidth()
-                .drawBackdrop(
-                    backdrop = backdrop,
-                    shape = { shape },
-                    effects = {
-                        vibrancy()
-                        blur(blurRadius.toPx())
-                        lens(
-                            refractionHeight = refractionHeight.toPx(),
-                            refractionAmount = refractionAmount.toPx(),
-                            chromaticAberration = true
-                        )
-                    },
-                    highlight = {
-                        Highlight.Ambient.copy(
-                            alpha = highlightAlpha
-                        )
-                    },
-                    shadow = {
-                        Shadow(
-                            radius = 8.dp,
-                            color = Color.Black.copy(alpha = shadowAlpha)
-                        )
-                    },
-                    innerShadow = {
-                        InnerShadow(
-                            radius = innerShadowRadius,
-                            alpha = 0.3f
-                        )
-                    },
-                    onDrawSurface = {
-                        drawRect(tintColor)
-                        drawRect(
-                            color = borderColor,
-                            style = Stroke(width = 0.8.dp.toPx())
-                        )
-                    }
-                )
+                .clip(shape)
+                .background(cardSurface())
+                .border(0.8.dp, cardBorder(), shape)
                 .padding(horizontal = contentPadding, vertical = 6.dp)
-        ) {
-            Column { content() }
-        }
+        ) { Column { content() } }
     }
 
-    // ═══════════════════════════════════════════
-    //  Glass Pill — капсула (для чипов, табов)
-    // ═══════════════════════════════════════════
-
+    // ── Glass Pill → плоская капсула ──
     @Composable
     fun Pill(
         backdrop: LayerBackdrop,
@@ -129,52 +97,10 @@ object GlassKit {
         shadowAlpha: Float = 0.10f,
         content: @Composable () -> Unit
     ) {
-        Box(
-            modifier = modifier
-                .drawBackdrop(
-                    backdrop = backdrop,
-                    shape = { Capsule() },
-                    effects = {
-                        vibrancy()
-                        blur(blurRadius.toPx())
-                        lens(
-                            refractionHeight = 14.dp.toPx(),
-                            refractionAmount = 16.dp.toPx(),
-                            chromaticAberration = true
-                        )
-                    },
-                    highlight = {
-                        Highlight.Ambient.copy(alpha = highlightAlpha)
-                    },
-                    shadow = {
-                        Shadow(
-                            radius = 4.dp,
-                            color = Color.Black.copy(alpha = shadowAlpha)
-                        )
-                    },
-                    innerShadow = {
-                        InnerShadow(
-                            radius = 3.dp,
-                            alpha = 0.2f
-                        )
-                    },
-                    onDrawSurface = {
-                        drawRect(tintColor)
-                        drawRect(
-                            color = borderColor,
-                            style = Stroke(width = 0.8.dp.toPx())
-                        )
-                    }
-                )
-        ) {
-            content()
-        }
+        flatCard(Capsule, content, modifier)
     }
 
-    // ═══════════════════════════════════════════
-    //  Glass Circle — кнопка (назад, ресет)
-    // ═══════════════════════════════════════════
-
+    // ── Glass Circle → плоская круглая кнопка ──
     @Composable
     fun Circle(
         backdrop: LayerBackdrop,
@@ -183,142 +109,41 @@ object GlassKit {
         borderColor: Color = Color.White.copy(alpha = 0.20f),
         content: @Composable () -> Unit
     ) {
-        Box(
-            modifier = modifier
-                .drawBackdrop(
-                    backdrop = backdrop,
-                    shape = { Capsule() },
-                    effects = {
-                        vibrancy()
-                        blur(4.dp.toPx())
-                        lens(
-                            refractionHeight = 12.dp.toPx(),
-                            refractionAmount = 16.dp.toPx(),
-                            chromaticAberration = true
-                        )
-                    },
-                    highlight = {
-                        Highlight.Ambient.copy(alpha = 0.5f)
-                    },
-                    shadow = {
-                        Shadow(
-                            radius = 4.dp,
-                            color = Color.Black.copy(alpha = 0.12f)
-                        )
-                    },
-                    innerShadow = {
-                        InnerShadow(radius = 3.dp, alpha = 0.2f)
-                    },
-                    onDrawSurface = {
-                        drawRect(tintColor)
-                        drawRect(
-                            color = borderColor,
-                            style = Stroke(width = 0.8.dp.toPx())
-                        )
-                    }
-                )
-        ) {
-            content()
-        }
+        flatCard(Capsule, content, modifier)
     }
 
-    // ═══════════════════════════════════════════
-    //  Glass Row — строка списка (треки, поиск)
-    // ═══════════════════════════════════════════
-
+    // ── Glass Row → плоская строка списка (крупный радиус) ──
     @Composable
     fun Row(
         backdrop: LayerBackdrop,
         modifier: Modifier = Modifier,
-        cornerRadius: Dp = 16.dp,
+        cornerRadius: Dp = 20.dp,
         tintColor: Color = Color.White.copy(alpha = 0.03f),
         borderColor: Color = Color.White.copy(alpha = 0.16f),
         content: @Composable () -> Unit
     ) {
         val shape = RoundedCornerShape(cornerRadius)
-
         Box(
             modifier = modifier
                 .fillMaxWidth()
-                .drawBackdrop(
-                    backdrop = backdrop,
-                    shape = { shape },
-                    effects = {
-                        vibrancy()
-                        blur(4.dp.toPx())
-                    },
-                    highlight = {
-                        Highlight.Ambient.copy(alpha = 0.3f)
-                    },
-                    shadow = {
-                        Shadow(
-                            radius = 2.dp,
-                            color = Color.Black.copy(alpha = 0.06f)
-                        )
-                    },
-                    onDrawSurface = {
-                        drawRect(tintColor)
-                        drawRect(
-                            color = borderColor,
-                            style = Stroke(width = 0.8.dp.toPx())
-                        )
-                    }
-                )
-        ) {
-            content()
-        }
+                .clip(shape)
+                .background(cardSurface())
+                .border(0.8.dp, cardBorder(), shape)
+        ) { content() }
     }
 
-    // ═══════════════════════════════════════════
-    //  Glass Accent Pill — подсвеченная (пресет, выбранный таб)
-    // ═══════════════════════════════════════════
-
+    // ── Glass Accent Pill → сплошная акцентная капсула (выбранный таб/пресет) ──
     @Composable
     fun AccentPill(
         backdrop: LayerBackdrop,
         modifier: Modifier = Modifier,
-        accentColor: Color = Color(0xFFFC3C44),
+        accentColor: Color = Color(0xFF7FB77E),
         content: @Composable () -> Unit
     ) {
-        Box(
-            modifier = modifier
-                .drawBackdrop(
-                    backdrop = backdrop,
-                    shape = { Capsule() },
-                    effects = {
-                        vibrancy()
-                        blur(4.dp.toPx())
-                        lens(
-                            refractionHeight = 10.dp.toPx(),
-                            refractionAmount = 12.dp.toPx(),
-                            chromaticAberration = true
-                        )
-                    },
-                    highlight = {
-                        Highlight.Default.copy(alpha = 0.7f)
-                    },
-                    shadow = {
-                        Shadow(
-                            radius = 6.dp,
-                            color = accentColor.copy(alpha = 0.3f)
-                        )
-                    },
-                    innerShadow = {
-                        InnerShadow(radius = 4.dp, alpha = 0.25f)
-                    },
-                    onDrawSurface = {
-                        drawRect(accentColor)
-                    }
-                )
-        ) {
-            content()
-        }
+        Box(modifier = modifier.clip(Capsule).background(accentColor)) { content() }
     }
 
-    // ═══════════════════════════════════════════
-    //  Glass MiniPlayer / Bar — прозрачная с highlight
-    // ═══════════════════════════════════════════
-
+    // ── Glass Bar → плоская капсула-бар ──
     @Composable
     fun Bar(
         backdrop: LayerBackdrop,
@@ -327,43 +152,7 @@ object GlassKit {
         borderColor: Color = Color.White.copy(alpha = 0.20f),
         content: @Composable () -> Unit
     ) {
-        Box(
-            modifier = modifier
-                .drawBackdrop(
-                    backdrop = backdrop,
-                    shape = { Capsule() },
-                    effects = {
-                        vibrancy()
-                        blur(4.dp.toPx())
-                        lens(
-                            refractionHeight = 24.dp.toPx(),
-                            refractionAmount = 32.dp.toPx(),
-                            chromaticAberration = true
-                        )
-                    },
-                    highlight = {
-                        Highlight.Ambient.copy(alpha = 0.5f)
-                    },
-                    shadow = {
-                        Shadow(
-                            radius = 8.dp,
-                            color = Color.Black.copy(alpha = 0.2f)
-                        )
-                    },
-                    innerShadow = {
-                        InnerShadow(radius = 4.dp, alpha = 0.15f)
-                    },
-                    onDrawSurface = {
-                        drawRect(tintColor)
-                        drawRect(
-                            color = borderColor,
-                            style = Stroke(width = 0.8.dp.toPx())
-                        )
-                    }
-                )
-        ) {
-            content()
-        }
+        flatCard(Capsule, content, modifier)
     }
 
     // ═══════════════════════════════════════════

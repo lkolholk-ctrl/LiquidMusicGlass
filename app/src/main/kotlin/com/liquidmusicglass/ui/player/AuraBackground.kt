@@ -4,21 +4,28 @@ import android.graphics.RuntimeShader
 import android.os.Build
 import androidx.annotation.RequiresApi
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.withInfiniteAnimationFrameMillis
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ShaderBrush
+import androidx.compose.ui.graphics.graphicsLayer
 import com.liquidmusicglass.engine.AudioReactor
 import com.liquidmusicglass.ui.glass.AlbumColors
 
@@ -147,22 +154,83 @@ private fun rememberSmoothedBass(): State<Float> = produceState(0f) {
     }
 }
 
+// Тяжёлый AGSL-дым НЕ монтируется на первых кадрах экрана: пока экран не отрисовал
+// AURA_WARMUP_FRAMES кадров — рисуем дешёвый статичный градиент, и только потом
+// подключаем fbm-шейдер (6 октав). Это снимает компиляцию/линковку fbm-программы с
+// критического пути холодного старта (именно одновременная линковка ауры + плиток
+// давала ANR на старте My Wave даже на флагмане). Аура и плитки прогреваются в
+// РАЗНЫХ кадрах (у плиток свой стаггер), так что линковка идёт по одной программе.
+//
+// Это ОТЛОЖЕННЫЙ СТАРТ, а НЕ деградация: дым включается через ~полсекунды после
+// открытия экрана и работает ПОСТОЯННО (не пропадает, не зависит от FPS).
+private const val AURA_WARMUP_FRAMES = 24  // ~0.4с отрисованных кадров
+
 @Composable
 fun AuraBackground(
     albumColors: AlbumColors,
     modifier: Modifier = Modifier,
     intensity: Float = 0.78f,
+    animate: Boolean = true,
 ) {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        AuraShaderBackground(albumColors, intensity, modifier)
-    } else {
-        AuraGradientFallback(albumColors, modifier)
+    val tiramisu = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+
+    // epoch меняется при возврате из фона → сбрасываем дым на статичный и пере-
+    // прогреваем. Смена heavyArmed true→false→true пересоздаёт AuraShaderBackground
+    // (а с ним — новый RuntimeShader вместо потерявшего GPU-контекст).
+    val epoch = com.liquidmusicglass.ui.EffectsLifecycle.epoch
+    var heavyArmed by remember { mutableStateOf(false) }
+    LaunchedEffect(epoch) {
+        heavyArmed = false
+        // Ждём N реально отрисованных кадров, затем включаем дым — и оставляем включённым.
+        repeat(AURA_WARMUP_FRAMES) { withFrameNanos { } }
+        heavyArmed = true
     }
+
+    // Энергосбережение: тяжёлый fbm-дым → лёгкий градиентный фон (не выключаем).
+    val powerSave = com.liquidmusicglass.ui.PowerSaveMonitor.active
+
+    when {
+        heavyArmed && tiramisu && !powerSave -> {
+            // Плавное появление: под шейдером — мгновенная градиентная база (нет
+            // чёрной вспышки и резкого щелчка), сам fbm-дым «проявляется» альфой
+            // 0→1, как эффекты на мудовых карточках. Базу убираем, когда дым
+            // полностью проявился (без лишнего overdraw).
+            var shown by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) { shown = true }
+            val fade by animateFloatAsState(
+                targetValue = if (shown) 1f else 0f,
+                animationSpec = tween(550, easing = LinearOutSlowInEasing),
+                label = "auraFadeIn"
+            )
+            Box(modifier) {
+                if (fade < 0.999f) AuraStaticBackground(albumColors, Modifier)
+                AuraShaderBackground(
+                    albumColors, intensity,
+                    Modifier.graphicsLayer { alpha = fade },
+                    animate
+                )
+            }
+        }
+        heavyArmed -> AuraGradientFallback(albumColors, modifier)
+        else -> AuraStaticBackground(albumColors, modifier)
+    }
+}
+
+/** Сверхдешёвый статичный фон: один линейный градиент по палитре, без анимации. */
+@Composable
+private fun AuraStaticBackground(albumColors: AlbumColors, modifier: Modifier) {
+    val top by animateColorAsState(albumColors.darkMuted, tween(600), label = "auraStaticTop")
+    val bottom by animateColorAsState(albumColors.dominant, tween(600), label = "auraStaticBot")
+    Box(
+        modifier
+            .fillMaxSize()
+            .background(Brush.verticalGradient(listOf(top, bottom)))
+    )
 }
 
 @RequiresApi(Build.VERSION_CODES.TIRAMISU)
 @Composable
-private fun AuraShaderBackground(albumColors: AlbumColors, intensity: Float, modifier: Modifier) {
+private fun AuraShaderBackground(albumColors: AlbumColors, intensity: Float, modifier: Modifier, animate: Boolean = true) {
     val shader = remember { RuntimeShader(AURA_AGSL) }
     val brush = remember { ShaderBrush(shader) }
 
@@ -176,8 +244,17 @@ private fun AuraShaderBackground(albumColors: AlbumColors, intensity: Float, mod
     // басовый прирост ≤ +15% (множитель 1.0..1.15), накапливаемый по dt. Дым
     // всегда спокойно движется сам, бас лишь чуть подкручивает — без «стоп→турбо»
     // и без скачков фазы (умножать накопленное uTime на бас — НЕЛЬЗЯ).
-    val timeSec by produceState(0f) {
-        var phase = 0f
+    // Когда экран перекрыт оверлеем (открыт альбом/плеер/настройки) — замораживаем
+    // тяжёлый AGSL-клок, чтобы не рисовать дым под другим экраном (это давало спайк
+    // RenderThread → ANR на слабых GPU). produceState перезапускается при смене animate.
+    // Фаза ПЕРСИСТЕНТНА между заморозками: когда экран перекрыт (animate=false)
+    // produceState приостанавливается (кадры не тратятся — perf сохранён), но при
+    // возврате фаза ПРОДОЛЖАЕТСЯ с того же места, а не сбрасывается в 0. Это
+    // убирает «прыжок» дыма при переключении на главный (resume из phaseHolder).
+    val phaseHolder = remember { floatArrayOf(0f) }
+    val timeSec by produceState(phaseHolder[0], animate) {
+        if (!animate) return@produceState
+        var phase = phaseHolder[0]
         var s1 = 0f
         var s2 = 0f
         var lastMs = 0L
@@ -188,6 +265,7 @@ private fun AuraShaderBackground(albumColors: AlbumColors, intensity: Float, mod
                 s1 = advanceBass(s1, AudioReactor.low.coerceIn(0f, 1f))
                 s2 += (s1 - s2) * BASS_STAGE2
                 phase += dt * (1f + s2 * 0.15f)
+                phaseHolder[0] = phase
                 value = phase
             }
         }
@@ -199,7 +277,8 @@ private fun AuraShaderBackground(albumColors: AlbumColors, intensity: Float, mod
     Box(
         modifier
             .fillMaxSize()
-            .background(Color.Black)
+            // Без .background(Color.Black): шейдер заполняет кадр непрозрачно
+            // (alpha=1.0), отдельная заливка фона была лишним полноэкранным overdraw.
             .drawBehind {
                 shader.setFloatUniform("uResolution", size.width, size.height)
                 shader.setFloatUniform("uTime", timeSec)

@@ -28,6 +28,13 @@ object AppSettings {
     private val _gaplessEnabled = MutableStateFlow(true)
     val gaplessEnabled: StateFlow<Boolean> = _gaplessEnabled
 
+    // ── Stage 7: JUCE AutoMix в реальном потоке (beta) ──
+    // OFF по умолчанию: пока не на глобальном тумблере (это 7d). Когда включён —
+    // AutoMixCoordinator ведёт переходы через JUCE-свод (модель дирижирует).
+    // Когда выключен — обычное воспроизведение Media3, ничего не трогается.
+    private val _juceAutoMixEnabled = MutableStateFlow(false)
+    val juceAutoMixEnabled: StateFlow<Boolean> = _juceAutoMixEnabled
+
     private val _sleepTimerMinutes = MutableStateFlow(0)
     val sleepTimerMinutes: StateFlow<Int> = _sleepTimerMinutes
 
@@ -114,6 +121,11 @@ object AppSettings {
     fun setGapless(enabled: Boolean) {
         _gaplessEnabled.value = enabled
         safePrefs()?.edit()?.putBoolean("gapless", enabled)?.apply()
+    }
+
+    fun setJuceAutoMix(enabled: Boolean) {
+        _juceAutoMixEnabled.value = enabled
+        safePrefs()?.edit()?.putBoolean("juce_automix", enabled)?.apply()
     }
 
     fun setSleepTimer(minutes: Int) {
@@ -303,6 +315,7 @@ object AppSettings {
     private fun loadAll() {
         val p = safePrefs() ?: return
         _gaplessEnabled.value = p.getBoolean("gapless", true)
+        _juceAutoMixEnabled.value = p.getBoolean("juce_automix", false)
         _sleepTimerMinutes.value = p.getInt("sleep_timer", 0)
         _ignoreShortEnabled.value = p.getBoolean("ignore_short", false)
         _ignoreThresholdSec.value = p.getFloat("ignore_threshold", 30f)

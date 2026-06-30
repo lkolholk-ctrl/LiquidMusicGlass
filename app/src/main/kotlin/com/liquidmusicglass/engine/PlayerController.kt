@@ -11,9 +11,11 @@ import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.MoreExecutors
+import com.liquidmusicglass.debug.DebugLog
 import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.api.icm.IcmTrackResponse
 import com.liquidmusicglass.data.local.WaveRepository
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -43,13 +45,27 @@ sealed class PlaybackContext {
     object Global : PlaybackContext()
 }
 
+enum class PlaybackBackend {
+    EXO_STREAMING,
+    JUCE_LOCAL
+}
+
 /**
  * PlayerController — единая точка управления воспроизведением.
  */
 object PlayerController {
 
-    private val ioScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    private val mainScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    // Любое необработанное исключение в корутине воспроизведения раньше валило
+    // всё приложение (у scope только SupervisorJob, без обработчика). Теперь —
+    // логируем, снимаем индикатор загрузки и живём дальше: тап по треку,
+    // который не смог стартовать, больше не крашит приложение.
+    private val crashGuard = CoroutineExceptionHandler { _, e ->
+        android.util.Log.e("VOIDPIXEL_MEDIA", "Unhandled playback coroutine error", e)
+        _isBuffering.value = false
+    }
+
+    private val ioScope = CoroutineScope(Dispatchers.IO + SupervisorJob() + crashGuard)
+    private val mainScope = CoroutineScope(Dispatchers.Main + SupervisorJob() + crashGuard)
 
     private var appContext: Context? = null
     val context: Context? get() = appContext
@@ -64,6 +80,10 @@ object PlayerController {
     // ── Playback Context (isolation gate) ──
     private var _playbackContext: PlaybackContext = PlaybackContext.Global
     val playbackContext: PlaybackContext get() = _playbackContext
+    private val _playbackBackend = MutableStateFlow(PlaybackBackend.EXO_STREAMING)
+    val playbackBackend: StateFlow<PlaybackBackend> = _playbackBackend
+    val isLocalJucePlaybackActive: Boolean
+        get() = _playbackBackend.value == PlaybackBackend.JUCE_LOCAL
 
     // ── Endless Playback (AutoMix) ──
     private val endlessEngine = EndlessPlaybackEngine(
@@ -166,9 +186,9 @@ object PlayerController {
     private val _recentlyPlayed = MutableStateFlow<List<Track>>(emptyList())
     val recentlyPlayed: StateFlow<List<Track>> = _recentlyPlayed
 
-    private val _themeMode = MutableStateFlow(0)
-    val themeMode: StateFlow<Int> = _themeMode
-    fun setThemeMode(mode: Int) { _themeMode.value = mode }
+    // Тема персистится в DataStore (PlayerSettings) — реактивно и переживает рестарт.
+    val themeMode: StateFlow<Int> get() = PlayerSettings.themeMode
+    fun setThemeMode(mode: Int) = PlayerSettings.setThemeMode(mode)
 
     private val _volume = MutableStateFlow(1f)
     val volume: StateFlow<Float> = _volume
@@ -183,7 +203,8 @@ object PlayerController {
     fun setPlaybackSpeed(speed: Float) {
         // re-anchor at current speed before switching, so position doesn't jump
         reanchorSmoothPosition()
-        _playbackSpeed.value = speed.coerceIn(0.5f, 2.0f)
+        // нижняя граница 0.1 — для медленной разметки лирики (успеть тапать слова)
+        _playbackSpeed.value = speed.coerceIn(0.1f, 2.0f)
         audioServiceRef?.setPlaybackSpeed(_playbackSpeed.value)
     }
 
@@ -339,7 +360,7 @@ object PlayerController {
         }
 
         val startTrack = tracks[startIndex]
-        android.util.Log.d("VOIDPIXEL_MEDIA", "playFromList: tracks=${tracks.size}, startIndex=$startIndex, startTrackId=${startTrack.id}")
+        DebugLog.add("PC.playFromList(EXO) n=${tracks.size} start=$startIndex online=${startTrack.isOnlineTrack} | ${DebugLog.caller()}")
 
         // ── Determine playback context BEFORE any async work ──
         val newContext = when {
@@ -373,6 +394,7 @@ object PlayerController {
             }
 
             _playbackContext = newContext
+            _playbackBackend.value = PlaybackBackend.EXO_STREAMING
             android.util.Log.d("VOIDPIXEL_MEDIA", "[CONTEXT_SET] $newContext")
 
             endlessEngine.reset()
@@ -453,6 +475,59 @@ object PlayerController {
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * Stage 8b — играть ЛОКАЛЬНУЮ очередь полностью через JUCE-движок.
+     *
+     * В отличие от [playFromList] (ExoPlayer + стриминговый резолв), здесь звук
+     * даёт нативный JUCE: AudioService переставляет MediaSession на JuceLocalPlayer
+     * (нотификация / экран блокировки / MediaController продолжают работать), а
+     * затем AutoMix (Стадия 8c) делает кроссфейд ВНУТРИ движка без швов.
+     *
+     * Только локальные файлы (content:// / file://) — JUCE читает их с диска.
+     * Онлайн-рефилл «волны» здесь не запускаем: очередь статична.
+     */
+    fun playLocalOnJuce(
+        context: Context,
+        tracks: List<Track>,
+        startIndex: Int = 0,
+        playbackContext: PlaybackContext = PlaybackContext.Playlist("local_audio")
+    ) {
+        if (tracks.isEmpty() || startIndex !in tracks.indices) {
+            android.util.Log.e("VOIDPIXEL_MEDIA", "playLocalOnJuce: empty tracks or bad startIndex=$startIndex")
+            return
+        }
+        val startTrack = tracks[startIndex]
+        DebugLog.add("PC.playLocalOnJuce n=${tracks.size} start=$startIndex id=${startTrack.id} | ${DebugLog.caller()}")
+
+        ioScope.launch {
+            // Статичная локальная очередь — без онлайн-рефилла.
+            _playbackContext = playbackContext
+            _playbackBackend.value = PlaybackBackend.JUCE_LOCAL
+            endlessEngine.reset()
+
+            val immutableTracks = tracks.toList()
+            queue = immutableTracks
+            _queueFlow.value = immutableTracks
+            currentIndex = startIndex
+
+            val mediaItems = immutableTracks.map { track -> buildMediaItem(track, track.uri) }
+
+            withContext(Dispatchers.Main) {
+                _currentTrack.value = startTrack
+                _durationMs.value = startTrack.durationMs
+                _currentPositionMs.value = 0L
+                _isBuffering.value = false
+
+                // Поднять сервис/контроллер (после этого audioServiceRef установлен).
+                getPlayer(context)
+                DebugLog.add("PC.playLocalOnJuce -> svc ref=${if (audioServiceRef==null) "NULL" else "ok"} items=${mediaItems.size}")
+                audioServiceRef?.playLocalQueue(mediaItems, startIndex)
+                resetPlaybackLogging(startTrack.durationMs)
+            }
+            addToRecent(startTrack)
         }
     }
 
@@ -590,12 +665,18 @@ object PlayerController {
             android.util.Log.w("VOIDPIXEL_MEDIA", "[TRACK_CHANGED] mediaId=$mediaId not found in local queue")
             return
         }
+        // Идемпотентность: тот же трек на том же индексе уже активен — выходим.
+        // Иначе тройной источник (jucePlayerListener + MediaController-bridge +
+        // прямой bridge из JuceLocalPlayer) трижды сбрасывал позицию в 0 и дёргал
+        // префетч. Теперь полезную работу делает только ПЕРВЫЙ вызов на смену трека.
+        if (_currentTrack.value?.id == mediaId && currentIndex == index) return
+
         val track = currentQueue[index]
         currentIndex = index
         _currentTrack.value = track
         _durationMs.value = track.durationMs
         _currentPositionMs.value = 0L
-        
+
         resetPlaybackLogging(track.durationMs)
         // Только ближайший следующий — для мгновенного скипа. Более глубокая
         // предзагрузка управляется настройкой «Preload next track» (по таймеру до конца).
@@ -1183,6 +1264,23 @@ object PlayerController {
                     durationMs = track.durationMs
                 )
             )
+            // Реальная история прослушивания в Room (для экрана «История»).
+            ioScope.launch {
+                runCatching {
+                    com.liquidmusicglass.data.local.db.AppDatabase.getInstance(ctx)
+                        .listenHistoryDao()
+                        .upsert(
+                            com.liquidmusicglass.data.local.db.ListenHistoryEntity(
+                                trackId = track.id,
+                                title = track.title,
+                                artist = track.artist,
+                                coverUrl = track.coverUrl,
+                                durationMs = track.durationMs,
+                                playedAt = System.currentTimeMillis()
+                            )
+                        )
+                }
+            }
         }
     }
 

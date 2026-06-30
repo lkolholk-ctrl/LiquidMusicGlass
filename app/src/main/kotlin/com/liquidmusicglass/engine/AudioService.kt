@@ -8,6 +8,8 @@ import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -22,9 +24,12 @@ import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.Renderer
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
+import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.video.VideoRendererEventListener
 import androidx.media3.session.CommandButton
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
@@ -35,6 +40,7 @@ import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.liquidmusicglass.R
+import com.liquidmusicglass.debug.DebugLog
 import com.liquidmusicglass.data.local.db.AppDatabase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -48,6 +54,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * AudioService — один ExoPlayer, один Listener, один MediaSession.
@@ -65,9 +72,25 @@ class AudioService : MediaSessionService() {
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     /** Dedicated main-thread scope for ALL ExoPlayer operations */
     private val mainScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private val fadeHandler = Handler(Looper.getMainLooper())
+    private val fadeGeneration = AtomicInteger(0)
+    @Volatile private var fadeActive = false           // во время фейда громкостью владеет фейд
+    // Дакинг по аудио-фокусу — с дебаунсом: другое приложение (напр. Яндекс Музыка)
+    // при переключении гоняет фокус LOSS↔GAIN пачкой, и прямой дак/андак громкости
+    // давал слышимую «цикличку». Коалесцируем в одно применение финального состояния.
+    private val duckHandler = Handler(Looper.getMainLooper())
 
     private lateinit var player: ExoPlayer
     private var session: MediaSession? = null
+
+    /**
+     * Stage 8b — отдельный плеер для ЛОКАЛЬНОГО аудио, играющий через JUCE-движок.
+     * Создаётся лениво при первой локальной очереди и подставляется в ту же
+     * MediaSession (session.setPlayer), поэтому нотификация / экран блокировки /
+     * MediaController продолжают работать, но звук локальных треков даёт JUCE.
+     * Стриминг остаётся на [player] (ExoPlayer).
+     */
+    private var juceLocalPlayer: com.liquidmusicglass.engine.automix.JuceLocalPlayer? = null
 
     private val channelId = "liquid_music_playback"
 
@@ -96,24 +119,24 @@ class AudioService : MediaSessionService() {
 
     private val focusChangeListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
         when (focusChange) {
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
-                android.util.Log.d("VOIDPIXEL_MEDIA", "[AUDIO_FOCUS] LOSS_TRANSIENT_CAN_DUCK — ducking volume to 20%")
-                setDucked(true)
-            }
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> requestDuck(true)
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
-                android.util.Log.d("VOIDPIXEL_MEDIA", "[AUDIO_FOCUS] LOSS_TRANSIENT — maintaining playback, NOT pausing")
-                // Do NOT pause on transient loss — playback continues
+                // Не паузим на временной потере — воспроизведение продолжается.
             }
-            AudioManager.AUDIOFOCUS_GAIN -> {
-                android.util.Log.d("VOIDPIXEL_MEDIA", "[AUDIO_FOCUS] GAIN — restoring volume")
-                setDucked(false)
-            }
+            AudioManager.AUDIOFOCUS_GAIN -> requestDuck(false)
             AudioManager.AUDIOFOCUS_LOSS -> {
-                android.util.Log.d("VOIDPIXEL_MEDIA", "[AUDIO_FOCUS] LOSS (permanent) — pausing playback")
+                // Перманентная потеря — паузим сразу (без дебаунса), снимаем отложенный дак.
+                duckHandler.removeCallbacksAndMessages(null)
                 setDucked(false)
-                player.pause()
+                runCatching { activePlayer().pause() }
             }
         }
+    }
+
+    /** Дебаунс дака по фокусу: коалесцируем пачку LOSS↔GAIN в финальное состояние. */
+    private fun requestDuck(target: Boolean) {
+        duckHandler.removeCallbacksAndMessages(null)
+        duckHandler.postDelayed({ setDucked(target) }, 250L)
     }
 
     /** Solid service-scoped queue reference — never garbage collected in background */
@@ -212,11 +235,20 @@ class AudioService : MediaSessionService() {
             val isExpiredUrl = error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS
                 && error.message?.contains("403") == true
 
-            if (isExpiredUrl) {
-                if (currentTrackId != null) {
+            if (isExpiredUrl && currentTrackId != null) {
+                // Не каждый 403 — протухшая подпись: source_not_allowed/региональный
+                // 403 вернётся снова с тем же источником. Раньше re-resolve шёл в обход
+                // счётчика и зацикливался. Ограничиваем число пере-резолвов на трек.
+                if (currentTrackId != lastErrorTrackId) {
+                    lastErrorTrackId = currentTrackId
+                    errorRetryCount = 0
+                }
+                if (errorRetryCount < 2) {
+                    errorRetryCount++
                     PlayerController.handleExpiredUrl(this@AudioService, currentTrackId)
                     return
                 }
+                // Пере-резолвы исчерпаны → проваливаемся в обычное восстановление/skip ниже.
             }
 
             // ── SOFT ERROR RECOVERY: retry up to 3 times on the SAME track, do NOT auto-skip ──
@@ -261,6 +293,36 @@ class AudioService : MediaSessionService() {
         }
     }
 
+    private val jucePlayerListener = object : Player.Listener {
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            _playbackState.value = playbackState
+            _isBuffering.value = (playbackState == Player.STATE_BUFFERING)
+            manageWakeLock()
+
+            if (playbackState == Player.STATE_ENDED) {
+                android.util.Log.d("AudioService", "JUCE STATE_ENDED -> notifying controller")
+                PlayerController.onTrackEnded()
+            }
+        }
+
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            PlayerController.setPlaying(isPlaying)
+            manageWakeLock()
+        }
+
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            mediaItem?.let {
+                android.util.Log.d("AudioService", "JUCE onMediaItemTransition: id=${it.mediaId}, reason=$reason")
+                PlayerController.onTrackChanged(it.mediaId)
+            }
+        }
+
+        override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+            android.util.Log.e("AudioService", "JUCE player error: ${error.errorCodeName} | ${error.message}")
+            PlayerController.onPlaybackError(error.errorCodeName)
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
 
@@ -293,6 +355,11 @@ class AudioService : MediaSessionService() {
         player.addListener(playerListener)
 
         PlayerController.audioServiceRef = this
+
+        // Stage 7b/7c: координатор JUCE-свода в реальном потоке. Бездействует,
+        // пока выключен флаг juceAutoMixEnabled — обычное воспроизведение не
+        // затрагивается. JUCE поднимается лениво только у точки свода.
+        com.liquidmusicglass.engine.automix.AutoMixCoordinator.start(this)
 
         // ── Одна сессия, созданная один раз ──
         val sessionActivityIntent = android.content.Intent(this, com.liquidmusicglass.MainActivity::class.java).apply {
@@ -340,7 +407,8 @@ class AudioService : MediaSessionService() {
 
     /** Acquire or release WakeLock based on playback state */
     private fun manageWakeLock() {
-        val isActive = player.isPlaying || player.playbackState == Player.STATE_BUFFERING
+        val active = activePlayer()
+        val isActive = active.isPlaying || active.playbackState == Player.STATE_BUFFERING
         if (isActive) {
             if (wakeLock?.isHeld == false) {
                 wakeLock?.acquire(10 * 60 * 1000L) // 10 min timeout, refreshed by playback
@@ -408,9 +476,11 @@ class AudioService : MediaSessionService() {
             .setBufferDurationsMs(30_000, 60_000, 2_500, 5_000)
             .build()
 
-        // Renderers factory with a transparent bass-analysis audio processor.
-        // It does not alter the audio, only measures low-frequency energy for
-        // the reactive glow on the "Моя волна" screen.
+        // Renderers factory с двумя аудио-процессорами:
+        //  1) BassAudioProcessor — прозрачный анализ полос для реактивного свечения;
+        //  2) VolumeNormalizationProcessor — Sound Check (нормализация громкости),
+        //     активен только при включённом флаге, иначе прозрачный проброс.
+        // Порядок важен: нормализация ПОСЛЕ анализа, чтобы Bass видел чистый сигнал.
         val renderersFactory = object : DefaultRenderersFactory(this) {
             override fun buildAudioSink(
                 context: Context,
@@ -418,8 +488,25 @@ class AudioService : MediaSessionService() {
                 enableAudioTrackPlaybackParameters: Boolean
             ): AudioSink {
                 return DefaultAudioSink.Builder(context)
-                    .setAudioProcessors(arrayOf(BassAudioProcessor()))
+                    .setAudioProcessors(arrayOf(BassAudioProcessor(), VolumeNormalizationProcessor()))
                     .build()
+            }
+
+            // Audio-only app: build NO video renderers. The default factory would
+            // create a video MediaCodec renderer + FrameReleaseChoreographer + GPU
+            // threads at player build, contending with UI shader compilation on a
+            // cold first launch (interpreted code) and tripping the startup ANR.
+            override fun buildVideoRenderers(
+                context: Context,
+                extensionRendererMode: Int,
+                mediaCodecSelector: MediaCodecSelector,
+                enableDecoderFallback: Boolean,
+                eventHandler: android.os.Handler,
+                eventListener: VideoRendererEventListener,
+                allowedVideoJoiningTimeMs: Long,
+                out: ArrayList<Renderer>
+            ) {
+                // intentionally empty — no video renderers
             }
         }
 
@@ -457,6 +544,7 @@ class AudioService : MediaSessionService() {
     override fun onDestroy() {
         PlayerController.logFinalPlayback()
         positionJob?.cancel()
+        cancelCrossfadeFade(resetVolume = false)
         abandonAudioFocus()
 
         // Release WakeLock
@@ -467,6 +555,12 @@ class AudioService : MediaSessionService() {
 
         player.removeListener(playerListener)
         player.release()
+
+        runCatching {
+            juceLocalPlayer?.removeListener(jucePlayerListener)
+            juceLocalPlayer?.release()
+        }
+        juceLocalPlayer = null
 
         session?.release()
         session = null
@@ -482,9 +576,10 @@ class AudioService : MediaSessionService() {
         positionJob = mainScope.launch {
             while (isActive) {
                 try {
-                    // ── ExoPlayer reads on Main thread ──
-                    val position = player.currentPosition
-                    val duration = player.duration
+                    // ── Читаем АКТИВНЫЙ плеер (JUCE для локального, Exo для стриминга) на Main ──
+                    val active = activePlayer()
+                    val position = active.currentPosition
+                    val duration = active.duration
                     val safeDuration = if (duration > 0 && duration != C.TIME_UNSET) duration else 0L
 
                     val effectiveDuration = if (safeDuration > 0L) {
@@ -601,9 +696,11 @@ class AudioService : MediaSessionService() {
 
                 COMMAND_FORCE_STOP -> {
                     android.util.Log.d("AudioService", "[FORCE_STOP] Executing hard termination sequence")
-                    // 1. Stop ExoPlayer
+                    // 1. Stop every playback backend
+                    activePlayer().stop()
                     player.stop()
                     player.clearMediaItems()
+                    runCatching { juceLocalPlayer?.stop() }
                     // 2. Release MediaSession
                     session.release()
                     this@AudioService.session = null
@@ -665,6 +762,8 @@ class AudioService : MediaSessionService() {
     fun setQueue(mediaItems: List<MediaItem>, startIndex: Int = 0, startPositionMs: Long = 0L) {
         currentQueueItems = mediaItems.toList()
         mainScope.launch {
+            cancelCrossfadeFade(resetVolume = true)
+            bindExoPlayer()                            // стриминг → ExoPlayer (с JUCE при необходимости)
             player.stop()
             player.clearMediaItems()
             player.setMediaItems(currentQueueItems, startIndex, startPositionMs)
@@ -695,14 +794,159 @@ class AudioService : MediaSessionService() {
         }
     }
     fun setPlaybackSpeed(speed: Float) {
-        val clamped = speed.coerceIn(0.5f, 2.0f)
-        player.setPlaybackParameters(PlaybackParameters(clamped))
+        // нижняя граница 0.1 — медленная разметка лирики (ExoPlayer/Sonic тянет slow-down)
+        val clamped = speed.coerceIn(0.1f, 2.0f)
+        runCatching { activePlayer().setPlaybackParameters(PlaybackParameters(clamped)) }
         _playbackSpeed.value = clamped
     }
 
     fun setDucked(ducked: Boolean) {
+        if (_isDucked.value == ducked) return            // дедуп — без лишних записей громкости
         _isDucked.value = ducked
-        player.volume = if (ducked) 0.2f else 1f
+        if (fadeActive) return                           // во время фейда громкостью владеет фейд
+        runCatching { activePlayer().volume = if (ducked) 0.2f else 1f }
+    }
+
+    // ── Stage 8b: локальное аудио полностью на JUCE ───────────────────────────
+    // Одна MediaSession, два плеера: ExoPlayer (стриминг) и JuceLocalPlayer
+    // (локальные файлы). session.setPlayer переключает источник звука, оставляя
+    // нотификацию/контроллер живыми. Активный плеер — тот, что сейчас в сессии.
+
+    /** Плеер, которым сейчас управляет сессия (JUCE — локальное, Exo — стриминг). */
+    private fun activePlayer(): Player = session?.player ?: player
+
+    /** Текущая позиция фактического session.player, минуя 500ms StateFlow polling. */
+    fun activePlaybackPositionMs(): Long {
+        return if (Looper.myLooper() == Looper.getMainLooper()) {
+            activePlayer().currentPosition
+        } else {
+            kotlinx.coroutines.runBlocking(Dispatchers.Main) {
+                activePlayer().currentPosition
+            }
+        }
+    }
+
+    /** Лениво создать JUCE-плеер локального аудио (на главном looper'е). */
+    private fun ensureJucePlayer(): com.liquidmusicglass.engine.automix.JuceLocalPlayer {
+        juceLocalPlayer?.let { return it }
+        val p = com.liquidmusicglass.engine.automix.JuceLocalPlayer(this, mainLooper)
+        p.addListener(jucePlayerListener)
+        juceLocalPlayer = p
+        return p
+    }
+
+    /** Поставить сессию на ExoPlayer (стриминг). Идемпотентно. */
+    private fun bindExoPlayer() {
+        if (session?.player !== player) {
+            DebugLog.add("SVC.bindExoPlayer (session JUCE->EXO) | ${DebugLog.caller()}")
+            cancelCrossfadeFade(resetVolume = true)
+            runCatching { juceLocalPlayer?.stop() }    // заглушить JUCE — без двойного звука
+            session?.player = player
+        }
+    }
+
+    /**
+     * Stage 8b — играть ЛОКАЛЬНУЮ очередь полностью через JUCE. Переставляет
+     * сессию на JUCE-плеер и останавливает ExoPlayer, затем загружает очередь.
+     * Вызывать с главного потока (PlayerController делает это в Dispatchers.Main).
+     */
+    fun playLocalQueue(mediaItems: List<MediaItem>, startIndex: Int = 0) {
+        DebugLog.add("SVC.playLocalQueue items=${mediaItems.size} start=$startIndex sessionNull=${session==null}")
+        mainScope.launch {
+            cancelCrossfadeFade(resetVolume = true)
+            currentQueueItems = mediaItems.toList()
+            val juce = ensureJucePlayer()
+            if (session?.player !== juce) {
+                DebugLog.add("SVC.playLocalQueue (session EXO->JUCE)")
+                runCatching { player.pause() }         // заглушить Exo — без двойного звука
+                session?.player = juce
+            }
+            juce.setMediaItems(mediaItems, startIndex.coerceAtLeast(0), 0L)
+            juce.prepare()
+            juce.playWhenReady = true
+            DebugLog.add("SVC.playLocalQueue applied isJuce=${session?.player === juce}")
+        }
+    }
+
+    /** Stage 8b — вернуть сессию на ExoPlayer (для стриминга). */
+    fun useExoForStreaming() {
+        mainScope.launch { bindExoPlayer() }
+    }
+
+    // ── Stage 7 hand-off (Media3 ↔ JUCE) ─────────────────────────────────
+    // Во время JUCE-свода Media3 ПОЛНОСТЬЮ заглушается и встаёт на паузу —
+    // это и убирает двойной звук, и не даёт ExoPlayer самому перейти на B.
+    /** У точки свода: заглушить (volume 0) и приостановить текущий трек A. */
+    fun handoffPause() = withPlayerOnMain {
+        cancelCrossfadeFade(resetVolume = false)
+        it.volume = 0f
+        it.pause()
+    }
+
+    /** После свода: перейти на следующий item (B) и встать на позицию, где
+     *  JUCE закончил свод (entryOffset + crossfade), вернуть звук и играть. */
+    fun handoffToNext(positionMs: Long) = withPlayerOnMain {
+        cancelCrossfadeFade(resetVolume = false)
+        val nextIndex = it.currentMediaItemIndex + 1
+        if (nextIndex < it.mediaItemCount) {
+            it.seekTo(nextIndex, positionMs.coerceAtLeast(0L))
+        }
+        it.volume = 1f
+        it.play()
+    }
+
+    /** Во время свода: перейти на B и встать на нужную позицию, но ОСТАТЬСЯ НА
+     *  ПАУЗЕ — ExoPlayer буферизует B заранее, чтобы hand-back был без рывка. */
+    fun handoffPrepareNext(positionMs: Long) = withPlayerOnMain {
+        val nextIndex = it.currentMediaItemIndex + 1
+        if (nextIndex < it.mediaItemCount) {
+            it.seekTo(nextIndex, positionMs.coerceAtLeast(0L))
+        }
+        // playWhenReady остаётся false (после handoffPause) — буферизуем, не играем.
+    }
+
+    /** Завершение hand-back: B уже на позиции и буферизован — вернуть звук и играть. */
+    fun handoffPlay() = withPlayerOnMain {
+        cancelCrossfadeFade(resetVolume = false)
+        it.volume = 1f
+        it.play()
+    }
+
+    /** Stage 7 наложенный кроссфейд: плавно гасит громкость A по equal-power
+     *  cos за durationMs, НЕ останавливая воспроизведение (B одновременно
+     *  нарастает в JUCE). Шаги планируются на главном потоке. */
+    fun crossfadeFadeOutA(durationMs: Long) {
+        val stepMs = 30L
+        val steps = (durationMs / stepMs).toInt().coerceAtLeast(1)
+        val generation = fadeGeneration.incrementAndGet()
+        fadeHandler.removeCallbacksAndMessages(null)
+        fadeActive = true                                 // фейд владеет громкостью — дак не клобберит
+        for (i in 0..steps) {
+            fadeHandler.postDelayed({
+                if (generation != fadeGeneration.get() || session?.player !== player) return@postDelayed
+                val t = i.toFloat() / steps
+                val g = kotlin.math.cos(t * (Math.PI.toFloat() / 2f))
+                player.volume = g.coerceIn(0f, 1f)
+                if (i == steps) fadeActive = false
+            }, i * stepMs)
+        }
+    }
+
+    /** Свод отменён/сорвался: вернуть звук и продолжить как обычно (fallback). */
+    fun handoffAbort() = withPlayerOnMain {
+        cancelCrossfadeFade(resetVolume = false)
+        it.volume = 1f
+        it.play()
+    }
+
+    private fun cancelCrossfadeFade(resetVolume: Boolean) {
+        fadeGeneration.incrementAndGet()
+        fadeHandler.removeCallbacksAndMessages(null)
+        fadeActive = false
+        if (resetVolume && this::player.isInitialized) {
+            // Уважаем текущее состояние дака, чтобы фейд не «снимал» дакинг.
+            player.volume = if (_isDucked.value) 0.2f else 1f
+        }
     }
 
     private fun updateNotificationLayout() {

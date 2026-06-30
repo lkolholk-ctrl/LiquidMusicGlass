@@ -28,6 +28,8 @@ data class LiquidColors(
     val glassBorder: Color,
     val divider: Color,
     val cardSurface: Color,
+    /** Единый акцент приложения (бледно-зелёный). Селекторы/галочки/кнопки. */
+    val accent: Color,
     val accentRed: Color,
     val accentGreen: Color,
     val iconDefault: Color,
@@ -59,6 +61,7 @@ private val DarkLiquidColors = LiquidColors(
     glassBorder = Color.White.copy(alpha = 0.20f),
     divider = Color.White.copy(alpha = 0.06f),
     cardSurface = Color.Transparent,
+    accent = Color(0xFF88C088),
     accentRed = Color(0xFFFC3C44),
     accentGreen = Color(0xFF34C759),
     iconDefault = Color.White,
@@ -90,6 +93,7 @@ private val LightLiquidColors = LiquidColors(
     glassBorder = Color.Black.copy(alpha = 0.08f),
     divider = Color.Black.copy(alpha = 0.06f),
     cardSurface = Color.Transparent,
+    accent = Color(0xFF7FB77E),
     accentRed = Color(0xFFFC3C44),
     accentGreen = Color(0xFF34C759),
     iconDefault = Color.Black,
@@ -101,6 +105,39 @@ private val LightLiquidColors = LiquidColors(
     bottomBarTint = Color(0xFFF2F2F7),
     miniPlayerTint = Color.Black.copy(alpha = 0.03f),
     miniPlayerBorder = Color.Black.copy(alpha = 0.08f)
+)
+
+// ── Высококонтрастные варианты (тумблер «Увеличение контрастности») ──
+// Меньше прозрачности у стекла/разделителей, ярче вторичный/третичный текст,
+// плотнее обводки — читаемость в glassmorphism заметно выше.
+private val DarkLiquidColorsHighContrast = DarkLiquidColors.copy(
+    textSecondary = Color.White.copy(alpha = 0.82f),
+    textTertiary = Color.White.copy(alpha = 0.55f),
+    glassTint = Color.White.copy(alpha = 0.14f),
+    glassBorder = Color.White.copy(alpha = 0.42f),
+    divider = Color.White.copy(alpha = 0.16f),
+    iconMuted = Color.White.copy(alpha = 0.70f),
+    sectionLabel = Color.White.copy(alpha = 0.75f),
+    searchFieldBg = Color.White.copy(alpha = 0.16f),
+    chipBg = Color.White.copy(alpha = 0.12f),
+    chipBorder = Color.White.copy(alpha = 0.22f),
+    miniPlayerTint = Color.White.copy(alpha = 0.10f),
+    miniPlayerBorder = Color.White.copy(alpha = 0.42f)
+)
+
+private val LightLiquidColorsHighContrast = LightLiquidColors.copy(
+    textSecondary = Color.Black.copy(alpha = 0.78f),
+    textTertiary = Color.Black.copy(alpha = 0.52f),
+    glassTint = Color.Black.copy(alpha = 0.10f),
+    glassBorder = Color.Black.copy(alpha = 0.22f),
+    divider = Color.Black.copy(alpha = 0.14f),
+    iconMuted = Color.Black.copy(alpha = 0.68f),
+    sectionLabel = Color.Black.copy(alpha = 0.72f),
+    searchFieldBg = Color.Black.copy(alpha = 0.12f),
+    chipBg = Color.Black.copy(alpha = 0.10f),
+    chipBorder = Color.Black.copy(alpha = 0.18f),
+    miniPlayerTint = Color.Black.copy(alpha = 0.10f),
+    miniPlayerBorder = Color.Black.copy(alpha = 0.22f)
 )
 
 val LocalLiquidColors = staticCompositionLocalOf { DarkLiquidColors }
@@ -153,10 +190,12 @@ private val LiquidLightScheme = lightColorScheme(
 
 /**
  * @param themeMode 0=System, 1=Dark, 2=Light
+ * @param highContrast включить высококонтрастную палитру (меньше прозрачности).
  */
 @Composable
 fun LiquidMusicGlassTheme(
     themeMode: Int = 0,
+    highContrast: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val isDark = when (themeMode) {
@@ -165,7 +204,11 @@ fun LiquidMusicGlassTheme(
         else -> isSystemInDarkTheme()
     }
 
-    val liquidColors = if (isDark) DarkLiquidColors else LightLiquidColors
+    val liquidColors = if (isDark) {
+        if (highContrast) DarkLiquidColorsHighContrast else DarkLiquidColors
+    } else {
+        if (highContrast) LightLiquidColorsHighContrast else LightLiquidColors
+    }
     val materialScheme = if (isDark) LiquidDarkScheme else LiquidLightScheme
 
     CompositionLocalProvider(
@@ -176,6 +219,28 @@ fun LiquidMusicGlassTheme(
             typography = LiquidTypography
         ) {
             // Bare Text() without an explicit style also inherits Golos Text.
+            CompositionLocalProvider(
+                LocalTextStyle provides LocalTextStyle.current.copy(fontFamily = AppFontFamily),
+                content = content
+            )
+        }
+    }
+}
+
+/**
+ * Принудительно ТЁМНЫЙ контент независимо от выбранной темы приложения. Wave и
+ * фулл-плеер всегда тёмные — их эффекты (аура/дым/AGSL) рассчитаны на тёмный фон.
+ * Тема приложения (Светлая/Тёмная/Системная) меняет только контентные экраны.
+ */
+@Composable
+fun ForceDarkContent(content: @Composable () -> Unit) {
+    CompositionLocalProvider(
+        LocalLiquidColors provides DarkLiquidColors
+    ) {
+        MaterialTheme(
+            colorScheme = LiquidDarkScheme,
+            typography = LiquidTypography
+        ) {
             CompositionLocalProvider(
                 LocalTextStyle provides LocalTextStyle.current.copy(fontFamily = AppFontFamily),
                 content = content

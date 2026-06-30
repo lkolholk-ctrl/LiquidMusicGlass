@@ -4,6 +4,8 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <!-- Pre-Android 13: local audio scan needs READ_EXTERNAL_STORAGE (Stage 7b). -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
@@ -67,7 +69,12 @@
             android:priority="1000">
             <intent-filter>
                 <action android:name="androidx.media3.session.MediaSessionService" />
-                <action android:name="android.media.browse.MediaBrowserService" />
+                <!-- MediaBrowserService action removed: on OEM devices (Honor/Huawei)
+                     the system media-resumption binds a browsable service at cold
+                     start, spinning up AudioService.onCreate -> ExoPlayer (+codec) and
+                     contending for CMA, contributing to the startup ANR. App playback
+                     connects via the MediaSessionService action above and is
+                     unaffected; only system "resume last media" browsing is dropped. -->
             </intent-filter>
         </service>
 

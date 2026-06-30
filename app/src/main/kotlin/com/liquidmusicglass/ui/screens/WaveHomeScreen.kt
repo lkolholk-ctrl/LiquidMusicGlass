@@ -24,6 +24,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.AccountCircle
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.CircularProgressIndicator
@@ -50,7 +52,6 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.liquidmusicglass.api.icm.IcmChart
 import com.liquidmusicglass.api.icm.IcmHomeItem
-import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.api.icm.toTrack
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.Track
@@ -59,7 +60,6 @@ import com.liquidmusicglass.ui.glass.rememberAlbumColors
 import com.liquidmusicglass.ui.player.AuraBackground
 import com.liquidmusicglass.ui.theme.AppFontFamily
 import com.liquidmusicglass.ui.viewmodel.HomeViewModel
-import kotlinx.coroutines.launch
 
 /**
  * "My Wave" — the main screen, our own take on the Yandex-Music style feed.
@@ -82,10 +82,11 @@ fun WaveHomeScreen(
     onNavigateToArtist: (String) -> Unit = {},
     onNavigateToPlaylist: (String) -> Unit = {},
     onOpenAuth: () -> Unit = {},
+    onOpenProfile: () -> Unit = {},
+    animationsActive: Boolean = true,
 ) {
     val context = LocalContext.current
     val viewModel = remember { HomeViewModel() }
-    val scope = androidx.compose.runtime.rememberCoroutineScope()
 
     LaunchedEffect(Unit) { viewModel.loadHomeContent() }
 
@@ -98,6 +99,11 @@ fun WaveHomeScreen(
     val recentlyPlayed by PlayerController.recentlyPlayed.collectAsState()
     val homeContent by viewModel.homeContent.collectAsState()
     val charts by viewModel.charts.collectAsState()
+
+    // Активная «именованная» волна (по муду/треку/артисту). У дефолтной «Моей волны»
+    // имени нет → индикатор не показываем.
+    val waveContext by PlayerController.waveRefillContext.collectAsState()
+    val activeStationName = waveContext?.name?.takeIf { it.isNotBlank() }
 
     val albumColors = rememberAlbumColors(currentTrack?.displayArtUri, currentTrack?.coverUrl)
 
@@ -113,7 +119,7 @@ fun WaveHomeScreen(
     Box(modifier = Modifier.fillMaxSize()) {
 
         // ── Living aura background (own AGSL shader, reacts to the music) ──
-        AuraBackground(albumColors = albumColors, modifier = Modifier.fillMaxSize())
+        AuraBackground(albumColors = albumColors, modifier = Modifier.fillMaxSize(), animate = animationsActive)
 
         LazyColumn(
             modifier = Modifier
@@ -121,7 +127,17 @@ fun WaveHomeScreen(
                 .statusBarsPadding(),
             contentPadding = PaddingValues(bottom = 96.dp)
         ) {
-            item { WaveTopBar(onSearch = onNavigateToSearch) }
+            item { WaveTopBar(onSearch = onNavigateToSearch, onOpenProfile = onOpenProfile) }
+
+            // ── Индикатор активной волны (по муду/треку/артисту) + сброс на «Мою волну» ──
+            if (activeStationName != null) {
+                item {
+                    WaveStationIndicator(
+                        name = activeStationName,
+                        onClear = { viewModel.buildWaveQueue(context) }
+                    )
+                }
+            }
 
             // ── Hero ──
             item {
@@ -151,11 +167,15 @@ fun WaveHomeScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Spacer(Modifier.height(24.dp))
+                        // Весь блок «артист + обложка + контролы» опущен чуть ниже.
+                        Spacer(Modifier.height(40.dp))
                         Text(
                             text = track.artist,
                             color = Color.White,
-                            fontSize = 40.sp,
+                            fontSize = 44.sp,
+                            // Межстрочный интервал — чтобы при переносе (длинное имя)
+                            // строки не налезали друг на друга.
+                            lineHeight = 50.sp,
                             fontWeight = FontWeight.Black,
                             fontFamily = AppFontFamily,
                             textAlign = TextAlign.Center,
@@ -165,7 +185,7 @@ fun WaveHomeScreen(
                                 .fillMaxWidth()
                                 .padding(horizontal = 24.dp)
                         )
-                        Spacer(Modifier.height(24.dp))
+                        Spacer(Modifier.height(26.dp))
                         AlbumArtImage(
                             uri = track.displayArtUri,
                             coverUrl = track.coverUrl,
@@ -177,7 +197,7 @@ fun WaveHomeScreen(
                                 .clip(RoundedCornerShape(28.dp))
                                 .clickable { onOpenPlayer() }
                         )
-                        Spacer(Modifier.height(20.dp))
+                        Spacer(Modifier.height(28.dp))
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -229,100 +249,17 @@ fun WaveHomeScreen(
 
             // ── Animated mood tiles ──
             item {
-                Spacer(Modifier.height(8.dp))
+                // Блобы опущены заметно ниже контролов (больше воздуха сверху).
+                Spacer(Modifier.height(36.dp))
                 WaveMoodTiles(
-                    onSelect = { mood -> viewModel.buildMoodWave(context, mood.query) }
+                    onSelect = { mood -> viewModel.buildMoodWave(context, mood.query, mood.label) },
+                    animate = animationsActive
                 )
                 Spacer(Modifier.height(8.dp))
             }
 
-            // ── Recently played ──
-            if (recentlyPlayed.isNotEmpty()) {
-                item {
-                    WaveSectionHeader("Recently played")
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = 20.dp),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp)
-                    ) {
-                        items(
-                            recentlyPlayed.take(15).distinctBy { it.id },
-                            key = { "recent_${it.id}" }
-                        ) { recent ->
-                            WaveTrackCard(
-                                title = recent.title,
-                                subtitle = recent.artist,
-                                uri = recent.displayArtUri,
-                                coverUrl = recent.coverUrl,
-                                onClick = { PlayerController.playNext(recent, context) }
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(28.dp))
-                }
-            }
-
-            // ── Home-блоки (popular / banners / new_releases / recommendations …) ──
-            homeBlocks.forEach { block ->
-                item(key = "block_${block.id}") {
-                    WaveSectionHeader(block.title)
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = 20.dp),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp)
-                    ) {
-                        items(block.items, key = { "${block.id}_${it.id}" }) { homeItem ->
-                            WaveTrackCard(
-                                title = homeItem.title,
-                                subtitle = homeItem.displayArtist,
-                                coverUrl = homeItem.cover,
-                                onClick = {
-                                    // Есть альбом → открываем альбом; иначе играем трек.
-                                    val cid = homeItem.collectionId
-                                    if (!cid.isNullOrBlank()) {
-                                        onNavigateToAlbum(cid)
-                                    } else {
-                                        val t = homeItem.toWaveTrack()
-                                        scope.launch {
-                                            resolveStreamUrl(t)?.let { PlayerController.playNext(it, context) }
-                                        }
-                                    }
-                                }
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(28.dp))
-                }
-            }
-
-            // ── Charts ──
-            if (charts.isNotEmpty()) {
-                item {
-                    WaveSectionHeader("Charts")
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = 20.dp),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp)
-                    ) {
-                        items(charts, key = { "chart_${it.id}" }) { chart ->
-                            WaveChartCard(
-                                chart = chart,
-                                onClick = {
-                                    val chartTracks = chart.tracks.map { it.toTrack() }
-                                    if (chartTracks.isNotEmpty()) {
-                                        PlayerController.playFromList(
-                                            context = context,
-                                            tracks = chartTracks,
-                                            startIndex = 0,
-                                            autoRefillType = "chart",
-                                            autoRefillId = chart.id,
-                                            autoRefillName = chart.name
-                                        )
-                                    }
-                                }
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(28.dp))
-                }
-            }
+            // Рекомендации (recently played / home-блоки / charts) перенесены в таб New.
+            // На Wave остаются только мудкарточки + плеер волны/текущий трек.
         }
 
         // ── Онбординг волны: показываем, когда персональная волна пуста и юзер
@@ -365,7 +302,7 @@ fun WaveHomeScreen(
     }
 }
 
-private fun IcmHomeItem.toWaveTrack(): Track = Track(
+internal fun IcmHomeItem.toWaveTrack(): Track = Track(
     id = id,
     title = title,
     artist = displayArtist,
@@ -373,15 +310,10 @@ private fun IcmHomeItem.toWaveTrack(): Track = Track(
     uri = Uri.parse("https://byicloud.online/track/$id"),
     durationMs = durationMs,
     albumId = collectionId?.hashCode()?.toLong() ?: -1L,
-    coverUrl = cover
+    coverUrl = cover,
+    // без source резолвер стрима не знал, откуда тянуть (apple/vk) → трек не грузился
+    source = source
 )
-
-private suspend fun resolveStreamUrl(track: Track): Track? = try {
-    val url = IcmRepository.getStreamUrl(track.id, source = track.source)
-    if (url != null) track.copy(uri = Uri.parse(url)) else null
-} catch (_: Exception) {
-    null
-}
 
 @Composable
 private fun WaveSectionHeader(title: String) {
@@ -526,35 +458,74 @@ private fun FlatCircleButton(onClick: () -> Unit, content: @Composable () -> Uni
     }
 }
 
+/** Чип активной именованной волны: «Wave by <name>» + крестик сброса на My Wave. */
 @Composable
-private fun WaveTopBar(onSearch: () -> Unit) {
+private fun WaveStationIndicator(name: String, onClear: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .padding(horizontal = 20.dp, vertical = 4.dp)
+            .clip(androidx.compose.foundation.shape.CircleShape)
+            .background(Color.White.copy(alpha = 0.12f))
+            .padding(start = 14.dp, end = 4.dp, top = 5.dp, bottom = 5.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = "Wave by $name",
+            color = Color.White,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            fontFamily = AppFontFamily,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false)
+        )
+        Spacer(Modifier.width(4.dp))
+        Box(
+            modifier = Modifier
+                .size(24.dp)
+                .clip(androidx.compose.foundation.shape.CircleShape)
+                .clickable { onClear() },
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Close,
+                contentDescription = "Reset to My Wave",
+                tint = Color.White.copy(alpha = 0.85f),
+                modifier = Modifier.size(16.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun WaveTopBar(onSearch: () -> Unit, onOpenProfile: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .height(56.dp)
             .padding(horizontal = 16.dp)
     ) {
+        // Слева — профиль (вход/аккаунт), заменил фиолетовый play-квадрат.
         Box(
             modifier = Modifier
                 .align(Alignment.CenterStart)
                 .size(40.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(
-                    Brush.linearGradient(listOf(Color(0xFFFF2D9B), Color(0xFFB14BFF)))
-                ),
+                .clip(androidx.compose.foundation.shape.CircleShape)
+                .background(Color.White.copy(alpha = 0.12f))
+                .clickable { onOpenProfile() },
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                imageVector = Icons.Rounded.PlayArrow,
-                contentDescription = null,
+                imageVector = Icons.Rounded.AccountCircle,
+                contentDescription = "Profile",
                 tint = Color.White,
-                modifier = Modifier.size(22.dp)
+                modifier = Modifier.size(26.dp)
             )
         }
 
         Text(
             text = "My Wave",
-            color = WaveAccent,
+            color = Color.White,
             fontSize = 18.sp,
             fontWeight = FontWeight.Black,
             fontFamily = AppFontFamily,
@@ -599,4 +570,5 @@ private fun BigPlayButton(loading: Boolean, onClick: () -> Unit) {
     }
 }
 
-private val WaveAccent = Color(0xFFFFE000)
+// Бледно-зелёный акцент волны (заменил жёлтый — цвет Яндекса убран).
+private val WaveAccent = Color(0xFF88C088)

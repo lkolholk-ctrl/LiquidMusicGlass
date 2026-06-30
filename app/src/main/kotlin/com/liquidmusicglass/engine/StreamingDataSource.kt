@@ -70,7 +70,11 @@ class StreamingDataSource private constructor(
         android.util.Log.d("StreamingDataSource", "open uri=$uri resolved=$resolvedUri scheme=${resolvedUri.scheme}")
 
         currentDataSource = when (resolvedUri.scheme) {
-            "file" -> fileDataSource
+            // fileDataSource — это DefaultDataSource, он умеет file://, а также
+            // content:// (через ContentDataSource), asset://, android.resource://.
+            // Локальные треки из MediaStore приходят как content:// — без этой
+            // ветки они уходили в httpDataSource и не играли (тишина).
+            "file", "content", "asset", "android.resource", "rawresource" -> fileDataSource
             "http", "https" -> cacheDataSource ?: httpDataSource
             else -> httpDataSource
         }

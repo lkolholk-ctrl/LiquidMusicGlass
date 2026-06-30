@@ -1,6 +1,8 @@
 package com.liquidmusicglass.ui.player
 
 import android.net.Uri
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
@@ -61,7 +63,22 @@ fun MiniPlayer(
 
     val lc = LiquidTheme.colors
 
-    val playerModifier = if (drawBackground) {
+    val degraded = com.liquidmusicglass.ui.PerfMonitor.degraded
+    val playerModifier = if (drawBackground && degraded) {
+        // degraded: плоская полупрозрачная пилюля без drawBackdrop/blur/lens.
+        Modifier
+            .fillMaxWidth(0.92f)
+            .height(52.dp)
+            .clip(pillShape)
+            .background(Color.White.copy(alpha = 0.10f))
+            .background(lc.miniPlayerTint)
+            .border(0.8.dp, lc.miniPlayerBorder, pillShape)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) { onExpand() }
+            .padding(horizontal = 10.dp)
+    } else if (drawBackground) {
         Modifier
             .fillMaxWidth(0.92f)
             .height(52.dp)

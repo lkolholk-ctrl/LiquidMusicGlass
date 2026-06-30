@@ -3,6 +3,7 @@ package com.liquidmusicglass.api.icm
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -96,17 +97,30 @@ class IcmApi private constructor() {
         // Явный Dispatcher: ограничиваем число одновременных запросов (всё идёт на
         // один хост byicloud.online). Реальный темп держит IcmRateGate, а это —
         // страховка от переполнения пула при залпах резолвов/префетча.
+        // maxRequestsPerHost снижен 8→5: на холодном старте летит залп запросов к
+        // byicloud, и пока ни одно HTTP/2-соединение не установлено, OkHttp открывал
+        // ДО 8 параллельных TLS-handshake'ов. На медленной/«подрезанной» сети они
+        // зависали пачкой → ложное «No internet connection». С 5 — гонок меньше +
+        // мёртвый хост не сожрёт весь пул; остальное мультиплексируется по HTTP/2.
         val dispatcher = okhttp3.Dispatcher().apply {
             maxRequests = 12
-            maxRequestsPerHost = 8
+            maxRequestsPerHost = 5
         }
         OkHttpClient.Builder()
-            .connectTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(10, TimeUnit.SECONDS)
-            .writeTimeout(10, TimeUnit.SECONDS)
-            // Единая политика ретраев — только наш интерсептор. retryOnConnectionFailure
-            // выключаем, чтобы не было ДВОЙНЫХ (умножающихся) повторов.
-            .retryOnConnectionFailure(false)
+            .connectTimeout(5, TimeUnit.SECONDS)
+            .readTimeout(8, TimeUnit.SECONDS)
+            .writeTimeout(8, TimeUnit.SECONDS)
+            // callTimeout ограничивает ВЕСЬ вызов (connect+TLS+retry+ответ). 10с — чтобы
+            // при мёртвой/медленной сети запрос падал БЫСТРО (юзер не думает, что
+            // приложение встало колом), а зависшие коннекты не копились.
+            .callTimeout(10, TimeUnit.SECONDS)
+            // ВКЛючаем штатное восстановление соединения OkHttp: прозрачный повтор на
+            // протухших keep-alive соединениях (сервер закрыл сокет) и перебор маршрутов
+            // (IPv6→IPv4). Без этого единичный мёртвый маршрут/протухший коннект давал
+            // «failed to connect» → ложное «No internet connection», хотя сеть жива.
+            // Это НЕ дублирует наш интерсептор: тот ретраит 5xx/таймауты, а это —
+            // выбор живого маршрута внутри одной попытки (4xx по-прежнему не ретраятся).
+            .retryOnConnectionFailure(true)
             .dispatcher(dispatcher)
             .connectionPool(okhttp3.ConnectionPool(5, 30, TimeUnit.SECONDS))
             .protocols(listOf(okhttp3.Protocol.HTTP_2, okhttp3.Protocol.HTTP_1_1))
@@ -125,7 +139,10 @@ class IcmApi private constructor() {
                 var response: okhttp3.Response? = null
                 var exception: java.io.IOException? = null
                 var tryCount = 0
-                val maxRetries = if (fast) 1 else 3
+                // 3→2: при лежачем хосте 3 попытки на КАЖДЫЙ вызов плодили лишние
+                // висящие коннекты. 2 достаточно для транзиентных 5xx; остальное
+                // отсекает circuit-breaker (IcmRateGate).
+                val maxRetries = if (fast) 1 else 2
                 while (tryCount < maxRetries) {
                     try {
                         // Закрываем предыдущий 5xx-ответ перед повтором (не течём телом).
@@ -152,6 +169,20 @@ class IcmApi private constructor() {
                 response ?: throw exception ?: java.io.IOException("Network error")
             }
             .build()
+    }
+
+    /**
+     * Сбросить сетевое состояние при СМЕНЕ сети (Wi-Fi↔моб., VPN вкл/выкл).
+     * Соединения в пуле привязаны к прежнему маршруту и после переключения мертвы —
+     * приложение продолжало долбиться в них и «ничего не грузило». Вызывать из
+     * networkCallback при появлении/смене активной сети.
+     */
+    fun evictConnections() {
+        try {
+            client.dispatcher.cancelAll()      // отменяем зависшие вызовы на мёртвых соединениях
+            client.connectionPool.evictAll()   // выкидываем протухшие соединения из пула
+            IcmRateGate.reset()                // снимаем локальный circuit-breaker бан
+        } catch (_: Throwable) {}
     }
 
     private val mediaTypeJson = "application/json; charset=utf-8".toMediaType()
@@ -230,7 +261,13 @@ class IcmApi private constructor() {
         body: String? = null,
         async: Boolean = false
     ): Result<T> {
-        return withContext(Dispatchers.IO) {
+        // Обычный расширяемый Dispatchers.IO — НЕ limitedParallelism: при лежащей сети
+        // узкий лимит забивался висяками и вешал весь API. Число коннектов держим
+        // короткими таймаутами (callTimeout) + ограниченными ретраями, а не очередью.
+        // ВНЕШНИЙ корутинный таймаут — на случай, если OkHttp callTimeout не сработает
+        // (висение на socketRead0): корутина гарантированно отменяется, не вешает пул.
+        return withTimeoutOrNull(11_000L) {
+        withContext(Dispatchers.IO) {
             // Circuit-breaker: пока активен бан — мгновенно фейлим, не выходя в сеть.
             if (IcmRateGate.isBanned()) {
                 return@withContext Result.failure(
@@ -242,6 +279,7 @@ class IcmApi private constructor() {
                 val url = if (async) "$BASE_URL$endpoint?async=1" else "$BASE_URL$endpoint"
                 val request = buildRequest(url, method, body)
                 val response = client.newCall(request).execute()
+                IcmRateGate.recordSuccess()   // ответ получен → хост жив, сбрасываем счётчик фейлов
 
                 extractRequestId(response)?.let { onRequestId?.invoke(it) }
 
@@ -290,8 +328,14 @@ class IcmApi private constructor() {
                     }
                 }
             } catch (e: Exception) {
+                IcmRateGate.recordFailure()   // сетевой фейл без ответа → копим к circuit-breaker
                 Result.failure(e)
             }
+        }
+        } ?: run {
+            // Корутинный таймаут (запрос завис дольше 11с) — фиксируем фейл, не виснем.
+            IcmRateGate.recordFailure()
+            Result.failure(IcmApiException(408, "icm call coroutine timeout"))
         }
     }
 
@@ -313,6 +357,7 @@ class IcmApi private constructor() {
             val url = if (async) "$BASE_URL$endpoint?async=1" else "$BASE_URL$endpoint"
             val request = buildRequest(url, method, body, fast = true)
             val response = client.newCall(request).execute()
+            IcmRateGate.recordSuccess()
 
             extractRequestId(response)?.let { onRequestId?.invoke(it) }
 
@@ -351,6 +396,7 @@ class IcmApi private constructor() {
                 }
             }
         } catch (e: Exception) {
+            IcmRateGate.recordFailure()
             return Result.failure(e)
         }
     }
@@ -389,10 +435,13 @@ class IcmApi private constructor() {
         partnerUserId: String,
         hideExplicit: Boolean = false
     ): Result<IcmSessionResponse> {
-        if (sessionToken != null) {
+        // Снимаем в локальную val: sessionToken — mutable var, между проверкой и
+        // использованием другой поток мог обнулить его (был бы NPE на !!).
+        val existing = sessionToken
+        if (existing != null) {
             return Result.success(
                 IcmSessionResponse(
-                    partnerSessionToken = sessionToken!!,
+                    partnerSessionToken = existing,
                     expiresIn = 0,
                     partnerUserId = partnerUserId,
                     scopes = emptyList()

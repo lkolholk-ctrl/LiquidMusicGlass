@@ -54,12 +54,20 @@ class MainActivity : ComponentActivity() {
     private var isNetworkCallbackRegistered = false
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
-        private var wasOffline = true
+        private var currentNetwork: Network? = null
         private var reconnectJob: kotlinx.coroutines.Job? = null
 
         override fun onAvailable(network: Network) {
-            if (!wasOffline) return
-            wasOffline = false
+            val isNewNetwork = currentNetwork != network
+            currentNetwork = network
+            if (isNewNetwork) {
+                // Активная сеть сменилась (Wi-Fi↔моб., VPN вкл/выкл): соединения в пуле
+                // привязаны к старому маршруту и мертвы. Эвиктим пулы (ICM + обложки) и
+                // сбрасываем локальный бан — иначе приложение долбится в «трупы» и ничего
+                // не грузит, пока соединения сами не протухнут.
+                com.liquidmusicglass.api.icm.IcmApi.getInstance().evictConnections()
+                (application as? App)?.evictImageConnections()
+            }
             // Debounce: на флапающей мобильной сети onAvailable может прийти много раз —
             // ждём 1.5с стабильности и делаем ОДИН рефетч + ретрай зависшего плеера,
             // вместо залпа запросов на каждое срабатывание.
@@ -74,12 +82,15 @@ class MainActivity : ComponentActivity() {
         }
 
         override fun onLost(network: Network) {
-            wasOffline = true
+            if (currentNetwork == network) currentNetwork = null
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // JUCE инициализируется через Activity-контекст (см. JuceContextHolder).
+        com.liquidmusicglass.engine.automix.JuceContextHolder.set(this)
 
         if (CrashHandler.hasCrashLog(this)) {
             startActivity(Intent(this, CrashActivity::class.java))
@@ -89,12 +100,14 @@ class MainActivity : ComponentActivity() {
 
         enableEdgeToEdge()
 
-        // Register network callback to auto-refresh profile when coming back online
+        // Детектор просадки FPS → деградация тяжёлых эффектов (аура/лирика/мудкарточки)
+        // на слабом GPU, чтобы RenderThread успевал и не было ANR-плашки.
+        com.liquidmusicglass.ui.PerfMonitor.start()
+
+        // Default-network callback ловит СМЕНУ активной сети (Wi-Fi↔моб., VPN вкл/выкл),
+        // чтобы вовремя эвиктить мёртвые соединения и не «терять сеть» после переключения.
         val connectivityManager = getSystemService(ConnectivityManager::class.java)
-        val networkRequest = NetworkRequest.Builder()
-            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-            .build()
-        connectivityManager?.registerNetworkCallback(networkRequest, networkCallback)
+        connectivityManager?.registerDefaultNetworkCallback(networkCallback)
         isNetworkCallbackRegistered = true
 
         // Initialize ICM API with native key (or BuildConfig fallback)
@@ -118,15 +131,19 @@ class MainActivity : ComponentActivity() {
     // Refresh profile on app start if user is logged in
         if (IcmAuthRepository.isLoggedIn.value) {
             authScope.launch {
-                val apiKey = try {
-                    IcmKeyProvider.getApiKey(this@MainActivity)
-                } catch (_: Throwable) { "" }.ifBlank { BuildConfig.ICM_API_KEY }
-                
-                if (apiKey.isNotBlank()) {
-                    IcmAuthRepository.refreshTokenIfNeeded(apiKey)
+                // Стартовые сетевые задачи — опциональны и ограничены по времени:
+                // приложение показывается и работает без них, не вися на сети.
+                kotlinx.coroutines.withTimeoutOrNull(5_000) {
+                    val apiKey = try {
+                        IcmKeyProvider.getApiKey(this@MainActivity)
+                    } catch (_: Throwable) { "" }.ifBlank { BuildConfig.ICM_API_KEY }
+
+                    if (apiKey.isNotBlank()) {
+                        IcmAuthRepository.refreshTokenIfNeeded(apiKey)
+                    }
+                    // Always refresh profile data on startup
+                    IcmAuthRepository.fetchUserData()
                 }
-                // Always refresh profile data on startup
-                IcmAuthRepository.fetchUserData()
             }
         }
 
@@ -212,7 +229,8 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val themeMode by PlayerController.themeMode.collectAsState()
-            LiquidMusicGlassTheme(themeMode = themeMode) {
+            val highContrast by com.liquidmusicglass.engine.PlayerSettings.increaseContrast.collectAsState()
+            LiquidMusicGlassTheme(themeMode = themeMode, highContrast = highContrast) {
                 val compromised by remember { isSecurityCompromised }
                 val reasons by remember { compromiseReason }
                 if (compromised) {
@@ -371,8 +389,38 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // Возврат из фона при живом процессе (музыка в foreground): onStart после
+    // onStop вызывается БЕЗ onCreate. GPU-контекст AGSL-шейдеров потерян — даём
+    // эффектам сигнал пере-прогрева (пересоздать дым/AGSL) и перезапускаем
+    // прогрев стекла. На самый первый onStart (после onCreate) НЕ реагируем.
+    private var wasStopped = false
+
+    override fun onStart() {
+        super.onStart()
+        if (wasStopped) {
+            wasStopped = false
+            com.liquidmusicglass.ui.EffectsLifecycle.onReturnedToForeground()
+            com.liquidmusicglass.ui.PerfMonitor.restart()
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        wasStopped = true
+    }
+
+    // Системные оверлеи/переходы (пикер файла/фото, экран «о приложении», шторка,
+    // сворачивание) забирают фокус ДО onStop. Замораживаем тяжёлый AGSL-дым на это
+    // время, чтобы наш рендер не конкурировал с аудио-колбэком JUCE за GPU/CPU и
+    // не давал цикличных заеданий звука в момент перехода.
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        com.liquidmusicglass.ui.EffectsLifecycle.hasWindowFocus = hasFocus
+    }
+
     override fun onDestroy() {
         super.onDestroy()
+        com.liquidmusicglass.engine.automix.JuceContextHolder.clear(this)
         if (!isNetworkCallbackRegistered) return
         val connectivityManager = getSystemService(ConnectivityManager::class.java)
         try {
