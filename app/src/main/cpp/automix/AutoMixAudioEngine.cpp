@@ -8,6 +8,82 @@
 
 namespace
 {
+    struct TransitionGains
+    {
+        float out;
+        float in;
+    };
+
+    float clamp01 (float v)
+    {
+        return juce::jlimit (0.0f, 1.0f, v);
+    }
+
+    float smoothstep01 (float v)
+    {
+        const float x = clamp01 (v);
+        return x * x * (3.0f - 2.0f * x);
+    }
+
+    float equalPowerOut (float p)
+    {
+        return (float) std::cos (clamp01 (p) * juce::MathConstants<float>::halfPi);
+    }
+
+    float equalPowerIn (float p)
+    {
+        return (float) std::sin (clamp01 (p) * juce::MathConstants<float>::halfPi);
+    }
+
+    int normaliseTransitionStyle (int style)
+    {
+        return style >= 0 && style <= 5 ? style : 0;
+    }
+
+    TransitionGains transitionGainsForStyle (float progress, int style)
+    {
+        const float p = clamp01 (progress);
+
+        switch (normaliseTransitionStyle (style))
+        {
+            case 1: // ENERGY_FADE: outgoing gets out of the way early, incoming rises after the hit.
+            {
+                const float outPhase = smoothstep01 (p * 1.25f);
+                const float inPhase  = smoothstep01 (p * 0.90f) * 0.85f + smoothstep01 (p) * 0.15f;
+                return { equalPowerOut (outPhase), equalPowerIn (inPhase) };
+            }
+            case 2: // BEAT_MATCH: long, smooth blend with a slight lead for the incoming deck.
+            {
+                const float outPhase = smoothstep01 ((p + 0.06f) / 1.06f);
+                const float inPhase  = smoothstep01 (p);
+                const float out = equalPowerOut (outPhase);
+                return { out * (0.92f + 0.08f * out), equalPowerIn (inPhase) };
+            }
+            case 3: // HARD_CUT: short DJ-style swap, but still ramped to avoid clicks.
+            {
+                const float earlyDuck = smoothstep01 (p * 1.15f) * 0.35f;
+                const float lateDrop  = smoothstep01 ((p - 0.35f) / 0.45f) * 0.65f;
+                const float outPhase = clamp01 (earlyDuck + lateDrop);
+                const float inPhase  = smoothstep01 (p / 0.60f);
+                return { equalPowerOut (outPhase), equalPowerIn (inPhase) };
+            }
+            case 4: // FILTER_SWEEP volume bed: outgoing ducks faster, incoming opens gradually.
+            {
+                const float outPhase = smoothstep01 (p * 1.12f);
+                const float inPhase  = smoothstep01 (p);
+                return { (1.0f - outPhase) * (1.0f - outPhase), inPhase * inPhase };
+            }
+            case 5: // ECHO_OUT bed: keep the tail audible briefly, then hand over cleanly.
+            {
+                const float outPhase = smoothstep01 (p * 0.75f) * 0.35f + smoothstep01 (p) * 0.65f;
+                const float inPhase  = smoothstep01 (p);
+                return { equalPowerOut (outPhase), equalPowerIn (inPhase) };
+            }
+            default: // SMOOTH_FADE: equal-power crossfade.
+                return { equalPowerOut (p), equalPowerIn (p) };
+        }
+    }
+
     struct TryAudioLock
     {
         explicit TryAudioLock (juce::CriticalSection& lockToUse)
@@ -414,6 +490,8 @@ void AutoMixAudioEngine::pause()
     outputMuted.store (true, std::memory_order_release);
     invalidateAllHolds();
     fxResetRequested.store (true, std::memory_order_release);
+    crossfadeStart.store (false);
+    crossfadeActive.store (false);
     const juce::CriticalSection::ScopedLockType slA (deckA.mutationLock);
     const juce::CriticalSection::ScopedLockType slB (deckB.mutationLock);
     deckA.transport.stop();
@@ -447,12 +525,13 @@ void AutoMixAudioEngine::silenceOutput()
     fxResetRequested.store (true, std::memory_order_release);
 }
 
-void AutoMixAudioEngine::startCrossfade (double durationMs)
+void AutoMixAudioEngine::startCrossfade (double durationMs, int transitionType)
 {
     outputMuted.store (false, std::memory_order_release);
     long long total = (long long) (durationMs * currentSampleRate / 1000.0);
     if (total < 1) total = 1;
     crossfadeTotal.store (total);
+    transitionStyle.store (normaliseTransitionStyle (transitionType), std::memory_order_release);
 
     // Both decks must be running for the mix. Stage 7 hand-off: deck A can be
     // positioned at the Media3 cue (entryOffsetMsA) so the blend continues
@@ -507,12 +586,13 @@ bool AutoMixAudioEngine::loadIncomingFd (int fd, long long offset, long long siz
     return loadDeckFd (deckRef (1 - currentDeck.load()), fd, offset, size);
 }
 
-void AutoMixAudioEngine::startTransition (double durationMs, double entryMs)
+void AutoMixAudioEngine::startTransition (double durationMs, double entryMs, int transitionType)
 {
     outputMuted.store (false, std::memory_order_release);
     long long total = (long long) (durationMs * currentSampleRate / 1000.0);
     if (total < 1) total = 1;
     crossfadeTotal.store (total);
+    transitionStyle.store (normaliseTransitionStyle (transitionType), std::memory_order_release);
 
     const int out = currentDeck.load();
     const int in  = 1 - out;
@@ -739,7 +819,7 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
     const float  bgA     = baseGainA.load();
     const float  bgB     = baseGainB.load();
     const int    fOut    = fadeOutDeck.load(); // which physical deck fades OUT
-    const double halfPi  = juce::MathConstants<double>::halfPi;
+    const int    style   = transitionStyle.load (std::memory_order_acquire);
 
     const int ch = juce::jmin (numOutputChannels, 8);
     if (numSamples > scratchA.getNumSamples() || numSamples > scratchB.getNumSamples()
@@ -826,8 +906,9 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
         {
             double t = (double) (crossfadePos + i) / total;
             if (t > 1.0) t = 1.0;
-            const float gOut = (float) std::cos (t * halfPi); // outgoing (equal power)
-            const float gIn  = (float) std::sin (t * halfPi); // incoming
+            const auto gains = transitionGainsForStyle ((float) t, style);
+            const float gOut = gains.out; // outgoing always fades down
+            const float gIn  = gains.in;  // incoming always fades up
 
             // Bass swap (Stage 5), only when enabled. Complementary: incoming
             // gains its low end while the outgoing deck gives up its own.

@@ -77,6 +77,8 @@ class JuceLocalPlayer(
     private val autoMixController by lazy { AutoMixController(context.applicationContext) }
     @Volatile private var autoMixAnalyzedIndex = -1
     private val AUTOMIX_LEAD_MS = 40_000L   // окно до конца трека для анализа (хватает на свод ≤30с)
+    private val MIN_AUTOMIX_XFADE_MS = 5_000L
+    private val MAX_AUTOMIX_XFADE_MS = 30_000L
     private val TICK_MS = 100L              // точка свода должна ловиться плотнее, чем UI polling
     private val STATE_TICK_MS = 500L        // MediaSession state не надо инвалидировать 10 раз/с
     private var lastStateInvalidateMs = 0L
@@ -327,7 +329,12 @@ class JuceLocalPlayer(
         DebugLog.add("JUCE.setPWR=$playWhenReady | ${DebugLog.caller()}")
         if (playWhenReady) ended = false
         playWhenReadyFlag = playWhenReady
-        if (!playWhenReady) engine.silenceOutput()
+        if (!playWhenReady) {
+            transitionState = 0
+            transitionFromIndex = -1
+            autoMixPlan = null
+            engine.silenceOutput()
+        }
         // Движок дёргаем на фоновом потоке (вызовы @Synchronized могут встать за
         // идущим декодом — нельзя блокировать main). Если идёт загрузка, она сама
         // стартует по флагу playWhenReadyFlag по завершении.
@@ -370,6 +377,7 @@ class JuceLocalPlayer(
         transitionState = 0
         transitionFromIndex = -1
         autoMixPlan = null
+        loadSeq.incrementAndGet()
         engine.silenceOutput()
         loadHandler.post { if (!released) runCatching { engine.stop() } }
         invalidateState()
@@ -378,6 +386,7 @@ class JuceLocalPlayer(
 
     override fun handleRelease(): ListenableFuture<*> {
         released = true
+        loadSeq.incrementAndGet()
         engine.silenceOutput()
         runCatching { autoMixScope.cancel() }
         handler.removeCallbacksAndMessages(null)
@@ -419,14 +428,17 @@ class JuceLocalPlayer(
         loadHandler.post {
             var ok = false
             runCatching {
+                if (released || seq != loadSeq.get()) return@runCatching
                 engine.init(context)
+                if (released || seq != loadSeq.get()) return@runCatching
                 engine.stop()              // current deck back to A
                 engine.clearDeck(1)        // incoming empty
                 engine.setBassSwap(true)
                 ok = loadUriIntoDeckA(uri)
+                if (released || seq != loadSeq.get()) return@runCatching
                 if (ok && positionMs > 0L) engine.seekCurrent(positionMs.toDouble())
                 // Старт здесь же, на фоне — main не дёргает @Synchronized движок.
-                if (ok && playWhenReadyFlag && seq == loadSeq.get()) engine.playCurrent()
+                if (ok && !released && playWhenReadyFlag && seq == loadSeq.get()) engine.playCurrent()
             }
             // Состояние применяем на main — только если загрузка ещё актуальна.
             handler.post {
@@ -546,9 +558,9 @@ class JuceLocalPlayer(
                 )
                 // Шаг 2: если модель готова свести — кладём план. Точку запуска
                 // НЕ берём из модельного start (он ранний/ненадёжен), якорим к
-                // концу трека по xfade. xfade ограничиваем [3с, 20с].
+                // концу трека по xfade. xfade держим в ML-окне [5с, 30с].
                 if (PlayerSettings.autoMix.value && f.readyForTransition && idx == currentIndex) {
-                    val xfade = f.crossfadeDurationMs.coerceIn(3_000L, 20_000L)
+                    val xfade = f.crossfadeDurationMs.coerceIn(MIN_AUTOMIX_XFADE_MS, MAX_AUTOMIX_XFADE_MS)
                     val entry = f.entryOffsetMs.coerceIn(0L, 10_000L)
                     autoMixPlan = AutoMixPlan(idx, xfade, entry, f.transitionType, nextUri)
                     DebugLog.add("AutoMix.plan idx=$idx xfade=${xfade}ms entry=${entry}ms type=${f.transitionType}")
@@ -601,21 +613,34 @@ class JuceLocalPlayer(
         DebugLog.add("AutoMix.xfade TRIGGER idx=${plan.fromIndex} rem=${remaining}ms xfade=${plan.xfadeMs}ms")
 
         loadHandler.post {
-            val ok = !released && loadUriIntoIncoming(plan.nextUri)
-            if (ok) {
+            val canStart = !released &&
+                playWhenReadyFlag &&
+                transitionState == 1 &&
+                transitionFromIndex == plan.fromIndex &&
+                currentIndex == plan.fromIndex
+            val ok = canStart && loadUriIntoIncoming(plan.nextUri)
+            val stillCurrent = ok &&
+                !released &&
+                playWhenReadyFlag &&
+                transitionState == 1 &&
+                transitionFromIndex == plan.fromIndex &&
+                currentIndex == plan.fromIndex
+            if (stillCurrent) {
                 // Ровная equal-power громкость: ВЫКЛючаем bass-swap, иначе в
                 // середине свода вырезается низ одного дека и переход звучит
                 // тоньше/тише. Без бит-мэтча подмена баса не нужна.
                 engine.setBassSwap(false)
-                engine.startTransition(plan.xfadeMs.toDouble(), plan.entryMs.toDouble())
+                engine.startTransition(plan.xfadeMs.toDouble(), plan.entryMs.toDouble(), plan.type)
             }
             handler.post {
                 if (released) return@post
-                if (ok) {
+                if (stillCurrent) {
                     transitionState = 2     // свод пошёл
                 } else {
-                    transitionState = 0     // фейл загрузки — фолбэк на обычное переключение
-                    transitionFromIndex = -1
+                    if (transitionState == 1 && transitionFromIndex == plan.fromIndex) {
+                        transitionState = 0     // фейл/отмена загрузки — фолбэк на обычное переключение
+                        transitionFromIndex = -1
+                    }
                     DebugLog.add("AutoMix.xfade LOAD FAILED → fallback advance")
                 }
                 invalidateState()

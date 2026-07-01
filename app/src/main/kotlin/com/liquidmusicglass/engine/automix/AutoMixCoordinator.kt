@@ -45,6 +45,8 @@ object AutoMixCoordinator {
     private const val LOCKSTEP_MS = 500L        // B играет в JUCE и Media3 параллельно перед сменой источника
     private const val SAFETY_MS = 2_000L        // запас хвоста A, чтобы он не доиграл до нашего seek
     private const val POLL_MS = 50L
+    private const val MIN_XFADE_MS = 5_000L
+    private const val MAX_XFADE_MS = 30_000L
 
     private val engine = AutoMixNativeEngine
 
@@ -106,7 +108,8 @@ object AutoMixCoordinator {
         } catch (_: Throwable) { return }
         if (!feat.readyForTransition) return
 
-        val crossfade = feat.crossfadeDurationMs
+        val crossfade = feat.crossfadeDurationMs.coerceIn(MIN_XFADE_MS, MAX_XFADE_MS)
+        val transitionType = feat.transitionType
         // Зажимаем cue так, чтобы у A остался хвост на ВЕСЬ свод + лок-степ + запас:
         // иначе A доиграет и Media3 сам авто-перейдёт на B до нашего seek (тогда
         // handoffPrepareNext уедет на C вместо B).
@@ -116,7 +119,7 @@ object AutoMixCoordinator {
 
         android.util.Log.i(
             "AutoMixCoordinator",
-            "armed ${current.id}->${next.id} cue=${cueMs}ms xfade=${crossfade}ms entry=${entry}ms"
+            "armed ${current.id}->${next.id} cue=${cueMs}ms xfade=${crossfade}ms entry=${entry}ms type=$transitionType"
         )
 
         var armed = false
@@ -152,7 +155,7 @@ object AutoMixCoordinator {
                 }
 
                 if (armed && pos >= cueMs) {
-                    doBlend(crossfade, entry)
+                    doBlend(crossfade, entry, transitionType)
                     return
                 }
                 delay(POLL_MS)
@@ -162,7 +165,7 @@ object AutoMixCoordinator {
         }
     }
 
-    private suspend fun doBlend(crossfadeMs: Long, entryMs: Long) {
+    private suspend fun doBlend(crossfadeMs: Long, entryMs: Long, transitionType: Int) {
         blending = true
         val resumeB = entryMs + crossfadeMs
         try {
@@ -170,8 +173,8 @@ object AutoMixCoordinator {
             // НАЛОЖЕННЫЙ кроссфейд: A гаснет в Media3 (cos), B нарастает в JUCE (sin)
             // ОДНОВРЕМЕННО. A НЕ паузим и не трогаем — никакого шва и паузы.
             svc?.crossfadeFadeOutA(crossfadeMs)
-            withContext(Dispatchers.IO) { engine.startCrossfade(crossfadeMs.toDouble()) }
-            android.util.Log.i("AutoMixCoordinator", "overlap crossfade ${crossfadeMs}ms")
+            withContext(Dispatchers.IO) { engine.startCrossfade(crossfadeMs.toDouble(), transitionType) }
+            android.util.Log.i("AutoMixCoordinator", "overlap crossfade ${crossfadeMs}ms type=$transitionType")
             delay(crossfadeMs)
 
             // A уже тихий (Media3 vol≈0), B на полной в JUCE. Передаём B в Media3 БЕЗ

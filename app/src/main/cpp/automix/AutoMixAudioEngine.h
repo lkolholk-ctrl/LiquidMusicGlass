@@ -53,8 +53,8 @@ public:
     /** RT-safe emergency mute. Used before async pause/skip/load reaches the engine. */
     void silenceOutput();
 
-    /** Equal-power crossfade deck A -> deck B over durationMs. Starts both decks. */
-    void startCrossfade (double durationMs);
+    /** Crossfade deck A -> deck B over durationMs. Starts both decks. */
+    void startCrossfade (double durationMs, int transitionType = 0);
 
     // ── Stage 8: full LOCAL player (ping-pong decks) ───────────────────────
     // The engine plays a queue: one deck is "current", the other is "incoming".
@@ -67,9 +67,9 @@ public:
     /** Same, but from a file descriptor (content:// без копии) — для AutoMix-свода
      *  следующего локального трека, у которого нет прямого пути. */
     bool loadIncomingFd (int fd, long long offset, long long size);
-    /** Equal-power crossfade current -> incoming over durationMs; incoming starts
+    /** Crossfade current -> incoming over durationMs; incoming starts
      *  at entryMs. On completion the incoming deck becomes current. */
-    void startTransition (double durationMs, double entryMs);
+    void startTransition (double durationMs, double entryMs, int transitionType = 0);
     /** Start / resume the current deck. */
     void playCurrent();
     /** Seek the current deck (ms). */
@@ -223,6 +223,7 @@ private:
     std::atomic<int>  currentDeck     { 0 };   // 0 = A, 1 = B (Stage 8 ping-pong)
     std::atomic<int>  fadeOutDeck     { 0 };   // deck fading OUT during active transition
     std::atomic<long long> crossfadeTotal { 0 };  // total samples
+    std::atomic<int> transitionStyle { 0 };        // DJEffectsEngine transitionType
     long long crossfadePos { 0 };                 // audio-thread only
     std::atomic<float> baseGainA { 1.0f };        // gains outside an active crossfade
     std::atomic<float> baseGainB { 0.0f };

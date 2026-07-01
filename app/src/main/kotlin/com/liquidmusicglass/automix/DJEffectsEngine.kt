@@ -205,7 +205,7 @@ object DJEffectsEngine {
             0 -> 8000L
             1 -> 5000L
             2 -> 12000L
-            3 -> 2000L
+            3 -> 5000L
             4 -> 10000L
             5 -> 7000L
             else -> 8000L
@@ -216,13 +216,13 @@ object DJEffectsEngine {
             val beatsPerBar = 4
             val barDuration = beatDurationMs * beatsPerBar
             val bars = if (barDuration * 4 < 16_000L) 4 else 2
-            return (barDuration * bars).coerceIn(4000L, 16000L)
+            return (barDuration * bars).coerceIn(5000L, 30000L)
         }
 
         val avgEnergy = (energyA + energyB) / 2f
         val energyMult = if (avgEnergy > 0.7f) 0.8f else if (avgEnergy < 0.3f) 1.3f else 1f
 
-        return (baseDuration * energyMult).toLong().coerceIn(2000L, 16000L)
+        return (baseDuration * energyMult).toLong().coerceIn(5000L, 30000L)
     }
 
     val TRANSITION_NAMES = arrayOf(

@@ -1,5 +1,6 @@
 #include <jni.h>
 #include <memory>
+#include <mutex>
 
 #include <juce_core/juce_core.h>
 
@@ -25,22 +26,43 @@ namespace juce
 
 // Single process-wide engine instance for the Stage 1 test tone.
 static std::unique_ptr<AutoMixAudioEngine> gEngine;
+static std::mutex gEngineMutex;
+
+template <typename Fn, typename R>
+static R withEngine (R fallback, Fn&& fn)
+{
+    std::lock_guard<std::mutex> lock (gEngineMutex);
+    if (gEngine == nullptr)
+        return fallback;
+    return fn (*gEngine);
+}
+
+template <typename Fn>
+static void withEngineVoid (Fn&& fn)
+{
+    std::lock_guard<std::mutex> lock (gEngineMutex);
+    if (gEngine != nullptr)
+        fn (*gEngine);
+}
 
 // Shared helper: jstring -> juce::String, invoke a deck loader. Templates can't
 // have C language linkage, so this must live OUTSIDE the extern "C" block below.
 template <typename Fn>
 static jboolean loadInto (JNIEnv* env, jstring path, Fn&& fn)
 {
-    if (gEngine == nullptr || path == nullptr)
+    if (path == nullptr)
         return JNI_FALSE;
 
     const char* utf = env->GetStringUTFChars (path, nullptr);
     if (utf == nullptr)
         return JNI_FALSE;
 
-    const bool ok = fn (juce::String::fromUTF8 (utf));
+    const auto pathString = juce::String::fromUTF8 (utf);
     env->ReleaseStringUTFChars (path, utf);
-    return ok ? JNI_TRUE : JNI_FALSE;
+
+    return withEngine (JNI_FALSE, [&] (AutoMixAudioEngine& engine) {
+        return fn (engine, pathString) ? JNI_TRUE : JNI_FALSE;
+    });
 }
 
 extern "C" {
@@ -49,6 +71,8 @@ JNIEXPORT jboolean JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeInit(
         JNIEnv* env, jobject /*thiz*/, jobject context)
 {
+    std::lock_guard<std::mutex> lock (gEngineMutex);
+
     // Bring JUCE up exactly like its own Java entry point: cache JNI class refs
     // first, then hand JUCE the env + Context. Process-global, so do it once.
     static bool juceInitialised = false;
@@ -69,79 +93,78 @@ JNIEXPORT jboolean JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeLoadTrack(
         JNIEnv* env, jobject /*thiz*/, jstring path)
 {
-    return loadInto (env, path, [] (const juce::String& p) { return gEngine->loadTrack (p); });
+    return loadInto (env, path, [] (AutoMixAudioEngine& engine, const juce::String& p) { return engine.loadTrack (p); });
 }
 
 JNIEXPORT jboolean JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeLoadTrackA(
         JNIEnv* env, jobject /*thiz*/, jstring path)
 {
-    return loadInto (env, path, [] (const juce::String& p) { return gEngine->loadTrackA (p); });
+    return loadInto (env, path, [] (AutoMixAudioEngine& engine, const juce::String& p) { return engine.loadTrackA (p); });
 }
 
 JNIEXPORT jboolean JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeLoadTrackB(
         JNIEnv* env, jobject /*thiz*/, jstring path)
 {
-    return loadInto (env, path, [] (const juce::String& p) { return gEngine->loadTrackB (p); });
+    return loadInto (env, path, [] (AutoMixAudioEngine& engine, const juce::String& p) { return engine.loadTrackB (p); });
 }
 
 JNIEXPORT jboolean JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeLoadTrackAFd(
         JNIEnv* /*env*/, jobject /*thiz*/, jint fd, jlong offset, jlong length)
 {
-    if (gEngine == nullptr || fd < 0)
+    if (fd < 0)
         return JNI_FALSE;
-    return gEngine->loadTrackAFd ((int) fd, (long long) offset, (long long) length) ? JNI_TRUE : JNI_FALSE;
+    return withEngine (JNI_FALSE, [&] (AutoMixAudioEngine& engine) {
+        return engine.loadTrackAFd ((int) fd, (long long) offset, (long long) length) ? JNI_TRUE : JNI_FALSE;
+    });
 }
 
 JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeStartCrossfade(
-        JNIEnv* /*env*/, jobject /*thiz*/, jdouble durationMs)
+        JNIEnv* /*env*/, jobject /*thiz*/, jdouble durationMs, jint transitionType)
 {
-    if (gEngine != nullptr)
-        gEngine->startCrossfade ((double) durationMs);
+    withEngineVoid ([&] (AutoMixAudioEngine& engine) {
+        engine.startCrossfade ((double) durationMs, (int) transitionType);
+    });
 }
 
 JNIEXPORT jboolean JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativePrepareStretchB(
         JNIEnv* /*env*/, jobject /*thiz*/, jdouble bpmA, jdouble bpmB)
 {
-    if (gEngine == nullptr)
-        return JNI_FALSE;
-    return gEngine->prepareStretchB ((double) bpmA, (double) bpmB) ? JNI_TRUE : JNI_FALSE;
+    return withEngine (JNI_FALSE, [&] (AutoMixAudioEngine& engine) {
+        return engine.prepareStretchB ((double) bpmA, (double) bpmB) ? JNI_TRUE : JNI_FALSE;
+    });
 }
 
 JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeSetEntryOffsetB(
         JNIEnv* /*env*/, jobject /*thiz*/, jdouble ms)
 {
-    if (gEngine != nullptr)
-        gEngine->setEntryOffsetB ((double) ms);
+    withEngineVoid ([&] (AutoMixAudioEngine& engine) { engine.setEntryOffsetB ((double) ms); });
 }
 
 JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeSetEntryOffsetA(
         JNIEnv* /*env*/, jobject /*thiz*/, jdouble ms)
 {
-    if (gEngine != nullptr)
-        gEngine->setEntryOffsetA ((double) ms);
+    withEngineVoid ([&] (AutoMixAudioEngine& engine) { engine.setEntryOffsetA ((double) ms); });
 }
 
 JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeClearDeckA(
         JNIEnv* /*env*/, jobject /*thiz*/)
 {
-    if (gEngine != nullptr)
-        gEngine->clearDeckA();
+    withEngineVoid ([] (AutoMixAudioEngine& engine) { engine.clearDeckA(); });
 }
 
 JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeSetBassSwap(
         JNIEnv* /*env*/, jobject /*thiz*/, jboolean enabled)
 {
-    if (gEngine != nullptr)
-        gEngine->setBassSwap (enabled == JNI_TRUE);
+    withEngineVoid ([&] (AutoMixAudioEngine& engine) { engine.setBassSwap (enabled == JNI_TRUE); });
 }
 
 // ── Graphic EQ ──────────────────────────────────────────────────────────────
@@ -150,23 +173,21 @@ JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeSetEqEnabled(
         JNIEnv* /*env*/, jobject /*thiz*/, jboolean enabled)
 {
-    if (gEngine != nullptr)
-        gEngine->setEqEnabled (enabled == JNI_TRUE);
+    withEngineVoid ([&] (AutoMixAudioEngine& engine) { engine.setEqEnabled (enabled == JNI_TRUE); });
 }
 
 JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeSetEqBandGain(
         JNIEnv* /*env*/, jobject /*thiz*/, jint band, jfloat gainDb)
 {
-    if (gEngine != nullptr)
-        gEngine->setEqBandGain ((int) band, (float) gainDb);
+    withEngineVoid ([&] (AutoMixAudioEngine& engine) { engine.setEqBandGain ((int) band, (float) gainDb); });
 }
 
 JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeSetEqBands(
         JNIEnv* env, jobject /*thiz*/, jfloatArray gains)
 {
-    if (gEngine == nullptr || gains == nullptr)
+    if (gains == nullptr)
         return;
     const jsize n = env->GetArrayLength (gains);
     if (n <= 0)
@@ -174,7 +195,7 @@ Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeSetEqBands(
     jfloat* vals = env->GetFloatArrayElements (gains, nullptr);
     if (vals == nullptr)
         return;
-    gEngine->setEqBands ((const float*) vals, (int) n);
+    withEngineVoid ([&] (AutoMixAudioEngine& engine) { engine.setEqBands ((const float*) vals, (int) n); });
     env->ReleaseFloatArrayElements (gains, vals, JNI_ABORT); // read-only, don't copy back
 }
 
@@ -184,42 +205,42 @@ JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeFxSetMasterEnabled(
         JNIEnv* /*env*/, jobject /*thiz*/, jboolean on)
 {
-    if (gEngine != nullptr) gEngine->setFxMasterEnabled (on == JNI_TRUE);
+    withEngineVoid ([&] (AutoMixAudioEngine& engine) { engine.setFxMasterEnabled (on == JNI_TRUE); });
 }
 
 JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeFxSetPreampGainDb(
         JNIEnv* /*env*/, jobject /*thiz*/, jfloat db)
 {
-    if (gEngine != nullptr) gEngine->setPreampGainDb ((float) db);
+    withEngineVoid ([&] (AutoMixAudioEngine& engine) { engine.setPreampGainDb ((float) db); });
 }
 
 JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeFxSetBassBoost(
         JNIEnv* /*env*/, jobject /*thiz*/, jboolean on, jfloat freqHz, jfloat gainDb)
 {
-    if (gEngine != nullptr) gEngine->setBassBoost (on == JNI_TRUE, (float) freqHz, (float) gainDb);
+    withEngineVoid ([&] (AutoMixAudioEngine& engine) { engine.setBassBoost (on == JNI_TRUE, (float) freqHz, (float) gainDb); });
 }
 
 JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeFxSetLoudnessEnabled(
         JNIEnv* /*env*/, jobject /*thiz*/, jboolean on)
 {
-    if (gEngine != nullptr) gEngine->setLoudnessEnabled (on == JNI_TRUE);
+    withEngineVoid ([&] (AutoMixAudioEngine& engine) { engine.setLoudnessEnabled (on == JNI_TRUE); });
 }
 
 JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeFxSetCurrentVolume(
         JNIEnv* /*env*/, jobject /*thiz*/, jfloat v01)
 {
-    if (gEngine != nullptr) gEngine->setCurrentVolume ((float) v01);
+    withEngineVoid ([&] (AutoMixAudioEngine& engine) { engine.setCurrentVolume ((float) v01); });
 }
 
 JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeFxSetStereoWidth(
         JNIEnv* /*env*/, jobject /*thiz*/, jfloat width)
 {
-    if (gEngine != nullptr) gEngine->setStereoWidth ((float) width);
+    withEngineVoid ([&] (AutoMixAudioEngine& engine) { engine.setStereoWidth ((float) width); });
 }
 
 JNIEXPORT void JNICALL
@@ -227,16 +248,17 @@ Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeFxSetCompress
         JNIEnv* /*env*/, jobject /*thiz*/, jboolean on,
         jfloat threshDb, jfloat ratio, jfloat attackMs, jfloat releaseMs)
 {
-    if (gEngine != nullptr)
-        gEngine->setCompressorFx (on == JNI_TRUE, (float) threshDb, (float) ratio,
-                                  (float) attackMs, (float) releaseMs);
+    withEngineVoid ([&] (AutoMixAudioEngine& engine) {
+        engine.setCompressorFx (on == JNI_TRUE, (float) threshDb, (float) ratio,
+                                (float) attackMs, (float) releaseMs);
+    });
 }
 
 JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeFxSetLimiter(
         JNIEnv* /*env*/, jobject /*thiz*/, jboolean on, jfloat threshDb, jfloat releaseMs)
 {
-    if (gEngine != nullptr) gEngine->setLimiterFx (on == JNI_TRUE, (float) threshDb, (float) releaseMs);
+    withEngineVoid ([&] (AutoMixAudioEngine& engine) { engine.setLimiterFx (on == JNI_TRUE, (float) threshDb, (float) releaseMs); });
 }
 
 // ── Stage 8: full LOCAL player (ping-pong decks) ───────────────────────────
@@ -245,152 +267,148 @@ JNIEXPORT jboolean JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeLoadIncoming(
         JNIEnv* env, jobject /*thiz*/, jstring path)
 {
-    return loadInto (env, path, [] (const juce::String& p) { return gEngine->loadIncoming (p); });
+    return loadInto (env, path, [] (AutoMixAudioEngine& engine, const juce::String& p) { return engine.loadIncoming (p); });
 }
 
 JNIEXPORT jboolean JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeLoadIncomingFd(
         JNIEnv* /*env*/, jobject /*thiz*/, jint fd, jlong offset, jlong length)
 {
-    if (gEngine == nullptr || fd < 0)
+    if (fd < 0)
         return JNI_FALSE;
-    return gEngine->loadIncomingFd ((int) fd, (long long) offset, (long long) length) ? JNI_TRUE : JNI_FALSE;
+    return withEngine (JNI_FALSE, [&] (AutoMixAudioEngine& engine) {
+        return engine.loadIncomingFd ((int) fd, (long long) offset, (long long) length) ? JNI_TRUE : JNI_FALSE;
+    });
 }
 
 JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeStartTransition(
-        JNIEnv* /*env*/, jobject /*thiz*/, jdouble durationMs, jdouble entryMs)
+        JNIEnv* /*env*/, jobject /*thiz*/, jdouble durationMs, jdouble entryMs, jint transitionType)
 {
-    if (gEngine != nullptr)
-        gEngine->startTransition ((double) durationMs, (double) entryMs);
+    withEngineVoid ([&] (AutoMixAudioEngine& engine) {
+        engine.startTransition ((double) durationMs, (double) entryMs, (int) transitionType);
+    });
 }
 
 JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativePlayCurrent(
         JNIEnv* /*env*/, jobject /*thiz*/)
 {
-    if (gEngine != nullptr)
-        gEngine->playCurrent();
+    withEngineVoid ([] (AutoMixAudioEngine& engine) { engine.playCurrent(); });
 }
 
 JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeSeekCurrent(
         JNIEnv* /*env*/, jobject /*thiz*/, jdouble ms)
 {
-    if (gEngine != nullptr)
-        gEngine->seekCurrent ((double) ms);
+    withEngineVoid ([&] (AutoMixAudioEngine& engine) { engine.seekCurrent ((double) ms); });
 }
 
 JNIEXPORT jdouble JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativePositionMsCurrent(
         JNIEnv* /*env*/, jobject /*thiz*/)
 {
-    return gEngine != nullptr ? (jdouble) gEngine->positionMsCurrent() : 0.0;
+    return withEngine ((jdouble) 0.0, [] (AutoMixAudioEngine& engine) { return (jdouble) engine.positionMsCurrent(); });
 }
 
 JNIEXPORT jdouble JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeLengthMsCurrent(
         JNIEnv* /*env*/, jobject /*thiz*/)
 {
-    return gEngine != nullptr ? (jdouble) gEngine->lengthMsCurrent() : 0.0;
+    return withEngine ((jdouble) 0.0, [] (AutoMixAudioEngine& engine) { return (jdouble) engine.lengthMsCurrent(); });
 }
 
 JNIEXPORT jboolean JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeIsCrossfadeActive(
         JNIEnv* /*env*/, jobject /*thiz*/)
 {
-    return (gEngine != nullptr && gEngine->isCrossfadeActive()) ? JNI_TRUE : JNI_FALSE;
+    return withEngine (JNI_FALSE, [] (AutoMixAudioEngine& engine) {
+        return engine.isCrossfadeActive() ? JNI_TRUE : JNI_FALSE;
+    });
 }
 
 JNIEXPORT jint JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeCurrentDeckIndex(
         JNIEnv* /*env*/, jobject /*thiz*/)
 {
-    return gEngine != nullptr ? (jint) gEngine->currentDeckIndex() : 0;
+    return withEngine ((jint) 0, [] (AutoMixAudioEngine& engine) { return (jint) engine.currentDeckIndex(); });
 }
 
 JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeClearDeck(
         JNIEnv* /*env*/, jobject /*thiz*/, jint index)
 {
-    if (gEngine != nullptr)
-        gEngine->clearDeck ((int) index);
+    withEngineVoid ([&] (AutoMixAudioEngine& engine) { engine.clearDeck ((int) index); });
 }
 
 JNIEXPORT jdouble JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativePositionMsA(
         JNIEnv* /*env*/, jobject /*thiz*/)
 {
-    return gEngine != nullptr ? (jdouble) gEngine->positionMsA() : 0.0;
+    return withEngine ((jdouble) 0.0, [] (AutoMixAudioEngine& engine) { return (jdouble) engine.positionMsA(); });
 }
 
 JNIEXPORT jdouble JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeLengthMsA(
         JNIEnv* /*env*/, jobject /*thiz*/)
 {
-    return gEngine != nullptr ? (jdouble) gEngine->lengthMsA() : 0.0;
+    return withEngine ((jdouble) 0.0, [] (AutoMixAudioEngine& engine) { return (jdouble) engine.lengthMsA(); });
 }
 
 JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativePlay(
         JNIEnv* /*env*/, jobject /*thiz*/)
 {
-    if (gEngine != nullptr)
-        gEngine->play();
+    withEngineVoid ([] (AutoMixAudioEngine& engine) { engine.play(); });
 }
 
 JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativePause(
         JNIEnv* /*env*/, jobject /*thiz*/)
 {
-    if (gEngine != nullptr)
-        gEngine->pause();
+    withEngineVoid ([] (AutoMixAudioEngine& engine) { engine.pause(); });
 }
 
 JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeSilenceOutput(
         JNIEnv* /*env*/, jobject /*thiz*/)
 {
-    if (gEngine != nullptr)
-        gEngine->silenceOutput();
+    withEngineVoid ([] (AutoMixAudioEngine& engine) { engine.silenceOutput(); });
 }
 
 JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeStop(
         JNIEnv* /*env*/, jobject /*thiz*/)
 {
-    if (gEngine != nullptr)
-        gEngine->stop();
+    withEngineVoid ([] (AutoMixAudioEngine& engine) { engine.stop(); });
 }
 
 JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeStartTone(
         JNIEnv* /*env*/, jobject /*thiz*/)
 {
-    if (gEngine != nullptr)
-        gEngine->startTone();
+    withEngineVoid ([] (AutoMixAudioEngine& engine) { engine.startTone(); });
 }
 
 JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeStopTone(
         JNIEnv* /*env*/, jobject /*thiz*/)
 {
-    if (gEngine != nullptr)
-        gEngine->stopTone();
+    withEngineVoid ([] (AutoMixAudioEngine& engine) { engine.stopTone(); });
 }
 
 JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeSetOutputRouteBluetooth(
         JNIEnv* /*env*/, jobject /*thiz*/, jboolean isBluetooth)
 {
-    if (gEngine != nullptr)
-        gEngine->onOutputRouteChanged (isBluetooth == JNI_TRUE);
+    withEngineVoid ([&] (AutoMixAudioEngine& engine) { engine.onOutputRouteChanged (isBluetooth == JNI_TRUE); });
 }
 
 JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeRelease(
         JNIEnv* /*env*/, jobject /*thiz*/)
 {
+    std::lock_guard<std::mutex> lock (gEngineMutex);
     if (gEngine != nullptr)
     {
         gEngine->release();

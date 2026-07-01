@@ -147,11 +147,11 @@ object AutoMixNativeEngine {
         }
     }
 
-    /** Start an equal-power crossfade A -> B over durationMs. */
+    /** Start a styled crossfade A -> B over durationMs. */
     @Synchronized
-    fun startCrossfade(durationMs: Double) {
+    fun startCrossfade(durationMs: Double, transitionType: Int = 0) {
         if (!isLoaded || !initialised) return
-        runCatching { nativeStartCrossfade(durationMs) }
+        runCatching { nativeStartCrossfade(durationMs, transitionType) }
             .onFailure { Log.w(TAG, "nativeStartCrossfade failed", it) }
     }
 
@@ -284,11 +284,11 @@ object AutoMixNativeEngine {
         }
     }
 
-    /** Crossfade current -> incoming over durationMs; incoming starts at entryMs. */
+    /** Styled crossfade current -> incoming over durationMs; incoming starts at entryMs. */
     @Synchronized
-    fun startTransition(durationMs: Double, entryMs: Double) {
+    fun startTransition(durationMs: Double, entryMs: Double, transitionType: Int = 0) {
         if (!isLoaded || !initialised) return
-        runCatching { nativeStartTransition(durationMs, entryMs) }
+        runCatching { nativeStartTransition(durationMs, entryMs, transitionType) }
             .onFailure { Log.w(TAG, "nativeStartTransition failed", it) }
     }
 
@@ -415,7 +415,7 @@ object AutoMixNativeEngine {
     private external fun nativeLoadTrackA(path: String): Boolean
     private external fun nativeLoadTrackAFd(fd: Int, offset: Long, length: Long): Boolean
     private external fun nativeLoadTrackB(path: String): Boolean
-    private external fun nativeStartCrossfade(durationMs: Double)
+    private external fun nativeStartCrossfade(durationMs: Double, transitionType: Int)
     private external fun nativePrepareStretchB(bpmA: Double, bpmB: Double): Boolean
     private external fun nativeSetEntryOffsetB(ms: Double)
     private external fun nativeSetEntryOffsetA(ms: Double)
@@ -435,7 +435,7 @@ object AutoMixNativeEngine {
     private external fun nativeSetOutputRouteBluetooth(isBluetooth: Boolean)
     private external fun nativeLoadIncoming(path: String): Boolean
     private external fun nativeLoadIncomingFd(fd: Int, offset: Long, length: Long): Boolean
-    private external fun nativeStartTransition(durationMs: Double, entryMs: Double)
+    private external fun nativeStartTransition(durationMs: Double, entryMs: Double, transitionType: Int)
     private external fun nativePlayCurrent()
     private external fun nativeSeekCurrent(ms: Double)
     private external fun nativePositionMsCurrent(): Double

@@ -598,8 +598,12 @@ class AudioService : MediaSessionService() {
 
     /** Safe main-thread player access wrapper for UI-driven commands */
     private inline fun withPlayerOnMain(crossinline block: (ExoPlayer) -> Unit) {
-        kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.Main) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
             block(player)
+        } else {
+            kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.Main) {
+                block(player)
+            }
         }
     }
 

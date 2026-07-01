@@ -226,14 +226,59 @@ private fun StereoSection(lc: LiquidColors, master: Boolean) {
 private fun CompressorSection(lc: LiquidColors, master: Boolean) {
     val on by AudioFxController.compEnabled.collectAsState()
     val preset by AudioFxController.compPreset.collectAsState()
+    val threshold by AudioFxController.compThreshold.collectAsState()
+    val ratio by AudioFxController.compRatio.collectAsState()
+    val attack by AudioFxController.compAttack.collectAsState()
+    val release by AudioFxController.compRelease.collectAsState()
     val active = master && on
     SectionWithToggle("Compressor", lc, on, { AudioFxController.setCompEnabled(it) }, master) {
-        Row(
-            modifier = Modifier.fillMaxWidth().alpha(if (active) 1f else 0.4f),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            AudioFxController.COMP_PRESETS.forEachIndexed { i, p ->
-                Chip(p.name, preset == i, lc, active) { AudioFxController.setCompPreset(i) }
+        Box(Modifier.alpha(if (active) 1f else 0.4f)) {
+            Column {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    AudioFxController.COMP_PRESETS.forEachIndexed { i, p ->
+                        Chip(p.name, preset == i, lc, active) { AudioFxController.setCompPreset(i) }
+                    }
+                }
+                if (preset == AudioFxController.COMP_PRESET_CUSTOM) {
+                    Spacer(Modifier.height(8.dp))
+                    Text("Custom", color = lc.accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                }
+                Spacer(Modifier.height(10.dp))
+                LabelValue("Threshold", "${threshold.roundToInt()} dB", lc)
+                FxSlider(
+                    threshold,
+                    AudioFxController.COMP_THRESH_MIN_DB..AudioFxController.COMP_THRESH_MAX_DB,
+                    active,
+                    { AudioFxController.setCompThreshold(it) },
+                    lc
+                )
+                LabelValue("Ratio", "${"%.1f".format(ratio)}:1", lc)
+                FxSlider(
+                    ratio,
+                    AudioFxController.COMP_RATIO_MIN..AudioFxController.COMP_RATIO_MAX,
+                    active,
+                    { AudioFxController.setCompRatio(it) },
+                    lc
+                )
+                LabelValue("Attack", "${attack.roundToInt()} ms", lc)
+                FxSlider(
+                    attack,
+                    AudioFxController.COMP_ATTACK_MIN_MS..AudioFxController.COMP_ATTACK_MAX_MS,
+                    active,
+                    { AudioFxController.setCompAttack(it) },
+                    lc
+                )
+                LabelValue("Release", "${release.roundToInt()} ms", lc)
+                FxSlider(
+                    release,
+                    AudioFxController.COMP_RELEASE_MIN_MS..AudioFxController.COMP_RELEASE_MAX_MS,
+                    active,
+                    { AudioFxController.setCompRelease(it) },
+                    lc
+                )
             }
         }
     }
@@ -243,12 +288,28 @@ private fun CompressorSection(lc: LiquidColors, master: Boolean) {
 private fun LimiterSection(lc: LiquidColors, master: Boolean) {
     val on by AudioFxController.limEnabled.collectAsState()
     val thr by AudioFxController.limThreshold.collectAsState()
+    val release by AudioFxController.limRelease.collectAsState()
     val active = master && on
     SectionWithToggle("Limiter", lc, on, { AudioFxController.setLimEnabled(it) }, master) {
         Box(Modifier.alpha(if (active) 1f else 0.4f)) {
             Column {
                 LabelValue("Порог", "${"%.1f".format(thr)} dB", lc)
-                FxSlider(thr, -6f..0f, active, { AudioFxController.setLimThreshold(it) }, lc)
+                FxSlider(
+                    thr,
+                    AudioFxController.LIM_THRESH_MIN_DB..AudioFxController.LIM_THRESH_MAX_DB,
+                    active,
+                    { AudioFxController.setLimThreshold(it) },
+                    lc
+                )
+                Spacer(Modifier.height(8.dp))
+                LabelValue("Release", "${release.roundToInt()} ms", lc)
+                FxSlider(
+                    release,
+                    AudioFxController.LIM_RELEASE_MIN_MS..AudioFxController.LIM_RELEASE_MAX_MS,
+                    active,
+                    { AudioFxController.setLimRelease(it) },
+                    lc
+                )
                 Text("Защита от клиппинга на громком звуке. Рекомендуется ВКЛ.",
                     color = lc.textSecondary, fontSize = 12.sp)
             }

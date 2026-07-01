@@ -147,10 +147,10 @@ class ServiceBackedAutoMixEngine(
     /**
      * Dual-player кроссфейд с параметрами от ML модели:
      *
-     * - crossfadeDurationMs: модель решает сколько длится фейд (3-15 сек)
+     * - crossfadeDurationMs: модель решает сколько длится фейд (5-30 сек)
      * - entryOffsetMs: модель решает откуда стартовать трек B
      *   (например, пропустить тихое интро)
-     * - transitionType: тип кривой кроссфейда (пока smooth_fade)
+     * - transitionType: тип кривой кроссфейда
      */
     private fun startDualPlayerTransition(transition: Transition) {
         val primary = primaryPlayerProvider() ?: return

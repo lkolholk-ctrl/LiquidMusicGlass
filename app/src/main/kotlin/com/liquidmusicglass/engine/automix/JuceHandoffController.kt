@@ -54,6 +54,7 @@ class JuceHandoffController(private val appContext: Context) {
         transitionStartMs: Long,
         crossfadeMs: Long,
         entryOffsetMs: Long,
+        transitionType: Int = 0,
         bpmA: Float?,
         bpmB: Float?,
         status: (String) -> Unit
@@ -102,7 +103,7 @@ class JuceHandoffController(private val appContext: Context) {
                     status("JUCE blend ${crossfadeMs}ms (Media3 muted)…")
                     withContext(Dispatchers.IO) {
                         engine.setEntryOffsetA(cuePos.toDouble()) // дек A продолжает с cue
-                        engine.startCrossfade(crossfadeMs.toDouble())
+                        engine.startCrossfade(crossfadeMs.toDouble(), transitionType)
                     }
 
                     // 4) Ждём завершения свода, затем возвращаем управление Media3:

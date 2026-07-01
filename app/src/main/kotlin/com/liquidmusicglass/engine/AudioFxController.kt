@@ -60,13 +60,25 @@ object AudioFxController {
         CompPreset("Medium", -18f, 3f, 20f, 150f),
         CompPreset("Hard",   -24f, 4f, 5f,  100f),
     )
+    const val COMP_PRESET_CUSTOM = -1
 
     // ── Дефолты ─────────────────────────────────────────────────────────────
     const val PREAMP_MIN_DB = -60f
     const val PREAMP_MAX_DB = 0f
     const val BASS_FREQ_MIN = 40f
     const val BASS_FREQ_MAX = 200f
-    private const val LIM_RELEASE_MS = 50f
+    const val COMP_THRESH_MIN_DB = -60f
+    const val COMP_THRESH_MAX_DB = 0f
+    const val COMP_RATIO_MIN = 1f
+    const val COMP_RATIO_MAX = 20f
+    const val COMP_ATTACK_MIN_MS = 1f
+    const val COMP_ATTACK_MAX_MS = 200f
+    const val COMP_RELEASE_MIN_MS = 10f
+    const val COMP_RELEASE_MAX_MS = 1000f
+    const val LIM_THRESH_MIN_DB = -6f
+    const val LIM_THRESH_MAX_DB = 0f
+    const val LIM_RELEASE_MIN_MS = 1f
+    const val LIM_RELEASE_MAX_MS = 1000f
 
     // ── Состояние (StateFlow для UI) ────────────────────────────────────────
     private val _masterEnabled = MutableStateFlow(true)
@@ -99,11 +111,21 @@ object AudioFxController {
     val compEnabled: StateFlow<Boolean> = _compEnabled
     private val _compPreset = MutableStateFlow(1)           // Medium
     val compPreset: StateFlow<Int> = _compPreset
+    private val _compThreshold = MutableStateFlow(COMP_PRESETS[1].threshDb)
+    val compThreshold: StateFlow<Float> = _compThreshold
+    private val _compRatio = MutableStateFlow(COMP_PRESETS[1].ratio)
+    val compRatio: StateFlow<Float> = _compRatio
+    private val _compAttack = MutableStateFlow(COMP_PRESETS[1].attackMs)
+    val compAttack: StateFlow<Float> = _compAttack
+    private val _compRelease = MutableStateFlow(COMP_PRESETS[1].releaseMs)
+    val compRelease: StateFlow<Float> = _compRelease
 
     private val _limEnabled = MutableStateFlow(true)        // вкл по умолчанию (анти-клиппинг)
     val limEnabled: StateFlow<Boolean> = _limEnabled
     private val _limThreshold = MutableStateFlow(-1f)       // -6..0 dB
     val limThreshold: StateFlow<Float> = _limThreshold
+    private val _limRelease = MutableStateFlow(50f)
+    val limRelease: StateFlow<Float> = _limRelease
 
     // ── DataStore ───────────────────────────────────────────────────────────
     private val K_MASTER = booleanPreferencesKey("master")
@@ -118,8 +140,13 @@ object AudioFxController {
     private val K_WIDTH = floatPreferencesKey("width")
     private val K_COMP_ON = booleanPreferencesKey("comp_on")
     private val K_COMP_PRESET = intPreferencesKey("comp_preset")
+    private val K_COMP_THRESH = floatPreferencesKey("comp_thresh")
+    private val K_COMP_RATIO = floatPreferencesKey("comp_ratio")
+    private val K_COMP_ATTACK = floatPreferencesKey("comp_attack")
+    private val K_COMP_RELEASE = floatPreferencesKey("comp_release")
     private val K_LIM_ON = booleanPreferencesKey("lim_on")
     private val K_LIM_THRESH = floatPreferencesKey("lim_thresh")
+    private val K_LIM_RELEASE = floatPreferencesKey("lim_release")
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var dataStore: DataStore<Preferences>? = null
@@ -156,9 +183,16 @@ object AudioFxController {
         _loudnessEnabled.value = p[K_LOUD_ON] ?: false
         _stereoWidth.value = (p[K_WIDTH] ?: 1f).coerceIn(0f, 2f)
         _compEnabled.value = p[K_COMP_ON] ?: false
-        _compPreset.value = (p[K_COMP_PRESET] ?: 1).coerceIn(0, COMP_PRESETS.lastIndex)
+        val presetIndex = (p[K_COMP_PRESET] ?: 1).let { if (it == COMP_PRESET_CUSTOM) it else it.coerceIn(0, COMP_PRESETS.lastIndex) }
+        val preset = COMP_PRESETS.getOrNull(presetIndex) ?: COMP_PRESETS[1]
+        _compPreset.value = presetIndex
+        _compThreshold.value = (p[K_COMP_THRESH] ?: preset.threshDb).coerceIn(COMP_THRESH_MIN_DB, COMP_THRESH_MAX_DB)
+        _compRatio.value = (p[K_COMP_RATIO] ?: preset.ratio).coerceIn(COMP_RATIO_MIN, COMP_RATIO_MAX)
+        _compAttack.value = (p[K_COMP_ATTACK] ?: preset.attackMs).coerceIn(COMP_ATTACK_MIN_MS, COMP_ATTACK_MAX_MS)
+        _compRelease.value = (p[K_COMP_RELEASE] ?: preset.releaseMs).coerceIn(COMP_RELEASE_MIN_MS, COMP_RELEASE_MAX_MS)
         _limEnabled.value = p[K_LIM_ON] ?: true
-        _limThreshold.value = (p[K_LIM_THRESH] ?: -1f).coerceIn(-6f, 0f)
+        _limThreshold.value = (p[K_LIM_THRESH] ?: -1f).coerceIn(LIM_THRESH_MIN_DB, LIM_THRESH_MAX_DB)
+        _limRelease.value = (p[K_LIM_RELEASE] ?: 50f).coerceIn(LIM_RELEASE_MIN_MS, LIM_RELEASE_MAX_MS)
     }
 
     private fun parseGains(csv: String?): List<Float> {
@@ -182,9 +216,8 @@ object AudioFxController {
         e.fxSetBassBoost(_bassEnabled.value, _bassFreq.value, _bassGain.value)
         e.fxSetLoudnessEnabled(_loudnessEnabled.value)
         e.fxSetStereoWidth(_stereoWidth.value)
-        val cp = COMP_PRESETS[_compPreset.value]
-        e.fxSetCompressor(_compEnabled.value, cp.threshDb, cp.ratio, cp.attackMs, cp.releaseMs)
-        e.fxSetLimiter(_limEnabled.value, _limThreshold.value, LIM_RELEASE_MS)
+        e.fxSetCompressor(_compEnabled.value, _compThreshold.value, _compRatio.value, _compAttack.value, _compRelease.value)
+        e.fxSetLimiter(_limEnabled.value, _limThreshold.value, _limRelease.value)
     }
 
     private fun preampDb(): Float = PREAMP_MIN_DB + (PREAMP_MAX_DB - PREAMP_MIN_DB) * _preamp01.value
@@ -276,8 +309,7 @@ object AudioFxController {
 
     fun setCompEnabled(on: Boolean) {
         _compEnabled.value = on
-        val cp = COMP_PRESETS[_compPreset.value]
-        AutoMixNativeEngine.fxSetCompressor(on, cp.threshDb, cp.ratio, cp.attackMs, cp.releaseMs)
+        applyCompressor()
         persist { it[K_COMP_ON] = on }
     }
 
@@ -285,21 +317,80 @@ object AudioFxController {
         val i = index.coerceIn(0, COMP_PRESETS.lastIndex)
         _compPreset.value = i
         val cp = COMP_PRESETS[i]
-        AutoMixNativeEngine.fxSetCompressor(_compEnabled.value, cp.threshDb, cp.ratio, cp.attackMs, cp.releaseMs)
-        persist { it[K_COMP_PRESET] = i }
+        _compThreshold.value = cp.threshDb
+        _compRatio.value = cp.ratio
+        _compAttack.value = cp.attackMs
+        _compRelease.value = cp.releaseMs
+        applyCompressor()
+        persist {
+            it[K_COMP_PRESET] = i
+            it[K_COMP_THRESH] = cp.threshDb
+            it[K_COMP_RATIO] = cp.ratio
+            it[K_COMP_ATTACK] = cp.attackMs
+            it[K_COMP_RELEASE] = cp.releaseMs
+        }
+    }
+
+    fun setCompThreshold(db: Float) {
+        _compThreshold.value = db.coerceIn(COMP_THRESH_MIN_DB, COMP_THRESH_MAX_DB)
+        markCustomCompressor()
+        applyCompressor()
+        persist { it[K_COMP_THRESH] = _compThreshold.value; it[K_COMP_PRESET] = COMP_PRESET_CUSTOM }
+    }
+
+    fun setCompRatio(ratio: Float) {
+        _compRatio.value = ratio.coerceIn(COMP_RATIO_MIN, COMP_RATIO_MAX)
+        markCustomCompressor()
+        applyCompressor()
+        persist { it[K_COMP_RATIO] = _compRatio.value; it[K_COMP_PRESET] = COMP_PRESET_CUSTOM }
+    }
+
+    fun setCompAttack(ms: Float) {
+        _compAttack.value = ms.coerceIn(COMP_ATTACK_MIN_MS, COMP_ATTACK_MAX_MS)
+        markCustomCompressor()
+        applyCompressor()
+        persist { it[K_COMP_ATTACK] = _compAttack.value; it[K_COMP_PRESET] = COMP_PRESET_CUSTOM }
+    }
+
+    fun setCompRelease(ms: Float) {
+        _compRelease.value = ms.coerceIn(COMP_RELEASE_MIN_MS, COMP_RELEASE_MAX_MS)
+        markCustomCompressor()
+        applyCompressor()
+        persist { it[K_COMP_RELEASE] = _compRelease.value; it[K_COMP_PRESET] = COMP_PRESET_CUSTOM }
+    }
+
+    private fun markCustomCompressor() {
+        _compPreset.value = COMP_PRESET_CUSTOM
+    }
+
+    private fun applyCompressor() {
+        AutoMixNativeEngine.fxSetCompressor(
+            _compEnabled.value,
+            _compThreshold.value,
+            _compRatio.value,
+            _compAttack.value,
+            _compRelease.value
+        )
     }
 
     fun setLimEnabled(on: Boolean) {
         _limEnabled.value = on
-        AutoMixNativeEngine.fxSetLimiter(on, _limThreshold.value, LIM_RELEASE_MS)
+        AutoMixNativeEngine.fxSetLimiter(on, _limThreshold.value, _limRelease.value)
         persist { it[K_LIM_ON] = on }
     }
 
     fun setLimThreshold(db: Float) {
-        val v = db.coerceIn(-6f, 0f)
+        val v = db.coerceIn(LIM_THRESH_MIN_DB, LIM_THRESH_MAX_DB)
         _limThreshold.value = v
-        AutoMixNativeEngine.fxSetLimiter(_limEnabled.value, v, LIM_RELEASE_MS)
+        AutoMixNativeEngine.fxSetLimiter(_limEnabled.value, v, _limRelease.value)
         persist { it[K_LIM_THRESH] = v }
+    }
+
+    fun setLimRelease(ms: Float) {
+        val v = ms.coerceIn(LIM_RELEASE_MIN_MS, LIM_RELEASE_MAX_MS)
+        _limRelease.value = v
+        AutoMixNativeEngine.fxSetLimiter(_limEnabled.value, _limThreshold.value, v)
+        persist { it[K_LIM_RELEASE] = v }
     }
 
     /** Полный сброс к дефолтам (Flat EQ + выкл эффекты, лимитер вкл). */
@@ -311,7 +402,7 @@ object AudioFxController {
         setLoudnessEnabled(false)
         setStereoWidth(1f)
         setCompEnabled(false); setCompPreset(1)
-        setLimEnabled(true); setLimThreshold(-1f)
+        setLimEnabled(true); setLimThreshold(-1f); setLimRelease(50f)
     }
 
     private fun matchEqPreset(gains: List<Float>): Int {
