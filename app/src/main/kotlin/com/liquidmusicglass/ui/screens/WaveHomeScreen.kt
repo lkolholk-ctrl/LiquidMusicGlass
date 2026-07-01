@@ -119,7 +119,13 @@ fun WaveHomeScreen(
     Box(modifier = Modifier.fillMaxSize()) {
 
         // ── Living aura background (own AGSL shader, reacts to the music) ──
-        AuraBackground(albumColors = albumColors, modifier = Modifier.fillMaxSize(), animate = animationsActive)
+        AuraBackground(
+            albumColors = albumColors,
+            modifier = Modifier.fillMaxSize(),
+            animate = animationsActive,
+            smokeSaturation = 1.22f,
+            smokeContrast = 1.16f
+        )
 
         LazyColumn(
             modifier = Modifier

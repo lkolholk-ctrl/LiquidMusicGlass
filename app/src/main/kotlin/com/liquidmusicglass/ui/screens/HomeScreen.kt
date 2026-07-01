@@ -550,7 +550,12 @@ fun HomeScreen(
 
     Box(modifier = Modifier.fillMaxSize().background(LiquidTheme.colors.settingsBackground)) {
         // Фон-аура (Liquid Aurora) — первым слоем, фиксирована; контент скроллится поверх.
-        AuraBackground(albumColors = auraColors, modifier = Modifier.fillMaxSize())
+        AuraBackground(
+            albumColors = auraColors,
+            modifier = Modifier.fillMaxSize(),
+            smokeSaturation = 1.22f,
+            smokeContrast = 1.16f
+        )
         Column(
             modifier = Modifier
                 .fillMaxSize()

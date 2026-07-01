@@ -53,6 +53,8 @@ uniform half3  uColorA;
 uniform half3  uColorB;
 uniform half3  uColorC;
 uniform float  uBass;   // сглаженная огибающая баса 0..1 (без вспышек)
+uniform float  uSmokeSaturation;
+uniform float  uSmokeContrast;
 
 float hash2(float2 p) {
     float px = fract(p.x * 0.3183099 + 0.1) * 17.0;
@@ -109,6 +111,13 @@ half4 main(float2 fragCoord) {
     col = mix(col, uColorA, smoothstep(0.40, 0.63, ff) * 0.92 * uIntensity);
     col = mix(col, uColorB, smoothstep(0.40, 0.63, w1) * 0.78 * uIntensity);
     col = mix(col, uColorC, clamp(smoothstep(0.42, 0.66, w2) * 0.70 * uIntensity, 0.0, 1.0));
+
+    // Усиление только цветного дыма: база остаётся как есть, меняется
+    // насыщенность/контраст вуалей относительно uColorBg.
+    half3 smoke = col - uColorBg;
+    half smokeLuma = dot(smoke, half3(0.2126, 0.7152, 0.0722));
+    smoke = mix(half3(smokeLuma), smoke, uSmokeSaturation) * uSmokeContrast;
+    col = clamp(uColorBg + smoke, 0.0, 1.0);
 
     // лёгкая вертикальная форма: чуть ярче к верху, мягче к фону у низа (читаемость)
     col *= mix(0.82, 1.05, 1.0 - smoothstep(0.1, 1.0, uv.y));
@@ -171,6 +180,8 @@ fun AuraBackground(
     modifier: Modifier = Modifier,
     intensity: Float = 0.78f,
     animate: Boolean = true,
+    smokeSaturation: Float = 1.0f,
+    smokeContrast: Float = 1.0f,
 ) {
     val tiramisu = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
 
@@ -207,11 +218,13 @@ fun AuraBackground(
                 AuraShaderBackground(
                     albumColors, intensity,
                     Modifier.graphicsLayer { alpha = fade },
-                    animate
+                    animate,
+                    smokeSaturation,
+                    smokeContrast
                 )
             }
         }
-        heavyArmed -> AuraGradientFallback(albumColors, modifier)
+        heavyArmed -> AuraGradientFallback(albumColors, modifier, smokeContrast)
         else -> AuraStaticBackground(albumColors, modifier)
     }
 }
@@ -230,7 +243,14 @@ private fun AuraStaticBackground(albumColors: AlbumColors, modifier: Modifier) {
 
 @RequiresApi(Build.VERSION_CODES.TIRAMISU)
 @Composable
-private fun AuraShaderBackground(albumColors: AlbumColors, intensity: Float, modifier: Modifier, animate: Boolean = true) {
+private fun AuraShaderBackground(
+    albumColors: AlbumColors,
+    intensity: Float,
+    modifier: Modifier,
+    animate: Boolean = true,
+    smokeSaturation: Float = 1.0f,
+    smokeContrast: Float = 1.0f,
+) {
     val shader = remember { RuntimeShader(AURA_AGSL) }
     val brush = remember { ShaderBrush(shader) }
 
@@ -288,6 +308,8 @@ private fun AuraShaderBackground(albumColors: AlbumColors, intensity: Float, mod
                 shader.setFloatUniform("uColorB", b.red, b.green, b.blue)
                 shader.setFloatUniform("uColorC", c.red, c.green, c.blue)
                 shader.setFloatUniform("uBass", bass)
+                shader.setFloatUniform("uSmokeSaturation", smokeSaturation.coerceIn(0.0f, 2.0f))
+                shader.setFloatUniform("uSmokeContrast", smokeContrast.coerceIn(0.0f, 2.0f))
                 drawRect(brush)
             },
     )
@@ -295,7 +317,7 @@ private fun AuraShaderBackground(albumColors: AlbumColors, intensity: Float, mod
 
 /** Фолбэк для Android < 13: мягкий дрейфующий радиальный градиент на тех же цветах (без шейдера). */
 @Composable
-private fun AuraGradientFallback(albumColors: AlbumColors, modifier: Modifier) {
+private fun AuraGradientFallback(albumColors: AlbumColors, modifier: Modifier, smokeContrast: Float = 1.0f) {
     val bg by animateColorAsState(albumColors.darkMuted, tween(900), label = "fbBg")
     val a by animateColorAsState(albumColors.vibrant, tween(900), label = "fbA")
     val b by animateColorAsState(albumColors.dominant, tween(900), label = "fbB")
@@ -320,7 +342,7 @@ private fun AuraGradientFallback(albumColors: AlbumColors, modifier: Modifier) {
                 val tau = (2.0 * Math.PI).toFloat()
                 // Бас слегка раздувает/подсвечивает пятна — УЗКО (±10..12%), без морганий
                 val rBoost = 1f + bass * 0.10f
-                val aBoost = 1f + bass * 0.12f
+                val aBoost = (1f + bass * 0.12f) * smokeContrast.coerceIn(0.0f, 2.0f)
                 fun pt(seed: Float, sx: Float, sy: Float) = androidx.compose.ui.geometry.Offset(
                     w * (0.5f + 0.35f * kotlin.math.cos(tau * (phase + seed)) * sx),
                     h * (0.42f + 0.30f * kotlin.math.sin(tau * (phase + seed)) * sy),
