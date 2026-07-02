@@ -152,6 +152,12 @@ object AutoMixNativeEngine {
         runCatching { nativeSinkRender(out, frames) }.onFailure { out.fill(0) }
     }
 
+    /** Число вызовов аудио-колбэка с запуска (для watchdog'а). */
+    fun callbackCount(): Long {
+        if (!isLoaded || !initialised) return 0L
+        return runCatching { nativeCallbackCount() }.getOrDefault(0L)
+    }
+
     /** Текущий режим + последние открытые Oboe-потоки (для DebugOverlay/логов). */
     fun audioDiagnostics(): String {
         if (!isLoaded) return "native lib not loaded"
@@ -546,6 +552,7 @@ object AutoMixNativeEngine {
     private external fun nativeSinkStart(sampleRate: Int, blockFrames: Int)
     private external fun nativeSinkRender(out: ShortArray, frames: Int)
     private external fun nativeSinkStop()
+    private external fun nativeCallbackCount(): Long
     private external fun nativeLoadIncoming(path: String): Boolean
     private external fun nativeLoadIncomingFd(fd: Int, offset: Long, length: Long): Boolean
     private external fun nativeStartTransition(durationMs: Double, entryMs: Double, transitionType: Int)

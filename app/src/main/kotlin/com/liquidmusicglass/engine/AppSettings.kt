@@ -146,6 +146,19 @@ object AppSettings {
         safePrefs()?.edit()?.putBoolean("ignore_short", enabled)?.apply()
     }
 
+    /**
+     * Вендорный дефолт аудио-выхода (полевая карта 03.07.2026):
+     *  • vivo/iQOO — AAudio-микшер портит и Float, и I16 (шип/тишина на Y35);
+     *  • Xiaomi/Redmi/POCO — битый exclusive-MMAP (шум), Shared не подтверждён.
+     * Обоим — AudioTrack (режим 6): путь ExoPlayer, подтверждённо чистый на
+     * этих устройствах. Honor и остальные — быстрый нативный путь (0), при
+     * механическом отказе их подхватит AudioOutputWatchdog.
+     */
+    private fun defaultAudioCompatModeForDevice(): Int {
+        val id = (android.os.Build.MANUFACTURER + " " + android.os.Build.BRAND).lowercase()
+        return if (listOf("vivo", "iqoo", "xiaomi", "redmi", "poco").any { it in id }) 6 else 0
+    }
+
     fun setAudioCompatMode(mode: Int) {
         val m = mode.coerceIn(0, 6)
         if (_audioCompatMode.value == m) return
@@ -336,7 +349,13 @@ object AppSettings {
         _sleepTimerMinutes.value = p.getInt("sleep_timer", 0)
         _ignoreShortEnabled.value = p.getBoolean("ignore_short", false)
         _ignoreThresholdSec.value = p.getFloat("ignore_threshold", 30f)
-        _audioCompatMode.value = p.getInt("audio_compat_mode", 0).coerceIn(0, 6)
+        // Пользователь/watchdog ещё не выбирали режим → вендорный дефолт. НЕ
+        // персистим его: если завтра карта дефолтов улучшится, обновление её
+        // подхватит; явный выбор (тумблер/MODE/watchdog) — персистится навсегда.
+        _audioCompatMode.value = if (p.contains("audio_compat_mode"))
+            p.getInt("audio_compat_mode", 0).coerceIn(0, 6)
+        else
+            defaultAudioCompatModeForDevice()
         _preloadLeadSeconds.value = p.getInt("preload_lead_seconds", 60).coerceIn(30, 90)
 
         _lastTrackIndex.value = p.getInt("last_track", -1)

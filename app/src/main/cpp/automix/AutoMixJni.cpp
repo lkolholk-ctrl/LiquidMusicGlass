@@ -465,6 +465,13 @@ Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeGetAudioDiagn
     return env->NewStringUTF (automix::getAudioDiagnostics().c_str());
 }
 
+JNIEXPORT jlong JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeCallbackCount(
+        JNIEnv* /*env*/, jobject /*thiz*/)
+{
+    return (jlong) automix::getCallbackCount();
+}
+
 // ── AudioTrack-выход (Java-sink, режим 6) ───────────────────────────────────
 // Oboe-девайс закрывается, движок остаётся жив; блоки тянет Java-поток
 // AudioTrackSink через nativeSinkRender. Путь ExoPlayer — работает на девайсах,

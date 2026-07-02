@@ -137,6 +137,13 @@ class JuceLocalPlayer(
             maybeAdvanceAtEnd()            // обычное переключение (если свода нет)
             maybeLogXRuns()                // телеметрия underrun'ов Oboe
             maybeSyncPowerSave()           // буфер движка ↔ Battery Saver
+            // Watchdog выхода: «должны играть, а прогресса нет» → авто-уход на
+            // AudioTrack. Кормим только когда звук ОБЯЗАН идти прямо сейчас.
+            AudioOutputWatchdog.noteTick(
+                playingAudibly = prepared && !loading && playWhenReadyFlag &&
+                    !ended && playlist.isNotEmpty() && transitionState != 1,
+                positionMs = engine.positionMsCurrent().toLong()
+            )
             invalidateStateFromTicker()
             handler.postDelayed(this, TICK_MS)
         }

@@ -119,6 +119,11 @@ namespace automix
         gCbLevelMilli.store ((int) (meanAbs * 1000.0f), std::memory_order_relaxed);
     }
 
+    long getCallbackCount()
+    {
+        return gCbCount.load (std::memory_order_relaxed);
+    }
+
     void setLastCodecInfo (const char* info)
     {
         if (info == nullptr)
@@ -132,10 +137,13 @@ namespace automix
 
     std::string getAudioDiagnostics()
     {
+        // При активном sink'е нативный атомик хранит последний Oboe-режим (≤5) —
+        // фактический выход показываем честно.
         std::string out = "mode=";
-        out += modeName (gCompatMode.load());
         if (gSinkActive.load (std::memory_order_relaxed))
-            out += "\nsink=AudioTrack(java) ACTIVE — Oboe отключён";
+            out += "AUDIOTRACK (java sink)\nsink=AudioTrack(java) ACTIVE — Oboe отключён";
+        else
+            out += modeName (gCompatMode.load());
         {
             // Пульс + уровень: cb n растёт → колбэк живёт; level>0 при тишине из
             // динамика → звук чистый на выходе движка, портит система.
