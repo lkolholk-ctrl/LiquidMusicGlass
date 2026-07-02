@@ -238,16 +238,15 @@ void MediaCodecAudioSource::pushF (const float* s, int totalSamples)
 
 void MediaCodecAudioSource::fillLeftover (int framesWanted)
 {
-    // Страж от мёртвого кодека: MediaCodec может отвалиться на лету (codec
-    // reclaimed / internal error), и тогда dequeue* навсегда возвращают коды
-    // ошибок, не покрытые ветками ниже. Без выхода по ним цикл крутился
-    // бесконечно ПОД lock'ом → замирал read-ahead поток, за ним seek/загрузка/
-    // pause (deck.mutationLock) — весь движок: вечная тишина + ANR.
-    // Фатальный статус → помечаем EOS (трек дальше не декодируется, плеер
-    // штатно перейдёт к следующему). Затяжное «нет прогресса» → просто выходим
-    // без EOS: транспорт дольёт тишину, следующий pull попробует ещё раз.
+    // Защита ТОЛЬКО от вечного цикла под lock'ом (dead codec → dequeue* вечно
+    // возвращает коды, не покрытые ветками ниже). БЕЗОПАСНАЯ версия: при любом
+    // аномальном статусе НЕ помечаем EOS и НЕ пересоздаём/сеемся — просто не
+    // считаем это прогрессом, и по счётчику noProgressIters выходим из цикла,
+    // отдав что успели (транспорт дольёт тишину, следующий pull повторит).
+    // Прежняя агрессивная версия (recreateCodec + ложный EOS) давала seek и
+    // ложный «конец трека» на ~3с → тишина и петля на локальном воспроизведении.
     int noProgressIters = 0;
-    constexpr int kMaxNoProgressIters = 500;   // ~2с при двух 2мс-таймаутах на итерацию
+    constexpr int kMaxNoProgressIters = 500;   // ~2с; выход БЕЗ EOS — безвредно
 
     while (! outputEOS && (int) (leftBuf.size() - leftoverStart) < framesWanted)
     {
@@ -277,17 +276,8 @@ void MediaCodecAudioSource::fillLeftover (int framesWanted)
                 }
                 progressed = true;
             }
-            else if (inIdx != AMEDIACODEC_INFO_TRY_AGAIN_LATER)
-            {
-                // Фатальная ошибка кодека: одна попытка реанимации, иначе EOS.
-                if (codecRecoveryUsed || ! recreateCodec())
-                {
-                    outputEOS = true;
-                    break;
-                }
-                codecRecoveryUsed = true;
-                continue;
-            }
+            // Прочие статусы input (в т.ч. аномальный отрицательный) — НЕ фатально:
+            // не сеемся, не EOS. Отсутствие прогресса поймает счётчик ниже.
         }
 
         AMediaCodecBufferInfo info;
@@ -329,23 +319,13 @@ void MediaCodecAudioSource::fillLeftover (int framesWanted)
         }
         else if (outIdx == AMEDIACODEC_INFO_TRY_AGAIN_LATER)
         {
-            // Nothing ready yet. If we've drained all input and the codec keeps
-            // returning nothing, treat as EOS so we never spin forever.
+            // Пока нечего отдавать. Если вход исчерпан, а кодек молчит — выходим
+            // (это законный конец потока).
             if (inputEOS)
                 break;
         }
-        else
-        {
-            // Неизвестный отрицательный статус = фатально: одна попытка
-            // реанимации кодека, иначе помечаем EOS.
-            if (codecRecoveryUsed || ! recreateCodec())
-            {
-                outputEOS = true;
-                break;
-            }
-            codecRecoveryUsed = true;
-            continue;
-        }
+        // Любой другой (аномальный отрицательный) статус — НЕ фатально: не EOS,
+        // не пересоздаём. noProgressIters ниже выведет из цикла.
 
         if (progressed)
             noProgressIters = 0;
