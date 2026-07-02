@@ -40,9 +40,11 @@ function(lmg_patch_juce_oboe juceOboeFile)
 // which also records every opened stream for on-device diagnostics.
 extern "C" int  lmg_oboeSharingModeInt();
 extern "C" int  lmg_oboePerformanceModeInt();
+extern "C" int  lmg_oboeBufferCapacityMinFrames();
 extern "C" void lmg_onOboeStreamOpen (int direction, int openResult, int usesAAudio,
                                       int sharingMode, int performanceMode, int format,
-                                      int sampleRate, int bufferSizeFrames, int framesPerBurst);
+                                      int sampleRate, int bufferSizeFrames, int framesPerBurst,
+                                      int bufferCapacityFrames);
 static inline oboe::SharingMode     lmg_oboeSharingMode()     { return static_cast<oboe::SharingMode> (lmg_oboeSharingModeInt()); }
 static inline oboe::PerformanceMode lmg_oboePerformanceMode() { return static_cast<oboe::PerformanceMode> (lmg_oboePerformanceModeInt()); }
 
@@ -53,6 +55,22 @@ template <typename OboeDataFormat>  struct OboeAudioIODeviceBufferHelpers {};]=]
     if(declsOk EQUAL -1)
         message(FATAL_ERROR "PatchJuceOboeCompat: decls anchor not found in ${juceOboeFile} "
                             "(JUCE upgrade changed juce_Oboe_android.cpp? Re-check the patch).")
+    endif()
+
+    # 1b) Запрос МИНИМАЛЬНОЙ ёмкости буфера при открытии потока. JUCE ёмкость не
+    #     задаёт («let OS choose»), а часть HAL (vivo) выдаёт capacity = 1 burst
+    #     (192 кадра ≈ 4 мс) — setBufferSizeInFrames клампится в неё, буфер
+    #     остаётся микроскопическим → хронические underrun'ы → «шип». Вставляем
+    #     ДО глобальной замены токена LowLatency (якорь содержит оригинальный токен).
+    set(perfAnchor "            builder.setPerformanceMode (oboe::PerformanceMode::LowLatency);")
+    set(perfWithCapacity [=[            builder.setPerformanceMode (oboe::PerformanceMode::LowLatency);
+
+            if (const int lmgMinCap = lmg_oboeBufferCapacityMinFrames(); lmgMinCap > 0)
+                builder.setBufferCapacityInFrames (lmgMinCap);]=])
+    string(REPLACE "${perfAnchor}" "${perfWithCapacity}" src "${src}")
+    string(FIND "${src}" "setBufferCapacityInFrames (lmgMinCap)" capOk)
+    if(capOk EQUAL -1)
+        message(FATAL_ERROR "PatchJuceOboeCompat: setPerformanceMode anchor not found in ${juceOboeFile}.")
     endif()
 
     # 2) Все 6 захардкоженных Exclusive (probe-поток, output/input сессии,
@@ -91,7 +109,8 @@ template <typename OboeDataFormat>  struct OboeAudioIODeviceBufferHelpers {};]=]
                                   stream != nullptr ? (int) stream->getFormat() : -1,
                                   stream != nullptr ? (int) stream->getSampleRate() : 0,
                                   stream != nullptr ? (int) stream->getBufferSizeInFrames() : 0,
-                                  stream != nullptr ? (int) stream->getFramesPerBurst() : 0);]=])
+                                  stream != nullptr ? (int) stream->getFramesPerBurst() : 0,
+                                  stream != nullptr ? (int) stream->getBufferCapacityInFrames() : 0);]=])
     string(REPLACE "${openAnchor}" "${openReport}" src "${src}")
 
     string(FIND "${src}" "lmg_onOboeStreamOpen ((int) direction" hookOk)

@@ -24,7 +24,7 @@ namespace
     struct StreamReport
     {
         int direction, openResult, usesAAudio, sharing, perf, format;
-        int sampleRate, bufferSize, burst;
+        int sampleRate, bufferSize, burst, capacity;
         int mode;        // compat-режим на момент открытия
         long seq;        // порядковый номер (растёт), для «свежее/старее»
     };
@@ -47,7 +47,7 @@ namespace
     void formatReport (char* buf, size_t bufSize, const StreamReport& r)
     {
         std::snprintf (buf, bufSize,
-                       "#%ld %s %s api=%s share=%s perf=%s fmt=%s rate=%d buf=%d burst=%d mode=%d",
+                       "#%ld %s %s api=%s share=%s perf=%s fmt=%s rate=%d buf=%d/%d burst=%d mode=%d",
                        r.seq,
                        r.direction == (int) oboe::Direction::Output ? "out" : "in",
                        oboe::convertToText ((oboe::Result) r.openResult),
@@ -55,7 +55,7 @@ namespace
                        r.sharing < 0 ? "?" : oboe::convertToText ((oboe::SharingMode) r.sharing),
                        r.perf < 0 ? "?" : oboe::convertToText ((oboe::PerformanceMode) r.perf),
                        r.format < 0 ? "?" : oboe::convertToText ((oboe::AudioFormat) r.format),
-                       r.sampleRate, r.bufferSize, r.burst, r.mode);
+                       r.sampleRate, r.bufferSize, r.capacity, r.burst, r.mode);
     }
 }
 
@@ -112,12 +112,23 @@ extern "C" int lmg_oboePerformanceModeInt()
                                                     : oboe::PerformanceMode::LowLatency);
 }
 
+extern "C" int lmg_oboeBufferCapacityMinFrames()
+{
+    // Минимальная ёмкость буфера потока. JUCE её не задаёт («let OS choose»), а
+    // часть HAL (vivo) выдаёт capacity = 1 burst (~4 мс) — setBufferSizeInFrames
+    // клампится в неё, и буфер остаётся микроскопическим → хронические underrun'ы
+    // (слышно как «шип»). 4096 кадров (~85 мс @48k) — это ЁМКОСТЬ (потолок), а не
+    // задержка: реальная задержка задаётся bufferSize, который движок ставит сам.
+    return 4096;
+}
+
 extern "C" void lmg_onOboeStreamOpen (int direction, int openResult, int usesAAudio,
                                       int sharingMode, int performanceMode, int format,
-                                      int sampleRate, int bufferSizeFrames, int framesPerBurst)
+                                      int sampleRate, int bufferSizeFrames, int framesPerBurst,
+                                      int bufferCapacityFrames)
 {
     StreamReport r { direction, openResult, usesAAudio, sharingMode, performanceMode,
-                     format, sampleRate, bufferSizeFrames, framesPerBurst,
+                     format, sampleRate, bufferSizeFrames, framesPerBurst, bufferCapacityFrames,
                      automix::getOboeCompatMode(), 0 };
     {
         const std::lock_guard<std::mutex> lock (gReportsMutex);
