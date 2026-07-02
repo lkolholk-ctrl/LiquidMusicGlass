@@ -5,7 +5,8 @@ import android.os.Build
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.withInfiniteAnimationFrameMillis
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -29,6 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -143,7 +145,11 @@ fun WaveMoodTiles(
     onSelect: (WaveMood) -> Unit,
     modifier: Modifier = Modifier,
     animate: Boolean = true,
-    albumColors: AlbumColors? = null
+    albumColors: AlbumColors? = null,
+    /** Сглаженный бас 0..1 — кромка карточек слегка пульсирует в такт (стриминг). */
+    bassLevel: State<Float>? = null,
+    /** Long-press по карточке — предпросмотр станции (диалог рисует вызывающий). */
+    onPreview: (WaveMood) -> Unit = {}
 ) {
     // Единый кадровый клок (секунды). Один на весь ряд — не плодим корутины.
     // Замораживается, когда Home перекрыт оверлеем (см. AuraBackground): меньше
@@ -163,9 +169,13 @@ fun WaveMoodTiles(
         itemsIndexed(WAVE_MOODS, key = { _, m -> m.label }) { index, mood ->
             // Тинт под текущий трек: тянем цвета муда к vibrant/lightVibrant
             // обложки (доля 0.42 — идентичность муда сохраняется, но вся линейка
-            // блобов уходит в цветовую семью ауры). Смена трека — плавный перелив.
-            val targetA = albumColors?.let { lerp(mood.colorA, it.vibrant, 0.42f) } ?: mood.colorA
-            val targetB = albumColors?.let { lerp(mood.colorB, it.lightVibrant, 0.42f) } ?: mood.colorB
+            // карточек уходит в цветовую семью ауры). Смена трека — плавный перелив.
+            // Без трека — цвета мудов, чуть приглушённые к нейтральному тёмному:
+            // экран без музыки спокойнее и «приглашает» нажать Play.
+            val targetA = albumColors?.let { lerp(mood.colorA, it.vibrant, 0.42f) }
+                ?: lerp(mood.colorA, IdleMuted, 0.30f)
+            val targetB = albumColors?.let { lerp(mood.colorB, it.lightVibrant, 0.42f) }
+                ?: lerp(mood.colorB, IdleMuted, 0.30f)
             val tintA by animateColorAsState(targetA, tween(900), label = "moodTintA")
             val tintB by animateColorAsState(targetB, tween(900), label = "moodTintB")
             MoodTile(
@@ -175,12 +185,18 @@ fun WaveMoodTiles(
                 timeSec = timeSec,
                 seed = index * 1.7f,
                 index = index,
-                onClick = { onSelect(mood) }
+                bassLevel = bassLevel,
+                onClick = { onSelect(mood) },
+                onLongClick = { onPreview(mood) }
             )
         }
     }
 }
 
+// Нейтральный тёмный тон для idle-приглушения карточек (нет играющего трека).
+private val IdleMuted = Color(0xFF20222B)
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MoodTile(
     mood: WaveMood,
@@ -189,7 +205,9 @@ private fun MoodTile(
     timeSec: State<Float>,
     seed: Float,
     index: Int,
-    onClick: () -> Unit
+    bassLevel: State<Float>?,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
 ) {
     // AGSL включаем НЕ на первом кадре, а со СТАГГЕРОМ по индексу в РЕАЛЬНО
     // отрисованных кадрах — чтобы линковка AGSL-программ легла на разные кадры уже
@@ -227,10 +245,11 @@ private fun MoodTile(
             // ВСЁ рисование по форме карточки — ничего не «вытекает» за плитку
             // (дымные ореолы без клипа рисовались ниже ряда и давали артефакты).
             .clip(RoundedCornerShape(40.dp))
-            .clickable(
+            .combinedClickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
-                onClick = onClick
+                onClick = onClick,
+                onLongClick = onLongClick
             )
             .drawBehind {
                 if (shader != null && shaderBrush != null && !powerSave) {
@@ -277,6 +296,17 @@ private fun MoodTile(
                         1.0f to Color.Black.copy(alpha = 0.35f)
                     )
                 )
+
+                // ── кромка слегка светится в такт басу (только когда шейдер уже
+                // активен — плитка и так перерисовывается каждый кадр; на паузе
+                // bass-продюсер остановлен и лишних инвалидаций нет) ──
+                if (shader != null && shaderBrush != null && !powerSave && bassLevel != null) {
+                    drawRoundRect(
+                        color = colorB.copy(alpha = 0.05f + 0.20f * bassLevel.value.coerceIn(0f, 1f)),
+                        cornerRadius = CornerRadius(40.dp.toPx()),
+                        style = Stroke(width = 2.dp.toPx())
+                    )
+                }
             }
             .padding(18.dp)
     ) {
