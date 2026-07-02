@@ -253,13 +253,17 @@ fun WaveHomeScreen(
                 }
             }
 
-            // ── Animated mood tiles ──
+            // ── Animated mood blobs ──
             item {
                 // Блобы опущены заметно ниже контролов (больше воздуха сверху).
                 Spacer(Modifier.height(36.dp))
                 WaveMoodTiles(
                     onSelect = { mood -> viewModel.buildMoodWave(context, mood.query, mood.label) },
-                    animate = animationsActive
+                    animate = animationsActive,
+                    // Палитра обложки текущего трека — та же, из которой рисуется
+                    // аура-дым: блобы подстраиваются под каждую музыку. Без трека
+                    // (палитра дефолтно тёмно-нейтральная) — свои цвета мудов.
+                    albumColors = if (track != null) albumColors else null
                 )
                 Spacer(Modifier.height(8.dp))
             }
