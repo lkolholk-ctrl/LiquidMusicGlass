@@ -479,6 +479,13 @@ class JuceLocalPlayer(
                 // Старт здесь же, на фоне — main не дёргает @Synchronized движок.
                 if (ok && !released && playWhenReadyFlag && seq == loadSeq.get()) engine.playCurrent()
             }
+            // ДИАГНОСТИКА локального аудио: показываем результат загрузки и что
+            // движок видит по длине/позиции (сразу видно: не загрузился трек,
+            // ложная длина ~3с, или движок вообще не поднялся).
+            DebugLog.add(
+                "JUCE.loadDone ok=$ok loaded=${AutoMixNativeEngine.isLoaded} " +
+                    "len=${engine.lengthMsCurrent().toLong()} pos=${engine.positionMsCurrent().toLong()} pwr=$playWhenReadyFlag"
+            )
             // Состояние применяем на main — только если загрузка ещё актуальна.
             handler.post {
                 if (released || seq != loadSeq.get()) return@post
@@ -535,6 +542,9 @@ class JuceLocalPlayer(
         if (len <= 1000L) return                 // длина ещё не известна/мусор — не дёргаем
         val pos = engine.positionMsCurrent().toLong()
         if (pos > 1000L && pos >= len - 300L) {   // требуем реально доигранный трек
+            // ДИАГНОСТИКА: если это срабатывает на ~3с — значит движок отдаёт
+            // ложно-короткую длину, и трек «доигрывает» и перезагружается по кругу.
+            DebugLog.add("JUCE.advanceAtEnd pos=$pos len=$len idx=$currentIndex")
             if (currentIndex < playlist.lastIndex) {
                 currentIndex++
                 ended = false

@@ -68,11 +68,11 @@ android {
             // Debug uses auto-generated debug signing
         }
         release {
-            // Полная защита: R8-минификация + обфускация + ресурс-шринк.
-            // Keep-правила — в proguard-rules.pro (JNI-мосты, Room, сериализация,
-            // LiteRT сохранены; см. подробные комментарии там).
-            isMinifyEnabled = true
-            isShrinkResources = true
+            // ДИАГНОСТИКА локального аудио: R8 временно ВЫКЛючен, чтобы исключить
+            // его как причину. Вернуть в true для защищённого билда (keep-правила
+            // готовы в proguard-rules.pro).
+            isMinifyEnabled = false
+            isShrinkResources = false
             isDebuggable = false
             isJniDebuggable = false
             vcsInfo.include = false
