@@ -121,6 +121,7 @@ fun SettingsScreen(
             SectionLabel("PLAYBACK")
 
             val hideExplicit by AppSettings.hideExplicit.collectAsState()
+            val audioCompatMode by AppSettings.audioCompatMode.collectAsState()
 
             PlainCard {
                 SettingsToggleItem(
@@ -135,6 +136,16 @@ fun SettingsScreen(
                     subtitle = "Filter explicit content from search & artist",
                     selected = hideExplicit,
                     onSelect = { AppSettings.setHideExplicit(it) }
+                )
+                PlainDivider()
+                // Безопасный вывод: legacy-путь Android-аудио (Shared + без
+                // low-latency) для устройств, где fast-path AAudio отдаёт
+                // шум/искажения вместо локального звука (часть Xiaomi и др.).
+                SettingsToggleItem(
+                    title = "Safe Audio Output",
+                    subtitle = "Fixes noise/static in local playback on some devices",
+                    selected = audioCompatMode == 1,
+                    onSelect = { AppSettings.setAudioCompatMode(if (it) 1 else 0) }
                 )
                 PlainDivider()
                 SettingsActionItem(

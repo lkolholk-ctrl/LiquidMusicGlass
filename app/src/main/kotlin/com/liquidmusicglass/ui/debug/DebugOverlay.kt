@@ -26,6 +26,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.liquidmusicglass.debug.DebugLog
+import com.liquidmusicglass.engine.automix.AutoMixNativeEngine
 
 /**
  * ВРЕМЕННЫЙ оверлей on-screen логгера. Полупрозрачная панель сверху со скроллом
@@ -51,6 +52,14 @@ fun DebugOverlay() {
                     Spacer(Modifier.width(12.dp))
                     Text("CLEAR", color = Color(0xFF4FC3F7), fontSize = 11.sp, fontFamily = FontFamily.Monospace,
                         modifier = Modifier.clickable { DebugLog.clear() }.padding(4.dp))
+                    Spacer(Modifier.width(8.dp))
+                    // Дамп фактических параметров Oboe-потоков (API/sharing/perf/
+                    // format/rate/burst) — чтобы с проблемного устройства сразу
+                    // видеть, каким путём пошёл звук.
+                    Text("OBOE", color = Color(0xFF4FC3F7), fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.clickable {
+                            DebugLog.add("OBOE ${AutoMixNativeEngine.audioDiagnostics()}")
+                        }.padding(4.dp))
                     Spacer(Modifier.width(8.dp))
                     Text("HIDE", color = Color(0xFF4FC3F7), fontSize = 11.sp, fontFamily = FontFamily.Monospace,
                         modifier = Modifier.clickable { DebugLog.visible.value = false }.padding(4.dp))

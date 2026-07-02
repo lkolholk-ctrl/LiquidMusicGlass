@@ -36,6 +36,11 @@ public:
      *  fast-path/RT). Позиция воспроизведения сохраняется. Зовётся НЕ из аудио-потока. */
     void onOutputRouteChanged (bool isBluetooth);
 
+    /** Сменился режим совместимости Oboe (OboeRuntime): переоткрыть поток, чтобы
+     *  новый sharing/performance mode применился. Позиция сохраняется (как при
+     *  смене маршрута). Зовётся НЕ из аудио-потока. */
+    void reopenAudioDevice();
+
     // Stage 1 diagnostic tone (only when neither deck has a track) -----------
     void startTone();
     void stopTone();

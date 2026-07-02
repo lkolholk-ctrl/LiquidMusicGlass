@@ -258,6 +258,16 @@ void AutoMixAudioEngine::onOutputRouteChanged (bool isBluetooth)
     applyBufferForRoute (isBluetooth, /*forceReopen=*/true);
 }
 
+// Переоткрыть Oboe-поток на текущем маршруте, чтобы применился новый compat-режим
+// (sharing/performance mode читаются из OboeRuntime при каждом открытии потока).
+// Транспорты не сбрасываются — позиция воспроизведения сохраняется.
+void AutoMixAudioEngine::reopenAudioDevice()
+{
+    if (! initialised.load())
+        return;                                   // применится при init()
+    applyBufferForRoute (routeIsBluetooth.load(), /*forceReopen=*/true);
+}
+
 void AutoMixAudioEngine::release()
 {
     toneOn.store (false);

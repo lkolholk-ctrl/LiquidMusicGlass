@@ -75,11 +75,32 @@ if(NOT signalsmithstretch_POPULATED)
     FetchContent_Populate(SignalsmithStretch)
 endif()
 
-set(JUCE_MODULES_DIR ${juce_SOURCE_DIR}/modules)
-set(OBOE_DIR ${JUCE_MODULES_DIR}/juce_audio_devices/native/oboe)
+# Свежий Oboe вместо вендоренного в JUCE 7.0.12 (там 1.8.0): 1.9.3 несёт более
+# полный QuirksManager с воркараундами под проблемные устройства. Безопасность
+# апгрейда: JUCE 8 использует тот же (почти неизменённый) juce_Oboe_android.cpp
+# с Oboe 1.9.x. Компилируем исходники Oboe так же напрямую в нашу либу.
+FetchContent_Declare(
+    Oboe
+    GIT_REPOSITORY https://github.com/google/oboe.git
+    GIT_TAG 1.9.3
+    GIT_SHALLOW TRUE
+)
+FetchContent_GetProperties(Oboe)
+if(NOT oboe_POPULATED)
+    FetchContent_Populate(Oboe)
+endif()
 
-# JUCE vendors a full copy of Oboe (not a submodule), so the shallow clone has
-# it. Compile it straight into our lib; JUCE's juce_android_Oboe.cpp uses it.
+set(JUCE_MODULES_DIR ${juce_SOURCE_DIR}/modules)
+set(OBOE_DIR ${oboe_SOURCE_DIR})
+
+# Девайс-совместимость: JUCE жёстко открывает Oboe-поток Exclusive+LowLatency
+# (AAudio MMAP-exclusive) — на части прошивок (Xiaomi/MIUI и др.) этот путь
+# отдаёт белый шум вместо звука. Правим juce_Oboe_android.cpp в FetchContent-
+# дереве: sharing/performance mode берутся из runtime-хуков (automix/OboeRuntime.cpp),
+# каждое открытие потока репортится для он-девайс диагностики.
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/PatchJuceOboeCompat.cmake)
+lmg_patch_juce_oboe("${JUCE_MODULES_DIR}/juce_audio_devices/native/juce_Oboe_android.cpp")
+
 file(GLOB_RECURSE OBOE_SOURCES CONFIGURE_DEPENDS ${OBOE_DIR}/src/*.cpp)
 
 # JUCE's Android path includes <cpu-features.h> (android_getCpuFamily etc.). That
@@ -98,6 +119,7 @@ add_library(
     automix/AutoMixJni.cpp
     automix/MediaCodecDecoder.cpp
     automix/MediaCodecAudioSource.cpp
+    automix/OboeRuntime.cpp
     automix/TimeStretch.cpp
     # JUCE module unity builds, compiled directly (no juceaide). Order doesn't
     # matter for a single static-link target; deps resolved via the

@@ -5,6 +5,7 @@
 #include <juce_core/juce_core.h>
 
 #include "AutoMixAudioEngine.h"
+#include "OboeRuntime.h"
 
 // JUCE's intended Android init is the Java method com.rmsl.juce.Java.initialiseJUCE,
 // whose registered native does TWO things in order:
@@ -402,6 +403,26 @@ Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeSetOutputRout
         JNIEnv* /*env*/, jobject /*thiz*/, jboolean isBluetooth)
 {
     withEngineVoid ([&] (AutoMixAudioEngine& engine) { engine.onOutputRouteChanged (isBluetooth == JNI_TRUE); });
+}
+
+// ── Девайс-совместимость Oboe (см. OboeRuntime.h) ───────────────────────────
+
+// Не требует живого движка: до init() просто запоминает режим (первое открытие
+// потока его подхватит); на живом движке — переоткрывает поток с новым режимом.
+JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeSetOboeCompatMode(
+        JNIEnv* /*env*/, jobject /*thiz*/, jint mode)
+{
+    if (! automix::setOboeCompatMode ((int) mode))
+        return;                                   // не изменился — устройство не трогаем
+    withEngineVoid ([] (AutoMixAudioEngine& engine) { engine.reopenAudioDevice(); });
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeGetAudioDiagnostics(
+        JNIEnv* env, jobject /*thiz*/)
+{
+    return env->NewStringUTF (automix::getAudioDiagnostics().c_str());
 }
 
 JNIEXPORT void JNICALL

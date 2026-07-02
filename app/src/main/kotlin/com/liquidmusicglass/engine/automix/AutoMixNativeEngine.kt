@@ -24,6 +24,17 @@ object AutoMixNativeEngine {
     @Volatile private var libState = 0
     private var initialised = false
 
+    /** Режимы совместимости Oboe (значения совпадают с OboeRuntime.h). */
+    const val OBOE_MODE_NORMAL = 0     // Shared + LowLatency (дефолт)
+    const val OBOE_MODE_SAFE = 1       // Shared + PerformanceMode::None (legacy-путь)
+    const val OBOE_MODE_EXCLUSIVE = 2  // Exclusive + LowLatency (стоковое поведение JUCE)
+
+    // Смена режима на живом движке переоткрывает Oboe-поток (close/reopen) —
+    // нельзя на main. Выделенный поток, как у AudioRouteMonitor.
+    private val compatExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+        Thread(r, "oboe-compat").apply { isDaemon = true }
+    }
+
     /**
      * Lazily load libautomix_juce.so on FIRST real use — never at app/UI start.
      * The native lib (JUCE + Signalsmith) and its AAudio device are large and
@@ -68,6 +79,12 @@ object AutoMixNativeEngine {
     fun init(context: Context): Boolean {
         if (!ensureLibrary()) return false
         if (initialised) return true
+        // Сохранённый режим совместимости — ДО открытия устройства, чтобы первый
+        // Oboe-поток открылся сразу с правильными sharing/performance mode.
+        // Движка ещё нет → нативка просто запоминает атомик (реопена не будет).
+        runCatching {
+            nativeSetOboeCompatMode(com.liquidmusicglass.engine.AppSettings.audioCompatMode.value)
+        }
         // JUCE-инициализации нужен ACTIVITY-контекст (getAppContext/JuceActivityWatcher
         // делают IsInstanceOf по android.app.Activity). applicationContext роняет это
         // с "java_class == null". Берём живую Activity из холдера (например, когда
@@ -85,8 +102,32 @@ object AutoMixNativeEngine {
         if (ok) {
             runCatching { com.liquidmusicglass.engine.AudioFxController.applyToEngine() }
             runCatching { com.liquidmusicglass.engine.AudioRouteMonitor.reapplyToEngine() }
+            // Фактические параметры открытого Oboe-потока (API/sharing/perf/format/
+            // rate/burst) — в on-screen лог: видно, каким путём пошёл звук на девайсе.
+            runCatching { com.liquidmusicglass.debug.DebugLog.add("OBOE ${audioDiagnostics()}") }
         }
         return ok
+    }
+
+    /**
+     * Режим совместимости Oboe: [OBOE_MODE_NORMAL] / [OBOE_MODE_SAFE] /
+     * [OBOE_MODE_EXCLUSIVE]. До init() применять не нужно (init читает сохранённый
+     * режим сам); на живом движке переоткрывает Oboe-поток на фоновом потоке —
+     * позиция воспроизведения сохраняется.
+     */
+    fun setOboeCompatMode(mode: Int) {
+        if (!isLoaded) return  // применится в init() из AppSettings
+        compatExecutor.execute {
+            runCatching { nativeSetOboeCompatMode(mode) }
+                .onFailure { Log.w(TAG, "nativeSetOboeCompatMode failed", it) }
+            runCatching { com.liquidmusicglass.debug.DebugLog.add("OBOE ${audioDiagnostics()}") }
+        }
+    }
+
+    /** Текущий режим + последние открытые Oboe-потоки (для DebugOverlay/логов). */
+    fun audioDiagnostics(): String {
+        if (!isLoaded) return "native lib not loaded"
+        return runCatching { nativeGetAudioDiagnostics() }.getOrDefault("n/a")
     }
 
     /** Выполнить [block] на главном потоке и дождаться результата (или сразу, если уже на main). */
@@ -433,6 +474,8 @@ object AutoMixNativeEngine {
     private external fun nativeFxSetCompressor(on: Boolean, threshDb: Float, ratio: Float, attackMs: Float, releaseMs: Float)
     private external fun nativeFxSetLimiter(on: Boolean, threshDb: Float, releaseMs: Float)
     private external fun nativeSetOutputRouteBluetooth(isBluetooth: Boolean)
+    private external fun nativeSetOboeCompatMode(mode: Int)
+    private external fun nativeGetAudioDiagnostics(): String
     private external fun nativeLoadIncoming(path: String): Boolean
     private external fun nativeLoadIncomingFd(fd: Int, offset: Long, length: Long): Boolean
     private external fun nativeStartTransition(durationMs: Double, entryMs: Double, transitionType: Int)

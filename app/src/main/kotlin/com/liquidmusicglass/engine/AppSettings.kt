@@ -44,6 +44,13 @@ object AppSettings {
     private val _ignoreShortEnabled = MutableStateFlow(false)
     val ignoreShortEnabled: StateFlow<Boolean> = _ignoreShortEnabled
 
+    // ── Аудио-совместимость (JUCE/Oboe) ──
+    // 0 = обычный (Shared + LowLatency), 1 = безопасный (Shared + None, legacy-путь),
+    // 2 = exclusive (стоковое поведение JUCE, для A/B-отладки). Безопасный — для
+    // устройств, где low-latency путь AAudio отдаёт шум/искажения вместо звука.
+    private val _audioCompatMode = MutableStateFlow(0)
+    val audioCompatMode: StateFlow<Int> = _audioCompatMode
+
     private val _ignoreThresholdSec = MutableStateFlow(30f)
     val ignoreThresholdSec: StateFlow<Float> = _ignoreThresholdSec
 
@@ -137,6 +144,16 @@ object AppSettings {
     fun setIgnoreShort(enabled: Boolean) {
         _ignoreShortEnabled.value = enabled
         safePrefs()?.edit()?.putBoolean("ignore_short", enabled)?.apply()
+    }
+
+    fun setAudioCompatMode(mode: Int) {
+        val m = mode.coerceIn(0, 2)
+        if (_audioCompatMode.value == m) return
+        _audioCompatMode.value = m
+        safePrefs()?.edit()?.putInt("audio_compat_mode", m)?.apply()
+        // Живой движок переоткроет Oboe-поток с новым режимом (на фоне);
+        // если движок ещё не поднят — режим подхватится при init().
+        com.liquidmusicglass.engine.automix.AutoMixNativeEngine.setOboeCompatMode(m)
     }
 
     fun setIgnoreThreshold(sec: Float) {
@@ -319,6 +336,7 @@ object AppSettings {
         _sleepTimerMinutes.value = p.getInt("sleep_timer", 0)
         _ignoreShortEnabled.value = p.getBoolean("ignore_short", false)
         _ignoreThresholdSec.value = p.getFloat("ignore_threshold", 30f)
+        _audioCompatMode.value = p.getInt("audio_compat_mode", 0).coerceIn(0, 2)
         _preloadLeadSeconds.value = p.getInt("preload_lead_seconds", 60).coerceIn(30, 90)
 
         _lastTrackIndex.value = p.getInt("last_track", -1)
