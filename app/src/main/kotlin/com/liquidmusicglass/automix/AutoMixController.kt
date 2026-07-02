@@ -34,24 +34,6 @@ class AutoMixController(
     context: Context
 ) {
 
-    companion object {
-        // Весь тяжёлый анализ (декод двух треков + FFT/мел-спектры + модель) — на
-        // ОДНОМ фоновом потоке с минимальным приоритетом. Раньше он шёл на общем
-        // Dispatchers.Default (пул на все ядра, обычный приоритет) за ~40с до конца
-        // КАЖДОГО трека и отбирал CPU у аудио-декода → периодические лаги/цикличка
-        // «в некоторых местах трека», особенно на слабых устройствах. Анализ может
-        // идти дольше — это фон, ему некуда спешить.
-        private val analysisDispatcher =
-            java.util.concurrent.Executors.newSingleThreadExecutor { r ->
-                Thread({
-                    android.os.Process.setThreadPriority(
-                        android.os.Process.THREAD_PRIORITY_BACKGROUND
-                    )
-                    r.run()
-                }, "automix-analysis")
-            }.asCoroutineDispatcher()
-    }
-
     private val appContext = context.applicationContext
     private var predictor: MLTransitionPredictor? = null
 
@@ -524,6 +506,22 @@ class AutoMixController(
     }
 
     companion object {
+        // Весь тяжёлый анализ (декод двух треков + FFT/мел-спектры + модель) — на
+        // ОДНОМ фоновом потоке с минимальным приоритетом. Раньше он шёл на общем
+        // Dispatchers.Default (пул на все ядра, обычный приоритет) за ~40с до конца
+        // КАЖДОГО трека и отбирал CPU у аудио-декода → периодические лаги/цикличка
+        // «в некоторых местах трека», особенно на слабых устройствах. Анализ может
+        // идти дольше — это фон, ему некуда спешить.
+        private val analysisDispatcher =
+            java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+                Thread({
+                    android.os.Process.setThreadPriority(
+                        android.os.Process.THREAD_PRIORITY_BACKGROUND
+                    )
+                    r.run()
+                }, "automix-analysis")
+            }.asCoroutineDispatcher()
+
         private const val MIN_COMPATIBILITY = 0.25f
         private const val DEFAULT_COMPATIBILITY = 0.75f
         private const val DEFAULT_CROSSFADE_MS = 8000L
