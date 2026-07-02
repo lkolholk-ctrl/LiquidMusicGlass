@@ -16,8 +16,11 @@ android {
         applicationId = "com.liquidmusicglass"
         minSdk = 29
         targetSdk = 36
-        versionCode = 20260530
-        versionName = "2026.05.30 pre-release1 gsm"
+        // Выше 20260702 (ветка greeting уже ставилась на тест-девайсы с ним):
+        // меньший versionCode Android считает даунгрейдом и отклоняет установку
+        // поверх с ошибкой «пакет недействителен».
+        versionCode = 20260703
+        versionName = "03.07.2026 juce-oboe-compat"
 
         // Build native libs only for arm64-v8a (faster builds, smaller APK).
         // Note: won't run on 32-bit (armeabi-v7a) or x86/x86_64 emulators.
