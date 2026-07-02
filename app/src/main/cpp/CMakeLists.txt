@@ -78,13 +78,23 @@ endif()
 set(JUCE_MODULES_DIR ${juce_SOURCE_DIR}/modules)
 set(OBOE_DIR ${JUCE_MODULES_DIR}/juce_audio_devices/native/oboe)
 
-# ── ОТКАТ патча Oboe: возвращаем ДЕФОЛТНЫЙ Oboe-бэкенд JUCE (Exclusive +
-# LowLatency). Прежний патч (Shared + PerformanceMode::None ради совместимости
-# с записью экрана) сломал ЛОКАЛЬНОЕ воспроизведение (тишина + петля). Аудио
-# важнее записи экрана — возвращаем заведомо рабочую конфигурацию.
-# Реверс идемпотентен и устойчив к кэшу FetchContent: оригинал JUCE вообще не
-# использует Shared/None (0 вхождений), поэтому эти замены трогают ТОЛЬКО ранее
-# пропатченные значения; на свежескачанном исходнике — no-op.
+# ── Патч Oboe: принудительно Shared + PerformanceMode::None вместо дефолтного
+# JUCE Exclusive + LowLatency (MMAP fast-path).
+#
+# Причина: на части OEM-устройств (Xiaomi/MIUI/HyperOS и др.) MMAP-путь Oboe
+# (Exclusive+LowLatency) сломан — поток открывается, JUCE рапортует успех
+# (loadDone ok=true loaded=true), но реальный вывод идёт в никуда: тишина/шипение,
+# позиция стоит. Shared+None — это обычный путь через AudioTrack, широко
+# совместимый (и он же нужен для захвата звука записью экрана). Он играет и на
+# «нормальных» устройствах, и на тех, где MMAP битый.
+#
+# ВАЖНО: петля локального аудио на устройстве-владельце была вызвана НЕ этим
+# патчем, а стражем мёртвого кодека (recreateCodec + ложный EOS в
+# MediaCodecAudioSource) — тот фикс откачен отдельно и НЕ возвращается здесь.
+#
+# Патч идемпотентен и устойчив к кэшу FetchContent: оригинал JUCE вообще не
+# использует Shared/None (0 вхождений), поэтому обратные замены (при повторном
+# конфигурировании уже пропатченного файла) — no-op.
 set(JUCE_OBOE_CPP ${JUCE_MODULES_DIR}/juce_audio_devices/native/juce_Oboe_android.cpp)
 if(NOT EXISTS ${JUCE_OBOE_CPP})
     set(JUCE_OBOE_CPP ${JUCE_MODULES_DIR}/juce_audio_devices/native/juce_android_Oboe.cpp)
@@ -92,11 +102,11 @@ endif()
 if(EXISTS ${JUCE_OBOE_CPP})
     file(READ ${JUCE_OBOE_CPP} _oboe_src_orig)
     set(_oboe_src "${_oboe_src_orig}")
-    string(REPLACE "SharingMode::Shared" "SharingMode::Exclusive" _oboe_src "${_oboe_src}")
-    string(REPLACE "PerformanceMode::None" "PerformanceMode::LowLatency" _oboe_src "${_oboe_src}")
+    string(REPLACE "SharingMode::Exclusive" "SharingMode::Shared" _oboe_src "${_oboe_src}")
+    string(REPLACE "PerformanceMode::LowLatency" "PerformanceMode::None" _oboe_src "${_oboe_src}")
     if(NOT _oboe_src STREQUAL _oboe_src_orig)
         file(WRITE ${JUCE_OBOE_CPP} "${_oboe_src}")
-        message(STATUS "automix: reverted JUCE Oboe backend to default Exclusive/LowLatency")
+        message(STATUS "automix: patched JUCE Oboe backend to Shared/None (broad OEM compat)")
     endif()
 endif()
 
