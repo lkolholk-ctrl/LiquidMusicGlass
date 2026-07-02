@@ -68,11 +68,12 @@ android {
             // Debug uses auto-generated debug signing
         }
         release {
-            // ДИАГНОСТИКА локального аудио: R8 временно ВЫКЛючен, чтобы исключить
-            // его как причину. Вернуть в true для защищённого билда (keep-правила
-            // готовы в proguard-rules.pro).
-            isMinifyEnabled = false
-            isShrinkResources = false
+            // Полная защита: R8-минификация + обфускация + ресурс-шринк.
+            // Keep-правила — в proguard-rules.pro (JNI-мосты, Room, сериализация,
+            // LiteRT сохранены). Диагностика показала, что баг локального аудио
+            // был НЕ в R8 (в Oboe-патче + страже кодека, откачены).
+            isMinifyEnabled = true
+            isShrinkResources = true
             isDebuggable = false
             isJniDebuggable = false
             vcsInfo.include = false

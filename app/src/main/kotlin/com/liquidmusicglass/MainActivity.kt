@@ -44,7 +44,7 @@ import kotlinx.coroutines.withContext
 
 // TODO: ВРЕМЕННО для отладки бага «лирика не ползёт с первого тыка». Вернуть true
 // и убрать lyrdbg-логи в LyricsScreen после диагностики.
-private const val PROTECTION_ENABLED = false
+private const val PROTECTION_ENABLED = true
 
 class MainActivity : ComponentActivity() {
 

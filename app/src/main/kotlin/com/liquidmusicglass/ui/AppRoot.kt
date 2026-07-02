@@ -609,8 +609,8 @@ fun AppRoot() {
         // ── Update Dialog ──
         UpdateDialog(backdrop = rootBackdrop)
 
-        // On-screen логгер (диагностика локального аудио).
-        com.liquidmusicglass.ui.debug.DebugOverlay()
+        // On-screen логгер убран из раздаваемого билда (DebugLog копит записи в
+        // памяти, оверлей не рисуем).
         }
     }
 }
