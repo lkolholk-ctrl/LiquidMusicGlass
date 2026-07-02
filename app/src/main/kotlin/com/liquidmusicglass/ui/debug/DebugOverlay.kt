@@ -61,6 +61,16 @@ fun DebugOverlay() {
                             DebugLog.add("OBOE ${AutoMixNativeEngine.audioDiagnostics()}")
                         }.padding(4.dp))
                     Spacer(Modifier.width(8.dp))
+                    // Перебор режимов Oboe на лету (0 normal → 1 safe → 2 exclusive):
+                    // A/B прямо на играющей музыке, поток переоткрывается сам. Для
+                    // устройств, где оба Shared-режима битые (vivo) — проверка стока.
+                    Text("MODE", color = Color(0xFFFF8A65), fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.clickable {
+                            val next = (com.liquidmusicglass.engine.AppSettings.audioCompatMode.value + 1) % 3
+                            com.liquidmusicglass.engine.AppSettings.setAudioCompatMode(next)
+                            DebugLog.add("OBOE mode -> ${when (next) { 1 -> "SAFE(shared+none)"; 2 -> "EXCLUSIVE(stock)"; else -> "NORMAL(shared+lowlat)" }}")
+                        }.padding(4.dp))
+                    Spacer(Modifier.width(8.dp))
                     Text("HIDE", color = Color(0xFF4FC3F7), fontSize = 11.sp, fontFamily = FontFamily.Monospace,
                         modifier = Modifier.clickable { DebugLog.visible.value = false }.padding(4.dp))
                 }
