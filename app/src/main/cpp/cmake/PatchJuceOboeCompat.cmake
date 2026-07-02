@@ -42,10 +42,11 @@ extern "C" int  lmg_oboeSharingModeInt();
 extern "C" int  lmg_oboePerformanceModeInt();
 extern "C" int  lmg_oboeBufferCapacityMinFrames();
 extern "C" int  lmg_oboeForceI16();
+extern "C" int  lmg_oboeAudioApiInt();
 extern "C" void lmg_onOboeStreamOpen (int direction, int openResult, int usesAAudio,
                                       int sharingMode, int performanceMode, int format,
                                       int sampleRate, int bufferSizeFrames, int framesPerBurst,
-                                      int bufferCapacityFrames);
+                                      int bufferCapacityFrames, int channelCount);
 static inline oboe::SharingMode     lmg_oboeSharingMode()     { return static_cast<oboe::SharingMode> (lmg_oboeSharingModeInt()); }
 static inline oboe::PerformanceMode lmg_oboePerformanceMode() { return static_cast<oboe::PerformanceMode> (lmg_oboePerformanceModeInt()); }
 
@@ -65,6 +66,8 @@ template <typename OboeDataFormat>  struct OboeAudioIODeviceBufferHelpers {};]=]
     #     ДО глобальной замены токена LowLatency (якорь содержит оригинальный токен).
     set(perfAnchor "            builder.setPerformanceMode (oboe::PerformanceMode::LowLatency);")
     set(perfWithCapacity [=[            builder.setPerformanceMode (oboe::PerformanceMode::LowLatency);
+
+            builder.setAudioApi (static_cast<oboe::AudioApi> (lmg_oboeAudioApiInt()));
 
             if (const int lmgMinCap = lmg_oboeBufferCapacityMinFrames(); lmgMinCap > 0)
                 builder.setBufferCapacityInFrames (lmgMinCap);]=])
@@ -130,7 +133,8 @@ template <typename OboeDataFormat>  struct OboeAudioIODeviceBufferHelpers {};]=]
                                   stream != nullptr ? (int) stream->getSampleRate() : 0,
                                   stream != nullptr ? (int) stream->getBufferSizeInFrames() : 0,
                                   stream != nullptr ? (int) stream->getFramesPerBurst() : 0,
-                                  stream != nullptr ? (int) stream->getBufferCapacityInFrames() : 0);]=])
+                                  stream != nullptr ? (int) stream->getBufferCapacityInFrames() : 0,
+                                  stream != nullptr ? (int) stream->getChannelCount() : 0);]=])
     string(REPLACE "${openAnchor}" "${openReport}" src "${src}")
 
     string(FIND "${src}" "lmg_onOboeStreamOpen ((int) direction" hookOk)

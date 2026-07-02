@@ -31,6 +31,7 @@ object AutoMixNativeEngine {
     const val OBOE_MODE_EXCLUSIVE = 2   // Exclusive + LowLatency + Float (сток JUCE; vivo молча даёт Shared)
     const val OBOE_MODE_NORMAL_I16 = 3  // Shared + LowLatency + int16 (HAL с битым float-микшером: vivo)
     const val OBOE_MODE_SAFE_I16 = 4    // Shared + None + int16
+    const val OBOE_MODE_OPENSLES_I16 = 5 // OpenSL ES + None + int16 (запасной бэкенд, минуя AAudio)
 
     // Смена режима на живом движке переоткрывает Oboe-поток (close/reopen) —
     // нельзя на main. Выделенный поток, как у AudioRouteMonitor.

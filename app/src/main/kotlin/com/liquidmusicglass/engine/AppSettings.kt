@@ -147,7 +147,7 @@ object AppSettings {
     }
 
     fun setAudioCompatMode(mode: Int) {
-        val m = mode.coerceIn(0, 4)
+        val m = mode.coerceIn(0, 5)
         if (_audioCompatMode.value == m) return
         _audioCompatMode.value = m
         safePrefs()?.edit()?.putInt("audio_compat_mode", m)?.apply()
@@ -336,7 +336,7 @@ object AppSettings {
         _sleepTimerMinutes.value = p.getInt("sleep_timer", 0)
         _ignoreShortEnabled.value = p.getBoolean("ignore_short", false)
         _ignoreThresholdSec.value = p.getFloat("ignore_threshold", 30f)
-        _audioCompatMode.value = p.getInt("audio_compat_mode", 0).coerceIn(0, 4)
+        _audioCompatMode.value = p.getInt("audio_compat_mode", 0).coerceIn(0, 5)
         _preloadLeadSeconds.value = p.getInt("preload_lead_seconds", 60).coerceIn(30, 90)
 
         _lastTrackIndex.value = p.getInt("last_track", -1)

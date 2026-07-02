@@ -827,6 +827,9 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
     if (numOutputChannels <= 0)
         return;
 
+    // Пульс для диагностики: «крутится ли колбэк вообще» видно из OBOE-дампа.
+    automix::noteAudioCallback (numSamples);
+
     juce::ScopedNoDenormals noDenormals; // flush IIR (bass-swap + EQ) denormals
 
     juce::AudioBuffer<float> output (outputChannelData, numOutputChannels, numSamples);
@@ -1039,19 +1042,28 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
     // NaN-ловушка: не-конечный сэмпл (NaN/Inf) отравляет рекурсивные IIR/лимитер
     // навсегда и на выходе слышен как постоянный шум. Вычищаем и СЧИТАЕМ
     // (nanScrubbed в OBOE-дампе): ненулевой счётчик = цепочка отравляется,
-    // это отдельный баг с точным индикатором.
+    // это отдельный баг с точным индикатором. Заодно (бесплатно, тот же проход)
+    // меряем уровень выхода: level>0 в дампе при тишине из динамика = звук
+    // чистый на выходе движка, его портит система.
     {
         int scrubbed = 0;
+        float sumAbs = 0.0f;
         for (int c = 0; c < ch && c < 2; ++c)
         {
             float* p = o[c];
             for (int i = 0; i < numSamples; ++i)
+            {
                 if (! std::isfinite (p[i]))
                 {
                     p[i] = 0.0f;
                     ++scrubbed;
                 }
+                else if (c == 0)
+                    sumAbs += std::abs (p[i]);
+            }
         }
+        if (numSamples > 0)
+            automix::noteAudioLevel (sumAbs / (float) numSamples);
         if (scrubbed > 0)
         {
             automix::addNanScrubbed (scrubbed);

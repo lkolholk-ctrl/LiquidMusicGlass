@@ -62,17 +62,19 @@ fun DebugOverlay() {
                         }.padding(4.dp))
                     Spacer(Modifier.width(8.dp))
                     // Перебор режимов Oboe на лету (0 normal → 1 safe → 2 exclusive →
-                    // 3 normal-i16 → 4 safe-i16): A/B прямо на играющей музыке, поток
-                    // переоткрывается сам. I16-режимы — для HAL с битым float-микшером.
+                    // 3 normal-i16 → 4 safe-i16 → 5 opensl-i16): A/B прямо на играющей
+                    // музыке, поток переоткрывается сам. Режим 5 — запасной бэкенд
+                    // OpenSL ES, минуя AAudio целиком.
                     Text("MODE", color = Color(0xFFFF8A65), fontSize = 11.sp, fontFamily = FontFamily.Monospace,
                         modifier = Modifier.clickable {
-                            val next = (com.liquidmusicglass.engine.AppSettings.audioCompatMode.value + 1) % 5
+                            val next = (com.liquidmusicglass.engine.AppSettings.audioCompatMode.value + 1) % 6
                             com.liquidmusicglass.engine.AppSettings.setAudioCompatMode(next)
                             DebugLog.add("OBOE mode -> ${when (next) {
                                 1 -> "SAFE(shared+none)"
                                 2 -> "EXCLUSIVE(stock)"
                                 3 -> "NORMAL_I16(shared+lowlat+i16)"
                                 4 -> "SAFE_I16(shared+none+i16)"
+                                5 -> "OPENSLES_I16(opensl+none+i16)"
                                 else -> "NORMAL(shared+lowlat)"
                             }}")
                         }.padding(4.dp))

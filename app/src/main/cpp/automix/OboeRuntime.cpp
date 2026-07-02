@@ -24,12 +24,14 @@ namespace
     struct StreamReport
     {
         int direction, openResult, usesAAudio, sharing, perf, format;
-        int sampleRate, bufferSize, burst, capacity;
+        int sampleRate, bufferSize, burst, capacity, channels;
         int mode;        // compat-режим на момент открытия
         long seq;        // порядковый номер (растёт), для «свежее/старее»
     };
 
-    constexpr int kMaxReports = 6;
+    // 12: каждый реопен устройства открывает пачку потоков (пробы + сессия), при
+    // 6 сессионный поток предыдущего режима выпадал из дампа.
+    constexpr int kMaxReports = 12;
     std::mutex gReportsMutex;
     StreamReport gReports[kMaxReports];
     long gReportSeq = 0;
@@ -45,16 +47,20 @@ namespace
             case 2:  return "EXCLUSIVE (exclusive+lowlat)";
             case 3:  return "NORMAL_I16 (shared+lowlat+i16)";
             case 4:  return "SAFE_I16 (shared+none+i16)";
+            case 5:  return "OPENSLES_I16 (opensl+none+i16)";
             default: return "NORMAL (shared+lowlat)";
         }
     }
 
     std::atomic<long> gNanScrubbed { 0 };   // вычищенные NaN/Inf на выходе колбэка
+    std::atomic<long> gCbCount { 0 };       // пульс аудио-колбэка
+    std::atomic<int>  gCbNumSamples { 0 };  // размер последнего блока
+    std::atomic<int>  gCbLevelMilli { 0 };  // средний |сэмпл| последнего блока ×1000
 
     void formatReport (char* buf, size_t bufSize, const StreamReport& r)
     {
         std::snprintf (buf, bufSize,
-                       "#%ld %s %s api=%s share=%s perf=%s fmt=%s rate=%d buf=%d/%d burst=%d mode=%d",
+                       "#%ld %s %s api=%s share=%s perf=%s fmt=%s rate=%d ch=%d buf=%d/%d burst=%d mode=%d",
                        r.seq,
                        r.direction == (int) oboe::Direction::Output ? "out" : "in",
                        oboe::convertToText ((oboe::Result) r.openResult),
@@ -62,7 +68,7 @@ namespace
                        r.sharing < 0 ? "?" : oboe::convertToText ((oboe::SharingMode) r.sharing),
                        r.perf < 0 ? "?" : oboe::convertToText ((oboe::PerformanceMode) r.perf),
                        r.format < 0 ? "?" : oboe::convertToText ((oboe::AudioFormat) r.format),
-                       r.sampleRate, r.bufferSize, r.capacity, r.burst, r.mode);
+                       r.sampleRate, r.channels, r.bufferSize, r.capacity, r.burst, r.mode);
     }
 }
 
@@ -70,7 +76,7 @@ namespace automix
 {
     bool setOboeCompatMode (int mode)
     {
-        const int clamped = mode < 0 ? 0 : (mode > 4 ? 4 : mode);
+        const int clamped = mode < 0 ? 0 : (mode > 5 ? 5 : mode);
         const int prev = gCompatMode.exchange (clamped);
         if (prev != clamped)
             __android_log_print (ANDROID_LOG_INFO, kLogTag, "compat mode %d -> %d (%s)",
@@ -89,6 +95,17 @@ namespace automix
             gNanScrubbed.fetch_add (count, std::memory_order_relaxed);
     }
 
+    void noteAudioCallback (int numSamples)
+    {
+        gCbCount.fetch_add (1, std::memory_order_relaxed);
+        gCbNumSamples.store (numSamples, std::memory_order_relaxed);
+    }
+
+    void noteAudioLevel (float meanAbs)
+    {
+        gCbLevelMilli.store ((int) (meanAbs * 1000.0f), std::memory_order_relaxed);
+    }
+
     void setLastCodecInfo (const char* info)
     {
         if (info == nullptr)
@@ -104,6 +121,16 @@ namespace automix
     {
         std::string out = "mode=";
         out += modeName (gCompatMode.load());
+        {
+            // Пульс + уровень: cb n растёт → колбэк живёт; level>0 при тишине из
+            // динамика → звук чистый на выходе движка, портит система.
+            char cbLine[80];
+            std::snprintf (cbLine, sizeof (cbLine), "\ncb n=%ld ns=%d level=%d",
+                           gCbCount.load (std::memory_order_relaxed),
+                           gCbNumSamples.load (std::memory_order_relaxed),
+                           gCbLevelMilli.load (std::memory_order_relaxed));
+            out += cbLine;
+        }
         if (const long nan = gNanScrubbed.load (std::memory_order_relaxed); nan > 0)
         {
             char nanLine[48];
@@ -147,15 +174,23 @@ extern "C" int lmg_oboeSharingModeInt()
 extern "C" int lmg_oboePerformanceModeInt()
 {
     const int mode = automix::getOboeCompatMode();
-    return (int) (mode == 1 || mode == 4 ? oboe::PerformanceMode::None
-                                         : oboe::PerformanceMode::LowLatency);
+    return (int) (mode == 1 || mode == 4 || mode == 5 ? oboe::PerformanceMode::None
+                                                      : oboe::PerformanceMode::LowLatency);
 }
 
 extern "C" int lmg_oboeForceI16()
 {
-    // Режимы 3/4: пропустить float-сессию JUCE → штатная int16-ветка. Для HAL,
+    // Режимы 3/4/5: пропустить float-сессию JUCE → штатная int16-ветка. Для HAL,
     // которые float «успешно» открывают, но портят в микшере (vivo Y35).
     return automix::getOboeCompatMode() >= 3 ? 1 : 0;
+}
+
+extern "C" int lmg_oboeAudioApiInt()
+{
+    // 0 = Unspecified (AAudio, при недоступности OpenSLES), 1 = принудительный
+    // OpenSL ES — запасной бэкенд для устройств, где кривой весь AAudio.
+    return automix::getOboeCompatMode() == 5 ? (int) oboe::AudioApi::OpenSLES
+                                             : (int) oboe::AudioApi::Unspecified;
 }
 
 extern "C" int lmg_oboeBufferCapacityMinFrames()
@@ -171,11 +206,11 @@ extern "C" int lmg_oboeBufferCapacityMinFrames()
 extern "C" void lmg_onOboeStreamOpen (int direction, int openResult, int usesAAudio,
                                       int sharingMode, int performanceMode, int format,
                                       int sampleRate, int bufferSizeFrames, int framesPerBurst,
-                                      int bufferCapacityFrames)
+                                      int bufferCapacityFrames, int channelCount)
 {
     StreamReport r { direction, openResult, usesAAudio, sharingMode, performanceMode,
                      format, sampleRate, bufferSizeFrames, framesPerBurst, bufferCapacityFrames,
-                     automix::getOboeCompatMode(), 0 };
+                     channelCount, automix::getOboeCompatMode(), 0 };
     {
         const std::lock_guard<std::mutex> lock (gReportsMutex);
         r.seq = ++gReportSeq;
