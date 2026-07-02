@@ -76,7 +76,11 @@ val WAVE_MOODS = listOf(
     WaveMood("Dancefloor", Color(0xFFE0405F), Color(0xFFFF7AB0), MoodPattern.RINGS, "dance edm hits"),
 )
 
-private const val TILE_DP = 168
+// Прямоугольные карточки (ландшафт): ниже квадратных — главный экран Wave
+// целиком помещается без скролла.
+private const val TILE_W_DP = 200
+private const val TILE_H_DP = 116
+private const val TILE_CORNER_DP = 30
 private const val TAU = (2.0 * PI).toFloat()
 
 // Скорость медленного «дыхания» узора (доля фазы 0..1 в секунду).
@@ -240,11 +244,11 @@ private fun MoodTile(
 
     Box(
         modifier = Modifier
-            .size(TILE_DP.dp)
-            // Прямоугольные карточки с СИЛЬНЫМ скруглением углов. Клип обрезает
+            .size(TILE_W_DP.dp, TILE_H_DP.dp)
+            // Прямоугольные карточки с сильным скруглением углов. Клип обрезает
             // ВСЁ рисование по форме карточки — ничего не «вытекает» за плитку
             // (дымные ореолы без клипа рисовались ниже ряда и давали артефакты).
-            .clip(RoundedCornerShape(40.dp))
+            .clip(RoundedCornerShape(TILE_CORNER_DP.dp))
             .combinedClickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -303,7 +307,7 @@ private fun MoodTile(
                 if (shader != null && shaderBrush != null && !powerSave && bassLevel != null) {
                     drawRoundRect(
                         color = colorB.copy(alpha = 0.05f + 0.20f * bassLevel.value.coerceIn(0f, 1f)),
-                        cornerRadius = CornerRadius(40.dp.toPx()),
+                        cornerRadius = CornerRadius(TILE_CORNER_DP.dp.toPx()),
                         style = Stroke(width = 2.dp.toPx())
                     )
                 }

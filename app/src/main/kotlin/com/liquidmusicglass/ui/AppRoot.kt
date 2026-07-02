@@ -1,6 +1,7 @@
 package com.liquidmusicglass.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.spring
@@ -38,6 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
@@ -414,6 +416,23 @@ fun AppRoot() {
             val bottomBarTranslateY = expandProgress.value * density.run { 160.dp.toPx() }
             val bottomBarAlpha = if (expandProgress.value >= 0.99f) 0f else 1f
 
+            // На вкладке Wave бар подстраивается под дым: красится тёмной базой
+            // палитры обложки (darkMuted — тот же цвет, к которому аура гасит дым
+            // у нижней кромки), с плавным переливом при смене трека. На остальных
+            // вкладках — обычный цвет темы.
+            val onWaveTab = selectedIndex == 0
+            val albumColorsForBar = com.liquidmusicglass.ui.glass.rememberAlbumColors(
+                currentTrack?.displayArtUri, currentTrack?.coverUrl
+            )
+            val waveBarColor by animateColorAsState(
+                targetValue = lerp(albumColorsForBar.darkMuted, Color.Black, 0.35f),
+                animationSpec = tween(600),
+                label = "waveBarColor"
+            )
+            val barBackground =
+                if (onWaveTab) waveBarColor
+                else if (LiquidTheme.colors.isDark) Color(0xFF0D0D0F) else Color(0xFFF2F2F4)
+
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -422,17 +441,20 @@ fun AppRoot() {
                         translationY = bottomBarTranslateY
                         alpha = bottomBarAlpha
                     }
-                    .background(
-                        if (LiquidTheme.colors.isDark) Color(0xFF0D0D0F) else Color(0xFFF2F2F4)
-                    )
+                    .background(barBackground)
             ) {
-                BottomBar(
-                    selectedIndex = selectedIndex,
-                    onItemSelected = {
-                        com.liquidmusicglass.debug.DebugLog.add("TAB -> $it")
-                        selectedIndex = it; AppSettings.setLastScreen(it)
-                    }
-                )
+                // Wave-контент всегда тёмный → на дымном фоне иконки бара тоже
+                // должны быть «тёмной темы» (белые), даже если тема приложения светлая.
+                val barContent: @Composable () -> Unit = {
+                    BottomBar(
+                        selectedIndex = selectedIndex,
+                        onItemSelected = {
+                            com.liquidmusicglass.debug.DebugLog.add("TAB -> $it")
+                            selectedIndex = it; AppSettings.setLastScreen(it)
+                        }
+                    )
+                }
+                if (onWaveTab) ForceDarkContent { barContent() } else barContent()
 
                 Spacer(
                     modifier = Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)

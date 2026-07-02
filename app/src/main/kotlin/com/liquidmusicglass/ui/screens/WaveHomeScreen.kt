@@ -255,15 +255,16 @@ fun WaveHomeScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        // Весь блок «артист + обложка + контролы» опущен чуть ниже.
-                        Spacer(Modifier.height(40.dp))
+                        Spacer(Modifier.height(24.dp))
+                        // Имя артиста компактнее (34sp): с гигантским заголовком
+                        // экран не влезал по высоте и начинал листаться.
                         Text(
                             text = track.artist,
                             color = Color.White,
-                            fontSize = 44.sp,
+                            fontSize = 34.sp,
                             // Межстрочный интервал — чтобы при переносе (длинное имя)
                             // строки не налезали друг на друга.
-                            lineHeight = 50.sp,
+                            lineHeight = 40.sp,
                             fontWeight = FontWeight.Black,
                             fontFamily = AppFontFamily,
                             textAlign = TextAlign.Center,
@@ -457,8 +458,8 @@ fun WaveHomeScreen(
 
             // ── Animated mood blobs ──
             item {
-                // Блобы опущены СИЛЬНО ниже контролов (много воздуха сверху).
-                Spacer(Modifier.height(96.dp))
+                // Умеренный отступ: карточки внизу, но весь экран влезает без скролла.
+                Spacer(Modifier.height(32.dp))
                 WaveMoodTiles(
                     onSelect = { mood -> viewModel.buildMoodWave(context, mood.query, mood.label) },
                     animate = animationsActive,
