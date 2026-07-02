@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -145,8 +146,12 @@ fun WaveHomeScreen(
     // Сглаженный бас 0..1 — пульс обложки и кромок мудкарточек. Питается только
     // от стриминга (BassAudioProcessor в цепочке ExoPlayer); у локального JUCE
     // уровней нет — эффект просто нулевой, как и «вдох» ауры-дыма. Кадровый цикл
-    // работает ТОЛЬКО пока играет музыка (на паузе плавно гаснет и остановлен).
-    val bassLevel = rememberSmoothedBass(animate = animationsActive, playing = isPlaying)
+    // работает ТОЛЬКО пока играет музыка (на паузе плавно гаснет и остановлен);
+    // в энергосбережении пульс выключен целиком.
+    val bassLevel = rememberSmoothedBass(
+        animate = animationsActive && !com.liquidmusicglass.ui.PowerSaveMonitor.active,
+        playing = isPlaying
+    )
 
     // Акцент экрана — vibrant играющей обложки (fallback — зелёный волны).
     val accent by animateColorAsState(
@@ -202,7 +207,9 @@ fun WaveHomeScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding(),
-            contentPadding = PaddingValues(bottom = 96.dp)
+            // Снизу — место под оверлей мудкарточек (116dp) + бар: контент ленты
+            // при скролле не прячется под ними.
+            contentPadding = PaddingValues(bottom = 220.dp)
         ) {
             item { WaveTopBar(onSearch = onNavigateToSearch, onOpenProfile = onOpenProfile) }
 
@@ -456,25 +463,29 @@ fun WaveHomeScreen(
                 }
             }
 
-            // ── Animated mood blobs ──
-            item {
-                // Умеренный отступ: карточки внизу, но весь экран влезает без скролла.
-                Spacer(Modifier.height(32.dp))
-                WaveMoodTiles(
-                    onSelect = { mood -> viewModel.buildMoodWave(context, mood.query, mood.label) },
-                    animate = animationsActive,
-                    // Палитра обложки текущего трека — та же, из которой рисуется
-                    // аура-дым: блобы подстраиваются под каждую музыку. Без трека
-                    // (палитра дефолтно тёмно-нейтральная) — свои цвета мудов.
-                    albumColors = if (track != null) albumColors else null,
-                    bassLevel = bassLevel,
-                    onPreview = { mood -> previewMood = mood }
-                )
-                Spacer(Modifier.height(8.dp))
-            }
-
             // Рекомендации (recently played / home-блоки / charts) перенесены в таб New.
             // На Wave остаются только мудкарточки + плеер волны/текущий трек.
+        }
+
+        // ── Мудкарточки — оверлей, прижатый к НИЖНЕМУ бару (не элемент ленты):
+        // всегда сидят прямо над баром, сколько бы воздуха ни было выше. ──
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(bottom = 72.dp)   // высота бара (60dp) + зазор
+        ) {
+            WaveMoodTiles(
+                onSelect = { mood -> viewModel.buildMoodWave(context, mood.query, mood.label) },
+                animate = animationsActive,
+                // Палитра обложки текущего трека — та же, из которой рисуется
+                // аура-дым: карточки подстраиваются под каждую музыку. Без трека
+                // (палитра дефолтно тёмно-нейтральная) — свои цвета мудов.
+                albumColors = if (track != null) albumColors else null,
+                bassLevel = bassLevel,
+                onPreview = { mood -> previewMood = mood }
+            )
         }
 
         // ── Онбординг волны: показываем, когда персональная волна пуста и юзер
@@ -854,13 +865,17 @@ private fun rememberSmoothedBass(animate: Boolean, playing: Boolean): State<Floa
         }
         var s1 = value
         var s2 = value
+        var skip = false
+        val halfRate = com.liquidmusicglass.ui.DeviceTier.lite
         while (true) {
             withInfiniteAnimationFrameMillis {
                 val target = AudioReactor.low.coerceIn(0f, 1f)
                 val rate = if (target > s1) 0.08f else 0.035f
                 s1 += ((target - s1) * rate).coerceIn(-0.022f, 0.022f)
                 s2 += (s1 - s2) * 0.15f
-                value = s2
+                // lite: публикуем через кадр — пульс/кромки перерисовываются на ~30 Гц.
+                if (!halfRate || !skip) value = s2
+                skip = !skip
             }
         }
     }

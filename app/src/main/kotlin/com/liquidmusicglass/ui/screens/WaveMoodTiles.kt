@@ -157,11 +157,18 @@ fun WaveMoodTiles(
 ) {
     // Единый кадровый клок (секунды). Один на весь ряд — не плодим корутины.
     // Замораживается, когда Home перекрыт оверлеем (см. AuraBackground): меньше
-    // нагрузки на RenderThread при переходах.
+    // нагрузки на RenderThread при переходах. На lite-устройствах публикуем
+    // через кадр (~30 Гц) — узоры/переливы медленные, разницы не видно, а
+    // перерисовка всех видимых плиток вдвое дешевле.
+    val liteTier = com.liquidmusicglass.ui.DeviceTier.lite
     val timeSec = produceState(0f, animate) {
         if (!animate) return@produceState
+        var skip = false
         while (true) {
-            withInfiniteAnimationFrameMillis { value = it / 1000f }
+            withInfiniteAnimationFrameMillis {
+                if (!liteTier || !skip) value = it / 1000f
+                skip = !skip
+            }
         }
     }
 

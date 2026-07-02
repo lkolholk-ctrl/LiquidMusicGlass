@@ -104,6 +104,10 @@ class App : Application(), ImageLoaderFactory {
         // Реактивный детектор энергосбережения (упрощает эффекты, не выключает)
         com.liquidmusicglass.ui.PowerSaveMonitor.init(this)
 
+        // Классификация железа: на слабых устройствах AGSL-эффекты работают в
+        // облегчённом режиме (меньше октав дыма, 30 Гц клоки)
+        com.liquidmusicglass.ui.DeviceTier.init(this)
+
         // Initialize PlayerController — просто сохраняет context
         PlayerController.init(this)
 

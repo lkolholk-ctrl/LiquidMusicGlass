@@ -44,7 +44,9 @@ import com.liquidmusicglass.ui.glass.AlbumColors
  *
  * Компонент НЕ подключён в FullPlayer (там свой palette-фон). Подключать там, где нужен фон-аура.
  */
-private const val AURA_AGSL = """
+// Число октав fbm подставляется при создании шейдера: 6 на обычных устройствах,
+// 4 на lite (DeviceTier) — дым чуть менее детальный, но GPU-стоимость заметно ниже.
+private fun auraAgsl(octaves: Int) = """
 uniform float2 uResolution;
 uniform float  uTime;
 uniform float  uIntensity;
@@ -77,7 +79,7 @@ float vnoise(float2 p) {
 float fbm(float2 p) {
     float v = 0.0;
     float amp = 0.5;
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < $octaves; i++) {
         v += amp * vnoise(p);
         p = float2(0.8 * p.x + 0.6 * p.y, -0.6 * p.x + 0.8 * p.y) * 2.0;
         amp *= 0.5;
@@ -149,16 +151,22 @@ private fun advanceBass(current: Float, target: Float): Float {
  * Сглаженный уровень баса 0..1 как [State]. Сырой [AudioReactor.low] прогоняется
  * через КАСКАД: огибающая с инерцией → вторая ступень low-pass. В шейдер уходит
  * одно очень плавное число (uBass) — клубление без рывков.
+ *
+ * [halfRate] (lite-устройства): каскад считается каждый кадр (постоянная времени
+ * сохраняется), но ПУБЛИКУЕТСЯ значение через кадр — дым перерисовывается на
+ * ~30 Гц вместо 60, GPU-нагрузка вдвое ниже, визуально неотличимо.
  */
 @Composable
-private fun rememberSmoothedBass(): State<Float> = produceState(0f) {
+private fun rememberSmoothedBass(halfRate: Boolean = false): State<Float> = produceState(0f, halfRate) {
     var s1 = 0f
     var s2 = 0f
+    var skip = false
     while (true) {
         withInfiniteAnimationFrameMillis {
             s1 = advanceBass(s1, AudioReactor.low.coerceIn(0f, 1f))
             s2 += (s1 - s2) * BASS_STAGE2
-            value = s2
+            if (!halfRate || !skip) value = s2
+            skip = !skip
         }
     }
 }
@@ -251,7 +259,9 @@ private fun AuraShaderBackground(
     smokeSaturation: Float = 1.0f,
     smokeContrast: Float = 1.0f,
 ) {
-    val shader = remember { RuntimeShader(AURA_AGSL) }
+    // lite-устройства: 4 октавы fbm вместо 6 (~вдвое дешевле на пиксель).
+    val liteTier = com.liquidmusicglass.ui.DeviceTier.lite
+    val shader = remember { RuntimeShader(auraAgsl(if (liteTier) 4 else 6)) }
     val brush = remember { ShaderBrush(shader) }
 
     // цвета вуалей — из палитры обложки, плавно меняются при смене трека
@@ -278,6 +288,7 @@ private fun AuraShaderBackground(
         var s1 = 0f
         var s2 = 0f
         var lastMs = 0L
+        var skip = false
         while (true) {
             withInfiniteAnimationFrameMillis { ms ->
                 val dt = if (lastMs == 0L) 0f else ((ms - lastMs).coerceIn(0L, 64L)) / 1000f
@@ -286,13 +297,16 @@ private fun AuraShaderBackground(
                 s2 += (s1 - s2) * BASS_STAGE2
                 phase += dt * (1f + s2 * 0.15f)
                 phaseHolder[0] = phase
-                value = phase
+                // lite: публикуем фазу через кадр — полноэкранный fbm рисуется на
+                // ~30 Гц (фаза интегрируется по dt, так что движение не ускоряется).
+                if (!liteTier || !skip) value = phase
+                skip = !skip
             }
         }
     }
 
     // одно сглаженное число баса в шейдер — дыхание/яркость (узко, безопасно)
-    val bass by rememberSmoothedBass()
+    val bass by rememberSmoothedBass(halfRate = liteTier)
 
     Box(
         modifier
@@ -323,14 +337,26 @@ private fun AuraGradientFallback(albumColors: AlbumColors, modifier: Modifier, s
     val b by animateColorAsState(albumColors.dominant, tween(900), label = "fbB")
     val c by animateColorAsState(albumColors.lightVibrant, tween(900), label = "fbC")
 
-    val phase by produceState(0f) {
+    // Частота публикаций: энергосбер → каждый 4-й кадр (~15 Гц), lite → каждый
+    // 2-й (~30 Гц). Медленному дрейфу пятен этого более чем достаточно.
+    val powerSave = com.liquidmusicglass.ui.PowerSaveMonitor.active
+    val divider = when {
+        powerSave -> 4
+        com.liquidmusicglass.ui.DeviceTier.lite -> 2
+        else -> 1
+    }
+    val phase by produceState(0f, divider) {
+        var frame = 0
         while (true) {
-            withInfiniteAnimationFrameMillis { value = (it % 16000L) / 16000f }
+            withInfiniteAnimationFrameMillis {
+                if (frame % divider == 0) value = (it % 16000L) / 16000f
+                frame++
+            }
         }
     }
 
     // та же сглаженная огибающая баса — мягкое дыхание, без вспышек
-    val bass by rememberSmoothedBass()
+    val bass by rememberSmoothedBass(halfRate = divider > 1)
 
     Box(
         modifier
