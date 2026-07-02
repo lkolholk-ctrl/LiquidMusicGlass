@@ -366,6 +366,18 @@ object AutoMixNativeEngine {
     }
 
     /**
+     * Underrun-адаптация: телеметрия поймала рост xrun → увеличить буфер
+     * (burst-множитель 6→8) и переоткрыть Oboe-поток. Внутри — close/reopen
+     * устройства, поэтому ТОЛЬКО с фонового потока (@Synchronized как route).
+     */
+    @Synchronized
+    fun escalateBufferForUnderruns() {
+        if (!isLoaded || !initialised) return
+        runCatching { nativeEscalateBufferForUnderruns() }
+            .onFailure { Log.w(TAG, "nativeEscalateBufferForUnderruns failed", it) }
+    }
+
+    /**
      * Pre-stretch deck B to match deck A's tempo (beat-match), pitch preserved.
      * Heavy/offline — call from a background thread BEFORE startCrossfade.
      */
@@ -462,6 +474,7 @@ object AutoMixNativeEngine {
     private external fun nativePositionMsA(): Double
     private external fun nativeLengthMsA(): Double
     private external fun nativeXRunCount(): Int
+    private external fun nativeEscalateBufferForUnderruns()
     private external fun nativePlay()
     private external fun nativePause()
     private external fun nativeSilenceOutput()

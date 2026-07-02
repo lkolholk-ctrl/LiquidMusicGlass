@@ -149,12 +149,13 @@ AutoMixAudioEngine::AutoMixAudioEngine()
     formatManager.registerBasicFormats();
     // По одному read-ahead потоку на дек (см. заголовок: общий поток starve'ил
     // играющий дек при загрузке incoming во время свода).
-    // Высокий приоритет: при переключении приложений система кратко тротлит
-    // фоновые потоки. Если поток предчтения декодирует mp3 на обычном приоритете,
-    // он отстаёт → буфер транспорта осушается → ~2с заикания. High держит декод
-    // впереди под нагрузкой (но НИЖЕ realtime-потока Oboe — аудио-колбэк не голодает).
-    readAheadThreadA.startThread (juce::Thread::Priority::high);
-    readAheadThreadB.startThread (juce::Thread::Priority::high);
+    // Максимальный НЕ-realtime приоритет: при шторке/переключении приложений
+    // система кратко тротлит фоновые потоки. Если поток предчтения декодирует
+    // mp3 на меньшем приоритете, он отстаёт → буфер транспорта осушается →
+    // микро-заикания вплоть до «циклички». highest держит декод впереди под
+    // нагрузкой (но НИЖЕ realtime-потока Oboe — аудио-колбэк не голодает).
+    readAheadThreadA.startThread (juce::Thread::Priority::highest);
+    readAheadThreadB.startThread (juce::Thread::Priority::highest);
 }
 
 AutoMixAudioEngine::~AutoMixAudioEngine()
@@ -232,9 +233,12 @@ void AutoMixAudioEngine::applyBufferForRouteUnlocked (bool isBluetooth, bool for
             // 2×burst (~8-10 мс на многих телефонах) слишком хрупок для JUCE +
             // MediaCodec + FX: при шторке/переключении приложений read-ahead и mixer
             // получают короткий CPU stall, и fast-path уходит в underrun. Для музыки
-            // 20-30 мс системной задержки не критичны, зато Oboe перестаёт щёлкать.
-            target = (burst > 0) ? juce::jmax (burst * 4, 1024)
-                                 : (sizes.isEmpty() ? 1024 : sizes.getFirst());
+            // 30-40 мс системной задержки не критичны, зато Oboe перестаёт щёлкать.
+            // Множитель адаптивный: базово 6×burst, телеметрия xrun'ов может
+            // поднять до 8× (escalateBufferForUnderruns).
+            const int mult = bufferBurstMultiplier.load();
+            target = (burst > 0) ? juce::jmax (burst * mult, 1536)
+                                 : (sizes.isEmpty() ? 1536 : sizes.getFirst());
         }
         if (! sizes.isEmpty())
             target = juce::jmax (target, sizes.getFirst());        // не ниже минимума устройства
@@ -719,6 +723,19 @@ int AutoMixAudioEngine::xRunCount()
     if (auto* dev = deviceManager.getCurrentAudioDevice())
         return dev->getXRunCount();
     return -1;
+}
+
+void AutoMixAudioEngine::escalateBufferForUnderruns()
+{
+    // Кап 8×burst: дальше расти бессмысленно — латентность заметна, а причина
+    // уже точно не в размере буфера.
+    int cur = bufferBurstMultiplier.load();
+    if (cur >= 8)
+        return;
+    bufferBurstMultiplier.store (cur + 2);
+    // BT-маршрут и так на крупном буфере — эскалация касается динамика/провода.
+    if (! routeIsBluetooth.load())
+        applyBufferForRoute (false, /*forceReopen=*/true);
 }
 
 //==============================================================================

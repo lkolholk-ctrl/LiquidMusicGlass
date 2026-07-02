@@ -89,6 +89,14 @@ class JuceLocalPlayer(
     private var lastXRunCheckMs = 0L
     private var lastXRuns = -1
 
+    // Адаптация буфера: если за окно проверки прилетело ≥ XRUN_ESCALATE_DELTA
+    // underrun'ов — просим движок расширить буфер (6×→8×burst). Не чаще
+    // MAX_BUFFER_ESCALATIONS раз за сессию плеера; сам вызов — на loadHandler
+    // (внутри реопен устройства, main это делать нельзя).
+    private val XRUN_ESCALATE_DELTA = 3
+    private val MAX_BUFFER_ESCALATIONS = 1
+    private var bufferEscalations = 0
+
     // ── Stage 8c (ШАГ 2: РЕАЛЬНЫЙ СВОД) ──────────────────────────────────────
     // Когда модель сказала ready и подобрала параметры — у точки свода реально
     // запускаем equal-power кроссфейд current→incoming в движке (пинг-понг деков).
@@ -540,8 +548,18 @@ class JuceLocalPlayer(
         if (!playWhenReadyFlag) return
         val x = engine.xRunCount()
         if (x >= 0) {
-            if (lastXRuns in 0 until x) DebugLog.add("JUCE.xruns +${x - lastXRuns} (total=$x)")
+            val delta = if (lastXRuns in 0 until x) x - lastXRuns else 0
+            if (delta > 0) DebugLog.add("JUCE.xruns +$delta (total=$x)")
             lastXRuns = x
+
+            // Стабильные underrun'ы под системной нагрузкой → адаптивно расширяем
+            // буфер. Счётчик xrun сбросится при реопене — база перезахватится.
+            if (delta >= XRUN_ESCALATE_DELTA && bufferEscalations < MAX_BUFFER_ESCALATIONS) {
+                bufferEscalations++
+                DebugLog.add("JUCE.xruns escalate buffer (#$bufferEscalations)")
+                loadHandler.post { if (!released) engine.escalateBufferForUnderruns() }
+                lastXRuns = -1
+            }
         }
     }
 

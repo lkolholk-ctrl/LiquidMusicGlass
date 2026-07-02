@@ -112,6 +112,12 @@ public:
      *  реальным данным, а не вслепую. */
     int xRunCount();
 
+    /** Underrun-адаптация: телеметрия поймала рост xrun → увеличить буфер
+     *  (множитель burst 4→6→8, кап) и переоткрыть поток на текущем маршруте.
+     *  Короткий разрыв звука при реопене — цена за прекращение постоянных
+     *  заиканий под системной нагрузкой. НЕ с аудио- и НЕ с main-потока. */
+    void escalateBufferForUnderruns();
+
     /**
      * Stage 4: pre-stretch deck B so its tempo matches deck A (bpmB -> bpmA),
      * pitch preserved. Heavy/offline — call off the audio & main threads, before
@@ -229,6 +235,11 @@ private:
     // вызов с тем же значением всё равно применился, а последующие без изменения — нет.
     std::atomic<bool> routeIsBluetooth { false };
     std::atomic<bool> routeEverApplied { false };
+
+    // Множитель burst-размера для встроенного/проводного маршрута. Стартует с 6
+    // (запас против CPU-сторма системного UI: шторка/переключения); телеметрия
+    // xrun'ов может адаптивно поднять до 8 (escalateBufferForUnderruns).
+    std::atomic<int> bufferBurstMultiplier { 6 };
 
     // Crossfade state. crossfadeStart is latched by the audio thread so the
     // sample position resets in sync; everything else is plain atomics.

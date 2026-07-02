@@ -380,6 +380,13 @@ Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeXRunCount(
 }
 
 JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeEscalateBufferForUnderruns(
+        JNIEnv* /*env*/, jobject /*thiz*/)
+{
+    withEngineVoid ([] (AutoMixAudioEngine& engine) { engine.escalateBufferForUnderruns(); });
+}
+
+JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativePlay(
         JNIEnv* /*env*/, jobject /*thiz*/)
 {
