@@ -387,6 +387,13 @@ Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeEscalateBuffe
 }
 
 JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeSetPowerSaveMode(
+        JNIEnv* /*env*/, jobject /*thiz*/, jboolean on)
+{
+    withEngineVoid ([&] (AutoMixAudioEngine& engine) { engine.setPowerSaveMode (on == JNI_TRUE); });
+}
+
+JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativePlay(
         JNIEnv* /*env*/, jobject /*thiz*/)
 {

@@ -378,6 +378,18 @@ object AutoMixNativeEngine {
     }
 
     /**
+     * Battery Saver вкл/выкл: движок держит максимальный буфер на время режима
+     * (система тротлит CPU жёстче). Внутри реопен потока — ТОЛЬКО с фонового
+     * потока (@Synchronized как route/escalate).
+     */
+    @Synchronized
+    fun setPowerSaveMode(on: Boolean) {
+        if (!isLoaded || !initialised) return
+        runCatching { nativeSetPowerSaveMode(on) }
+            .onFailure { Log.w(TAG, "nativeSetPowerSaveMode failed", it) }
+    }
+
+    /**
      * Pre-stretch deck B to match deck A's tempo (beat-match), pitch preserved.
      * Heavy/offline — call from a background thread BEFORE startCrossfade.
      */
@@ -475,6 +487,7 @@ object AutoMixNativeEngine {
     private external fun nativeLengthMsA(): Double
     private external fun nativeXRunCount(): Int
     private external fun nativeEscalateBufferForUnderruns()
+    private external fun nativeSetPowerSaveMode(on: Boolean)
     private external fun nativePlay()
     private external fun nativePause()
     private external fun nativeSilenceOutput()

@@ -118,6 +118,11 @@ public:
      *  заиканий под системной нагрузкой. НЕ с аудио- и НЕ с main-потока. */
     void escalateBufferForUnderruns();
 
+    /** Энергосбережение (Battery Saver): система жёстче тротлит CPU — на время
+     *  режима держим максимальный буфер (8×burst) для динамика/провода.
+     *  Реопен потока при смене состояния. НЕ с аудио- и НЕ с main-потока. */
+    void setPowerSaveMode (bool on);
+
     /**
      * Stage 4: pre-stretch deck B so its tempo matches deck A (bpmB -> bpmA),
      * pitch preserved. Heavy/offline — call off the audio & main threads, before
@@ -240,6 +245,8 @@ private:
     // (запас против CPU-сторма системного UI: шторка/переключения); телеметрия
     // xrun'ов может адаптивно поднять до 8 (escalateBufferForUnderruns).
     std::atomic<int> bufferBurstMultiplier { 6 };
+    // Battery Saver: на время режима буфер держится на максимуме (8×burst).
+    std::atomic<bool> powerSaveBuffer { false };
 
     // Crossfade state. crossfadeStart is latched by the audio thread so the
     // sample position resets in sync; everything else is plain atomics.

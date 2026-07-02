@@ -235,8 +235,11 @@ void AutoMixAudioEngine::applyBufferForRouteUnlocked (bool isBluetooth, bool for
             // получают короткий CPU stall, и fast-path уходит в underrun. Для музыки
             // 30-40 мс системной задержки не критичны, зато Oboe перестаёт щёлкать.
             // Множитель адаптивный: базово 6×burst, телеметрия xrun'ов может
-            // поднять до 8× (escalateBufferForUnderruns).
-            const int mult = bufferBurstMultiplier.load();
+            // поднять до 8× (escalateBufferForUnderruns); в энергосбережении —
+            // сразу максимум (система тротлит CPU жёстче обычного).
+            int mult = bufferBurstMultiplier.load();
+            if (powerSaveBuffer.load())
+                mult = juce::jmax (mult, 8);
             target = (burst > 0) ? juce::jmax (burst * mult, 1536)
                                  : (sizes.isEmpty() ? 1536 : sizes.getFirst());
         }
@@ -352,8 +355,9 @@ bool AutoMixAudioEngine::loadDeck (Deck& deck, const juce::String& path)
         clearDeckUnlocked (deck);
         deck.sourceSampleRate = sourceRate;
         deck.readerSource = std::move (readerSource);
-        // ~3с предчтения (переживает кратковременный тротлинг при уходе в фон).
-        deck.transport.setSource (deck.readerSource.get(), (int) (sourceRate * 3.0),
+        // ~5с предчтения (переживает затяжной тротлинг фоновых потоков при
+        // погашенном экране / энергосбережении).
+        deck.transport.setSource (deck.readerSource.get(), (int) (sourceRate * 5.0),
                                   &threadForDeck (deck), sourceRate, 2);
         deck.transport.setPosition (0.0);
         deck.path = path;
@@ -371,10 +375,11 @@ bool AutoMixAudioEngine::loadDeck (Deck& deck, const juce::String& path)
         clearDeckUnlocked (deck);
         deck.sourceSampleRate = sourceRate;
         deck.mediaCodecSource = std::move (streaming);
-        // ~5с предчтения (декод mp3 тяжелее, чем чтение wav): при переключении
-        // приложений система тротлит CPU на ~2с — большой буфер не даёт транспорту
-        // осушиться, поэтому звук не заикается. ~1.9 МБ/дек @48k stereo float.
-        deck.transport.setSource (deck.mediaCodecSource.get(), (int) (sourceRate * 5.0),
+        // ~8с предчтения (декод mp3 тяжелее, чем чтение wav): при переключении
+        // приложений и в фоне с погашенным экраном система тротлит CPU — большой
+        // буфер не даёт транспорту осушиться, звук не заикается и не уходит в
+        // «цикличку». ~3 МБ/дек @48k stereo float — приемлемо.
+        deck.transport.setSource (deck.mediaCodecSource.get(), (int) (sourceRate * 8.0),
                                   &threadForDeck (deck), sourceRate, 2);
         deck.transport.setPosition (0.0);
         deck.path = path;
@@ -482,7 +487,7 @@ bool AutoMixAudioEngine::loadDeckFd (Deck& deck, int fd, long long offset, long 
     clearDeckUnlocked (deck);
     deck.sourceSampleRate = sourceRate;
     deck.mediaCodecSource = std::move (streaming);
-    deck.transport.setSource (deck.mediaCodecSource.get(), (int) (sourceRate * 5.0),
+    deck.transport.setSource (deck.mediaCodecSource.get(), (int) (sourceRate * 8.0),
                               &threadForDeck (deck), sourceRate, 2);
     deck.transport.setPosition (0.0);
     deck.path = {};
@@ -723,6 +728,16 @@ int AutoMixAudioEngine::xRunCount()
     if (auto* dev = deviceManager.getCurrentAudioDevice())
         return dev->getXRunCount();
     return -1;
+}
+
+void AutoMixAudioEngine::setPowerSaveMode (bool on)
+{
+    if (powerSaveBuffer.exchange (on) == on)
+        return;                                    // состояние не изменилось
+    if (! initialised.load())
+        return;                                    // применится при init()
+    if (! routeIsBluetooth.load())
+        applyBufferForRoute (false, /*forceReopen=*/true);
 }
 
 void AutoMixAudioEngine::escalateBufferForUnderruns()

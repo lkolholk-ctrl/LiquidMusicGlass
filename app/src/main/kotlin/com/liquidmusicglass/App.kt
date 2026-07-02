@@ -135,4 +135,17 @@ class App : Application(), ImageLoaderFactory {
             }
         }
     }
+
+    /**
+     * Давление на память: сбрасываем крупные in-memory кэши (обложки Coil —
+     * до 30% heap, кэш лирики), чтобы LMK не выбивал процесс с играющей
+     * музыкой из фона. Диск-кэши не трогаем — обложки перечитаются с диска.
+     */
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= TRIM_MEMORY_UI_HIDDEN) {
+            runCatching { coil.Coil.imageLoader(this).memoryCache?.clear() }
+            runCatching { com.liquidmusicglass.engine.LyricsParser.trimCache() }
+        }
+    }
 }

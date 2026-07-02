@@ -588,6 +588,14 @@ class AudioService : MediaSessionService() {
                         PlayerController.durationMs.value.coerceAtLeast(0L)
                     }
                     PlayerController.updatePosition(position, effectiveDuration)
+
+                    // ── КРИТИЧНО для фона: wakelock взят с таймаутом 10 мин и
+                    // раньше «обновлялся» только событиями смены состояния. При
+                    // непрерывном воспроизведении событий НЕТ → через 10 минут
+                    // фона lock истекал, CPU уходил в дрёму, декод отставал →
+                    // микролаги/«цикличка», а затем процесс выбивало из памяти.
+                    // manageWakeLock() перезахватывает истёкший lock, пока играем.
+                    manageWakeLock()
                 } catch (e: Exception) {
                     android.util.Log.e("AudioService", "Position polling error", e)
                 }

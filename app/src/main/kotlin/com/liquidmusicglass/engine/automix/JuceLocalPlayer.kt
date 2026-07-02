@@ -97,6 +97,10 @@ class JuceLocalPlayer(
     private val MAX_BUFFER_ESCALATIONS = 1
     private var bufferEscalations = 0
 
+    // Синхронизация буфера движка с Battery Saver: тикер замечает смену режима
+    // и передаёт движку (реопен на loadHandler — не на main).
+    private var lastPowerSave: Boolean? = null
+
     // ── Stage 8c (ШАГ 2: РЕАЛЬНЫЙ СВОД) ──────────────────────────────────────
     // Когда модель сказала ready и подобрала параметры — у точки свода реально
     // запускаем equal-power кроссфейд current→incoming в движке (пинг-понг деков).
@@ -124,6 +128,7 @@ class JuceLocalPlayer(
             maybeRunAutoMixTransition()    // шаг 2: реальный кроссфейд по плану модели
             maybeAdvanceAtEnd()            // обычное переключение (если свода нет)
             maybeLogXRuns()                // телеметрия underrun'ов Oboe
+            maybeSyncPowerSave()           // буфер движка ↔ Battery Saver
             invalidateStateFromTicker()
             handler.postDelayed(this, TICK_MS)
         }
@@ -561,6 +566,14 @@ class JuceLocalPlayer(
                 lastXRuns = -1
             }
         }
+    }
+
+    /** Смена режима энергосбережения → движку максимальный буфер (или обратно). */
+    private fun maybeSyncPowerSave() {
+        val ps = com.liquidmusicglass.ui.PowerSaveMonitor.active
+        if (ps == lastPowerSave) return
+        lastPowerSave = ps
+        loadHandler.post { if (!released) engine.setPowerSaveMode(ps) }
     }
 
     private fun invalidateStateFromTicker() {
