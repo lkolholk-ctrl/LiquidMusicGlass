@@ -1,6 +1,7 @@
 package com.liquidmusicglass.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.spring
@@ -38,6 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
@@ -76,7 +78,6 @@ import com.liquidmusicglass.ui.screens.SettingsScreen
 import com.liquidmusicglass.ui.screens.AuthScreen
 import com.liquidmusicglass.ui.screens.ProfileScreen
 import com.liquidmusicglass.ui.screens.WaveOnboardingScreen
-import com.liquidmusicglass.ui.screens.youtube.YouTubeSearchScreen
 import com.liquidmusicglass.ui.theme.ForceDarkContent
 import com.liquidmusicglass.ui.theme.LiquidTheme
 import kotlinx.coroutines.launch
@@ -102,7 +103,6 @@ fun AppRoot() {
     var playlistDetailId by remember { mutableStateOf<String?>(null) }
     var authOpen by remember { mutableStateOf(false) }
     var profileOpen by remember { mutableStateOf(false) }
-    var youtubeSearchOpen by remember { mutableStateOf(false) }
     // Локальная медиатека (Артисты/Альбомы/Треки + поиск)
     var localLibraryOpen by remember { mutableStateOf(false) }
     var localArtistName by remember { mutableStateOf<String?>(null) }
@@ -174,7 +174,7 @@ fun AppRoot() {
     val rootBackdrop: LayerBackdrop = rememberLayerBackdrop()
 
     // Back handler: close detail screens first, then player, then app
-    BackHandler(enabled = tagEditTrack != null || lrcPublishTrack != null || localAlbum != null || localArtistName != null || localLibraryOpen || detailAlbumId != null || detailArtistId != null || equalizerOpen || playlistDetailId != null || settingsOpen || authOpen || profileOpen || youtubeSearchOpen || expandProgress.value > 0.5f) {
+    BackHandler(enabled = tagEditTrack != null || lrcPublishTrack != null || localAlbum != null || localArtistName != null || localLibraryOpen || detailAlbumId != null || detailArtistId != null || equalizerOpen || playlistDetailId != null || settingsOpen || authOpen || profileOpen || expandProgress.value > 0.5f) {
         when {
             tagEditTrack != null -> tagEditTrack = null
             lrcPublishTrack != null -> lrcPublishTrack = null
@@ -184,7 +184,6 @@ fun AppRoot() {
             settingsOpen -> settingsOpen = false
             authOpen -> authOpen = false
             profileOpen -> profileOpen = false
-            youtubeSearchOpen -> youtubeSearchOpen = false
             equalizerOpen -> equalizerOpen = false
             playlistDetailId != null -> playlistDetailId = null
             detailAlbumId != null -> detailAlbumId = null
@@ -236,7 +235,6 @@ fun AppRoot() {
                     !settingsOpen &&
                     !authOpen &&
                     !profileOpen &&
-                    !youtubeSearchOpen &&
                     expandProgress.value < 0.05f &&
                     // При потере фокуса окна (пикер файла/фото, «о приложении», шторка,
                     // сворачивание) замораживаем тяжёлый дым — чтобы наш рендер не душил
@@ -245,14 +243,7 @@ fun AppRoot() {
 
             // ── Main screens ──
             when (selectedIndex) {
-                0 -> if (currentCamp is com.liquidmusicglass.camp.MusicCamp.Youtube) {
-                    HomeScreen(
-                        onNavigateToAlbum = { detailAlbumId = it },
-                        onNavigateToArtist = { detailArtistId = it },
-                        onNavigateToPlaylist = { playlistDetailId = it },
-                        onNavigateToYouTube = { youtubeSearchOpen = true }
-                    )
-                } else {
+                0 -> {
                     // Wave всегда тёмный — эффекты завязаны на тёмный фон.
                     ForceDarkContent {
                         WaveHomeScreen(
@@ -418,12 +409,29 @@ fun AppRoot() {
 
      val barsVisible = detailAlbumId == null && detailArtistId == null &&
                         !equalizerOpen && playlistDetailId == null &&
-                        !settingsOpen && !authOpen && !profileOpen && !youtubeSearchOpen
+                        !settingsOpen && !authOpen && !profileOpen
 
     if (barsVisible) {
             val density = androidx.compose.ui.platform.LocalDensity.current
             val bottomBarTranslateY = expandProgress.value * density.run { 160.dp.toPx() }
             val bottomBarAlpha = if (expandProgress.value >= 0.99f) 0f else 1f
+
+            // На вкладке Wave бар подстраивается под дым: красится тёмной базой
+            // палитры обложки (darkMuted — тот же цвет, к которому аура гасит дым
+            // у нижней кромки), с плавным переливом при смене трека. На остальных
+            // вкладках — обычный цвет темы.
+            val onWaveTab = selectedIndex == 0
+            val albumColorsForBar = com.liquidmusicglass.ui.glass.rememberAlbumColors(
+                currentTrack?.displayArtUri, currentTrack?.coverUrl
+            )
+            val waveBarColor by animateColorAsState(
+                targetValue = lerp(albumColorsForBar.darkMuted, Color.Black, 0.35f),
+                animationSpec = tween(600),
+                label = "waveBarColor"
+            )
+            val barBackground =
+                if (onWaveTab) waveBarColor
+                else if (LiquidTheme.colors.isDark) Color(0xFF0D0D0F) else Color(0xFFF2F2F4)
 
             Column(
                 modifier = Modifier
@@ -433,17 +441,20 @@ fun AppRoot() {
                         translationY = bottomBarTranslateY
                         alpha = bottomBarAlpha
                     }
-                    .background(
-                        if (LiquidTheme.colors.isDark) Color(0xFF0D0D0F) else Color(0xFFF2F2F4)
-                    )
+                    .background(barBackground)
             ) {
-                BottomBar(
-                    selectedIndex = selectedIndex,
-                    onItemSelected = {
-                        com.liquidmusicglass.debug.DebugLog.add("TAB -> $it")
-                        selectedIndex = it; AppSettings.setLastScreen(it)
-                    }
-                )
+                // Wave-контент всегда тёмный → на дымном фоне иконки бара тоже
+                // должны быть «тёмной темы» (белые), даже если тема приложения светлая.
+                val barContent: @Composable () -> Unit = {
+                    BottomBar(
+                        selectedIndex = selectedIndex,
+                        onItemSelected = {
+                            com.liquidmusicglass.debug.DebugLog.add("TAB -> $it")
+                            selectedIndex = it; AppSettings.setLastScreen(it)
+                        }
+                    )
+                }
+                if (onWaveTab) ForceDarkContent { barContent() } else barContent()
 
                 Spacer(
                     modifier = Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)
@@ -595,25 +606,10 @@ fun AppRoot() {
             )
         }
 
-        // ── YouTube Search Screen ──
-        AnimatedVisibility(
-            visible = youtubeSearchOpen,
-            enter = slideInHorizontally(
-                initialOffsetX = { it },
-                animationSpec = spring(dampingRatio = 0.9f, stiffness = 300f)
-            ) + fadeIn(tween(200)),
-            exit = slideOutHorizontally(
-                targetOffsetX = { it },
-                animationSpec = spring(dampingRatio = 0.9f, stiffness = 350f)
-            ) + fadeOut(tween(150))
-        ) {
-            YouTubeSearchScreen(onBack = { youtubeSearchOpen = false })
-        }
-
         // ── Update Dialog ──
         UpdateDialog(backdrop = rootBackdrop)
 
-        // ── ВРЕМЕННЫЙ on-screen логгер (отладка JUCE без logcat) ──
+        // On-screen логгер (диагностика аудио на устройстве друга — MMAP/Oboe).
         com.liquidmusicglass.ui.debug.DebugOverlay()
         }
     }

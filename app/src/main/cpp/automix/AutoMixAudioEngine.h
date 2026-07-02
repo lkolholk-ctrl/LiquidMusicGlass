@@ -6,6 +6,7 @@
 #include <array>
 #include <atomic>
 #include <memory>
+#include <mutex>
 
 #include "AudioFxChain.h"
 
@@ -110,6 +111,23 @@ public:
     double positionMsA();
     double lengthMsA();
 
+    /** Счётчик underrun'ов (xrun) Oboe-потока с момента его открытия; -1 если
+     *  неизвестен/устройство занято переоткрытием. Не блокирует (try_lock) и
+     *  не зовётся с аудио-потока. Для телеметрии/DebugLog — тюнить буфер по
+     *  реальным данным, а не вслепую. */
+    int xRunCount();
+
+    /** Underrun-адаптация: телеметрия поймала рост xrun → увеличить буфер
+     *  (множитель burst 4→6→8, кап) и переоткрыть поток на текущем маршруте.
+     *  Короткий разрыв звука при реопене — цена за прекращение постоянных
+     *  заиканий под системной нагрузкой. НЕ с аудио- и НЕ с main-потока. */
+    void escalateBufferForUnderruns();
+
+    /** Энергосбережение (Battery Saver): система жёстче тротлит CPU — на время
+     *  режима держим максимальный буфер (8×burst) для динамика/провода.
+     *  Реопен потока при смене состояния. НЕ с аудио- и НЕ с main-потока. */
+    void setPowerSaveMode (bool on);
+
     /**
      * Stage 4: pre-stretch deck B so its tempo matches deck A (bpmB -> bpmA),
      * pitch preserved. Heavy/offline — call off the audio & main threads, before
@@ -171,8 +189,15 @@ private:
     int deckIndex (const Deck& deck) const { return &deck == &deckA ? 0 : 1; }
     void invalidateHoldForDeck (const Deck& deck);
     void invalidateAllHolds();
-    void applyBufferForRoute (bool isBluetooth, bool forceReopen);  // not on audio thread
+    void applyBufferForRoute (bool isBluetooth, bool forceReopen);          // not on audio thread
+    void applyBufferForRouteUnlocked (bool isBluetooth, bool forceReopen);  // держа deviceControlMutex
     Deck& deckRef (int index) { return index == 0 ? deckA : deckB; }
+
+    // Управляющие операции с устройством (init / переоткрытие под маршрут /
+    // закрытие в release) идут с РАЗНЫХ потоков (main, route-монитор, load) и
+    // после ухода от глобального JNI-мьютекса могут перекрыться. Сериализуем их
+    // здесь; аудио-коллбэк этот мьютекс НИКОГДА не берёт.
+    std::mutex deviceControlMutex;
 
     juce::AudioDeviceManager deviceManager;
     juce::AudioFormatManager formatManager;
@@ -220,6 +245,13 @@ private:
     // вызов с тем же значением всё равно применился, а последующие без изменения — нет.
     std::atomic<bool> routeIsBluetooth { false };
     std::atomic<bool> routeEverApplied { false };
+
+    // Множитель burst-размера для встроенного/проводного маршрута. Стартует с 6
+    // (запас против CPU-сторма системного UI: шторка/переключения); телеметрия
+    // xrun'ов может адаптивно поднять до 8 (escalateBufferForUnderruns).
+    std::atomic<int> bufferBurstMultiplier { 6 };
+    // Battery Saver: на время режима буфер держится на максимуме (8×burst).
+    std::atomic<bool> powerSaveBuffer { false };
 
     // Crossfade state. crossfadeStart is latched by the audio thread so the
     // sample position resets in sync; everything else is plain atomics.

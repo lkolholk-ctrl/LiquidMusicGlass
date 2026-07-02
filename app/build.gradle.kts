@@ -16,7 +16,7 @@ android {
         applicationId = "com.liquidmusicglass"
         minSdk = 29
         targetSdk = 36
-        // Выше 20260702 (ветка greeting уже ставилась на тест-девайсы с ним):
+        // Выше 20260702 (сборки greeting уже стоят на тест-девайсах с ним):
         // меньший versionCode Android считает даунгрейдом и отклоняет установку
         // поверх с ошибкой «пакет недействителен».
         versionCode = 20260703
@@ -71,9 +71,12 @@ android {
             // Debug uses auto-generated debug signing
         }
         release {
-            // TODO: ВРЕМЕННО для ускорения отладочных сборок — вернуть оба в true.
-            isMinifyEnabled = false
-            isShrinkResources = false
+            // Полная защита: R8-минификация + обфускация + ресурс-шринк.
+            // Keep-правила — в proguard-rules.pro (JNI-мосты, Room, сериализация,
+            // LiteRT сохранены). Диагностика показала, что баг локального аудио
+            // был НЕ в R8 (в Oboe-патче + страже кодека, откачены).
+            isMinifyEnabled = true
+            isShrinkResources = true
             isDebuggable = false
             isJniDebuggable = false
             vcsInfo.include = false

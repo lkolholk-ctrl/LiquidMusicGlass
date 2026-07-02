@@ -5,6 +5,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /**
  * Kotlin bridge to the native JUCE -> Oboe audio engine.
@@ -25,8 +26,8 @@ object AutoMixNativeEngine {
     private var initialised = false
 
     /** Режимы совместимости Oboe (значения совпадают с OboeRuntime.h). */
-    const val OBOE_MODE_NORMAL = 0     // Shared + LowLatency (дефолт)
-    const val OBOE_MODE_SAFE = 1       // Shared + PerformanceMode::None (legacy-путь)
+    const val OBOE_MODE_NORMAL = 0     // Shared + LowLatency (низкая задержка, опция)
+    const val OBOE_MODE_SAFE = 1       // Shared + None (legacy-путь) — ДЕФОЛТ, проверен на всём парке
     const val OBOE_MODE_EXCLUSIVE = 2  // Exclusive + LowLatency (стоковое поведение JUCE)
 
     // Смена режима на живом движке переоткрывает Oboe-поток (close/reopen) —
@@ -140,8 +141,13 @@ object AutoMixNativeEngine {
             try { result = block() } finally { latch.countDown() }
         }
         return try {
-            latch.await()
-            result
+            // С таймаутом: если main надолго занят (тяжёлый кадр, чужой ANR),
+            // load-поток не должен ждать вечно. По таймауту вернём false —
+            // инициализация просто повторится при следующей попытке проигрывания.
+            if (latch.await(10, TimeUnit.SECONDS)) result else {
+                Log.w(TAG, "runOnMainBlocking timed out waiting for main thread")
+                false
+            }
         } catch (_: InterruptedException) {
             Thread.currentThread().interrupt()
             false
@@ -391,6 +397,40 @@ object AutoMixNativeEngine {
     }
 
     /**
+     * Счётчик underrun'ов (xrun) Oboe-потока с момента его открытия; -1 если
+     * неизвестен. Не блокирует (try_lock в нативке) — можно звать из тикера.
+     * Сбрасывается при переоткрытии потока (смена маршрута BT/динамик).
+     */
+    fun xRunCount(): Int {
+        if (!isLoaded || !initialised) return -1
+        return runCatching { nativeXRunCount() }.getOrDefault(-1)
+    }
+
+    /**
+     * Underrun-адаптация: телеметрия поймала рост xrun → увеличить буфер
+     * (burst-множитель 6→8) и переоткрыть Oboe-поток. Внутри — close/reopen
+     * устройства, поэтому ТОЛЬКО с фонового потока (@Synchronized как route).
+     */
+    @Synchronized
+    fun escalateBufferForUnderruns() {
+        if (!isLoaded || !initialised) return
+        runCatching { nativeEscalateBufferForUnderruns() }
+            .onFailure { Log.w(TAG, "nativeEscalateBufferForUnderruns failed", it) }
+    }
+
+    /**
+     * Battery Saver вкл/выкл: движок держит максимальный буфер на время режима
+     * (система тротлит CPU жёстче). Внутри реопен потока — ТОЛЬКО с фонового
+     * потока (@Synchronized как route/escalate).
+     */
+    @Synchronized
+    fun setPowerSaveMode(on: Boolean) {
+        if (!isLoaded || !initialised) return
+        runCatching { nativeSetPowerSaveMode(on) }
+            .onFailure { Log.w(TAG, "nativeSetPowerSaveMode failed", it) }
+    }
+
+    /**
      * Pre-stretch deck B to match deck A's tempo (beat-match), pitch preserved.
      * Heavy/offline — call from a background thread BEFORE startCrossfade.
      */
@@ -488,6 +528,9 @@ object AutoMixNativeEngine {
     private external fun nativeClearDeck(index: Int)
     private external fun nativePositionMsA(): Double
     private external fun nativeLengthMsA(): Double
+    private external fun nativeXRunCount(): Int
+    private external fun nativeEscalateBufferForUnderruns()
+    private external fun nativeSetPowerSaveMode(on: Boolean)
     private external fun nativePlay()
     private external fun nativePause()
     private external fun nativeSilenceOutput()

@@ -1,8 +1,17 @@
 package com.liquidmusicglass.ui.screens
 
 import android.net.Uri
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.withInfiniteAnimationFrameMillis
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,6 +21,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -28,21 +38,30 @@ import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.ThumbDown
+import androidx.compose.material.icons.rounded.Whatshot
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -52,7 +71,11 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.liquidmusicglass.api.icm.IcmChart
 import com.liquidmusicglass.api.icm.IcmHomeItem
+import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.api.icm.toTrack
+import com.liquidmusicglass.engine.AudioReactor
+import com.liquidmusicglass.engine.LyricsParser
+import com.liquidmusicglass.engine.PlaybackBackend
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.Track
 import com.liquidmusicglass.ui.glass.AlbumArtImage
@@ -60,6 +83,11 @@ import com.liquidmusicglass.ui.glass.rememberAlbumColors
 import com.liquidmusicglass.ui.player.AuraBackground
 import com.liquidmusicglass.ui.theme.AppFontFamily
 import com.liquidmusicglass.ui.viewmodel.HomeViewModel
+import java.util.Calendar
+import kotlin.math.abs
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * "My Wave" — the main screen, our own take on the Yandex-Music style feed.
@@ -92,6 +120,7 @@ fun WaveHomeScreen(
 
     val currentTrack by PlayerController.currentTrack.collectAsState()
     val isPlaying by PlayerController.isPlaying.collectAsState()
+    val isBuffering by PlayerController.isBuffering.collectAsState()
     val favoriteIds by PlayerController.favoriteIds.collectAsState()
     val isBuildingWave by viewModel.isBuildingWave.collectAsState()
     val needsOnboarding by viewModel.needsOnboarding.collectAsState()
@@ -109,6 +138,53 @@ fun WaveHomeScreen(
 
     val track = currentTrack
     val isFavorite = track?.id?.let { favoriteIds.contains(it) } == true
+
+    val scope = rememberCoroutineScope()
+    val backend by PlayerController.playbackBackend.collectAsState()
+    val queueList by PlayerController.queueFlow.collectAsState()
+
+    // Сглаженный бас 0..1 — пульс обложки и кромок мудкарточек. Питается только
+    // от стриминга (BassAudioProcessor в цепочке ExoPlayer); у локального JUCE
+    // уровней нет — эффект просто нулевой, как и «вдох» ауры-дыма. Кадровый цикл
+    // работает ТОЛЬКО пока играет музыка (на паузе плавно гаснет и остановлен);
+    // в энергосбережении пульс выключен целиком.
+    val bassLevel = rememberSmoothedBass(
+        animate = animationsActive && !com.liquidmusicglass.ui.PowerSaveMonitor.active,
+        playing = isPlaying
+    )
+
+    // Акцент экрана — vibrant играющей обложки (fallback — зелёный волны).
+    val accent by animateColorAsState(
+        targetValue = if (track != null) albumColors.vibrant else WaveAccent,
+        animationSpec = tween(700),
+        label = "waveAccent"
+    )
+
+    // «Дальше в волне»: следующие до трёх треков очереди; индекс — абсолютный
+    // (для PlayerController.playTrack). Очередь и позиция общие для обоих
+    // бэкендов (JUCE-локал и ExoPlayer-стриминг) — контроллер сам маршрутизирует.
+    val upNext = remember(queueList, track?.id) {
+        val idx = queueList.indexOfFirst { it.id == track?.id }
+        if (idx < 0) emptyList()
+        else (idx + 1 until minOf(idx + 4, queueList.size)).map { it to queueList[it] }
+    }
+
+    // Фидбек волны — только ICM-стриминг с активным wave-контекстом
+    // (для локальных файлов на JUCE он бессмыслен).
+    val showWaveFeedback = track != null &&
+        waveContext != null &&
+        backend == PlaybackBackend.EXO_STREAMING
+
+    // Long-press по мудкарточке → предпросмотр станции (сеть только на IO).
+    var previewMood by remember { mutableStateOf<WaveMood?>(null) }
+    var previewTracks by remember { mutableStateOf<List<Track>?>(null) }
+    LaunchedEffect(previewMood) {
+        val mood = previewMood ?: return@LaunchedEffect
+        previewTracks = null
+        previewTracks = withContext(Dispatchers.IO) {
+            runCatching { IcmRepository.searchTracks(mood.query, limit = 4) }.getOrDefault(emptyList())
+        }
+    }
 
     // Все смысловые блоки home-контента (popular / banners / new_releases /
     // recommendations …). Чарты идут отдельной секцией из viewModel.charts.
@@ -131,7 +207,9 @@ fun WaveHomeScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding(),
-            contentPadding = PaddingValues(bottom = 96.dp)
+            // Снизу — место под оверлей мудкарточек (116dp) + бар: контент ленты
+            // при скролле не прячется под ними.
+            contentPadding = PaddingValues(bottom = 220.dp)
         ) {
             item { WaveTopBar(onSearch = onNavigateToSearch, onOpenProfile = onOpenProfile) }
 
@@ -154,6 +232,16 @@ fun WaveHomeScreen(
                             .padding(horizontal = 24.dp, vertical = 48.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
+                        // Приветствие по времени суток — экран «свой» ещё до музыки.
+                        Text(
+                            text = remember { greetingForNow() },
+                            color = Color.White.copy(alpha = 0.7f),
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            fontFamily = AppFontFamily,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(Modifier.height(10.dp))
                         Text(
                             text = "My Wave",
                             color = Color.White,
@@ -165,6 +253,7 @@ fun WaveHomeScreen(
                         Spacer(Modifier.height(40.dp))
                         BigPlayButton(
                             loading = isBuildingWave,
+                            accent = accent,
                             onClick = { viewModel.buildWaveQueue(context) }
                         )
                     }
@@ -173,15 +262,16 @@ fun WaveHomeScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        // Весь блок «артист + обложка + контролы» опущен чуть ниже.
-                        Spacer(Modifier.height(40.dp))
+                        Spacer(Modifier.height(24.dp))
+                        // Имя артиста компактнее (34sp): с гигантским заголовком
+                        // экран не влезал по высоте и начинал листаться.
                         Text(
                             text = track.artist,
                             color = Color.White,
-                            fontSize = 44.sp,
+                            fontSize = 34.sp,
                             // Межстрочный интервал — чтобы при переносе (длинное имя)
                             // строки не налезали друг на друга.
-                            lineHeight = 50.sp,
+                            lineHeight = 40.sp,
                             fontWeight = FontWeight.Black,
                             fontFamily = AppFontFamily,
                             textAlign = TextAlign.Center,
@@ -191,18 +281,98 @@ fun WaveHomeScreen(
                                 .fillMaxWidth()
                                 .padding(horizontal = 24.dp)
                         )
-                        Spacer(Modifier.height(26.dp))
-                        AlbumArtImage(
-                            uri = track.displayArtUri,
-                            coverUrl = track.coverUrl,
-                            albumId = track.albumId,
-                            contentDescription = track.title,
-                            contentScale = ContentScale.Crop,
+                        Spacer(Modifier.height(6.dp))
+                        // Текущая строка синхронного текста (пусто, если лирики нет).
+                        CurrentLyricLine(track = track)
+                        Spacer(Modifier.height(16.dp))
+
+                        // Обложка: пульсирует от баса (только стриминг — у JUCE
+                        // уровней нет) и свайпается влево/вправо для скипа. Скип —
+                        // через PlayerController (асинхронно, оба бэкенда), main
+                        // ничего не ждёт.
+                        val density = LocalDensity.current
+                        val dragThresholdPx = remember(density) { with(density) { 96.dp.toPx() } }
+                        val maxDragPx = remember(density) { with(density) { 160.dp.toPx() } }
+                        val coverOffset = remember { Animatable(0f) }
+
+                        // Страховка от «застрявшей» наклонённой обложки: как только
+                        // реально сменился трек — возвращаем обложку в центр, даже
+                        // если возвратная анимация жеста была чем-то отменена.
+                        LaunchedEffect(track.id) {
+                            if (coverOffset.value != 0f) {
+                                coverOffset.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 420f))
+                            }
+                        }
+
+                        Box(
                             modifier = Modifier
                                 .size(216.dp)
+                                .graphicsLayer {
+                                    translationX = coverOffset.value
+                                    rotationZ = coverOffset.value / 42f
+                                    val pulse = 1f + bassLevel.value * 0.025f
+                                    scaleX = pulse
+                                    scaleY = pulse
+                                    alpha = 1f -
+                                        (abs(coverOffset.value) / (dragThresholdPx * 4f)).coerceAtMost(0.35f)
+                                }
                                 .clip(RoundedCornerShape(28.dp))
-                                .clickable { onOpenPlayer() }
-                        )
+                                .draggable(
+                                    orientation = Orientation.Horizontal,
+                                    state = rememberDraggableState { delta ->
+                                        // Резинка: тянется с сопротивлением и не дальше maxDragPx.
+                                        scope.launch {
+                                            val next = (coverOffset.value + delta * 0.85f)
+                                                .coerceIn(-maxDragPx, maxDragPx)
+                                            coverOffset.snapTo(next)
+                                        }
+                                    },
+                                    onDragStopped = { velocity ->
+                                        val off = coverOffset.value
+                                        when {
+                                            off < -dragThresholdPx || velocity < -2800f ->
+                                                PlayerController.skipNext(context)
+                                            off > dragThresholdPx || velocity > 2800f ->
+                                                PlayerController.skipPrevious(context)
+                                        }
+                                        // Возврат — в ТОМ ЖЕ scope, что и snapTo-дельты:
+                                        // единая очередь main, отставший snapTo не отменит
+                                        // возвратную анимацию (раньше обложка могла застрять
+                                        // наклонённой на время буферизации).
+                                        scope.launch {
+                                            coverOffset.animateTo(
+                                                0f,
+                                                spring(dampingRatio = 0.78f, stiffness = 300f)
+                                            )
+                                        }
+                                    }
+                                )
+                                .clickable { onOpenPlayer() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            AlbumArtImage(
+                                uri = track.displayArtUri,
+                                coverUrl = track.coverUrl,
+                                albumId = track.albumId,
+                                contentDescription = track.title,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                            // Буферизация после скипа: затемнение + спиннер прямо на
+                            // обложке — видно, что трек грузится, а не «всё зависло».
+                            if (isBuffering) {
+                                Box(
+                                    Modifier
+                                        .fillMaxSize()
+                                        .background(Color.Black.copy(alpha = 0.35f))
+                                )
+                                CircularProgressIndicator(
+                                    color = Color.White,
+                                    strokeWidth = 3.dp,
+                                    modifier = Modifier.size(40.dp)
+                                )
+                            }
+                        }
                         Spacer(Modifier.height(28.dp))
                         Row(
                             modifier = Modifier
@@ -224,7 +394,9 @@ fun WaveHomeScreen(
                                     .weight(1f)
                                     .height(56.dp)
                                     .clip(RoundedCornerShape(28.dp))
-                                    .background(Color.White.copy(alpha = 0.12f))
+                                    // Подложка пилюли красится акцентом обложки —
+                                    // экран целиком уходит в палитру трека.
+                                    .background(accent.copy(alpha = 0.16f))
                                     .clickable { onOpenPlayer() }
                                     .padding(horizontal = 16.dp),
                                 contentAlignment = Alignment.Center
@@ -249,23 +421,71 @@ fun WaveHomeScreen(
                                 )
                             }
                         }
+
+                        // ── Быстрый фидбек волны (только ICM-стриминг с wave-контекстом) ──
+                        if (showWaveFeedback) {
+                            Spacer(Modifier.height(14.dp))
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                WaveFeedbackChip(
+                                    icon = Icons.Rounded.Whatshot,
+                                    label = "More like this",
+                                    tint = accent
+                                ) {
+                                    scope.launch(Dispatchers.IO) {
+                                        runCatching { IcmRepository.sendWaveFeedback("more_track", track.id) }
+                                    }
+                                }
+                                WaveFeedbackChip(
+                                    icon = Icons.Rounded.ThumbDown,
+                                    label = "Less",
+                                    tint = Color.White.copy(alpha = 0.75f)
+                                ) {
+                                    scope.launch(Dispatchers.IO) {
+                                        runCatching { IcmRepository.sendWaveFeedback("less_track", track.id) }
+                                    }
+                                    PlayerController.skipNext(context)
+                                }
+                            }
+                        }
+
+                        // ── «Дальше в волне»: следующие обложки, тап — перескок ──
+                        if (upNext.isNotEmpty()) {
+                            Spacer(Modifier.height(22.dp))
+                            UpNextRow(
+                                upNext = upNext,
+                                onPlay = { index -> PlayerController.playTrack(context, index) }
+                            )
+                        }
                     }
                 }
             }
 
-            // ── Animated mood tiles ──
-            item {
-                // Блобы опущены заметно ниже контролов (больше воздуха сверху).
-                Spacer(Modifier.height(36.dp))
-                WaveMoodTiles(
-                    onSelect = { mood -> viewModel.buildMoodWave(context, mood.query, mood.label) },
-                    animate = animationsActive
-                )
-                Spacer(Modifier.height(8.dp))
-            }
-
             // Рекомендации (recently played / home-блоки / charts) перенесены в таб New.
             // На Wave остаются только мудкарточки + плеер волны/текущий трек.
+        }
+
+        // ── Мудкарточки — оверлей, прижатый к НИЖНЕМУ бару (не элемент ленты):
+        // всегда сидят прямо над баром, сколько бы воздуха ни было выше. ──
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(bottom = 72.dp)   // высота бара (60dp) + зазор
+        ) {
+            WaveMoodTiles(
+                onSelect = { mood -> viewModel.buildMoodWave(context, mood.query, mood.label) },
+                animate = animationsActive,
+                // Палитра обложки текущего трека — та же, из которой рисуется
+                // аура-дым: карточки подстраиваются под каждую музыку. Без трека
+                // (палитра дефолтно тёмно-нейтральная) — свои цвета мудов.
+                albumColors = if (track != null) albumColors else null,
+                bassLevel = bassLevel,
+                onPreview = { mood -> previewMood = mood }
+            )
         }
 
         // ── Онбординг волны: показываем, когда персональная волна пуста и юзер
@@ -302,6 +522,40 @@ fun WaveHomeScreen(
                     androidx.compose.material3.TextButton(onClick = {
                         viewModel.clearLinkFlag()
                     }) { Text("Later") }
+                }
+            )
+        }
+
+        // ── Long-press по мудкарточке: предпросмотр станции перед запуском ──
+        previewMood?.let { mood ->
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { previewMood = null },
+                title = { Text(mood.label) },
+                text = {
+                    val tracks = previewTracks
+                    when {
+                        tracks == null -> Text("Loading…")
+                        tracks.isEmpty() -> Text("Nothing found for this mood.")
+                        else -> Column {
+                            tracks.forEach { t ->
+                                Text(
+                                    text = "${t.title} — ${t.artist}",
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(Modifier.height(6.dp))
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(onClick = {
+                        previewMood = null
+                        viewModel.buildMoodWave(context, mood.query, mood.label)
+                    }) { Text("Play station") }
+                },
+                dismissButton = {
+                    androidx.compose.material3.TextButton(onClick = { previewMood = null }) { Text("Close") }
                 }
             )
         }
@@ -553,7 +807,7 @@ private fun WaveTopBar(onSearch: () -> Unit, onOpenProfile: () -> Unit) {
 }
 
 @Composable
-private fun BigPlayButton(loading: Boolean, onClick: () -> Unit) {
+private fun BigPlayButton(loading: Boolean, accent: Color = WaveAccent, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .size(132.dp)
@@ -562,7 +816,7 @@ private fun BigPlayButton(loading: Boolean, onClick: () -> Unit) {
     ) {
         if (loading) {
             CircularProgressIndicator(
-                color = WaveAccent,
+                color = accent,
                 strokeWidth = 3.dp,
                 modifier = Modifier.size(48.dp)
             )
@@ -571,8 +825,180 @@ private fun BigPlayButton(loading: Boolean, onClick: () -> Unit) {
             Icon(
                 imageVector = Icons.Rounded.PlayArrow,
                 contentDescription = "Listen",
-                tint = WaveAccent,
+                tint = accent,
                 modifier = Modifier.size(124.dp)
+            )
+        }
+    }
+}
+
+/** Приветствие по времени суток — для idle-состояния волны. */
+private fun greetingForNow(): String =
+    when (Calendar.getInstance().get(Calendar.HOUR_OF_DAY)) {
+        in 5..11 -> "Good morning"
+        in 12..16 -> "Good afternoon"
+        in 17..22 -> "Good evening"
+        else -> "Late night waves"
+    }
+
+/**
+ * Сглаженный бас 0..1 — каскад «огибающая с раздельной атакой/спадом + low-pass»,
+ * как у ауры-дыма. Источник — [AudioReactor] (кормится ТОЛЬКО из ExoPlayer-цепочки,
+ * т.е. стриминга; на локальном JUCE уровней нет — значение остаётся 0).
+ *
+ * ANR/энергия: кадровый цикл живёт только пока [playing]; на паузе значение
+ * плавно гасится до нуля и цикл ОСТАНАВЛИВАЕТСЯ (никаких вечных покадровых корутин).
+ */
+@Composable
+private fun rememberSmoothedBass(animate: Boolean, playing: Boolean): State<Float> =
+    produceState(0f, animate, playing) {
+        if (!animate || !playing) {
+            var v = value
+            while (v > 0.005f) {
+                withInfiniteAnimationFrameMillis {
+                    v += (0f - v) * 0.12f
+                    value = v
+                }
+            }
+            value = 0f
+            return@produceState
+        }
+        var s1 = value
+        var s2 = value
+        var skip = false
+        val halfRate = com.liquidmusicglass.ui.DeviceTier.lite
+        while (true) {
+            withInfiniteAnimationFrameMillis {
+                val target = AudioReactor.low.coerceIn(0f, 1f)
+                val rate = if (target > s1) 0.08f else 0.035f
+                s1 += ((target - s1) * rate).coerceIn(-0.022f, 0.022f)
+                s2 += (s1 - s2) * 0.15f
+                // lite: публикуем через кадр — пульс/кромки перерисовываются на ~30 Гц.
+                if (!halfRate || !skip) value = s2
+                skip = !skip
+            }
+        }
+    }
+
+/**
+ * Одна строка синхронного текста под именем артиста. Загрузка/парсинг — на
+ * IO/кэше LyricsParser (тот же путь, что LyricsSheet), main не блокируется.
+ * Высота фиксированная — hero не прыгает, когда строка появляется/исчезает.
+ */
+@Composable
+private fun CurrentLyricLine(track: Track) {
+    val context = LocalContext.current
+    var lyrics by remember(track.id) { mutableStateOf(LyricsParser.getCachedLyrics(track.id)) }
+    LaunchedEffect(track.id) {
+        if (lyrics == null) {
+            lyrics = withContext(Dispatchers.IO) {
+                runCatching {
+                    LyricsParser.loadLyrics(
+                        context = context,
+                        uri = track.uri,
+                        title = track.title,
+                        artist = track.artist,
+                        durationMs = track.durationMs,
+                        trackId = track.id
+                    )
+                }.getOrNull()
+            }
+        }
+    }
+    val positionMs by PlayerController.currentPositionMs.collectAsState()
+    val line = remember(lyrics, positionMs) {
+        val l = lyrics
+        if (l == null || !l.isSynced || l.lines.isEmpty()) null
+        else {
+            val i = LyricsParser.findCurrentLine(l, positionMs)
+            l.lines.getOrNull(i)?.text?.trim()?.takeIf { it.isNotEmpty() }
+        }
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(20.dp)
+            .padding(horizontal = 32.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Crossfade(targetState = line.orEmpty(), label = "lyricLine") { text ->
+            if (text.isNotEmpty()) {
+                Text(
+                    text = text,
+                    color = Color.White.copy(alpha = 0.62f),
+                    fontSize = 13.sp,
+                    fontFamily = AppFontFamily,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+    }
+}
+
+/** Чип быстрого фидбека волны («ещё такого» / «меньше такого»). */
+@Composable
+private fun WaveFeedbackChip(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    tint: Color,
+    onClick: () -> Unit
+) {
+    var pressedOnce by remember { mutableStateOf(false) }
+    Row(
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(Color.White.copy(alpha = if (pressedOnce) 0.22f else 0.12f))
+            .clickable {
+                pressedOnce = true
+                onClick()
+            }
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            tint = tint,
+            modifier = Modifier.size(16.dp)
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text = label,
+            color = Color.White,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            fontFamily = AppFontFamily
+        )
+    }
+}
+
+/** «Дальше в волне»: до трёх следующих обложек, тап — перескок на трек. */
+@Composable
+private fun UpNextRow(upNext: List<Pair<Int, Track>>, onPlay: (Int) -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text(
+            text = "Next",
+            color = Color.White.copy(alpha = 0.55f),
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            fontFamily = AppFontFamily
+        )
+        upNext.forEach { (index, t) ->
+            AlbumArtImage(
+                uri = t.displayArtUri,
+                coverUrl = t.coverUrl,
+                albumId = t.albumId,
+                contentDescription = t.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { onPlay(index) }
             )
         }
     }

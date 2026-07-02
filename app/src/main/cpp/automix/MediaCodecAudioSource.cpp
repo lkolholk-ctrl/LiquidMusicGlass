@@ -109,6 +109,7 @@ bool MediaCodecAudioSource::configureFromExtractor()
         return false;
 
     AMediaExtractor_selectTrack (extractor, audioTrack);
+    audioTrackIndex = audioTrack;
 
     int32_t sr = 0, ch = 0;
     AMediaFormat_getInt32 (format, AMEDIAFORMAT_KEY_SAMPLE_RATE, &sr);
@@ -134,36 +135,123 @@ bool MediaCodecAudioSource::configureFromExtractor()
     return ok;
 }
 
+// Пересоздать декодер после фатальной ошибки (codec died / reclaimed системой)
+// и продолжить с первого ещё не отданного кадра. Возвращает false, если
+// восстановиться нельзя — тогда источник помечается EOS.
+bool MediaCodecAudioSource::recreateCodec()
+{
+    closeCodec();
+    if (extractor == nullptr || audioTrackIndex < 0)
+        return false;
+
+    AMediaFormat* format = AMediaExtractor_getTrackFormat (extractor, (size_t) audioTrackIndex);
+    if (format == nullptr)
+        return false;
+
+    const char* mime = nullptr;
+    if (! AMediaFormat_getString (format, AMEDIAFORMAT_KEY_MIME, &mime) || mime == nullptr)
+    {
+        AMediaFormat_delete (format);
+        return false;
+    }
+
+    codec = AMediaCodec_createDecoderByType (mime);
+    const bool ok = codec != nullptr
+        && AMediaCodec_configure (codec, format, nullptr, nullptr, 0) == AMEDIA_OK
+        && AMediaCodec_start (codec) == AMEDIA_OK;
+    AMediaFormat_delete (format);
+
+    if (! ok)
+    {
+        closeCodec();
+        return false;
+    }
+
+    // Экстрактор мог уйти вперёд кадрами, которые погибший кодек так и не отдал —
+    // вернём его к первому НЕ выданному кадру (readPos + буферизованный остаток).
+    const juce::int64 resumeFrame = readPos + (juce::int64) (leftBuf.size() - leftoverStart);
+    const int64_t resumeUs = (int64_t) ((double) resumeFrame / sampleRate * 1.0e6);
+    AMediaExtractor_seekTo (extractor, resumeUs, AMEDIAEXTRACTOR_SEEK_CLOSEST_SYNC);
+    inputEOS = false;
+    return true;
+}
+
+// Bulk-append: один resize на выходной буфер кодека и запись по указателям.
+// push_back на каждый сэмпл (проверка capacity + вызов на фрейм) заметно грел
+// декод-поток на длинных предчтениях; здесь это плоский проход по памяти.
 void MediaCodecAudioSource::push16 (const int16_t* s, int totalSamples)
 {
     const int ch = outChannels > 0 ? outChannels : 2;
     const int frames = totalSamples / ch;
-    for (int fr = 0; fr < frames; ++fr)
-    {
-        const float l = s[fr * ch + 0] / 32768.0f;
-        const float r = (ch > 1) ? s[fr * ch + 1] / 32768.0f : l;
-        leftBuf.push_back (l);
-        rightBuf.push_back (r);
-    }
+    if (frames <= 0)
+        return;
+
+    constexpr float kScale = 1.0f / 32768.0f;
+    const size_t base = leftBuf.size();
+    leftBuf.resize  (base + (size_t) frames);
+    rightBuf.resize (base + (size_t) frames);
+    float* l = leftBuf.data()  + base;
+    float* r = rightBuf.data() + base;
+
+    if (ch == 1)
+        for (int fr = 0; fr < frames; ++fr)
+        {
+            const float v = (float) s[fr] * kScale;
+            l[fr] = v;
+            r[fr] = v;
+        }
+    else
+        for (int fr = 0; fr < frames; ++fr)
+        {
+            l[fr] = (float) s[fr * ch + 0] * kScale;
+            r[fr] = (float) s[fr * ch + 1] * kScale;
+        }
 }
 
 void MediaCodecAudioSource::pushF (const float* s, int totalSamples)
 {
     const int ch = outChannels > 0 ? outChannels : 2;
     const int frames = totalSamples / ch;
-    for (int fr = 0; fr < frames; ++fr)
-    {
-        const float l = s[fr * ch + 0];
-        const float r = (ch > 1) ? s[fr * ch + 1] : l;
-        leftBuf.push_back (l);
-        rightBuf.push_back (r);
-    }
+    if (frames <= 0)
+        return;
+
+    const size_t base = leftBuf.size();
+    leftBuf.resize  (base + (size_t) frames);
+    rightBuf.resize (base + (size_t) frames);
+    float* l = leftBuf.data()  + base;
+    float* r = rightBuf.data() + base;
+
+    if (ch == 1)
+        for (int fr = 0; fr < frames; ++fr)
+        {
+            const float v = s[fr];
+            l[fr] = v;
+            r[fr] = v;
+        }
+    else
+        for (int fr = 0; fr < frames; ++fr)
+        {
+            l[fr] = s[fr * ch + 0];
+            r[fr] = s[fr * ch + 1];
+        }
 }
 
 void MediaCodecAudioSource::fillLeftover (int framesWanted)
 {
+    // Защита ТОЛЬКО от вечного цикла под lock'ом (dead codec → dequeue* вечно
+    // возвращает коды, не покрытые ветками ниже). БЕЗОПАСНАЯ версия: при любом
+    // аномальном статусе НЕ помечаем EOS и НЕ пересоздаём/сеемся — просто не
+    // считаем это прогрессом, и по счётчику noProgressIters выходим из цикла,
+    // отдав что успели (транспорт дольёт тишину, следующий pull повторит).
+    // Прежняя агрессивная версия (recreateCodec + ложный EOS) давала seek и
+    // ложный «конец трека» на ~3с → тишина и петля на локальном воспроизведении.
+    int noProgressIters = 0;
+    constexpr int kMaxNoProgressIters = 500;   // ~2с; выход БЕЗ EOS — безвредно
+
     while (! outputEOS && (int) (leftBuf.size() - leftoverStart) < framesWanted)
     {
+        bool progressed = false;
+
         if (! inputEOS)
         {
             const ssize_t inIdx = AMediaCodec_dequeueInputBuffer (codec, 2000);
@@ -186,7 +274,10 @@ void MediaCodecAudioSource::fillLeftover (int framesWanted)
                     AMediaCodec_queueInputBuffer (codec, (size_t) inIdx, 0, (size_t) sampleSize, pts, 0);
                     AMediaExtractor_advance (extractor);
                 }
+                progressed = true;
             }
+            // Прочие статусы input (в т.ч. аномальный отрицательный) — НЕ фатально:
+            // не сеемся, не EOS. Отсутствие прогресса поймает счётчик ниже.
         }
 
         AMediaCodecBufferInfo info;
@@ -207,6 +298,7 @@ void MediaCodecAudioSource::fillLeftover (int framesWanted)
             AMediaCodec_releaseOutputBuffer (codec, (size_t) outIdx, false);
             if ((info.flags & AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM) != 0)
                 outputEOS = true;
+            progressed = true;
         }
         else if (outIdx == AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED)
         {
@@ -219,14 +311,26 @@ void MediaCodecAudioSource::fillLeftover (int framesWanted)
                 if (AMediaFormat_getInt32 (of, AMEDIAFORMAT_KEY_PCM_ENCODING,  &v) && v > 0) pcmEncoding = v;
                 AMediaFormat_delete (of);
             }
+            progressed = true;
+        }
+        else if (outIdx == AMEDIACODEC_INFO_OUTPUT_BUFFERS_CHANGED)
+        {
+            progressed = true;   // легитимное событие, не ошибка
         }
         else if (outIdx == AMEDIACODEC_INFO_TRY_AGAIN_LATER)
         {
-            // Nothing ready yet. If we've drained all input and the codec keeps
-            // returning nothing, treat as EOS so we never spin forever.
+            // Пока нечего отдавать. Если вход исчерпан, а кодек молчит — выходим
+            // (это законный конец потока).
             if (inputEOS)
                 break;
         }
+        // Любой другой (аномальный отрицательный) статус — НЕ фатально: не EOS,
+        // не пересоздаём. noProgressIters ниже выведет из цикла.
+
+        if (progressed)
+            noProgressIters = 0;
+        else if (++noProgressIters >= kMaxNoProgressIters)
+            break;
     }
 }
 

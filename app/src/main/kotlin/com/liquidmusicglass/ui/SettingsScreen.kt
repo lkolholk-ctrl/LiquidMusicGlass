@@ -138,12 +138,13 @@ fun SettingsScreen(
                     onSelect = { AppSettings.setHideExplicit(it) }
                 )
                 PlainDivider()
-                // Безопасный вывод: legacy-путь Android-аудио (Shared + без
-                // low-latency) для устройств, где fast-path AAudio отдаёт
-                // шум/искажения вместо локального звука (часть Xiaomi и др.).
+                // Безопасный вывод (ДЕФОЛТ ON): legacy-путь Android-аудио (Shared +
+                // без low-latency) — единственный, проверенный на всём тест-парке;
+                // на части устройств (Xiaomi и др.) fast-path AAudio отдаёт
+                // шум/тишину вместо локального звука. OFF = low-latency путь.
                 SettingsToggleItem(
                     title = "Safe Audio Output",
-                    subtitle = "Fixes noise/static in local playback on some devices",
+                    subtitle = "Most compatible local audio path. Turn off for lower latency",
                     selected = audioCompatMode == 1,
                     onSelect = { AppSettings.setAudioCompatMode(if (it) 1 else 0) }
                 )
@@ -471,6 +472,22 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(28.dp))
 
+            // ── BACKGROUND PLAYBACK ──
+            // Doze/оптимизация батареи душит фоновые декод-потоки и сеть стриминга
+            // (лаги/«цикличка» при погашенном экране). Исключение из оптимизации —
+            // штатное решение для музыкальных плееров.
+            SectionLabel("BACKGROUND PLAYBACK")
+            PlainCard {
+                SettingsActionItem(
+                    title = "Ignore Battery Optimization",
+                    subtitle = "Prevents background stutter (Doze). Recommended for music",
+                    icon = Icons.Rounded.ChevronRight,
+                    onClick = { requestIgnoreBatteryOptimizations(context) }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(28.dp))
+
             // ── ACCESSIBILITY ──
             SectionLabel("ACCESSIBILITY")
 
@@ -534,6 +551,56 @@ private fun CacheSizeSelector(
             }
         }
     }
+}
+
+/**
+ * Запрос исключения из оптимизации батареи — МАКСИМАЛЬНО защищённо. На части
+ * прошивок/версий Android этот интент вырезан или кидает SecurityException
+ * (известны стабильные краши у приложений без страховок), поэтому:
+ *  - каждый шаг в runCatching (никогда не роняем приложение);
+ *  - FLAG_ACTIVITY_NEW_TASK (не зависим от типа контекста);
+ *  - цепочка фолбэков: системный диалог → общий список исключений →
+ *    страница приложения в настройках. Ничего не персистим — повторный
+ *    запуск приложения ни при каком исходе не затрагивается.
+ */
+private fun requestIgnoreBatteryOptimizations(context: Context) {
+    val pkg = context.packageName
+    val alreadyIgnoring = runCatching {
+        context.getSystemService(android.os.PowerManager::class.java)
+            ?.isIgnoringBatteryOptimizations(pkg) == true
+    }.getOrDefault(false)
+
+    fun tryStart(intent: android.content.Intent): Boolean = runCatching {
+        intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(intent)
+        true
+    }.getOrDefault(false)
+
+    if (!alreadyIgnoring) {
+        // 1) Прямой системный диалог (нужен REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+        //    в манифесте — добавлен; без него часть прошивок кидает SecurityException).
+        if (tryStart(
+                android.content.Intent(
+                    android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    android.net.Uri.parse("package:$pkg")
+                )
+            )
+        ) return
+    }
+    // 2) Общий список исключений (или уже в исключениях — показать, где это).
+    if (tryStart(
+            android.content.Intent(
+                android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS
+            )
+        )
+    ) return
+    // 3) Последний фолбэк — страница приложения в настройках.
+    tryStart(
+        android.content.Intent(
+            android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            android.net.Uri.parse("package:$pkg")
+        )
+    )
 }
 
 private fun cacheLabel(bytes: Long): String = when {

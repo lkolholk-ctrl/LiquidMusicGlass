@@ -101,6 +101,10 @@ set(OBOE_DIR ${oboe_SOURCE_DIR})
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/PatchJuceOboeCompat.cmake)
 lmg_patch_juce_oboe("${JUCE_MODULES_DIR}/juce_audio_devices/native/juce_Oboe_android.cpp")
 
+# Их предшественник — жёсткая string-replace замена Exclusive→Shared /
+# LowLatency→None из ветки greeting — заменён runtime-хуками выше: дефолт тот же
+# полевой проверенный Shared+None (SAFE в OboeRuntime), но режим переключается
+# без пересборки, и каждое открытие потока диагностируется.
 file(GLOB_RECURSE OBOE_SOURCES CONFIGURE_DEPENDS ${OBOE_DIR}/src/*.cpp)
 
 # JUCE's Android path includes <cpu-features.h> (android_getCpuFamily etc.). That
@@ -135,6 +139,12 @@ add_library(
 )
 
 target_compile_features(automix_juce PRIVATE cxx_std_17)
+
+# Аудио-движок ВСЕГДА с оптимизацией: debug-вариант AGP собирает нативку с -O0,
+# и JUCE DSP/ресемплер/FLAC-декод становятся в 5-10 раз медленнее — underrun'ы
+# и заикания ровно в тех сборках, на которых идёт отладка. -O2 не мешает
+# отладке Kotlin-части. -fno-math-errno разрешает векторизацию sin/cos/sqrt.
+target_compile_options(automix_juce PRIVATE -O2 -fno-math-errno)
 
 target_include_directories(automix_juce PRIVATE
     ${JUCE_MODULES_DIR}

@@ -11,7 +11,10 @@ namespace
 {
     constexpr const char* kLogTag = "OboeCompat";
 
-    std::atomic<int> gCompatMode { 0 };   // 0 NORMAL / 1 SAFE / 2 EXCLUSIVE (см. OboeRuntime.h)
+    // Дефолт — SAFE (Shared+None): единственная конфигурация, полевая-проверенная
+    // на всём парке (Honor владельца + Xiaomi с битым MMAP; ветка greeting возила
+    // её захардкоженной). NORMAL (Shared+LowLatency) — опция для смелых из настроек.
+    std::atomic<int> gCompatMode { 1 };   // 0 NORMAL / 1 SAFE / 2 EXCLUSIVE (см. OboeRuntime.h)
 
     // Кольцо последних отчётов об открытых потоках. Открытие идёт с обычных
     // (не realtime) потоков, поэтому мьютекс здесь безопасен.

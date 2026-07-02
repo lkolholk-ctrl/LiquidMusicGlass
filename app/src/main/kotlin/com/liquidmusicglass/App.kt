@@ -104,6 +104,10 @@ class App : Application(), ImageLoaderFactory {
         // Реактивный детектор энергосбережения (упрощает эффекты, не выключает)
         com.liquidmusicglass.ui.PowerSaveMonitor.init(this)
 
+        // Классификация железа: на слабых устройствах AGSL-эффекты работают в
+        // облегчённом режиме (меньше октав дыма, 30 Гц клоки)
+        com.liquidmusicglass.ui.DeviceTier.init(this)
+
         // Initialize PlayerController — просто сохраняет context
         PlayerController.init(this)
 
@@ -129,6 +133,19 @@ class App : Application(), ImageLoaderFactory {
                 IcmRepository.init(savedKey, IcmAuthRepository.ensurePartnerUserId())
                 IcmAuthRepository.getSessionToken()?.let { IcmRepository.setSessionToken(it) }
             }
+        }
+    }
+
+    /**
+     * Давление на память: сбрасываем крупные in-memory кэши (обложки Coil —
+     * до 30% heap, кэш лирики), чтобы LMK не выбивал процесс с играющей
+     * музыкой из фона. Диск-кэши не трогаем — обложки перечитаются с диска.
+     */
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= TRIM_MEMORY_UI_HIDDEN) {
+            runCatching { coil.Coil.imageLoader(this).memoryCache?.clear() }
+            runCatching { com.liquidmusicglass.engine.LyricsParser.trimCache() }
         }
     }
 }

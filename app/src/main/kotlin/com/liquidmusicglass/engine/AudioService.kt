@@ -356,10 +356,12 @@ class AudioService : MediaSessionService() {
 
         PlayerController.audioServiceRef = this
 
-        // Stage 7b/7c: координатор JUCE-свода в реальном потоке. Бездействует,
-        // пока выключен флаг juceAutoMixEnabled — обычное воспроизведение не
-        // затрагивается. JUCE поднимается лениво только у точки свода.
-        com.liquidmusicglass.engine.automix.AutoMixCoordinator.start(this)
+        // AutoMix ТОЛЬКО для локального аудио (JUCE в JuceLocalPlayer). Раньше
+        // здесь запускался AutoMixCoordinator — он вёл AutoMix-свод на СТРИМИНГЕ
+        // (ExoPlayer): анализировал пару моделью ("AutoMix LOADED ok" в логе) и
+        // сам переключал/сводил треки в потоковом воспроизведении. Стриминг не
+        // должен трогаться AutoMix'ом — координатор больше НЕ стартуем.
+        // com.liquidmusicglass.engine.automix.AutoMixCoordinator.start(this)
 
         // ── Одна сессия, созданная один раз ──
         val sessionActivityIntent = android.content.Intent(this, com.liquidmusicglass.MainActivity::class.java).apply {
@@ -523,7 +525,10 @@ class AudioService : MediaSessionService() {
 
                 setAudioAttributes(audioAttributes, false)
                 setHandleAudioBecomingNoisy(true)
-                setWakeMode(C.WAKE_MODE_LOCAL) // Media3 native wake mode
+                // NETWORK: Exo у нас — стриминговый бэкенд; держит wake+wifi lock
+                // на время воспроизведения. С LOCAL WiFi засыпал в фоне/Doze →
+                // сеть отваливалась → буфер осушался → лаги/ребуферинг в фоне.
+                setWakeMode(C.WAKE_MODE_NETWORK)
                 // ── Audio Becoming Noisy Guard ──
                 // Do NOT aggressively pause on minor BT/routing changes.
                 // ExoPlayer's built-in handler is sufficient; we soften by
@@ -588,6 +593,14 @@ class AudioService : MediaSessionService() {
                         PlayerController.durationMs.value.coerceAtLeast(0L)
                     }
                     PlayerController.updatePosition(position, effectiveDuration)
+
+                    // ── КРИТИЧНО для фона: wakelock взят с таймаутом 10 мин и
+                    // раньше «обновлялся» только событиями смены состояния. При
+                    // непрерывном воспроизведении событий НЕТ → через 10 минут
+                    // фона lock истекал, CPU уходил в дрёму, декод отставал →
+                    // микролаги/«цикличка», а затем процесс выбивало из памяти.
+                    // manageWakeLock() перезахватывает истёкший lock, пока играем.
+                    manageWakeLock()
                 } catch (e: Exception) {
                     android.util.Log.e("AudioService", "Position polling error", e)
                 }

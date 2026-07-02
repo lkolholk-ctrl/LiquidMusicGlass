@@ -194,6 +194,7 @@ fun FullPlayer(
 
     val shuffleEnabled by PlayerController.shuffleEnabled.collectAsState()
     val repeatMode by PlayerController.repeatMode.collectAsState()
+    val isBuffering by PlayerController.isBuffering.collectAsState()
     // currentTrackObj is declared above for Room reactive favorite state
 
     // isFavorite is now reactive from Room DB via LibraryRepository Flow
@@ -741,12 +742,23 @@ fun FullPlayer(
                         iconSize = 50.dp,
                         onClick = onSkipPrevious
                     )
-                    AnimatedTransportButton(
-                        icon = if (isPlaying) Icons.Rounded.Pause
-                               else Icons.Rounded.PlayArrow,
-                        iconSize = 66.dp,
-                        onClick = onPlayPause
-                    )
+                    // Пока трек буферизуется после скипа — вокруг play/pause крутится
+                    // кольцо: видно, что плеер грузит трек, а не завис.
+                    Box(contentAlignment = Alignment.Center) {
+                        AnimatedTransportButton(
+                            icon = if (isPlaying) Icons.Rounded.Pause
+                                   else Icons.Rounded.PlayArrow,
+                            iconSize = 66.dp,
+                            onClick = onPlayPause
+                        )
+                        if (isBuffering) {
+                            CircularProgressIndicator(
+                                color = Color.White.copy(alpha = 0.85f),
+                                strokeWidth = 2.5.dp,
+                                modifier = Modifier.size(72.dp)
+                            )
+                        }
+                    }
                     AnimatedTransportButton(
                         icon = Icons.Rounded.FastForward,
                         iconSize = 50.dp,

@@ -24,8 +24,9 @@ object LyricsParser {
 
     private const val LRCLIB_BASE = "https://lrclib.net/api"
 
-    // In-memory lyrics cache — key: trackId
-    private val lyricsCache = mutableMapOf<String, Lyrics>()
+    // In-memory lyrics cache — key: trackId. Concurrent: пишется/читается с
+    // разных корутин (строка лирики на Wave, LyricsSheet, полный экран).
+    private val lyricsCache = java.util.concurrent.ConcurrentHashMap<String, Lyrics>()
 
     fun getCachedLyrics(trackId: String?): Lyrics? {
         if (trackId.isNullOrBlank()) return null
@@ -34,6 +35,12 @@ object LyricsParser {
 
     fun cacheLyrics(trackId: String, lyrics: Lyrics) {
         lyricsCache[trackId] = lyrics
+    }
+
+    /** Сброс in-memory кэша при давлении на память (onTrimMemory): лирика
+     *  перезагрузится из сети/файла при следующем обращении. */
+    fun trimCache() {
+        lyricsCache.clear()
     }
 
     /** Одно слово с таймкодом (word-level / Enhanced LRC). */

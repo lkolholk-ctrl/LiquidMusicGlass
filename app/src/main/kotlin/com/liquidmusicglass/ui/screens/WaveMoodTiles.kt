@@ -2,8 +2,11 @@ package com.liquidmusicglass.ui.screens
 
 import android.graphics.RuntimeShader
 import android.os.Build
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.withInfiniteAnimationFrameMillis
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -27,6 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -37,10 +41,12 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.liquidmusicglass.ui.glass.AlbumColors
 import com.liquidmusicglass.ui.theme.AppFontFamily
 import kotlin.math.PI
 import kotlin.math.cos
@@ -70,7 +76,11 @@ val WAVE_MOODS = listOf(
     WaveMood("Dancefloor", Color(0xFFE0405F), Color(0xFFFF7AB0), MoodPattern.RINGS, "dance edm hits"),
 )
 
-private const val TILE_DP = 168
+// Прямоугольные карточки (ландшафт): ниже квадратных — главный экран Wave
+// целиком помещается без скролла.
+private const val TILE_W_DP = 200
+private const val TILE_H_DP = 116
+private const val TILE_CORNER_DP = 30
 private const val TAU = (2.0 * PI).toFloat()
 
 // Скорость медленного «дыхания» узора (доля фазы 0..1 в секунду).
@@ -124,24 +134,41 @@ half4 main(float2 fragCoord) {
 """
 
 /**
- * Горизонтальный ряд крупных мудовых плиток. Перелив+глубина — шейдером (GPU),
- * свой узор — сверху. Анимируются только ВИДИМЫЕ плитки: LazyRow уничтожает
- * элементы за вьюпортом, поэтому их drawBehind не вызывается; время — один
- * общий кадровый клок.
+ * Горизонтальный ряд крупных мудовых карточек: прямоугольники с СИЛЬНО
+ * скруглёнными углами, внутри — AGSL-перелив + узор.
+ *
+ * [albumColors] — палитра обложки ТЕКУЩЕГО трека (та же, из которой рисуется
+ * аура-дым фона): цвета плиток мягко подтягиваются к ней, поэтому карточки
+ * сочетаются с фоном и дымом под каждую музыку. null (нет трека) — свои цвета.
+ *
+ * Анимируются только ВИДИМЫЕ плитки: LazyRow уничтожает элементы за вьюпортом,
+ * поэтому их drawBehind не вызывается; время — один общий кадровый клок.
  */
 @Composable
 fun WaveMoodTiles(
     onSelect: (WaveMood) -> Unit,
     modifier: Modifier = Modifier,
-    animate: Boolean = true
+    animate: Boolean = true,
+    albumColors: AlbumColors? = null,
+    /** Сглаженный бас 0..1 — кромка карточек слегка пульсирует в такт (стриминг). */
+    bassLevel: State<Float>? = null,
+    /** Long-press по карточке — предпросмотр станции (диалог рисует вызывающий). */
+    onPreview: (WaveMood) -> Unit = {}
 ) {
     // Единый кадровый клок (секунды). Один на весь ряд — не плодим корутины.
     // Замораживается, когда Home перекрыт оверлеем (см. AuraBackground): меньше
-    // нагрузки на RenderThread при переходах.
+    // нагрузки на RenderThread при переходах. На lite-устройствах публикуем
+    // через кадр (~30 Гц) — узоры/переливы медленные, разницы не видно, а
+    // перерисовка всех видимых плиток вдвое дешевле.
+    val liteTier = com.liquidmusicglass.ui.DeviceTier.lite
     val timeSec = produceState(0f, animate) {
         if (!animate) return@produceState
+        var skip = false
         while (true) {
-            withInfiniteAnimationFrameMillis { value = it / 1000f }
+            withInfiniteAnimationFrameMillis {
+                if (!liteTier || !skip) value = it / 1000f
+                skip = !skip
+            }
         }
     }
 
@@ -151,24 +178,47 @@ fun WaveMoodTiles(
         horizontalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         itemsIndexed(WAVE_MOODS, key = { _, m -> m.label }) { index, mood ->
+            // Тинт под текущий трек: тянем цвета муда к vibrant/lightVibrant
+            // обложки (доля 0.42 — идентичность муда сохраняется, но вся линейка
+            // карточек уходит в цветовую семью ауры). Смена трека — плавный перелив.
+            // Без трека — цвета мудов, чуть приглушённые к нейтральному тёмному:
+            // экран без музыки спокойнее и «приглашает» нажать Play.
+            val targetA = albumColors?.let { lerp(mood.colorA, it.vibrant, 0.42f) }
+                ?: lerp(mood.colorA, IdleMuted, 0.30f)
+            val targetB = albumColors?.let { lerp(mood.colorB, it.lightVibrant, 0.42f) }
+                ?: lerp(mood.colorB, IdleMuted, 0.30f)
+            val tintA by animateColorAsState(targetA, tween(900), label = "moodTintA")
+            val tintB by animateColorAsState(targetB, tween(900), label = "moodTintB")
             MoodTile(
                 mood = mood,
+                colorA = tintA,
+                colorB = tintB,
                 timeSec = timeSec,
                 seed = index * 1.7f,
                 index = index,
-                onClick = { onSelect(mood) }
+                bassLevel = bassLevel,
+                onClick = { onSelect(mood) },
+                onLongClick = { onPreview(mood) }
             )
         }
     }
 }
 
+// Нейтральный тёмный тон для idle-приглушения карточек (нет играющего трека).
+private val IdleMuted = Color(0xFF20222B)
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MoodTile(
     mood: WaveMood,
+    colorA: Color,
+    colorB: Color,
     timeSec: State<Float>,
     seed: Float,
     index: Int,
-    onClick: () -> Unit
+    bassLevel: State<Float>?,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
 ) {
     // AGSL включаем НЕ на первом кадре, а со СТАГГЕРОМ по индексу в РЕАЛЬНО
     // отрисованных кадрах — чтобы линковка AGSL-программ легла на разные кадры уже
@@ -201,13 +251,16 @@ private fun MoodTile(
 
     Box(
         modifier = Modifier
-            .size(TILE_DP.dp)
-            // Менее скруглённые — ближе к прямоугольным карточкам (лёгкое скругление).
-            .clip(RoundedCornerShape(22.dp))
-            .clickable(
+            .size(TILE_W_DP.dp, TILE_H_DP.dp)
+            // Прямоугольные карточки с сильным скруглением углов. Клип обрезает
+            // ВСЁ рисование по форме карточки — ничего не «вытекает» за плитку
+            // (дымные ореолы без клипа рисовались ниже ряда и давали артефакты).
+            .clip(RoundedCornerShape(TILE_CORNER_DP.dp))
+            .combinedClickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
-                onClick = onClick
+                onClick = onClick,
+                onLongClick = onLongClick
             )
             .drawBehind {
                 if (shader != null && shaderBrush != null && !powerSave) {
@@ -217,13 +270,15 @@ private fun MoodTile(
                     val patternPhase = ((ts * PATTERN_SPEED) + seed * 0.13f) % 1f
                     shader.setFloatUniform("uResolution", size.width, size.height)
                     shader.setFloatUniform("uTime", ts + seed)       // сдвиг фазы у каждой плитки
-                    shader.setFloatUniform("uColorA", mood.colorA.red, mood.colorA.green, mood.colorA.blue)
-                    shader.setFloatUniform("uColorB", mood.colorB.red, mood.colorB.green, mood.colorB.blue)
+                    // Цвета уже тинтованы под палитру обложки текущего трека —
+                    // карточки сочетаются с аурой-дымом фона.
+                    shader.setFloatUniform("uColorA", colorA.red, colorA.green, colorA.blue)
+                    shader.setFloatUniform("uColorB", colorB.red, colorB.green, colorB.blue)
                     drawRect(shaderBrush)
 
                     // ── узор (path-тяжёлый) — рисуем только когда шейдер активен ──
                     clipRect {
-                        val a = mood.colorB
+                        val a = colorB
                         when (mood.pattern) {
                             MoodPattern.WAVES -> drawWaves(patternPhase, size.width, size.height, a)
                             MoodPattern.DIAGONALS -> drawDiagonals(patternPhase, size.width, size.height, a)
@@ -238,7 +293,7 @@ private fun MoodTile(
                     // градиент. Клок НЕ читаем → плитка не перерисовывается каждый кадр.
                     drawRect(
                         Brush.linearGradient(
-                            colors = listOf(mood.colorA, mood.colorB),
+                            colors = listOf(colorA, colorB),
                             start = Offset.Zero,
                             end = Offset(size.width, size.height)
                         )
@@ -252,6 +307,17 @@ private fun MoodTile(
                         1.0f to Color.Black.copy(alpha = 0.35f)
                     )
                 )
+
+                // ── кромка слегка светится в такт басу (только когда шейдер уже
+                // активен — плитка и так перерисовывается каждый кадр; на паузе
+                // bass-продюсер остановлен и лишних инвалидаций нет) ──
+                if (shader != null && shaderBrush != null && !powerSave && bassLevel != null) {
+                    drawRoundRect(
+                        color = colorB.copy(alpha = 0.05f + 0.20f * bassLevel.value.coerceIn(0f, 1f)),
+                        cornerRadius = CornerRadius(TILE_CORNER_DP.dp.toPx()),
+                        style = Stroke(width = 2.dp.toPx())
+                    )
+                }
             }
             .padding(18.dp)
     ) {
