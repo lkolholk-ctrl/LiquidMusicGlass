@@ -26,9 +26,11 @@ object AutoMixNativeEngine {
     private var initialised = false
 
     /** Режимы совместимости Oboe (значения совпадают с OboeRuntime.h). */
-    const val OBOE_MODE_NORMAL = 0     // Shared + LowLatency — ДЕФОЛТ
-    const val OBOE_MODE_SAFE = 1       // Shared + None (legacy-путь; на части девайсов сам даёт тишину)
-    const val OBOE_MODE_EXCLUSIVE = 2  // Exclusive + LowLatency (стоковое поведение JUCE)
+    const val OBOE_MODE_NORMAL = 0      // Shared + LowLatency + Float — ДЕФОЛТ
+    const val OBOE_MODE_SAFE = 1        // Shared + None + Float (на части девайсов сам даёт тишину)
+    const val OBOE_MODE_EXCLUSIVE = 2   // Exclusive + LowLatency + Float (сток JUCE; vivo молча даёт Shared)
+    const val OBOE_MODE_NORMAL_I16 = 3  // Shared + LowLatency + int16 (HAL с битым float-микшером: vivo)
+    const val OBOE_MODE_SAFE_I16 = 4    // Shared + None + int16
 
     // Смена режима на живом движке переоткрывает Oboe-поток (close/reopen) —
     // нельзя на main. Выделенный поток, как у AudioRouteMonitor.

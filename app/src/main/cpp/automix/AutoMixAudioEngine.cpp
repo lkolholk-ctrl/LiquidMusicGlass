@@ -1,6 +1,7 @@
 #include "AutoMixAudioEngine.h"
 #include "MediaCodecDecoder.h"
 #include "MediaCodecAudioSource.h"
+#include "OboeRuntime.h"
 #include "TimeStretch.h"
 
 #include <cmath>
@@ -1034,6 +1035,29 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
     // AutoMix-кроссфейд). Сама пропускает выключенные стадии (лёгкий путь).
     // o[0..ch) — указатели выхода; обрабатываем до 2 каналов (стерео).
     audioFx.process (o, ch, numSamples);
+
+    // NaN-ловушка: не-конечный сэмпл (NaN/Inf) отравляет рекурсивные IIR/лимитер
+    // навсегда и на выходе слышен как постоянный шум. Вычищаем и СЧИТАЕМ
+    // (nanScrubbed в OBOE-дампе): ненулевой счётчик = цепочка отравляется,
+    // это отдельный баг с точным индикатором.
+    {
+        int scrubbed = 0;
+        for (int c = 0; c < ch && c < 2; ++c)
+        {
+            float* p = o[c];
+            for (int i = 0; i < numSamples; ++i)
+                if (! std::isfinite (p[i]))
+                {
+                    p[i] = 0.0f;
+                    ++scrubbed;
+                }
+        }
+        if (scrubbed > 0)
+        {
+            automix::addNanScrubbed (scrubbed);
+            fxResetRequested.store (true, std::memory_order_release); // вылечить цепочку
+        }
+    }
 
     // Clear any channels beyond the 8 we mixed (phones are stereo; just in case).
     for (int c = ch; c < numOutputChannels; ++c)

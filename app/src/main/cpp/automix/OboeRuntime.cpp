@@ -43,9 +43,13 @@ namespace
         {
             case 1:  return "SAFE (shared+none)";
             case 2:  return "EXCLUSIVE (exclusive+lowlat)";
+            case 3:  return "NORMAL_I16 (shared+lowlat+i16)";
+            case 4:  return "SAFE_I16 (shared+none+i16)";
             default: return "NORMAL (shared+lowlat)";
         }
     }
+
+    std::atomic<long> gNanScrubbed { 0 };   // вычищенные NaN/Inf на выходе колбэка
 
     void formatReport (char* buf, size_t bufSize, const StreamReport& r)
     {
@@ -66,7 +70,7 @@ namespace automix
 {
     bool setOboeCompatMode (int mode)
     {
-        const int clamped = mode < 0 ? 0 : (mode > 2 ? 2 : mode);
+        const int clamped = mode < 0 ? 0 : (mode > 4 ? 4 : mode);
         const int prev = gCompatMode.exchange (clamped);
         if (prev != clamped)
             __android_log_print (ANDROID_LOG_INFO, kLogTag, "compat mode %d -> %d (%s)",
@@ -77,6 +81,12 @@ namespace automix
     int getOboeCompatMode()
     {
         return gCompatMode.load();
+    }
+
+    void addNanScrubbed (int count)
+    {
+        if (count > 0)
+            gNanScrubbed.fetch_add (count, std::memory_order_relaxed);
     }
 
     void setLastCodecInfo (const char* info)
@@ -94,6 +104,12 @@ namespace automix
     {
         std::string out = "mode=";
         out += modeName (gCompatMode.load());
+        if (const long nan = gNanScrubbed.load (std::memory_order_relaxed); nan > 0)
+        {
+            char nanLine[48];
+            std::snprintf (nanLine, sizeof (nanLine), "\nnanScrubbed=%ld (!)", nan);
+            out += nanLine;
+        }
         {
             const std::lock_guard<std::mutex> lock (gCodecInfoMutex);
             if (! gLastCodecInfo.empty())
@@ -130,8 +146,16 @@ extern "C" int lmg_oboeSharingModeInt()
 
 extern "C" int lmg_oboePerformanceModeInt()
 {
-    return (int) (automix::getOboeCompatMode() == 1 ? oboe::PerformanceMode::None
-                                                    : oboe::PerformanceMode::LowLatency);
+    const int mode = automix::getOboeCompatMode();
+    return (int) (mode == 1 || mode == 4 ? oboe::PerformanceMode::None
+                                         : oboe::PerformanceMode::LowLatency);
+}
+
+extern "C" int lmg_oboeForceI16()
+{
+    // Режимы 3/4: пропустить float-сессию JUCE → штатная int16-ветка. Для HAL,
+    // которые float «успешно» открывают, но портят в микшере (vivo Y35).
+    return automix::getOboeCompatMode() >= 3 ? 1 : 0;
 }
 
 extern "C" int lmg_oboeBufferCapacityMinFrames()

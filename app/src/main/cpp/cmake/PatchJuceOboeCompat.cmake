@@ -41,6 +41,7 @@ function(lmg_patch_juce_oboe juceOboeFile)
 extern "C" int  lmg_oboeSharingModeInt();
 extern "C" int  lmg_oboePerformanceModeInt();
 extern "C" int  lmg_oboeBufferCapacityMinFrames();
+extern "C" int  lmg_oboeForceI16();
 extern "C" void lmg_onOboeStreamOpen (int direction, int openResult, int usesAAudio,
                                       int sharingMode, int performanceMode, int format,
                                       int sampleRate, int bufferSizeFrames, int framesPerBurst,
@@ -71,6 +72,25 @@ template <typename OboeDataFormat>  struct OboeAudioIODeviceBufferHelpers {};]=]
     string(FIND "${src}" "setBufferCapacityInFrames (lmgMinCap)" capOk)
     if(capOk EQUAL -1)
         message(FATAL_ERROR "PatchJuceOboeCompat: setPerformanceMode anchor not found in ${juceOboeFile}.")
+    endif()
+
+    # 1c) Принудительный 16-бит вывод. JUCE пробует Float и падает на int16 только
+    #     если open ФЕЙЛИТСЯ — а часть HAL (vivo) float-поток «успешно» открывает и
+    #     портит в микшере (fast-путь → шум, deep-путь → тишина). Режимы 3/4 в
+    #     OboeRuntime пропускают float-сессию → JUCE идёт по своей штатной
+    #     int16-ветке ниже.
+    set(floatAnchor [=[    if (sdkVersion >= 21)
+    {
+        session.reset (new OboeSessionImpl<float> (owner, inputDeviceId, outputDeviceId,
+                                                   numInputChannels, numOutputChannels, sampleRate, bufferSize));]=])
+    set(floatGated [=[    if (sdkVersion >= 21 && ! lmg_oboeForceI16())
+    {
+        session.reset (new OboeSessionImpl<float> (owner, inputDeviceId, outputDeviceId,
+                                                   numInputChannels, numOutputChannels, sampleRate, bufferSize));]=])
+    string(REPLACE "${floatAnchor}" "${floatGated}" src "${src}")
+    string(FIND "${src}" "lmg_oboeForceI16()" i16Ok)
+    if(i16Ok EQUAL -1)
+        message(FATAL_ERROR "PatchJuceOboeCompat: float-session anchor not found in ${juceOboeFile}.")
     endif()
 
     # 2) Все 6 захардкоженных Exclusive (probe-поток, output/input сессии,
