@@ -53,6 +53,7 @@ namespace
     }
 
     std::atomic<long> gNanScrubbed { 0 };   // вычищенные NaN/Inf на выходе колбэка
+    std::atomic<bool> gSinkActive { false };// AudioTrack-sink (Java-выход) активен
     std::atomic<long> gCbCount { 0 };       // пульс аудио-колбэка
     std::atomic<int>  gCbNumSamples { 0 };  // размер последнего блока
     std::atomic<int>  gCbLevelMilli { 0 };  // средний |сэмпл| последнего блока ×1000
@@ -95,6 +96,18 @@ namespace automix
             gNanScrubbed.fetch_add (count, std::memory_order_relaxed);
     }
 
+    void setSinkActive (bool active)
+    {
+        gSinkActive.store (active, std::memory_order_relaxed);
+        __android_log_print (ANDROID_LOG_INFO, kLogTag, "AudioTrack sink %s",
+                             active ? "ACTIVE" : "stopped");
+    }
+
+    bool isSinkActive()
+    {
+        return gSinkActive.load (std::memory_order_relaxed);
+    }
+
     void noteAudioCallback (int numSamples)
     {
         gCbCount.fetch_add (1, std::memory_order_relaxed);
@@ -121,6 +134,8 @@ namespace automix
     {
         std::string out = "mode=";
         out += modeName (gCompatMode.load());
+        if (gSinkActive.load (std::memory_order_relaxed))
+            out += "\nsink=AudioTrack(java) ACTIVE — Oboe отключён";
         {
             // Пульс + уровень: cb n растёт → колбэк живёт; level>0 при тишине из
             // динамика → звук чистый на выходе движка, портит система.

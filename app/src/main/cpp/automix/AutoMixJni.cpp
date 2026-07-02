@@ -1,6 +1,8 @@
 #include <jni.h>
+#include <cstring>
 #include <memory>
 #include <mutex>
+#include <vector>
 
 #include <juce_core/juce_core.h>
 
@@ -461,6 +463,70 @@ Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeGetAudioDiagn
         JNIEnv* env, jobject /*thiz*/)
 {
     return env->NewStringUTF (automix::getAudioDiagnostics().c_str());
+}
+
+// ── AudioTrack-выход (Java-sink, режим 6) ───────────────────────────────────
+// Oboe-девайс закрывается, движок остаётся жив; блоки тянет Java-поток
+// AudioTrackSink через nativeSinkRender. Путь ExoPlayer — работает на девайсах,
+// где кривые оба нативных входа (vivo).
+
+JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeSinkStart(
+        JNIEnv* /*env*/, jobject /*thiz*/, jint sampleRate, jint blockFrames)
+{
+    withEngineVoid ([&] (AutoMixAudioEngine& engine) {
+        engine.enterSinkMode ((double) sampleRate, (int) blockFrames);
+    });
+    automix::setSinkActive (true);
+}
+
+JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeSinkRender(
+        JNIEnv* env, jobject /*thiz*/, jshortArray out, jint frames)
+{
+    if (out == nullptr || frames <= 0)
+        return;
+
+    // Локальные буферы потока sink'а (единственный вызывающий) — без аллокаций
+    // после первого вызова.
+    static thread_local std::vector<float> lbuf, rbuf;
+    if ((int) lbuf.size() < frames) { lbuf.resize ((size_t) frames); rbuf.resize ((size_t) frames); }
+
+    bool rendered = false;
+    withEngineVoid ([&] (AutoMixAudioEngine& engine) {
+        engine.renderSinkBlock (lbuf.data(), rbuf.data(), (int) frames);
+        rendered = true;
+    });
+
+    jshort* dst = (jshort*) env->GetPrimitiveArrayCritical (out, nullptr);
+    if (dst == nullptr)
+        return;
+    if (rendered)
+    {
+        for (int i = 0; i < (int) frames; ++i)
+        {
+            const float l = juce::jlimit (-1.0f, 1.0f, lbuf[(size_t) i]);
+            const float r = juce::jlimit (-1.0f, 1.0f, rbuf[(size_t) i]);
+            dst[i * 2 + 0] = (jshort) juce::roundToInt (l * 32767.0f);
+            dst[i * 2 + 1] = (jshort) juce::roundToInt (r * 32767.0f);
+        }
+    }
+    else
+    {
+        std::memset (dst, 0, (size_t) frames * 2 * sizeof (jshort));
+    }
+    env->ReleasePrimitiveArrayCritical (out, dst, 0);
+}
+
+JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeSinkStop(
+        JNIEnv* /*env*/, jobject /*thiz*/)
+{
+    automix::setSinkActive (false);
+    // Всегда возвращаем Oboe-девайс: последующий nativeSetOboeCompatMode может
+    // оказаться no-op (тот же нативный режим), и без реопена здесь остались бы
+    // без выхода вообще. Двойной реопен при смене режима — безвреден.
+    withEngineVoid ([] (AutoMixAudioEngine& engine) { engine.reopenAudioDevice(); });
 }
 
 JNIEXPORT void JNICALL

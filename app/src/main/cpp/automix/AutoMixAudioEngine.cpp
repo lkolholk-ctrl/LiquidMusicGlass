@@ -767,11 +767,16 @@ void AutoMixAudioEngine::escalateBufferForUnderruns()
 //==============================================================================
 void AutoMixAudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
 {
-    if (device != nullptr)
-    {
-        currentSampleRate = device->getCurrentSampleRate();
-        currentBlockSize  = device->getCurrentBufferSizeSamples();
-    }
+    prepareInternal (device != nullptr ? device->getCurrentSampleRate() : 0.0,
+                     device != nullptr ? device->getCurrentBufferSizeSamples() : 0);
+}
+
+// Общая подготовка рендера: зовётся и Oboe-девайсом (audioDeviceAboutToStart),
+// и AudioTrack-sink'ом (enterSinkMode) — один и тот же код, разные источники тика.
+void AutoMixAudioEngine::prepareInternal (double sampleRate, int blockSize)
+{
+    if (sampleRate > 0.0) currentSampleRate = sampleRate;
+    if (blockSize  > 0)   currentBlockSize  = blockSize;
 
     if (currentSampleRate <= 0.0) currentSampleRate = 44100.0;
     if (currentBlockSize  <= 0)   currentBlockSize  = 512;
@@ -805,6 +810,27 @@ void AutoMixAudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
 
     // Профессиональная FX-цепочка готовится на стерео-выход.
     audioFx.prepare (currentSampleRate, currentBlockSize, 2);
+}
+
+// ── AudioTrack-выход (Java-sink) ─────────────────────────────────────────────
+// Третий вход в аудио-систему для устройств, где кривые оба нативных пути
+// (vivo Y35: AAudio Float шипит, deep-путь молчит). Oboe-девайс закрывается,
+// движок жив, блоки тянет Java-поток AudioTrackSink — путь ExoPlayer/стриминга,
+// заведомо рабочий на этих устройствах.
+void AutoMixAudioEngine::enterSinkMode (double sampleRate, int blockSize)
+{
+    if (initialised.load())
+    {
+        std::lock_guard<std::mutex> lock (deviceControlMutex);
+        deviceManager.closeAudioDevice();   // Oboe-колбэки останавливаются, движок жив
+    }
+    prepareInternal (sampleRate, blockSize);
+}
+
+void AutoMixAudioEngine::renderSinkBlock (float* left, float* right, int numSamples)
+{
+    float* outs[2] = { left, right };
+    audioDeviceIOCallbackWithContext (nullptr, 0, outs, 2, numSamples, {});
 }
 
 void AutoMixAudioEngine::audioDeviceStopped()

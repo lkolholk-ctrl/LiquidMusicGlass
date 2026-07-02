@@ -39,6 +39,10 @@ namespace automix
      *  Ненулевое значение в дампе = DSP-цепочка отравляется — отдельный баг. */
     void addNanScrubbed (int count);
 
+    /** AudioTrack-sink активен (Java-выход вместо Oboe). Виден в дампе. */
+    void setSinkActive (bool active);
+    bool isSinkActive();
+
     /** Пульс аудио-колбэка: тик на каждый вызов (+ размер блока). Из дампа видно,
      *  крутится ли колбэк вообще. RT-safe (relaxed-атомики). */
     void noteAudioCallback (int numSamples);

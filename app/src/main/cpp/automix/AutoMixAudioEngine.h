@@ -42,6 +42,15 @@ public:
      *  смене маршрута). Зовётся НЕ из аудио-потока. */
     void reopenAudioDevice();
 
+    // ── AudioTrack-выход (Java-sink): третий вход в аудио-систему ────────────
+    // Для устройств, где кривые ОБА нативных пути (AAudio и OpenSL): Oboe-девайс
+    // закрывается, движок остаётся жив, и готовые блоки тянет Java-поток
+    // AudioTrackSink — тем же путём, каким играет ExoPlayer/стриминг.
+    /** Закрыть Oboe-устройство и подготовить движок под ручной рендер. */
+    void enterSinkMode (double sampleRate, int blockSize);
+    /** Отрендерить numSamples стерео-кадров в l/r (зовёт ТОЛЬКО поток sink'а). */
+    void renderSinkBlock (float* left, float* right, int numSamples);
+
     // Stage 1 diagnostic tone (only when neither deck has a track) -----------
     void startTone();
     void stopTone();
@@ -191,6 +200,7 @@ private:
     void invalidateAllHolds();
     void applyBufferForRoute (bool isBluetooth, bool forceReopen);          // not on audio thread
     void applyBufferForRouteUnlocked (bool isBluetooth, bool forceReopen);  // держа deviceControlMutex
+    void prepareInternal (double sampleRate, int blockSize);                // общая подготовка (device/sink)
     Deck& deckRef (int index) { return index == 0 ? deckA : deckB; }
 
     // Управляющие операции с устройством (init / переоткрытие под маршрут /

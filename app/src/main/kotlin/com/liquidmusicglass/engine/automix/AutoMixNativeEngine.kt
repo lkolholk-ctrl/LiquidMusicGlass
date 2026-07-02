@@ -32,6 +32,7 @@ object AutoMixNativeEngine {
     const val OBOE_MODE_NORMAL_I16 = 3  // Shared + LowLatency + int16 (HAL с битым float-микшером: vivo)
     const val OBOE_MODE_SAFE_I16 = 4    // Shared + None + int16
     const val OBOE_MODE_OPENSLES_I16 = 5 // OpenSL ES + None + int16 (запасной бэкенд, минуя AAudio)
+    const val OBOE_MODE_AUDIOTRACK = 6   // Java AudioTrack-sink: третий вход, путь ExoPlayer (см. AudioTrackSink)
 
     // Смена режима на живом движке переоткрывает Oboe-поток (close/reopen) —
     // нельзя на main. Выделенный поток, как у AudioRouteMonitor.
@@ -86,8 +87,11 @@ object AutoMixNativeEngine {
         // Сохранённый режим совместимости — ДО открытия устройства, чтобы первый
         // Oboe-поток открылся сразу с правильными sharing/performance mode.
         // Движка ещё нет → нативка просто запоминает атомик (реопена не будет).
+        // Режим 6 (AudioTrack) — Kotlin-уровневый: нативке даём NORMAL, а sink
+        // поднимаем после успешного init (ниже).
+        val savedMode = com.liquidmusicglass.engine.AppSettings.audioCompatMode.value
         runCatching {
-            nativeSetOboeCompatMode(com.liquidmusicglass.engine.AppSettings.audioCompatMode.value)
+            nativeSetOboeCompatMode(if (savedMode == OBOE_MODE_AUDIOTRACK) OBOE_MODE_NORMAL else savedMode)
         }
         // JUCE-инициализации нужен ACTIVITY-контекст (getAppContext/JuceActivityWatcher
         // делают IsInstanceOf по android.app.Activity). applicationContext роняет это
@@ -106,6 +110,8 @@ object AutoMixNativeEngine {
         if (ok) {
             runCatching { com.liquidmusicglass.engine.AudioFxController.applyToEngine() }
             runCatching { com.liquidmusicglass.engine.AudioRouteMonitor.reapplyToEngine() }
+            // Сохранённый AudioTrack-режим: поднять Java-sink после старта движка.
+            if (savedMode == OBOE_MODE_AUDIOTRACK) setOboeCompatMode(OBOE_MODE_AUDIOTRACK)
             // Фактические параметры открытого Oboe-потока (API/sharing/perf/format/
             // rate/burst) — в on-screen лог: видно, каким путём пошёл звук на девайсе.
             runCatching { com.liquidmusicglass.debug.DebugLog.add("OBOE ${audioDiagnostics()}") }
@@ -122,10 +128,28 @@ object AutoMixNativeEngine {
     fun setOboeCompatMode(mode: Int) {
         if (!isLoaded) return  // применится в init() из AppSettings
         compatExecutor.execute {
-            runCatching { nativeSetOboeCompatMode(mode) }
-                .onFailure { Log.w(TAG, "nativeSetOboeCompatMode failed", it) }
+            if (mode == OBOE_MODE_AUDIOTRACK) {
+                // Режим 6: закрыть Oboe-девайс, поднять Java-sink (путь ExoPlayer).
+                runCatching { nativeSinkStart(48_000, 960) }
+                    .onFailure { Log.w(TAG, "nativeSinkStart failed", it) }
+                runCatching { AudioTrackSink.start() }
+                    .onFailure { Log.w(TAG, "AudioTrackSink start failed", it) }
+            } else {
+                // Любой режим ≤5: сначала остановить sink (no-op, если не работал),
+                // затем применить режим — реопен Oboe вернёт нативный выход.
+                runCatching { AudioTrackSink.stop() }
+                runCatching { nativeSinkStop() }
+                runCatching { nativeSetOboeCompatMode(mode) }
+                    .onFailure { Log.w(TAG, "nativeSetOboeCompatMode failed", it) }
+            }
             runCatching { com.liquidmusicglass.debug.DebugLog.add("OBOE ${audioDiagnostics()}") }
         }
+    }
+
+    /** Рендер блока для AudioTrackSink (зовёт ТОЛЬКО его поток). */
+    fun sinkRender(out: ShortArray, frames: Int) {
+        if (!isLoaded) { out.fill(0); return }
+        runCatching { nativeSinkRender(out, frames) }.onFailure { out.fill(0) }
     }
 
     /** Текущий режим + последние открытые Oboe-потоки (для DebugOverlay/логов). */
@@ -519,6 +543,9 @@ object AutoMixNativeEngine {
     private external fun nativeSetOutputRouteBluetooth(isBluetooth: Boolean)
     private external fun nativeSetOboeCompatMode(mode: Int)
     private external fun nativeGetAudioDiagnostics(): String
+    private external fun nativeSinkStart(sampleRate: Int, blockFrames: Int)
+    private external fun nativeSinkRender(out: ShortArray, frames: Int)
+    private external fun nativeSinkStop()
     private external fun nativeLoadIncoming(path: String): Boolean
     private external fun nativeLoadIncomingFd(fd: Int, offset: Long, length: Long): Boolean
     private external fun nativeStartTransition(durationMs: Double, entryMs: Double, transitionType: Int)
