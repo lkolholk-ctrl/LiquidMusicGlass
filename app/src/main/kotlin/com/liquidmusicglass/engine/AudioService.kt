@@ -356,10 +356,12 @@ class AudioService : MediaSessionService() {
 
         PlayerController.audioServiceRef = this
 
-        // Stage 7b/7c: координатор JUCE-свода в реальном потоке. Бездействует,
-        // пока выключен флаг juceAutoMixEnabled — обычное воспроизведение не
-        // затрагивается. JUCE поднимается лениво только у точки свода.
-        com.liquidmusicglass.engine.automix.AutoMixCoordinator.start(this)
+        // AutoMix ТОЛЬКО для локального аудио (JUCE в JuceLocalPlayer). Раньше
+        // здесь запускался AutoMixCoordinator — он вёл AutoMix-свод на СТРИМИНГЕ
+        // (ExoPlayer): анализировал пару моделью ("AutoMix LOADED ok" в логе) и
+        // сам переключал/сводил треки в потоковом воспроизведении. Стриминг не
+        // должен трогаться AutoMix'ом — координатор больше НЕ стартуем.
+        // com.liquidmusicglass.engine.automix.AutoMixCoordinator.start(this)
 
         // ── Одна сессия, созданная один раз ──
         val sessionActivityIntent = android.content.Intent(this, com.liquidmusicglass.MainActivity::class.java).apply {
