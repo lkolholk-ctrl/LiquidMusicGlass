@@ -609,8 +609,8 @@ fun AppRoot() {
         // ── Update Dialog ──
         UpdateDialog(backdrop = rootBackdrop)
 
-        // ── ВРЕМЕННЫЙ on-screen логгер (отладка JUCE без logcat) ──
-        com.liquidmusicglass.ui.debug.DebugOverlay()
+        // On-screen отладочный логгер убран из релизных/раздаваемых сборок.
+        // (DebugLog по-прежнему копит записи в память — оверлей просто не рисуем.)
         }
     }
 }
