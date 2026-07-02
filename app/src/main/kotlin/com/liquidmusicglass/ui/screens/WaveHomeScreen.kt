@@ -119,6 +119,7 @@ fun WaveHomeScreen(
 
     val currentTrack by PlayerController.currentTrack.collectAsState()
     val isPlaying by PlayerController.isPlaying.collectAsState()
+    val isBuffering by PlayerController.isBuffering.collectAsState()
     val favoriteIds by PlayerController.favoriteIds.collectAsState()
     val isBuildingWave by viewModel.isBuildingWave.collectAsState()
     val needsOnboarding by viewModel.needsOnboarding.collectAsState()
@@ -283,13 +284,19 @@ fun WaveHomeScreen(
                         // ничего не ждёт.
                         val density = LocalDensity.current
                         val dragThresholdPx = remember(density) { with(density) { 96.dp.toPx() } }
+                        val maxDragPx = remember(density) { with(density) { 160.dp.toPx() } }
                         val coverOffset = remember { Animatable(0f) }
-                        AlbumArtImage(
-                            uri = track.displayArtUri,
-                            coverUrl = track.coverUrl,
-                            albumId = track.albumId,
-                            contentDescription = track.title,
-                            contentScale = ContentScale.Crop,
+
+                        // Страховка от «застрявшей» наклонённой обложки: как только
+                        // реально сменился трек — возвращаем обложку в центр, даже
+                        // если возвратная анимация жеста была чем-то отменена.
+                        LaunchedEffect(track.id) {
+                            if (coverOffset.value != 0f) {
+                                coverOffset.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 420f))
+                            }
+                        }
+
+                        Box(
                             modifier = Modifier
                                 .size(216.dp)
                                 .graphicsLayer {
@@ -305,7 +312,12 @@ fun WaveHomeScreen(
                                 .draggable(
                                     orientation = Orientation.Horizontal,
                                     state = rememberDraggableState { delta ->
-                                        scope.launch { coverOffset.snapTo(coverOffset.value + delta) }
+                                        // Резинка: тянется с сопротивлением и не дальше maxDragPx.
+                                        scope.launch {
+                                            val next = (coverOffset.value + delta * 0.85f)
+                                                .coerceIn(-maxDragPx, maxDragPx)
+                                            coverOffset.snapTo(next)
+                                        }
                                     },
                                     onDragStopped = { velocity ->
                                         val off = coverOffset.value
@@ -315,14 +327,44 @@ fun WaveHomeScreen(
                                             off > dragThresholdPx || velocity > 2800f ->
                                                 PlayerController.skipPrevious(context)
                                         }
-                                        coverOffset.animateTo(
-                                            0f,
-                                            spring(dampingRatio = 0.78f, stiffness = 300f)
-                                        )
+                                        // Возврат — в ТОМ ЖЕ scope, что и snapTo-дельты:
+                                        // единая очередь main, отставший snapTo не отменит
+                                        // возвратную анимацию (раньше обложка могла застрять
+                                        // наклонённой на время буферизации).
+                                        scope.launch {
+                                            coverOffset.animateTo(
+                                                0f,
+                                                spring(dampingRatio = 0.78f, stiffness = 300f)
+                                            )
+                                        }
                                     }
                                 )
-                                .clickable { onOpenPlayer() }
-                        )
+                                .clickable { onOpenPlayer() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            AlbumArtImage(
+                                uri = track.displayArtUri,
+                                coverUrl = track.coverUrl,
+                                albumId = track.albumId,
+                                contentDescription = track.title,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                            // Буферизация после скипа: затемнение + спиннер прямо на
+                            // обложке — видно, что трек грузится, а не «всё зависло».
+                            if (isBuffering) {
+                                Box(
+                                    Modifier
+                                        .fillMaxSize()
+                                        .background(Color.Black.copy(alpha = 0.35f))
+                                )
+                                CircularProgressIndicator(
+                                    color = Color.White,
+                                    strokeWidth = 3.dp,
+                                    modifier = Modifier.size(40.dp)
+                                )
+                            }
+                        }
                         Spacer(Modifier.height(28.dp))
                         Row(
                             modifier = Modifier
