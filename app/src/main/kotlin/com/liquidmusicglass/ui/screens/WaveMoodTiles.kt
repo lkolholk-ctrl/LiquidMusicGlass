@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -26,6 +27,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -35,11 +37,10 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -47,8 +48,6 @@ import com.liquidmusicglass.ui.glass.AlbumColors
 import com.liquidmusicglass.ui.theme.AppFontFamily
 import kotlin.math.PI
 import kotlin.math.cos
-import kotlin.math.max
-import kotlin.math.min
 import kotlin.math.sin
 
 /** Узор плитки — у каждого муда свой. */
@@ -129,12 +128,11 @@ half4 main(float2 fragCoord) {
 """
 
 /**
- * Горизонтальный ряд крупных мудовых БЛОБОВ. Каждый — «фигуристая» органичная
- * форма (замкнутая волнистая кривая со своим сидом и медленным бесшовным
- * морфингом), внутри — AGSL-перелив + узор, вокруг — дымный ореол.
+ * Горизонтальный ряд крупных мудовых карточек: прямоугольники с СИЛЬНО
+ * скруглёнными углами, внутри — AGSL-перелив + узор.
  *
  * [albumColors] — палитра обложки ТЕКУЩЕГО трека (та же, из которой рисуется
- * аура-дым фона): цвета плиток мягко подтягиваются к ней, поэтому блобы
+ * аура-дым фона): цвета плиток мягко подтягиваются к ней, поэтому карточки
  * сочетаются с фоном и дымом под каждую музыку. null (нет трека) — свои цвета.
  *
  * Анимируются только ВИДИМЫЕ плитки: LazyRow уничтожает элементы за вьюпортом,
@@ -225,42 +223,31 @@ private fun MoodTile(
     Box(
         modifier = Modifier
             .size(TILE_DP.dp)
+            // Прямоугольные карточки с СИЛЬНЫМ скруглением углов. Клип обрезает
+            // ВСЁ рисование по форме карточки — ничего не «вытекает» за плитку
+            // (дымные ореолы без клипа рисовались ниже ряда и давали артефакты).
+            .clip(RoundedCornerShape(40.dp))
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = onClick
             )
             .drawBehind {
-                // «Фигуристая» органичная форма вместо прямоугольника: замкнутая
-                // волнистая кривая со своим сидом; при активном шейдере медленно
-                // морфится (бесшовный цикл по patternPhase), на прогреве — статична.
-                val blob = Path()
-
                 if (shader != null && shaderBrush != null && !powerSave) {
                     // AGSL активна (плитка прогрелась). Клок читаем ТОЛЬКО здесь —
                     // статичные плитки не инвалидируются каждый кадр.
                     val ts = timeSec.value
                     val patternPhase = ((ts * PATTERN_SPEED) + seed * 0.13f) % 1f
-                    buildBlobPath(blob, size.width, size.height, seed, patternPhase)
-
-                    // Дымный ореол ПОЗАДИ блоба — цветом плитки (уже тинтован под
-                    // обложку), мягко сливается с аурой-дымом фона.
-                    softGlow(
-                        center = Offset(size.width * 0.5f, size.height * 0.5f),
-                        radius = size.minDimension * 0.60f,
-                        color = colorB,
-                        alpha = 0.20f
-                    )
-
                     shader.setFloatUniform("uResolution", size.width, size.height)
                     shader.setFloatUniform("uTime", ts + seed)       // сдвиг фазы у каждой плитки
+                    // Цвета уже тинтованы под палитру обложки текущего трека —
+                    // карточки сочетаются с аурой-дымом фона.
                     shader.setFloatUniform("uColorA", colorA.red, colorA.green, colorA.blue)
                     shader.setFloatUniform("uColorB", colorB.red, colorB.green, colorB.blue)
+                    drawRect(shaderBrush)
 
-                    clipPath(blob) {
-                        drawRect(shaderBrush)
-
-                        // ── узор (path-тяжёлый) — рисуем только когда шейдер активен ──
+                    // ── узор (path-тяжёлый) — рисуем только когда шейдер активен ──
+                    clipRect {
                         val a = colorB
                         when (mood.pattern) {
                             MoodPattern.WAVES -> drawWaves(patternPhase, size.width, size.height, a)
@@ -270,105 +257,40 @@ private fun MoodTile(
                             MoodPattern.DOTS -> drawDots(patternPhase, size.width, size.height, a)
                             MoodPattern.RINGS -> drawRings(patternPhase, size.width, size.height, a)
                         }
-
-                        // ── мягкий scrim к низу для читаемости подписи ──
-                        drawRect(
-                            Brush.verticalGradient(
-                                0.45f to Color.Transparent,
-                                1.0f to Color.Black.copy(alpha = 0.38f)
-                            )
-                        )
                     }
-
-                    // Тонкий светящийся контур по кромке блоба.
-                    drawPath(blob, Color.White.copy(alpha = 0.10f), style = Stroke(width = 1.8f))
                 } else {
                     // Прогрев (шейдер ещё не включён) / <API33 — ДЕШЁВЫЙ статичный
-                    // блоб-градиент. Клок НЕ читаем → плитка не перерисовывается каждый кадр.
-                    buildBlobPath(blob, size.width, size.height, seed, 0f)
-                    drawPath(
-                        blob,
+                    // градиент. Клок НЕ читаем → плитка не перерисовывается каждый кадр.
+                    drawRect(
                         Brush.linearGradient(
                             colors = listOf(colorA, colorB),
                             start = Offset.Zero,
                             end = Offset(size.width, size.height)
                         )
                     )
-                    drawPath(
-                        blob,
-                        Brush.verticalGradient(
-                            0.45f to Color.Transparent,
-                            1.0f to Color.Black.copy(alpha = 0.38f)
-                        )
-                    )
                 }
 
-                // Дымная тёмная подложка под подписью (низ-центр): текст читается,
-                // даже если кромка блоба в этом месте «поджалась» волной.
-                softGlow(
-                    center = Offset(size.width * 0.5f, size.height * 0.88f),
-                    radius = size.width * 0.46f,
-                    color = Color.Black,
-                    alpha = 0.30f
+                // ── мягкий scrim к низу для читаемости подписи (всегда) ──
+                drawRect(
+                    Brush.verticalGradient(
+                        0.45f to Color.Transparent,
+                        1.0f to Color.Black.copy(alpha = 0.35f)
+                    )
                 )
             }
-            .padding(horizontal = 16.dp)
+            .padding(18.dp)
     ) {
         Text(
             text = mood.label,
             color = Color.White,
-            fontSize = 17.sp,
+            fontSize = 18.sp,
             fontWeight = FontWeight.Black,
             fontFamily = AppFontFamily,
-            textAlign = TextAlign.Center,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 22.dp)
+            modifier = Modifier.align(Alignment.BottomStart)
         )
     }
-}
-
-/**
- * Замкнутый органичный блоб: [n] опорных точек на окружности с тремя гармониками
- * волнистости. Сид даёт каждой плитке СВОЮ форму; фаза 0..1 — бесшовный цикл
- * морфинга (все члены — целые обороты sin). Нижняя половина спокойнее (там
- * подпись), верх — «фигуристее». Сглаживание — квадратичные кривые через
- * середины сегментов, поэтому углов нет в принципе.
- */
-private fun buildBlobPath(path: Path, w: Float, h: Float, seed: Float, phase: Float) {
-    val cx = w * 0.5f
-    val cy = h * 0.5f
-    val base = min(w, h) * 0.455f
-    val n = 12
-    val xs = FloatArray(n)
-    val ys = FloatArray(n)
-    for (i in 0 until n) {
-        val ang = i.toFloat() / n * TAU
-        // Внизу (sin>0 в экранных координатах) волнистость приглушена — кромка
-        // под подписью ровнее; сверху блоб гуляет сильнее.
-        val calm = 1f - 0.55f * max(0f, sin(ang))
-        val wob = 1f + calm * (
-            0.070f * sin(ang * 3f + seed * 5.1f + phase * TAU) +
-            0.045f * sin(ang * 5f - seed * 3.7f - phase * TAU) +
-            0.028f * sin(ang * 2f + seed * 1.9f + phase * TAU)
-        )
-        val r = base * wob
-        xs[i] = cx + r * cos(ang)
-        ys[i] = cy + r * sin(ang)
-    }
-    path.reset()
-    var mx = (xs[n - 1] + xs[0]) * 0.5f
-    var my = (ys[n - 1] + ys[0]) * 0.5f
-    path.moveTo(mx, my)
-    for (i in 0 until n) {
-        val j = (i + 1) % n
-        mx = (xs[i] + xs[j]) * 0.5f
-        my = (ys[i] + ys[j]) * 0.5f
-        path.quadraticBezierTo(xs[i], ys[i], mx, my)
-    }
-    path.close()
 }
 
 /** Мягкое светящееся пятно (радиальный градиент → прозрачность). */

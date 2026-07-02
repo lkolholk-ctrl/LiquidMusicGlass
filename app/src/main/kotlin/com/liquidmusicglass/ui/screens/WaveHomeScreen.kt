@@ -255,8 +255,8 @@ fun WaveHomeScreen(
 
             // ── Animated mood blobs ──
             item {
-                // Блобы опущены заметно ниже контролов (больше воздуха сверху).
-                Spacer(Modifier.height(36.dp))
+                // Блобы опущены СИЛЬНО ниже контролов (много воздуха сверху).
+                Spacer(Modifier.height(96.dp))
                 WaveMoodTiles(
                     onSelect = { mood -> viewModel.buildMoodWave(context, mood.query, mood.label) },
                     animate = animationsActive,
