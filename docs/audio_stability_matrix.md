@@ -47,6 +47,7 @@ BufferingAudioSource (предчтение) → AudioTransportSource → ауд�
 | D1 | Смена маршрута BT↔динамик — пачки событий, циклы реопенов | ✅ Debounce 700мс + dedup в AudioRouteMonitor; BT — крупный буфер без fast-path |
 | D2 | AAudio DISCONNECTED (рестарт audioserver) | ⚠️ Полагаемся на реопен JUCE/Oboe + наш route-монитор; при жалобах — проверить логи на Disconnected |
 | D3 | Потеря аудио-фокуса (транзиент/дак) | ✅ Дак с дебаунсом 250мс (пачки LOSS↔GAIN от других приложений давали «цикличку» громкости) |
+| D4 | Запись экрана (AudioPlaybackCapture): эксклюзивный MMAP-поток нельзя дублировать → шипение/стук при включении записи, музыки нет в записи | ✅ CMake-патч Oboe-бэкенда JUCE: все потоки Shared + PerformanceMode::None (обычный AudioTrack-путь). Fast-path музыке не нужен — буферы и так крупные |
 
 ## E. Уровень процесса (фон)
 

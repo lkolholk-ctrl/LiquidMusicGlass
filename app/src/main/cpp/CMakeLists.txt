@@ -78,6 +78,33 @@ endif()
 set(JUCE_MODULES_DIR ${juce_SOURCE_DIR}/modules)
 set(OBOE_DIR ${JUCE_MODULES_DIR}/juce_audio_devices/native/oboe)
 
+# ── Патч совместимости: Oboe-бэкенд JUCE запрашивает Exclusive + LowLatency
+# (MMAP fast-path). Захват звука при записи экрана не может дублировать
+# эксклюзивный MMAP-поток — на многих устройствах при включении записи звук
+# превращается в шипение/стук, а в самой записи музыки нет. Музыкальному
+# плееру fast-path не нужен (мы и так на крупных буферах): переводим все
+# потоки на Shared + PerformanceMode::None — обычный AudioTrack-путь,
+# совместимый с записью экрана, капчером и BT. JUCE снаружи это не
+# конфигурирует, поэтому правим скачанный исходник (идемпотентно; файл
+# перезаписывается только если содержимое реально изменилось — без лишних
+# ребилдов).
+set(JUCE_OBOE_CPP ${JUCE_MODULES_DIR}/juce_audio_devices/native/juce_Oboe_android.cpp)
+if(NOT EXISTS ${JUCE_OBOE_CPP})
+    set(JUCE_OBOE_CPP ${JUCE_MODULES_DIR}/juce_audio_devices/native/juce_android_Oboe.cpp)
+endif()
+if(EXISTS ${JUCE_OBOE_CPP})
+    file(READ ${JUCE_OBOE_CPP} _oboe_src_orig)
+    set(_oboe_src "${_oboe_src_orig}")
+    string(REPLACE "SharingMode::Exclusive" "SharingMode::Shared" _oboe_src "${_oboe_src}")
+    string(REPLACE "PerformanceMode::LowLatency" "PerformanceMode::None" _oboe_src "${_oboe_src}")
+    if(NOT _oboe_src STREQUAL _oboe_src_orig)
+        file(WRITE ${JUCE_OBOE_CPP} "${_oboe_src}")
+        message(STATUS "automix: patched JUCE Oboe backend -> Shared/PerformanceMode::None (screen-recording compatibility)")
+    endif()
+else()
+    message(WARNING "automix: JUCE Oboe backend source not found — screen-recording compatibility patch NOT applied")
+endif()
+
 # JUCE vendors a full copy of Oboe (not a submodule), so the shallow clone has
 # it. Compile it straight into our lib; JUCE's juce_android_Oboe.cpp uses it.
 file(GLOB_RECURSE OBOE_SOURCES CONFIGURE_DEPENDS ${OBOE_DIR}/src/*.cpp)
