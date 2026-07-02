@@ -45,11 +45,14 @@ object AppSettings {
     val ignoreShortEnabled: StateFlow<Boolean> = _ignoreShortEnabled
 
     // ── Аудио-совместимость (JUCE/Oboe) ──
-    // 0 = ДЕФОЛТ (Shared + LowLatency), 1 = безопасный (Shared + None, legacy-путь;
-    // тумблер для устройств с шумом на fast-path — но на Honor владельца None сам
-    // даёт тишину, поэтому НЕ дефолт), 2 = exclusive (сток JUCE, A/B-отладка).
+    // Режимы 0..6 — см. OboeRuntime.h / AutoMixNativeEngine. Пока явного выбора
+    // не было (auto=true), режим берётся из вендорной таблицы AudioQuirks; явный
+    // выбор (селектор в настройках / MODE / watchdog) персистится навсегда.
     private val _audioCompatMode = MutableStateFlow(0)
     val audioCompatMode: StateFlow<Int> = _audioCompatMode
+
+    private val _audioCompatAuto = MutableStateFlow(true)
+    val audioCompatAuto: StateFlow<Boolean> = _audioCompatAuto
 
     private val _ignoreThresholdSec = MutableStateFlow(30f)
     val ignoreThresholdSec: StateFlow<Float> = _ignoreThresholdSec
@@ -146,27 +149,31 @@ object AppSettings {
         safePrefs()?.edit()?.putBoolean("ignore_short", enabled)?.apply()
     }
 
-    /**
-     * Вендорный дефолт аудио-выхода (полевая карта 03.07.2026):
-     *  • vivo/iQOO — AAudio-микшер портит и Float, и I16 (шип/тишина на Y35);
-     *  • Xiaomi/Redmi/POCO — битый exclusive-MMAP (шум), Shared не подтверждён.
-     * Обоим — AudioTrack (режим 6): путь ExoPlayer, подтверждённо чистый на
-     * этих устройствах. Honor и остальные — быстрый нативный путь (0), при
-     * механическом отказе их подхватит AudioOutputWatchdog.
-     */
-    private fun defaultAudioCompatModeForDevice(): Int {
-        val id = (android.os.Build.MANUFACTURER + " " + android.os.Build.BRAND).lowercase()
-        return if (listOf("vivo", "iqoo", "xiaomi", "redmi", "poco").any { it in id }) 6 else 0
-    }
-
     fun setAudioCompatMode(mode: Int) {
         val m = mode.coerceIn(0, 6)
-        if (_audioCompatMode.value == m) return
+        _audioCompatAuto.value = false
+        if (_audioCompatMode.value == m) {
+            // Значение то же, но выбор стал ЯВНЫМ — зафиксировать в prefs.
+            safePrefs()?.edit()?.putInt("audio_compat_mode", m)?.apply()
+            return
+        }
         _audioCompatMode.value = m
         safePrefs()?.edit()?.putInt("audio_compat_mode", m)?.apply()
         // Живой движок переоткроет Oboe-поток с новым режимом (на фоне);
         // если движок ещё не поднят — режим подхватится при init().
         com.liquidmusicglass.engine.automix.AutoMixNativeEngine.setOboeCompatMode(m)
+    }
+
+    /** Вернуться в «Авто»: явный выбор стирается, действует вендорная таблица
+     *  (AudioQuirks) + watchdog. */
+    fun setAudioCompatModeAuto() {
+        _audioCompatAuto.value = true
+        safePrefs()?.edit()?.remove("audio_compat_mode")?.apply()
+        val m = com.liquidmusicglass.engine.automix.AudioQuirks.defaultMode()
+        if (_audioCompatMode.value != m) {
+            _audioCompatMode.value = m
+            com.liquidmusicglass.engine.automix.AutoMixNativeEngine.setOboeCompatMode(m)
+        }
     }
 
     fun setIgnoreThreshold(sec: Float) {
@@ -349,13 +356,15 @@ object AppSettings {
         _sleepTimerMinutes.value = p.getInt("sleep_timer", 0)
         _ignoreShortEnabled.value = p.getBoolean("ignore_short", false)
         _ignoreThresholdSec.value = p.getFloat("ignore_threshold", 30f)
-        // Пользователь/watchdog ещё не выбирали режим → вендорный дефолт. НЕ
-        // персистим его: если завтра карта дефолтов улучшится, обновление её
-        // подхватит; явный выбор (тумблер/MODE/watchdog) — персистится навсегда.
-        _audioCompatMode.value = if (p.contains("audio_compat_mode"))
-            p.getInt("audio_compat_mode", 0).coerceIn(0, 6)
+        // Пользователь/watchdog ещё не выбирали режим → вендорная таблица
+        // AudioQuirks (модель → семейство → NORMAL). Дефолт НЕ персистим: если
+        // завтра карта улучшится, обновление её подхватит; явный выбор
+        // (селектор/MODE/watchdog) — персистится навсегда.
+        _audioCompatAuto.value = !p.contains("audio_compat_mode")
+        _audioCompatMode.value = if (_audioCompatAuto.value)
+            com.liquidmusicglass.engine.automix.AudioQuirks.defaultMode()
         else
-            defaultAudioCompatModeForDevice()
+            p.getInt("audio_compat_mode", 0).coerceIn(0, 6)
         _preloadLeadSeconds.value = p.getInt("preload_lead_seconds", 60).coerceIn(30, 90)
 
         _lastTrackIndex.value = p.getInt("last_track", -1)

@@ -114,6 +114,7 @@ object AutoMixNativeEngine {
             if (savedMode == OBOE_MODE_AUDIOTRACK) setOboeCompatMode(OBOE_MODE_AUDIOTRACK)
             // Фактические параметры открытого Oboe-потока (API/sharing/perf/format/
             // rate/burst) — в on-screen лог: видно, каким путём пошёл звук на девайсе.
+            runCatching { com.liquidmusicglass.debug.DebugLog.add("QUIRKS ${AudioQuirks.describe()}") }
             runCatching { com.liquidmusicglass.debug.DebugLog.add("OBOE ${audioDiagnostics()}") }
         }
         return ok

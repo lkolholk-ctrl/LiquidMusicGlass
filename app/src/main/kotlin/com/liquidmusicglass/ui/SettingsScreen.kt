@@ -122,6 +122,7 @@ fun SettingsScreen(
 
             val hideExplicit by AppSettings.hideExplicit.collectAsState()
             val audioCompatMode by AppSettings.audioCompatMode.collectAsState()
+            val audioCompatAuto by AppSettings.audioCompatAuto.collectAsState()
 
             PlainCard {
                 SettingsToggleItem(
@@ -138,16 +139,44 @@ fun SettingsScreen(
                     onSelect = { AppSettings.setHideExplicit(it) }
                 )
                 PlainDivider()
-                // Безопасный вывод (ДЕФОЛТ OFF): legacy-путь Android-аудио (Shared +
-                // без low-latency) для устройств, где fast-path AAudio отдаёт
-                // шум/тишину (часть Xiaomi и др.). Не дефолт: на Honor владельца
-                // этот путь сам даёт тишину — универсального режима нет.
-                SettingsToggleItem(
-                    title = "Safe Audio Output",
-                    subtitle = "Try if local playback is noisy or silent on this device",
-                    selected = audioCompatMode == 1,
-                    onSelect = { AppSettings.setAudioCompatMode(if (it) 1 else 0) }
-                )
+                // Выход локального аудио. Auto — вендорная таблица AudioQuirks +
+                // watchdog (рекомендуется); Fast — нативный low-latency (AAudio);
+                // Compat — legacy-путь без low-latency; Track — Java AudioTrack,
+                // путь ExoPlayer (максимальная совместимость: vivo/Xiaomi).
+                // Продвинутые режимы (exclusive/i16/OpenSL) — кнопкой MODE в
+                // дебаг-панели; при них здесь не подсвечено ничего.
+                Column(modifier = Modifier.padding(top = 6.dp, bottom = 2.dp)) {
+                    Text(
+                        text = "Audio Output",
+                        color = LiquidTheme.colors.textPrimary,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
+                    AudioOutputSelector(
+                        selectedKey = when {
+                            audioCompatAuto -> "auto"
+                            audioCompatMode == 0 -> "fast"
+                            audioCompatMode == 1 -> "compat"
+                            audioCompatMode == 6 -> "track"
+                            else -> "custom"
+                        },
+                        onSelect = { key ->
+                            when (key) {
+                                "auto" -> AppSettings.setAudioCompatModeAuto()
+                                "fast" -> AppSettings.setAudioCompatMode(0)
+                                "compat" -> AppSettings.setAudioCompatMode(1)
+                                "track" -> AppSettings.setAudioCompatMode(6)
+                            }
+                        }
+                    )
+                    Text(
+                        text = "Auto picks the right path for this device and self-heals if audio stalls",
+                        color = LiquidTheme.colors.textSecondary,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
+                }
                 PlainDivider()
                 SettingsActionItem(
                     title = "Audio",
@@ -653,6 +682,54 @@ private fun PlainDivider() {
             .height(1.dp)
             .background(dividerColor)
     )
+}
+
+/** Выбор выхода локального аудио: Auto / Fast / Compat / Track (стиль PreloadSelector). */
+@Composable
+private fun AudioOutputSelector(
+    selectedKey: String,
+    onSelect: (String) -> Unit
+) {
+    val options = listOf("auto" to "Auto", "fast" to "Fast", "compat" to "Compat", "track" to "Track")
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        options.forEach { (key, label) ->
+            val isSelected = selectedKey == key
+            val isDark = LiquidTheme.colors.isDark
+            val itemBg = if (isSelected) Accent else (if (isDark) Color(0xFF1C1C1E) else Color(0xFFE5E5EA))
+            val unselectedTextColor = if (isDark) Color.White.copy(alpha = 0.45f) else Color.Black.copy(alpha = 0.45f)
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(36.dp)
+                    .background(itemBg, RoundedCornerShape(50))
+                    .clip(RoundedCornerShape(50))
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = { onSelect(key) }
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                val textColor by animateColorAsState(
+                    targetValue = if (isSelected) Color.White else unselectedTextColor,
+                    animationSpec = tween(200),
+                    label = "audioOutText"
+                )
+                Text(
+                    text = label,
+                    color = textColor,
+                    fontSize = 13.sp,
+                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+                )
+            }
+        }
+    }
 }
 
 @Composable

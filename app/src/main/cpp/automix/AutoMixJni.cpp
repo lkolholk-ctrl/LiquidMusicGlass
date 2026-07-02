@@ -481,10 +481,12 @@ JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeSinkStart(
         JNIEnv* /*env*/, jobject /*thiz*/, jint sampleRate, jint blockFrames)
 {
+    // Флаг ДО закрытия девайса: с этого момента гвард в applyBufferForRouteUnlocked
+    // не даст ничему (BT-монитор, эскалация буфера) воскресить Oboe параллельно sink'у.
+    automix::setSinkActive (true);
     withEngineVoid ([&] (AutoMixAudioEngine& engine) {
         engine.enterSinkMode ((double) sampleRate, (int) blockFrames);
     });
-    automix::setSinkActive (true);
 }
 
 JNIEXPORT void JNICALL

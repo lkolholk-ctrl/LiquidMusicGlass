@@ -214,6 +214,15 @@ void AutoMixAudioEngine::applyBufferForRouteUnlocked (bool isBluetooth, bool for
     if (! initialised.load())
         return;
 
+    // AudioTrack-sink активен → Oboe-девайс закрыт НАМЕРЕННО. Любой реопен здесь
+    // (смена BT-маршрута, эскалация буфера, power-save) воскресил бы Oboe
+    // ПАРАЛЛЕЛЬНО sink'у: два потребителя одного движка = двойная скорость/каша.
+    // AudioTrack сам следует за системным роутингом (как ExoPlayer) — при смене
+    // маршрута делать ничего не нужно. Выход из sink-режима реопенит явно
+    // (nativeSinkStop), минуя этот гвард.
+    if (automix::isSinkActive())
+        return;
+
     auto setup = deviceManager.getAudioDeviceSetup();
     int target = setup.bufferSize;
 
