@@ -1,11 +1,29 @@
 #include "MediaCodecAudioSource.h"
+#include "OboeRuntime.h"
 
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
 
+#include <cstdio>
 #include <cstring>
 #include <algorithm>
+
+namespace
+{
+    const char* pcmEncodingName (int32_t enc)
+    {
+        switch (enc)
+        {
+            case 2:  return "i16";
+            case 3:  return "i8";
+            case 4:  return "float";
+            case 21: return "i24";
+            case 22: return "i32";
+            default: return "?";
+        }
+    }
+}
 
 namespace automix
 {
@@ -132,6 +150,12 @@ bool MediaCodecAudioSource::configureFromExtractor()
         && AMediaCodec_start (codec) == AMEDIA_OK;
 
     AMediaFormat_delete (format);
+
+    // Фактический ВЫХОДНОЙ формат кодека сразу после старта: часть OEM-кодеков
+    // (vivo) отдаёт 24/32-бит вместо 16, и rate/каналы могут отличаться от
+    // контейнерных. Читаем ДО того, как транспорт возьмёт getSampleRate().
+    if (ok)
+        refreshOutputFormat();
     return ok;
 }
 
@@ -167,6 +191,9 @@ bool MediaCodecAudioSource::recreateCodec()
         return false;
     }
 
+    outputFormatKnown = false;   // новый кодек может отдать другой формат
+    refreshOutputFormat();
+
     // Экстрактор мог уйти вперёд кадрами, которые погибший кодек так и не отдал —
     // вернём его к первому НЕ выданному кадру (readPos + буферизованный остаток).
     const juce::int64 resumeFrame = readPos + (juce::int64) (leftBuf.size() - leftoverStart);
@@ -187,6 +214,76 @@ void MediaCodecAudioSource::push16 (const int16_t* s, int totalSamples)
         return;
 
     constexpr float kScale = 1.0f / 32768.0f;
+    const size_t base = leftBuf.size();
+    leftBuf.resize  (base + (size_t) frames);
+    rightBuf.resize (base + (size_t) frames);
+    float* l = leftBuf.data()  + base;
+    float* r = rightBuf.data() + base;
+
+    if (ch == 1)
+        for (int fr = 0; fr < frames; ++fr)
+        {
+            const float v = (float) s[fr] * kScale;
+            l[fr] = v;
+            r[fr] = v;
+        }
+    else
+        for (int fr = 0; fr < frames; ++fr)
+        {
+            l[fr] = (float) s[fr * ch + 0] * kScale;
+            r[fr] = (float) s[fr * ch + 1] * kScale;
+        }
+}
+
+// 24-бит packed (3 байта/сэмпл, little-endian, знаковый) — так отдают звук
+// аппаратные декодеры части вендоров (vivo и др.). Чтение как int16 даёт
+// «шипение с прорывающейся музыкой» — байты уходят со сдвигом.
+void MediaCodecAudioSource::push24 (const uint8_t* s, int totalSamples)
+{
+    const int ch = outChannels > 0 ? outChannels : 2;
+    const int frames = totalSamples / ch;
+    if (frames <= 0)
+        return;
+
+    constexpr float kScale = 1.0f / 8388608.0f;   // 2^23
+    const size_t base = leftBuf.size();
+    leftBuf.resize  (base + (size_t) frames);
+    rightBuf.resize (base + (size_t) frames);
+    float* l = leftBuf.data()  + base;
+    float* r = rightBuf.data() + base;
+
+    auto sampleAt = [s] (int index) noexcept -> float
+    {
+        const uint8_t* p = s + index * 3;
+        int32_t v = (int32_t) p[0] | ((int32_t) p[1] << 8) | ((int32_t) p[2] << 16);
+        if (v & 0x800000)
+            v -= 0x1000000;                        // sign-extend 24 -> 32
+        return (float) v;
+    };
+
+    if (ch == 1)
+        for (int fr = 0; fr < frames; ++fr)
+        {
+            const float v = sampleAt (fr) * kScale;
+            l[fr] = v;
+            r[fr] = v;
+        }
+    else
+        for (int fr = 0; fr < frames; ++fr)
+        {
+            l[fr] = sampleAt (fr * ch + 0) * kScale;
+            r[fr] = sampleAt (fr * ch + 1) * kScale;
+        }
+}
+
+void MediaCodecAudioSource::push32 (const int32_t* s, int totalSamples)
+{
+    const int ch = outChannels > 0 ? outChannels : 2;
+    const int frames = totalSamples / ch;
+    if (frames <= 0)
+        return;
+
+    constexpr float kScale = 1.0f / 2147483648.0f; // 2^31
     const size_t base = leftBuf.size();
     leftBuf.resize  (base + (size_t) frames);
     rightBuf.resize (base + (size_t) frames);
@@ -234,6 +331,39 @@ void MediaCodecAudioSource::pushF (const float* s, int totalSamples)
             l[fr] = s[fr * ch + 0];
             r[fr] = s[fr * ch + 1];
         }
+}
+
+// Диспетчер по фактическому pcmEncoding кодека. По умолчанию (2/неизвестно) — 16-бит.
+void MediaCodecAudioSource::pushDecoded (const uint8_t* data, int sizeBytes)
+{
+    switch (pcmEncoding)
+    {
+        case 4:  pushF  (reinterpret_cast<const float*>   (data), sizeBytes / (int) sizeof (float));   break;
+        case 21: push24 (data,                                    sizeBytes / 3);                      break;
+        case 22: push32 (reinterpret_cast<const int32_t*> (data), sizeBytes / (int) sizeof (int32_t)); break;
+        default: push16 (reinterpret_cast<const int16_t*> (data), sizeBytes / (int) sizeof (int16_t)); break;
+    }
+}
+
+void MediaCodecAudioSource::refreshOutputFormat()
+{
+    if (codec == nullptr)
+        return;
+    AMediaFormat* of = AMediaCodec_getOutputFormat (codec);
+    if (of == nullptr)
+        return;
+
+    int32_t v = 0;
+    if (AMediaFormat_getInt32 (of, AMEDIAFORMAT_KEY_SAMPLE_RATE,   &v) && v > 0) sampleRate  = (double) v;
+    if (AMediaFormat_getInt32 (of, AMEDIAFORMAT_KEY_CHANNEL_COUNT, &v) && v > 0) outChannels = v;
+    if (AMediaFormat_getInt32 (of, AMEDIAFORMAT_KEY_PCM_ENCODING,  &v) && v > 0) pcmEncoding = v;
+    AMediaFormat_delete (of);
+    outputFormatKnown = true;
+
+    char info[96];
+    std::snprintf (info, sizeof (info), "codec out: enc=%d(%s) rate=%d ch=%d",
+                   (int) pcmEncoding, pcmEncodingName (pcmEncoding), (int) sampleRate, outChannels);
+    automix::setLastCodecInfo (info);
 }
 
 void MediaCodecAudioSource::fillLeftover (int framesWanted)
@@ -288,11 +418,12 @@ void MediaCodecAudioSource::fillLeftover (int framesWanted)
             uint8_t* outBuf = AMediaCodec_getOutputBuffer (codec, (size_t) outIdx, &outSize);
             if (outBuf != nullptr && info.size > 0)
             {
-                uint8_t* data = outBuf + info.offset;
-                if (pcmEncoding == 4)
-                    pushF  (reinterpret_cast<const float*>   (data), info.size / (int) sizeof (float));
-                else
-                    push16 (reinterpret_cast<const int16_t*> (data), info.size / (int) sizeof (int16_t));
+                // Страховка: если FORMAT_CHANGED так и не пришёл до первого буфера
+                // (бывает на OEM-кодеках) — читаем фактический формат прямо здесь,
+                // до интерпретации байтов.
+                if (! outputFormatKnown)
+                    refreshOutputFormat();
+                pushDecoded (outBuf + info.offset, (int) info.size);
             }
 
             AMediaCodec_releaseOutputBuffer (codec, (size_t) outIdx, false);
@@ -302,15 +433,7 @@ void MediaCodecAudioSource::fillLeftover (int framesWanted)
         }
         else if (outIdx == AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED)
         {
-            AMediaFormat* of = AMediaCodec_getOutputFormat (codec);
-            if (of != nullptr)
-            {
-                int32_t v = 0;
-                if (AMediaFormat_getInt32 (of, AMEDIAFORMAT_KEY_SAMPLE_RATE,  &v) && v > 0) sampleRate  = (double) v;
-                if (AMediaFormat_getInt32 (of, AMEDIAFORMAT_KEY_CHANNEL_COUNT, &v) && v > 0) outChannels = v;
-                if (AMediaFormat_getInt32 (of, AMEDIAFORMAT_KEY_PCM_ENCODING,  &v) && v > 0) pcmEncoding = v;
-                AMediaFormat_delete (of);
-            }
+            refreshOutputFormat();
             progressed = true;
         }
         else if (outIdx == AMEDIACODEC_INFO_OUTPUT_BUFFERS_CHANGED)

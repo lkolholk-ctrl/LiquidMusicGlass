@@ -59,7 +59,14 @@ namespace automix
         void closeCodec();
         /** Decode until at least framesWanted frames are buffered, or EOS. */
         void fillLeftover (int framesWanted);
+        /** Прочитать фактический выходной формат кодека (sr/ch/pcmEncoding) и
+         *  отрепортить его в диагностику. Часть OEM-кодеков (vivo) отдаёт 24/32-бит
+         *  вместо 16 — без этого байты парсятся со сдвигом → «шипение». */
+        void refreshOutputFormat();
+        void pushDecoded (const uint8_t* data, int sizeBytes);
         void push16 (const int16_t* s, int totalSamples);
+        void push24 (const uint8_t* s, int totalSamples);   // 3 байта/сэмпл, packed LE
+        void push32 (const int32_t* s, int totalSamples);
         void pushF  (const float*  s, int totalSamples);
 
         int fd = -1;
@@ -68,7 +75,8 @@ namespace automix
 
         double  sampleRate  = 44100.0;
         int     outChannels = 2;
-        int32_t pcmEncoding = 2;            // 2 = 16-bit, 4 = float
+        int32_t pcmEncoding = 2;            // 2=16bit 3=8bit 4=float 21=24bit-packed 22=32bit
+        bool    outputFormatKnown = false;  // выходной формат кодека уже прочитан
         juce::int64 totalFrames = 0;
 
         juce::int64 readPos = 0;            // next frame index to output

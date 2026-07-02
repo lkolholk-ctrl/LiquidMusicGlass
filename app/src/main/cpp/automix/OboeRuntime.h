@@ -28,7 +28,12 @@ namespace automix
     bool setOboeCompatMode (int mode);
     int  getOboeCompatMode();
 
-    /** Человекочитаемый отчёт: текущий режим + последние открытые потоки
-     *  (API/sharing/perf/format/rate/buffer/burst). Для DebugOverlay/логов. */
+    /** Человекочитаемый отчёт: текущий режим + формат декодера + последние
+     *  открытые потоки (API/sharing/perf/format/rate/buffer/burst). */
     std::string getAudioDiagnostics();
+
+    /** Фактический выходной формат MediaCodec-декодера (enc/rate/ch) — зовут
+     *  MediaCodec-источники; строка попадает в getAudioDiagnostics() и logcat.
+     *  Нужен для девайсов, где кодек отдаёт не 16-бит (vivo: 24/32-бит). */
+    void setLastCodecInfo (const char* info);
 }

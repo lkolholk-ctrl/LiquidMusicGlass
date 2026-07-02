@@ -133,6 +133,78 @@ bool decodeWithMediaCodec (const juce::String& path,
         }
     };
 
+    // 24-бит packed / 32-бит int: так отдают аппаратные декодеры части вендоров
+    // (vivo и др.) — чтение их как int16 даёт шум (см. MediaCodecAudioSource).
+    const auto pushFrames24 = [&] (const uint8_t* s, int totalSamples, int ch)
+    {
+        if (ch <= 0) return;
+        const int frames = totalSamples / ch;
+        if (frames <= 0) return;
+        constexpr float kScale = 1.0f / 8388608.0f;   // 2^23
+        const size_t base = left.size();
+        left.resize  (base + (size_t) frames);
+        right.resize (base + (size_t) frames);
+        float* l = left.data()  + base;
+        float* r = right.data() + base;
+        const auto sampleAt = [s] (int index) noexcept -> float
+        {
+            const uint8_t* p = s + index * 3;
+            int32_t v = (int32_t) p[0] | ((int32_t) p[1] << 8) | ((int32_t) p[2] << 16);
+            if (v & 0x800000)
+                v -= 0x1000000;
+            return (float) v;
+        };
+        for (int fr = 0; fr < frames; ++fr)
+        {
+            l[fr] = sampleAt (fr * ch + 0) * kScale;
+            r[fr] = (ch > 1) ? sampleAt (fr * ch + 1) * kScale : l[fr];
+        }
+    };
+
+    const auto pushFrames32 = [&] (const int32_t* s, int totalSamples, int ch)
+    {
+        if (ch <= 0) return;
+        const int frames = totalSamples / ch;
+        if (frames <= 0) return;
+        constexpr float kScale = 1.0f / 2147483648.0f; // 2^31
+        const size_t base = left.size();
+        left.resize  (base + (size_t) frames);
+        right.resize (base + (size_t) frames);
+        float* l = left.data()  + base;
+        float* r = right.data() + base;
+        for (int fr = 0; fr < frames; ++fr)
+        {
+            l[fr] = (float) s[fr * ch + 0] * kScale;
+            r[fr] = (ch > 1) ? (float) s[fr * ch + 1] * kScale : l[fr];
+        }
+    };
+
+    // Диспетчер по фактическому pcmEncoding (дефолт — 16-бит).
+    const auto pushDecoded = [&] (const uint8_t* data, int sizeBytes)
+    {
+        switch (pcmEncoding)
+        {
+            case 4:  pushFramesF  (reinterpret_cast<const float*>   (data), sizeBytes / (int) sizeof (float),   outChannels); break;
+            case 21: pushFrames24 (data,                                    sizeBytes / 3,                      outChannels); break;
+            case 22: pushFrames32 (reinterpret_cast<const int32_t*> (data), sizeBytes / (int) sizeof (int32_t), outChannels); break;
+            default: pushFrames16 (reinterpret_cast<const int16_t*> (data), sizeBytes / (int) sizeof (int16_t), outChannels); break;
+        }
+    };
+
+    // Фактический выходной формат сразу после старта — страховка на случай,
+    // когда OEM-кодек не шлёт FORMAT_CHANGED до первого буфера.
+    {
+        AMediaFormat* of = AMediaCodec_getOutputFormat (codec);
+        if (of != nullptr)
+        {
+            int32_t v = 0;
+            if (AMediaFormat_getInt32 (of, AMEDIAFORMAT_KEY_SAMPLE_RATE, &v) && v > 0)   sampleRate  = v;
+            if (AMediaFormat_getInt32 (of, AMEDIAFORMAT_KEY_CHANNEL_COUNT, &v) && v > 0)  outChannels = v;
+            if (AMediaFormat_getInt32 (of, AMEDIAFORMAT_KEY_PCM_ENCODING, &v) && v > 0)   pcmEncoding = v;
+            AMediaFormat_delete (of);
+        }
+    }
+
     // Страж от мёртвого кодека (см. MediaCodecAudioSource::fillLeftover): при
     // фатальной ошибке dequeue* вечно возвращают коды, не покрытые ветками ниже,
     // и без выхода по ним цикл зависал навсегда — вместе с вызывающим потоком
@@ -184,15 +256,7 @@ bool decodeWithMediaCodec (const juce::String& path,
             size_t outSize = 0;
             uint8_t* outBuf = AMediaCodec_getOutputBuffer (codec, (size_t) outIdx, &outSize);
             if (outBuf != nullptr && info.size > 0)
-            {
-                uint8_t* data = outBuf + info.offset;
-                if (pcmEncoding == 4)
-                    pushFramesF (reinterpret_cast<const float*> (data),
-                                 info.size / (int) sizeof (float), outChannels);
-                else
-                    pushFrames16 (reinterpret_cast<const int16_t*> (data),
-                                  info.size / (int) sizeof (int16_t), outChannels);
-            }
+                pushDecoded (outBuf + info.offset, (int) info.size);
 
             AMediaCodec_releaseOutputBuffer (codec, (size_t) outIdx, false);
             if ((info.flags & AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM) != 0)

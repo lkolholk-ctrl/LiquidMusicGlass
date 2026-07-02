@@ -34,6 +34,9 @@ namespace
     StreamReport gReports[kMaxReports];
     long gReportSeq = 0;
 
+    std::mutex gCodecInfoMutex;
+    std::string gLastCodecInfo;   // формат вывода MediaCodec-декодера (см. setLastCodecInfo)
+
     const char* modeName (int mode)
     {
         switch (mode)
@@ -76,10 +79,29 @@ namespace automix
         return gCompatMode.load();
     }
 
+    void setLastCodecInfo (const char* info)
+    {
+        if (info == nullptr)
+            return;
+        {
+            const std::lock_guard<std::mutex> lock (gCodecInfoMutex);
+            gLastCodecInfo = info;
+        }
+        __android_log_print (ANDROID_LOG_INFO, kLogTag, "%s", info);
+    }
+
     std::string getAudioDiagnostics()
     {
         std::string out = "mode=";
         out += modeName (gCompatMode.load());
+        {
+            const std::lock_guard<std::mutex> lock (gCodecInfoMutex);
+            if (! gLastCodecInfo.empty())
+            {
+                out += '\n';
+                out += gLastCodecInfo;
+            }
+        }
 
         const std::lock_guard<std::mutex> lock (gReportsMutex);
         // Свежие сверху: от последнего seq назад.
