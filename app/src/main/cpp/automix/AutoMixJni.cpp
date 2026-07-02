@@ -25,24 +25,35 @@ namespace juce
 }
 
 // Single process-wide engine instance for the Stage 1 test tone.
-static std::unique_ptr<AutoMixAudioEngine> gEngine;
+static std::shared_ptr<AutoMixAudioEngine> gEngine;
 static std::mutex gEngineMutex;
+
+// Мьютекс держим ТОЛЬКО на копирование указателя; сам вызов движка идёт без
+// него. Раньше мьютекс жил на весь вызов, и тяжёлые операции (загрузка дека,
+// offline-стретч на секунды) блокировали pause/silenceOutput и геттеры позиции,
+// которые Media3 дёргает с main каждые ~100мс → фризы UI и «не нажимается
+// пауза» во время загрузки. Движок внутри сам потокобезопасен (atomics +
+// пер-дековые локи), сериализация JNI-уровня ему не нужна; shared_ptr держит
+// объект живым, даже если nativeRelease случится посреди чужого вызова.
+static std::shared_ptr<AutoMixAudioEngine> engineSnapshot()
+{
+    std::lock_guard<std::mutex> lock (gEngineMutex);
+    return gEngine;
+}
 
 template <typename Fn, typename R>
 static R withEngine (R fallback, Fn&& fn)
 {
-    std::lock_guard<std::mutex> lock (gEngineMutex);
-    if (gEngine == nullptr)
-        return fallback;
-    return fn (*gEngine);
+    if (const auto engine = engineSnapshot())
+        return fn (*engine);
+    return fallback;
 }
 
 template <typename Fn>
 static void withEngineVoid (Fn&& fn)
 {
-    std::lock_guard<std::mutex> lock (gEngineMutex);
-    if (gEngine != nullptr)
-        fn (*gEngine);
+    if (const auto engine = engineSnapshot())
+        fn (*engine);
 }
 
 // Shared helper: jstring -> juce::String, invoke a deck loader. Templates can't
@@ -71,22 +82,28 @@ JNIEXPORT jboolean JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeInit(
         JNIEnv* env, jobject /*thiz*/, jobject context)
 {
-    std::lock_guard<std::mutex> lock (gEngineMutex);
-
-    // Bring JUCE up exactly like its own Java entry point: cache JNI class refs
-    // first, then hand JUCE the env + Context. Process-global, so do it once.
-    static bool juceInitialised = false;
-    if (! juceInitialised)
+    std::shared_ptr<AutoMixAudioEngine> engine;
     {
-        juce::JNIClassBase::initialiseAllClasses (env, context);
-        juce::Thread::initialiseJUCE (env, context);
-        juceInitialised = true;
+        std::lock_guard<std::mutex> lock (gEngineMutex);
+
+        // Bring JUCE up exactly like its own Java entry point: cache JNI class refs
+        // first, then hand JUCE the env + Context. Process-global, so do it once.
+        static bool juceInitialised = false;
+        if (! juceInitialised)
+        {
+            juce::JNIClassBase::initialiseAllClasses (env, context);
+            juce::Thread::initialiseJUCE (env, context);
+            juceInitialised = true;
+        }
+
+        if (gEngine == nullptr)
+            gEngine = std::make_shared<AutoMixAudioEngine>();
+        engine = gEngine;
     }
 
-    if (gEngine == nullptr)
-        gEngine = std::make_unique<AutoMixAudioEngine>();
-
-    return gEngine->init() ? JNI_TRUE : JNI_FALSE;
+    // init() открывает аудио-устройство (может занять сотни мс) — уже без
+    // мьютекса, чтобы не блокировать снапшоты из других потоков.
+    return engine->init() ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jboolean JNICALL
@@ -408,12 +425,17 @@ JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeRelease(
         JNIEnv* /*env*/, jobject /*thiz*/)
 {
-    std::lock_guard<std::mutex> lock (gEngineMutex);
-    if (gEngine != nullptr)
+    // Указатель забираем под коротким мьютексом, release() зовём уже без него.
+    // In-flight вызовы на других потоках держат свой shared_ptr — объект умрёт,
+    // когда завершится последний из них.
+    std::shared_ptr<AutoMixAudioEngine> engine;
     {
-        gEngine->release();
+        std::lock_guard<std::mutex> lock (gEngineMutex);
+        engine = std::move (gEngine);
         gEngine.reset();
     }
+    if (engine != nullptr)
+        engine->release();
 }
 
 } // extern "C"

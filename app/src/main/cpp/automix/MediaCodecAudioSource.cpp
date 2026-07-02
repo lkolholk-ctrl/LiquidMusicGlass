@@ -109,6 +109,7 @@ bool MediaCodecAudioSource::configureFromExtractor()
         return false;
 
     AMediaExtractor_selectTrack (extractor, audioTrack);
+    audioTrackIndex = audioTrack;
 
     int32_t sr = 0, ch = 0;
     AMediaFormat_getInt32 (format, AMEDIAFORMAT_KEY_SAMPLE_RATE, &sr);
@@ -132,6 +133,47 @@ bool MediaCodecAudioSource::configureFromExtractor()
 
     AMediaFormat_delete (format);
     return ok;
+}
+
+// Пересоздать декодер после фатальной ошибки (codec died / reclaimed системой)
+// и продолжить с первого ещё не отданного кадра. Возвращает false, если
+// восстановиться нельзя — тогда источник помечается EOS.
+bool MediaCodecAudioSource::recreateCodec()
+{
+    closeCodec();
+    if (extractor == nullptr || audioTrackIndex < 0)
+        return false;
+
+    AMediaFormat* format = AMediaExtractor_getTrackFormat (extractor, (size_t) audioTrackIndex);
+    if (format == nullptr)
+        return false;
+
+    const char* mime = nullptr;
+    if (! AMediaFormat_getString (format, AMEDIAFORMAT_KEY_MIME, &mime) || mime == nullptr)
+    {
+        AMediaFormat_delete (format);
+        return false;
+    }
+
+    codec = AMediaCodec_createDecoderByType (mime);
+    const bool ok = codec != nullptr
+        && AMediaCodec_configure (codec, format, nullptr, nullptr, 0) == AMEDIA_OK
+        && AMediaCodec_start (codec) == AMEDIA_OK;
+    AMediaFormat_delete (format);
+
+    if (! ok)
+    {
+        closeCodec();
+        return false;
+    }
+
+    // Экстрактор мог уйти вперёд кадрами, которые погибший кодек так и не отдал —
+    // вернём его к первому НЕ выданному кадру (readPos + буферизованный остаток).
+    const juce::int64 resumeFrame = readPos + (juce::int64) (leftBuf.size() - leftoverStart);
+    const int64_t resumeUs = (int64_t) ((double) resumeFrame / sampleRate * 1.0e6);
+    AMediaExtractor_seekTo (extractor, resumeUs, AMEDIAEXTRACTOR_SEEK_CLOSEST_SYNC);
+    inputEOS = false;
+    return true;
 }
 
 void MediaCodecAudioSource::push16 (const int16_t* s, int totalSamples)
@@ -162,8 +204,21 @@ void MediaCodecAudioSource::pushF (const float* s, int totalSamples)
 
 void MediaCodecAudioSource::fillLeftover (int framesWanted)
 {
+    // Страж от мёртвого кодека: MediaCodec может отвалиться на лету (codec
+    // reclaimed / internal error), и тогда dequeue* навсегда возвращают коды
+    // ошибок, не покрытые ветками ниже. Без выхода по ним цикл крутился
+    // бесконечно ПОД lock'ом → замирал read-ahead поток, за ним seek/загрузка/
+    // pause (deck.mutationLock) — весь движок: вечная тишина + ANR.
+    // Фатальный статус → помечаем EOS (трек дальше не декодируется, плеер
+    // штатно перейдёт к следующему). Затяжное «нет прогресса» → просто выходим
+    // без EOS: транспорт дольёт тишину, следующий pull попробует ещё раз.
+    int noProgressIters = 0;
+    constexpr int kMaxNoProgressIters = 500;   // ~2с при двух 2мс-таймаутах на итерацию
+
     while (! outputEOS && (int) (leftBuf.size() - leftoverStart) < framesWanted)
     {
+        bool progressed = false;
+
         if (! inputEOS)
         {
             const ssize_t inIdx = AMediaCodec_dequeueInputBuffer (codec, 2000);
@@ -186,6 +241,18 @@ void MediaCodecAudioSource::fillLeftover (int framesWanted)
                     AMediaCodec_queueInputBuffer (codec, (size_t) inIdx, 0, (size_t) sampleSize, pts, 0);
                     AMediaExtractor_advance (extractor);
                 }
+                progressed = true;
+            }
+            else if (inIdx != AMEDIACODEC_INFO_TRY_AGAIN_LATER)
+            {
+                // Фатальная ошибка кодека: одна попытка реанимации, иначе EOS.
+                if (codecRecoveryUsed || ! recreateCodec())
+                {
+                    outputEOS = true;
+                    break;
+                }
+                codecRecoveryUsed = true;
+                continue;
             }
         }
 
@@ -207,6 +274,7 @@ void MediaCodecAudioSource::fillLeftover (int framesWanted)
             AMediaCodec_releaseOutputBuffer (codec, (size_t) outIdx, false);
             if ((info.flags & AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM) != 0)
                 outputEOS = true;
+            progressed = true;
         }
         else if (outIdx == AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED)
         {
@@ -219,6 +287,11 @@ void MediaCodecAudioSource::fillLeftover (int framesWanted)
                 if (AMediaFormat_getInt32 (of, AMEDIAFORMAT_KEY_PCM_ENCODING,  &v) && v > 0) pcmEncoding = v;
                 AMediaFormat_delete (of);
             }
+            progressed = true;
+        }
+        else if (outIdx == AMEDIACODEC_INFO_OUTPUT_BUFFERS_CHANGED)
+        {
+            progressed = true;   // легитимное событие, не ошибка
         }
         else if (outIdx == AMEDIACODEC_INFO_TRY_AGAIN_LATER)
         {
@@ -227,6 +300,23 @@ void MediaCodecAudioSource::fillLeftover (int framesWanted)
             if (inputEOS)
                 break;
         }
+        else
+        {
+            // Неизвестный отрицательный статус = фатально: одна попытка
+            // реанимации кодека, иначе помечаем EOS.
+            if (codecRecoveryUsed || ! recreateCodec())
+            {
+                outputEOS = true;
+                break;
+            }
+            codecRecoveryUsed = true;
+            continue;
+        }
+
+        if (progressed)
+            noProgressIters = 0;
+        else if (++noProgressIters >= kMaxNoProgressIters)
+            break;
     }
 }
 

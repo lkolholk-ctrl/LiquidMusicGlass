@@ -172,6 +172,8 @@ AutoMixAudioEngine::~AutoMixAudioEngine()
 
 bool AutoMixAudioEngine::init()
 {
+    const std::lock_guard<std::mutex> deviceLock (deviceControlMutex);
+
     if (initialised.load())
         return true;
 
@@ -187,7 +189,7 @@ bool AutoMixAudioEngine::init()
     // тянет). Детали — в applyBufferForRoute. На старте устройство уже открыто
     // initialiseWithDefaultDevices, поэтому реопен не форсируем.
     initialised.store (true);
-    applyBufferForRoute (routeIsBluetooth.load(), /*forceReopen=*/false);
+    applyBufferForRouteUnlocked (routeIsBluetooth.load(), /*forceReopen=*/false);
     routeEverApplied.store (true);
 
     deviceManager.addAudioCallback (this);
@@ -200,6 +202,12 @@ bool AutoMixAudioEngine::init()
 // маршрута с фонового потока монитора). Позиция воспроизведения сохраняется:
 // транспорты не сбрасываются, releaseResources/prepareToPlay не трогают позицию.
 void AutoMixAudioEngine::applyBufferForRoute (bool isBluetooth, bool forceReopen)
+{
+    const std::lock_guard<std::mutex> deviceLock (deviceControlMutex);
+    applyBufferForRouteUnlocked (isBluetooth, forceReopen);
+}
+
+void AutoMixAudioEngine::applyBufferForRouteUnlocked (bool isBluetooth, bool forceReopen)
 {
     if (! initialised.load())
         return;
@@ -271,6 +279,7 @@ void AutoMixAudioEngine::release()
         deckB.transport.stop();
     }
 
+    const std::lock_guard<std::mutex> deviceLock (deviceControlMutex);
     if (initialised.load())
     {
         deviceManager.removeAudioCallback (this);

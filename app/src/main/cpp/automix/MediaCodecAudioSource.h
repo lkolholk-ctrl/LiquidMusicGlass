@@ -55,6 +55,7 @@ namespace automix
         bool openFile (const juce::String& path);
         bool openFd (int fd, int64_t offset, int64_t size);
         bool configureFromExtractor();   // shared: pick audio track + start codec
+        bool recreateCodec();            // одна попытка реанимации после смерти кодека
         void closeCodec();
         /** Decode until at least framesWanted frames are buffered, or EOS. */
         void fillLeftover (int framesWanted);
@@ -72,6 +73,8 @@ namespace automix
 
         juce::int64 readPos = 0;            // next frame index to output
         bool inputEOS = false, outputEOS = false;
+        int  audioTrackIndex = -1;          // выбранный аудио-трек (для recreateCodec)
+        bool codecRecoveryUsed = false;     // одна попытка реанимации на источник
 
         // Decoded-but-not-yet-consumed frames (deinterleaved); consumed prefix tracked
         // by leftoverStart, compacted periodically to keep memory bounded.

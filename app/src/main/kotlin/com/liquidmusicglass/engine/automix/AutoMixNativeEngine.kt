@@ -5,6 +5,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /**
  * Kotlin bridge to the native JUCE -> Oboe audio engine.
@@ -99,8 +100,13 @@ object AutoMixNativeEngine {
             try { result = block() } finally { latch.countDown() }
         }
         return try {
-            latch.await()
-            result
+            // С таймаутом: если main надолго занят (тяжёлый кадр, чужой ANR),
+            // load-поток не должен ждать вечно. По таймауту вернём false —
+            // инициализация просто повторится при следующей попытке проигрывания.
+            if (latch.await(10, TimeUnit.SECONDS)) result else {
+                Log.w(TAG, "runOnMainBlocking timed out waiting for main thread")
+                false
+            }
         } catch (_: InterruptedException) {
             Thread.currentThread().interrupt()
             false

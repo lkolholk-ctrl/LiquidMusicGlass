@@ -364,7 +364,12 @@ class JuceLocalPlayer(
             notifyCurrentTrackChanged()
         } else {
             val to = (if (positionMs == C.TIME_UNSET) 0L else positionMs).toDouble()
-            loadHandler.post { if (!released && !loading) engine.seekCurrent(to) }
+            // Не выбрасываем seek во время загрузки: loadHandler последователен,
+            // поэтому пост встанет В ОЧЕРЕДЬ за идущей загрузкой и применится к
+            // только что загруженному треку. Guard по loadSeq отменяет seek, если
+            // к моменту исполнения стартовала более новая загрузка (другой трек).
+            val seq = loadSeq.get()
+            loadHandler.post { if (!released && seq == loadSeq.get()) engine.seekCurrent(to) }
         }
         invalidateState()
         return Futures.immediateVoidFuture()

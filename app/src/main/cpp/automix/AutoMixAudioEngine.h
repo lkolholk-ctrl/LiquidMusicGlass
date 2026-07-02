@@ -6,6 +6,7 @@
 #include <array>
 #include <atomic>
 #include <memory>
+#include <mutex>
 
 #include "AudioFxChain.h"
 
@@ -166,8 +167,15 @@ private:
     int deckIndex (const Deck& deck) const { return &deck == &deckA ? 0 : 1; }
     void invalidateHoldForDeck (const Deck& deck);
     void invalidateAllHolds();
-    void applyBufferForRoute (bool isBluetooth, bool forceReopen);  // not on audio thread
+    void applyBufferForRoute (bool isBluetooth, bool forceReopen);          // not on audio thread
+    void applyBufferForRouteUnlocked (bool isBluetooth, bool forceReopen);  // держа deviceControlMutex
     Deck& deckRef (int index) { return index == 0 ? deckA : deckB; }
+
+    // Управляющие операции с устройством (init / переоткрытие под маршрут /
+    // закрытие в release) идут с РАЗНЫХ потоков (main, route-монитор, load) и
+    // после ухода от глобального JNI-мьютекса могут перекрыться. Сериализуем их
+    // здесь; аудио-коллбэк этот мьютекс НИКОГДА не берёт.
+    std::mutex deviceControlMutex;
 
     juce::AudioDeviceManager deviceManager;
     juce::AudioFormatManager formatManager;

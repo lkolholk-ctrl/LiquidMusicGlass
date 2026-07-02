@@ -121,8 +121,19 @@ bool decodeWithMediaCodec (const juce::String& path,
         }
     };
 
-    while (! outputEOS)
+    // Страж от мёртвого кодека (см. MediaCodecAudioSource::fillLeftover): при
+    // фатальной ошибке dequeue* вечно возвращают коды, не покрытые ветками ниже,
+    // и без выхода по ним цикл зависал навсегда — вместе с вызывающим потоком
+    // (prepareStretchB / decodeFullPCM). Фатальный статус или долгий «нет
+    // прогресса» → выходим и возвращаем то, что успели декодировать.
+    int noProgressIters = 0;
+    constexpr int kMaxNoProgressIters = 400;   // ~4с при двух 5мс-таймаутах на итерацию
+    bool codecFailed = false;
+
+    while (! outputEOS && ! codecFailed)
     {
+        bool progressed = false;
+
         if (! inputEOS)
         {
             const ssize_t inIdx = AMediaCodec_dequeueInputBuffer (codec, 5000);
@@ -145,6 +156,12 @@ bool decodeWithMediaCodec (const juce::String& path,
                     AMediaCodec_queueInputBuffer (codec, (size_t) inIdx, 0, (size_t) sampleSize, pts, 0);
                     AMediaExtractor_advance (extractor);
                 }
+                progressed = true;
+            }
+            else if (inIdx != AMEDIACODEC_INFO_TRY_AGAIN_LATER)
+            {
+                codecFailed = true;
+                break;
             }
         }
 
@@ -168,6 +185,7 @@ bool decodeWithMediaCodec (const juce::String& path,
             AMediaCodec_releaseOutputBuffer (codec, (size_t) outIdx, false);
             if ((info.flags & AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM) != 0)
                 outputEOS = true;
+            progressed = true;
         }
         else if (outIdx == AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED)
         {
@@ -180,8 +198,22 @@ bool decodeWithMediaCodec (const juce::String& path,
                 if (AMediaFormat_getInt32 (of, AMEDIAFORMAT_KEY_PCM_ENCODING, &v) && v > 0)   pcmEncoding = v;
                 AMediaFormat_delete (of);
             }
+            progressed = true;
         }
-        // INFO_TRY_AGAIN_LATER / INFO_OUTPUT_BUFFERS_CHANGED: just keep looping.
+        else if (outIdx == AMEDIACODEC_INFO_OUTPUT_BUFFERS_CHANGED)
+        {
+            progressed = true;   // легитимное событие, не ошибка
+        }
+        else if (outIdx != AMEDIACODEC_INFO_TRY_AGAIN_LATER)
+        {
+            codecFailed = true;  // неизвестный отрицательный статус = фатально
+            break;
+        }
+
+        if (progressed)
+            noProgressIters = 0;
+        else if (++noProgressIters >= kMaxNoProgressIters)
+            break;   // кодек молчит слишком долго — отдаём что есть
     }
 
     AMediaCodec_stop (codec);
