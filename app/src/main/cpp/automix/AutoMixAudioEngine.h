@@ -106,6 +106,12 @@ public:
     double positionMsA();
     double lengthMsA();
 
+    /** Счётчик underrun'ов (xrun) Oboe-потока с момента его открытия; -1 если
+     *  неизвестен/устройство занято переоткрытием. Не блокирует (try_lock) и
+     *  не зовётся с аудио-потока. Для телеметрии/DebugLog — тюнить буфер по
+     *  реальным данным, а не вслепую. */
+    int xRunCount();
+
     /**
      * Stage 4: pre-stretch deck B so its tempo matches deck A (bpmB -> bpmA),
      * pitch preserved. Heavy/offline — call off the audio & main threads, before

@@ -356,6 +356,16 @@ object AutoMixNativeEngine {
     }
 
     /**
+     * Счётчик underrun'ов (xrun) Oboe-потока с момента его открытия; -1 если
+     * неизвестен. Не блокирует (try_lock в нативке) — можно звать из тикера.
+     * Сбрасывается при переоткрытии потока (смена маршрута BT/динамик).
+     */
+    fun xRunCount(): Int {
+        if (!isLoaded || !initialised) return -1
+        return runCatching { nativeXRunCount() }.getOrDefault(-1)
+    }
+
+    /**
      * Pre-stretch deck B to match deck A's tempo (beat-match), pitch preserved.
      * Heavy/offline — call from a background thread BEFORE startCrossfade.
      */
@@ -451,6 +461,7 @@ object AutoMixNativeEngine {
     private external fun nativeClearDeck(index: Int)
     private external fun nativePositionMsA(): Double
     private external fun nativeLengthMsA(): Double
+    private external fun nativeXRunCount(): Int
     private external fun nativePlay()
     private external fun nativePause()
     private external fun nativeSilenceOutput()

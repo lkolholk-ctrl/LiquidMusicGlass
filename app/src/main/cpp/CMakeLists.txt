@@ -114,6 +114,12 @@ add_library(
 
 target_compile_features(automix_juce PRIVATE cxx_std_17)
 
+# Аудио-движок ВСЕГДА с оптимизацией: debug-вариант AGP собирает нативку с -O0,
+# и JUCE DSP/ресемплер/FLAC-декод становятся в 5-10 раз медленнее — underrun'ы
+# и заикания ровно в тех сборках, на которых идёт отладка. -O2 не мешает
+# отладке Kotlin-части. -fno-math-errno разрешает векторизацию sin/cos/sqrt.
+target_compile_options(automix_juce PRIVATE -O2 -fno-math-errno)
+
 target_include_directories(automix_juce PRIVATE
     ${JUCE_MODULES_DIR}
     ${OBOE_DIR}/include

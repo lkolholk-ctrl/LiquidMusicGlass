@@ -176,30 +176,64 @@ bool MediaCodecAudioSource::recreateCodec()
     return true;
 }
 
+// Bulk-append: один resize на выходной буфер кодека и запись по указателям.
+// push_back на каждый сэмпл (проверка capacity + вызов на фрейм) заметно грел
+// декод-поток на длинных предчтениях; здесь это плоский проход по памяти.
 void MediaCodecAudioSource::push16 (const int16_t* s, int totalSamples)
 {
     const int ch = outChannels > 0 ? outChannels : 2;
     const int frames = totalSamples / ch;
-    for (int fr = 0; fr < frames; ++fr)
-    {
-        const float l = s[fr * ch + 0] / 32768.0f;
-        const float r = (ch > 1) ? s[fr * ch + 1] / 32768.0f : l;
-        leftBuf.push_back (l);
-        rightBuf.push_back (r);
-    }
+    if (frames <= 0)
+        return;
+
+    constexpr float kScale = 1.0f / 32768.0f;
+    const size_t base = leftBuf.size();
+    leftBuf.resize  (base + (size_t) frames);
+    rightBuf.resize (base + (size_t) frames);
+    float* l = leftBuf.data()  + base;
+    float* r = rightBuf.data() + base;
+
+    if (ch == 1)
+        for (int fr = 0; fr < frames; ++fr)
+        {
+            const float v = (float) s[fr] * kScale;
+            l[fr] = v;
+            r[fr] = v;
+        }
+    else
+        for (int fr = 0; fr < frames; ++fr)
+        {
+            l[fr] = (float) s[fr * ch + 0] * kScale;
+            r[fr] = (float) s[fr * ch + 1] * kScale;
+        }
 }
 
 void MediaCodecAudioSource::pushF (const float* s, int totalSamples)
 {
     const int ch = outChannels > 0 ? outChannels : 2;
     const int frames = totalSamples / ch;
-    for (int fr = 0; fr < frames; ++fr)
-    {
-        const float l = s[fr * ch + 0];
-        const float r = (ch > 1) ? s[fr * ch + 1] : l;
-        leftBuf.push_back (l);
-        rightBuf.push_back (r);
-    }
+    if (frames <= 0)
+        return;
+
+    const size_t base = leftBuf.size();
+    leftBuf.resize  (base + (size_t) frames);
+    rightBuf.resize (base + (size_t) frames);
+    float* l = leftBuf.data()  + base;
+    float* r = rightBuf.data() + base;
+
+    if (ch == 1)
+        for (int fr = 0; fr < frames; ++fr)
+        {
+            const float v = s[fr];
+            l[fr] = v;
+            r[fr] = v;
+        }
+    else
+        for (int fr = 0; fr < frames; ++fr)
+        {
+            l[fr] = s[fr * ch + 0];
+            r[fr] = s[fr * ch + 1];
+        }
 }
 
 void MediaCodecAudioSource::fillLeftover (int framesWanted)

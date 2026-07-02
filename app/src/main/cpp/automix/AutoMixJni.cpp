@@ -372,6 +372,13 @@ Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeLengthMsA(
     return withEngine ((jdouble) 0.0, [] (AutoMixAudioEngine& engine) { return (jdouble) engine.lengthMsA(); });
 }
 
+JNIEXPORT jint JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeXRunCount(
+        JNIEnv* /*env*/, jobject /*thiz*/)
+{
+    return withEngine ((jint) -1, [] (AutoMixAudioEngine& engine) { return (jint) engine.xRunCount(); });
+}
+
 JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativePlay(
         JNIEnv* /*env*/, jobject /*thiz*/)

@@ -83,6 +83,12 @@ class JuceLocalPlayer(
     private val STATE_TICK_MS = 500L        // MediaSession state не надо инвалидировать 10 раз/с
     private var lastStateInvalidateMs = 0L
 
+    // Телеметрия underrun'ов Oboe: раз в XRUN_LOG_MS сверяем счётчик xrun и
+    // пишем прирост в DebugLog — тюнить размер буфера по реальным данным.
+    private val XRUN_LOG_MS = 5_000L
+    private var lastXRunCheckMs = 0L
+    private var lastXRuns = -1
+
     // ── Stage 8c (ШАГ 2: РЕАЛЬНЫЙ СВОД) ──────────────────────────────────────
     // Когда модель сказала ready и подобрала параметры — у точки свода реально
     // запускаем equal-power кроссфейд current→incoming в движке (пинг-понг деков).
@@ -109,6 +115,7 @@ class JuceLocalPlayer(
             maybeAnalyzeForAutoMix()       // шаг 1: анализ пары моделью + план свода
             maybeRunAutoMixTransition()    // шаг 2: реальный кроссфейд по плану модели
             maybeAdvanceAtEnd()            // обычное переключение (если свода нет)
+            maybeLogXRuns()                // телеметрия underrun'ов Oboe
             invalidateStateFromTicker()
             handler.postDelayed(this, TICK_MS)
         }
@@ -520,6 +527,21 @@ class JuceLocalPlayer(
     private fun notifyCurrentTrackChanged() {
         playlist.getOrNull(currentIndex)?.mediaId?.takeIf { it.isNotBlank() }?.let {
             PlayerController.onTrackChanged(it)
+        }
+    }
+
+    /** Раз в XRUN_LOG_MS пишем прирост underrun'ов Oboe в DebugLog. Вызов не
+     *  блокирует (try_lock в нативке). Счётчик сбрасывается при переоткрытии
+     *  потока (смена маршрута) — тогда просто перезахватываем базу. */
+    private fun maybeLogXRuns() {
+        val now = SystemClock.uptimeMillis()
+        if (now - lastXRunCheckMs < XRUN_LOG_MS) return
+        lastXRunCheckMs = now
+        if (!playWhenReadyFlag) return
+        val x = engine.xRunCount()
+        if (x >= 0) {
+            if (lastXRuns in 0 until x) DebugLog.add("JUCE.xruns +${x - lastXRuns} (total=$x)")
+            lastXRuns = x
         }
     }
 

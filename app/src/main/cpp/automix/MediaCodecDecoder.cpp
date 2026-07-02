@@ -95,16 +95,24 @@ bool decodeWithMediaCodec (const juce::String& path,
     int32_t outChannels = channelCount;
     bool inputEOS = false, outputEOS = false;
 
+    // Bulk-append (см. MediaCodecAudioSource::push16): один resize на выходной
+    // буфер кодека вместо push_back на каждый фрейм — offline-декод целого
+    // трека (prepareStretchB) заметно быстрее.
     const auto pushFrames16 = [&] (const int16_t* s, int totalSamples, int ch)
     {
         if (ch <= 0) return;
         const int frames = totalSamples / ch;
+        if (frames <= 0) return;
+        constexpr float kScale = 1.0f / 32768.0f;
+        const size_t base = left.size();
+        left.resize  (base + (size_t) frames);
+        right.resize (base + (size_t) frames);
+        float* l = left.data()  + base;
+        float* r = right.data() + base;
         for (int fr = 0; fr < frames; ++fr)
         {
-            const float l = s[fr * ch + 0] / 32768.0f;
-            const float r = (ch > 1) ? s[fr * ch + 1] / 32768.0f : l;
-            left.push_back (l);
-            right.push_back (r);
+            l[fr] = (float) s[fr * ch + 0] * kScale;
+            r[fr] = (ch > 1) ? (float) s[fr * ch + 1] * kScale : l[fr];
         }
     };
 
@@ -112,12 +120,16 @@ bool decodeWithMediaCodec (const juce::String& path,
     {
         if (ch <= 0) return;
         const int frames = totalSamples / ch;
+        if (frames <= 0) return;
+        const size_t base = left.size();
+        left.resize  (base + (size_t) frames);
+        right.resize (base + (size_t) frames);
+        float* l = left.data()  + base;
+        float* r = right.data() + base;
         for (int fr = 0; fr < frames; ++fr)
         {
-            const float l = s[fr * ch + 0];
-            const float r = (ch > 1) ? s[fr * ch + 1] : l;
-            left.push_back (l);
-            right.push_back (r);
+            l[fr] = s[fr * ch + 0];
+            r[fr] = (ch > 1) ? s[fr * ch + 1] : l[fr];
         }
     };
 

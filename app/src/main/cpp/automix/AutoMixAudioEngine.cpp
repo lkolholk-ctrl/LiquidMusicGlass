@@ -709,6 +709,18 @@ double AutoMixAudioEngine::lengthMsA()
     return reportedLenMs[0].load (std::memory_order_relaxed);
 }
 
+int AutoMixAudioEngine::xRunCount()
+{
+    // try_lock: во время переоткрытия устройства (init / смена маршрута) не
+    // блокируем вызывающего (тикер на main) — просто вернём «неизвестно».
+    std::unique_lock<std::mutex> lock (deviceControlMutex, std::try_to_lock);
+    if (! lock.owns_lock() || ! initialised.load())
+        return -1;
+    if (auto* dev = deviceManager.getCurrentAudioDevice())
+        return dev->getXRunCount();
+    return -1;
+}
+
 //==============================================================================
 void AutoMixAudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
 {
@@ -820,6 +832,12 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
     if (crossfadeStart.exchange (false))
     {
         crossfadePos = 0;
+        // Bass-swap фильтры считаются ТОЛЬКО во время перехода (вне его их вклад
+        // всё равно нулевой — cut=0). Сбрасываем состояние на старте: вес свопа
+        // поднимается от нуля лишь к середине перехода, к этому моменту фильтры
+        // давно прогреты, щелчков нет.
+        for (auto& f : lowpassA) f.reset();
+        for (auto& f : lowpassB) f.reset();
         crossfadeActive.store (true);
     }
 
@@ -829,6 +847,10 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
     const float  bgB     = baseGainB.load();
     const int    fOut    = fadeOutDeck.load(); // which physical deck fades OUT
     const int    style   = transitionStyle.load (std::memory_order_acquire);
+    const bool   bassOn  = bassSwapEnabled.load();
+    // Гоняем bass-swap биквады только когда они реально влияют на звук: в
+    // стационарном режиме (без перехода) это экономит 4 IIR на каждый сэмпл.
+    const bool   bassSwapActive = active && bassOn && total > 0.0;
 
     const int ch = juce::jmin (numOutputChannels, 8);
     if (numSamples > scratchA.getNumSamples() || numSamples > scratchB.getNumSamples()
@@ -922,7 +944,7 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
             // Bass swap (Stage 5), only when enabled. Complementary: incoming
             // gains its low end while the outgoing deck gives up its own.
             float bassOut = 1.0f, bassIn = 1.0f;
-            if (bassSwapEnabled.load())
+            if (bassOn)
             {
                 const float w = 0.5f; // swap over the middle 50% of the transition
                 float u = ((float) t - (0.5f - w * 0.5f)) / w;
@@ -950,9 +972,10 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
             float av = a[c][i];
             float bv = b[c][i];
 
-            // Keep the low-pass state warm every sample (c < 2 = L/R have filters);
-            // subtract the scaled low band to attenuate that deck's bass.
-            if (c < 2)
+            // Низкочастотные фильтры работают только пока идёт переход с
+            // bass-swap (состояние сброшено на его старте); вне перехода
+            // cutA/cutB = 0 и вычитать нечего — фильтры пропускаем.
+            if (c < 2 && bassSwapActive)
             {
                 const float la = lowpassA[(size_t) c].processSample (av);
                 const float lb = lowpassB[(size_t) c].processSample (bv);
