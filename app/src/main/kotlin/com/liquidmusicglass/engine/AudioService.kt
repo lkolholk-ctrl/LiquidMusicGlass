@@ -523,7 +523,10 @@ class AudioService : MediaSessionService() {
 
                 setAudioAttributes(audioAttributes, false)
                 setHandleAudioBecomingNoisy(true)
-                setWakeMode(C.WAKE_MODE_LOCAL) // Media3 native wake mode
+                // NETWORK: Exo у нас — стриминговый бэкенд; держит wake+wifi lock
+                // на время воспроизведения. С LOCAL WiFi засыпал в фоне/Doze →
+                // сеть отваливалась → буфер осушался → лаги/ребуферинг в фоне.
+                setWakeMode(C.WAKE_MODE_NETWORK)
                 // ── Audio Becoming Noisy Guard ──
                 // Do NOT aggressively pause on minor BT/routing changes.
                 // ExoPlayer's built-in handler is sufficient; we soften by

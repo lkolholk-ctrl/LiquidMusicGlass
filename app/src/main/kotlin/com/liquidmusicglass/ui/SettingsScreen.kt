@@ -460,6 +460,37 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(28.dp))
 
+            // ── BACKGROUND PLAYBACK ──
+            // Doze/оптимизация батареи душит фоновые декод-потоки и сеть стриминга
+            // (лаги/«цикличка» при погашенном экране). Исключение из оптимизации —
+            // штатное решение для музыкальных плееров.
+            SectionLabel("BACKGROUND PLAYBACK")
+            PlainCard {
+                SettingsActionItem(
+                    title = "Ignore Battery Optimization",
+                    subtitle = "Prevents background stutter (Doze). Recommended for music",
+                    icon = Icons.Rounded.ChevronRight,
+                    onClick = {
+                        val pm = context.getSystemService(android.os.PowerManager::class.java)
+                        val pkg = context.packageName
+                        val intent = if (pm?.isIgnoringBatteryOptimizations(pkg) != true) {
+                            android.content.Intent(
+                                android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                                android.net.Uri.parse("package:$pkg")
+                            )
+                        } else {
+                            // Уже в исключениях — открываем общий список, чтобы было видно.
+                            android.content.Intent(
+                                android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS
+                            )
+                        }
+                        runCatching { context.startActivity(intent) }
+                    }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(28.dp))
+
             // ── ACCESSIBILITY ──
             SectionLabel("ACCESSIBILITY")
 

@@ -63,6 +63,14 @@ class JuceLocalPlayer(
 
     private var playlist: List<MediaItem> = emptyList()
     private var currentIndex = 0
+
+    // getState() зовётся каждые ~500мс (тикер) и на каждую инвалидацию. Маппинг
+    // ВСЕГО плейлиста в MediaItemData на каждый вызов — лишний CPU/мусор на main
+    // при длинной очереди волны (GC-паузы косвенно бьют по аудио на слабых
+    // устройствах). Кэшируем по identity списка: плейлист всегда заменяется
+    // новым инстансом при мутации, поэтому сравнение по ссылке корректно.
+    private var cachedItemsSource: List<MediaItem>? = null
+    private var cachedItems: List<MediaItemData> = emptyList()
     @Volatile private var playWhenReadyFlag = false   // пишется на main, читается фоном
     private var prepared = false
     @Volatile private var ended = false
@@ -159,17 +167,23 @@ class JuceLocalPlayer(
             .add(Player.COMMAND_RELEASE)
             .build()
 
-        val items = playlist.mapIndexed { i, mi ->
-            val b = MediaItemData.Builder(/* uid = */ mi.mediaId.ifEmpty { "juce_$i" })
-                .setMediaItem(mi)
-            // ВАЖНО: длительность берём из СТАБИЛЬНЫХ метаданных трека (MediaStore),
-            // а НЕ из движка. Меняющийся durationUs между вызовами getState() Media3
-            // трактует как разрыв таймлайна; если длина на миг просядет ниже позиции
-            // (например, read-ahead голодает при тяжёлой перерисовке UI), плеер ложно
-            // «заканчивает» трек → стоп + перемотка в начало. Метаданные не плавают.
-            val durMs = mi.mediaMetadata.durationMs
-            if (durMs != null && durMs > 0L) b.setDurationUs(durMs * 1000L)
-            b.build()
+        val currentPlaylist = playlist
+        val items = if (currentPlaylist === cachedItemsSource) cachedItems else {
+            currentPlaylist.mapIndexed { i, mi ->
+                val b = MediaItemData.Builder(/* uid = */ mi.mediaId.ifEmpty { "juce_$i" })
+                    .setMediaItem(mi)
+                // ВАЖНО: длительность берём из СТАБИЛЬНЫХ метаданных трека (MediaStore),
+                // а НЕ из движка. Меняющийся durationUs между вызовами getState() Media3
+                // трактует как разрыв таймлайна; если длина на миг просядет ниже позиции
+                // (например, read-ahead голодает при тяжёлой перерисовке UI), плеер ложно
+                // «заканчивает» трек → стоп + перемотка в начало. Метаданные не плавают.
+                val durMs = mi.mediaMetadata.durationMs
+                if (durMs != null && durMs > 0L) b.setDurationUs(durMs * 1000L)
+                b.build()
+            }.also {
+                cachedItemsSource = currentPlaylist
+                cachedItems = it
+            }
         }
 
         val state = when {
