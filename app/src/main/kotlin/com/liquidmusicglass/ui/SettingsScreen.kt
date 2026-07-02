@@ -470,22 +470,7 @@ fun SettingsScreen(
                     title = "Ignore Battery Optimization",
                     subtitle = "Prevents background stutter (Doze). Recommended for music",
                     icon = Icons.Rounded.ChevronRight,
-                    onClick = {
-                        val pm = context.getSystemService(android.os.PowerManager::class.java)
-                        val pkg = context.packageName
-                        val intent = if (pm?.isIgnoringBatteryOptimizations(pkg) != true) {
-                            android.content.Intent(
-                                android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
-                                android.net.Uri.parse("package:$pkg")
-                            )
-                        } else {
-                            // Уже в исключениях — открываем общий список, чтобы было видно.
-                            android.content.Intent(
-                                android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS
-                            )
-                        }
-                        runCatching { context.startActivity(intent) }
-                    }
+                    onClick = { requestIgnoreBatteryOptimizations(context) }
                 )
             }
 
@@ -554,6 +539,56 @@ private fun CacheSizeSelector(
             }
         }
     }
+}
+
+/**
+ * Запрос исключения из оптимизации батареи — МАКСИМАЛЬНО защищённо. На части
+ * прошивок/версий Android этот интент вырезан или кидает SecurityException
+ * (известны стабильные краши у приложений без страховок), поэтому:
+ *  - каждый шаг в runCatching (никогда не роняем приложение);
+ *  - FLAG_ACTIVITY_NEW_TASK (не зависим от типа контекста);
+ *  - цепочка фолбэков: системный диалог → общий список исключений →
+ *    страница приложения в настройках. Ничего не персистим — повторный
+ *    запуск приложения ни при каком исходе не затрагивается.
+ */
+private fun requestIgnoreBatteryOptimizations(context: Context) {
+    val pkg = context.packageName
+    val alreadyIgnoring = runCatching {
+        context.getSystemService(android.os.PowerManager::class.java)
+            ?.isIgnoringBatteryOptimizations(pkg) == true
+    }.getOrDefault(false)
+
+    fun tryStart(intent: android.content.Intent): Boolean = runCatching {
+        intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(intent)
+        true
+    }.getOrDefault(false)
+
+    if (!alreadyIgnoring) {
+        // 1) Прямой системный диалог (нужен REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+        //    в манифесте — добавлен; без него часть прошивок кидает SecurityException).
+        if (tryStart(
+                android.content.Intent(
+                    android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    android.net.Uri.parse("package:$pkg")
+                )
+            )
+        ) return
+    }
+    // 2) Общий список исключений (или уже в исключениях — показать, где это).
+    if (tryStart(
+            android.content.Intent(
+                android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS
+            )
+        )
+    ) return
+    // 3) Последний фолбэк — страница приложения в настройках.
+    tryStart(
+        android.content.Intent(
+            android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            android.net.Uri.parse("package:$pkg")
+        )
+    )
 }
 
 private fun cacheLabel(bytes: Long): String = when {
