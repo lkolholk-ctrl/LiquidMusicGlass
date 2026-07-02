@@ -52,7 +52,6 @@ import com.liquidmusicglass.ui.theme.LiquidTheme
 
 private val AppleRed = Color(0xFFFC3C44)
 private val AppleRedLight = Color(0xFFFF6B6B)
-private val YouTubeRed = Color(0xFFFF0000)
 private val GlassSurface = Color(0xFF1A1A1A)
 private val GlassBorder = Color(0x33FFFFFF)
 private val NeonGreen = Color(0xFF39FF14)
@@ -134,17 +133,13 @@ private fun CampCard(
     )
 
     val borderColor by animateColorAsState(
-        targetValue = when {
-            isSelected && camp is MusicCamp.Youtube -> YouTubeRed
-            isSelected -> AppleRed
-            else -> GlassBorder
-        },
+        targetValue = if (isSelected) AppleRed else GlassBorder,
         animationSpec = spring(stiffness = Spring.StiffnessMedium),
         label = "border_color"
     )
 
     val bgAlpha = if (isSelected) 0.15f else 0.08f
-    val accentColor = if (camp is MusicCamp.Youtube) YouTubeRed else AppleRed
+    val accentColor = AppleRed
 
     Box(
         modifier = modifier
@@ -188,8 +183,7 @@ private fun CampCard(
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = if (camp is MusicCamp.Youtube)
-                        Icons.Outlined.MusicNote else Icons.Outlined.Waves,
+                    imageVector = Icons.Outlined.Waves,
                     contentDescription = null,
                     tint = accentColor,
                     modifier = Modifier.size(24.dp)
@@ -257,8 +251,7 @@ private fun CapabilitiesPreview(
     capabilities: Capabilities,
     camp: MusicCamp
 ) {
-    val isYoutube = camp is MusicCamp.Youtube
-    val accentColor = if (isYoutube) YouTubeRed else AppleRed
+    val accentColor = AppleRed
 
     Column(
         modifier = Modifier
@@ -294,22 +287,6 @@ private fun CapabilitiesPreview(
                     fontWeight = FontWeight.SemiBold
                 )
             }
-
-            if (isYoutube) {
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(NeonGreen.copy(alpha = 0.15f))
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        text = "FREE",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = NeonGreen,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
         }
 
         Spacer(modifier = Modifier.height(4.dp))
@@ -334,7 +311,7 @@ private fun CapabilitiesPreview(
             FeatureRowData(
                 icon = Icons.Outlined.Translate,
                 label = "Lyrics",
-                enabled = capabilities[Feature.LOSSLESS] == true || isYoutube
+                enabled = capabilities[Feature.LOSSLESS] == true
             )
         )
 
@@ -416,7 +393,7 @@ fun CampSwitcherChip(
     ) {
         MusicCamp.ALL.forEach { camp ->
             val isSelected = currentCamp == camp
-            val accentColor = if (camp is MusicCamp.Youtube) YouTubeRed else AppleRed
+            val accentColor = AppleRed
 
             val bgColor by animateColorAsState(
                 targetValue = if (isSelected) accentColor.copy(alpha = 0.2f) else Color.Transparent,
@@ -459,8 +436,8 @@ fun CampIndicator(
     val currentCamp by manager.currentCamp.collectAsState()
     val capabilities by manager.capabilities.collectAsState()
 
-    val accentColor = if (currentCamp is MusicCamp.Youtube) YouTubeRed else AppleRed
-    val campLabel = if (currentCamp is MusicCamp.Youtube) "YT" else "ICM"
+    val accentColor = AppleRed
+    val campLabel = "ICM"
 
     Row(
         modifier = modifier,

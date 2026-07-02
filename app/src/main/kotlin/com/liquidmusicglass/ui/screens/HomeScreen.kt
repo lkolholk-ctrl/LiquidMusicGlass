@@ -43,12 +43,6 @@ import com.liquidmusicglass.api.icm.IcmHomeItem
 import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.api.icm.IcmWaveTrack
 import com.liquidmusicglass.api.icm.toTrack
-import com.liquidmusicglass.api.youtube.YouTubeMusicRepository
-import com.liquidmusicglass.api.youtube.YtAlbumItem
-import com.liquidmusicglass.api.youtube.YtMoodItem
-import com.liquidmusicglass.api.youtube.YtExplorePage
-import com.liquidmusicglass.camp.FeatureAccessManager
-import com.liquidmusicglass.camp.MusicCamp
 import com.liquidmusicglass.data.local.WaveRepository
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.Track
@@ -60,7 +54,6 @@ import com.liquidmusicglass.ui.viewmodel.HomeViewModel
 import kotlinx.coroutines.launch
 
 private val AppleRed = Color(0xFFFC3C44)
-private val YouTubeRed = Color(0xFFFF0000)
 
 private suspend fun resolveWaveTrackUrl(track: Track?): Track? {
     if (track == null) return null
@@ -181,30 +174,18 @@ private suspend fun loadMoodFallbackTracks(mood: MoodCategory, count: Int): List
 fun HomeScreen(
     onNavigateToAlbum: (String) -> Unit = {},
     onNavigateToArtist: (String) -> Unit = {},
-    onNavigateToPlaylist: (String) -> Unit = {},
-    onNavigateToYouTube: () -> Unit = {}
+    onNavigateToPlaylist: (String) -> Unit = {}
 ) {
     val viewModel = remember { HomeViewModel() }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val scroll = rememberScrollState()
 
-    // Camp observation
-    val campManager = remember { FeatureAccessManager.getInstance(context) }
-    val currentCamp by campManager.currentCamp.collectAsState()
-    val isYoutubeCamp = currentCamp is MusicCamp.Youtube
-
     val homeContent by viewModel.homeContent.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val error by viewModel.error.collectAsState()
     val charts by viewModel.charts.collectAsState()
     val isLoadingCharts by viewModel.isLoadingCharts.collectAsState()
-
-    // YouTube explore state
-    var ytExplore by remember { mutableStateOf<YtExplorePage?>(null) }
-    var ytExploreLoading by remember { mutableStateOf(false) }
-    var ytExploreError by remember { mutableStateOf<String?>(null) }
-    val ytRepo = remember { YouTubeMusicRepository.getInstance() }
 
     val allTracks by PlayerController.queueFlow.collectAsState()
     val recentlyPlayed by PlayerController.recentlyPlayed.collectAsState()
@@ -218,26 +199,9 @@ fun HomeScreen(
 
     val isLoggedIn by IcmAuthRepository.isLoggedIn.collectAsState()
 
-    // Load home content based on camp
-    LaunchedEffect(isYoutubeCamp, isLoggedIn) {
-        if (isYoutubeCamp) {
-            ytExploreLoading = true
-            ytExploreError = null
-            try {
-                val result = ytRepo.explore()
-                if (result.isSuccess) {
-                    ytExplore = result.getOrThrow()
-                } else {
-                    ytExploreError = result.exceptionOrNull()?.message ?: "Failed to load"
-                }
-            } catch (e: Exception) {
-                ytExploreError = e.message ?: "Unknown error"
-            } finally {
-                ytExploreLoading = false
-            }
-        } else {
-            viewModel.loadHomeContent()
-        }
+    // Load home content
+    LaunchedEffect(isLoggedIn) {
+        viewModel.loadHomeContent()
     }
 
     // Extract blocks from home content
@@ -321,80 +285,30 @@ fun HomeScreen(
         isPlayingMood = true
         moodLoading = moodLoading + moodId
         scope.launch {
-            // Check current camp
-            val campManager = FeatureAccessManager.getInstance(context)
-            val currentCamp = campManager.currentCamp.value
-
             if (moodId == "my_wave") {
-                when (currentCamp) {
-                    is MusicCamp.Youtube -> {
-                        // === YOUTUBE RADIO ===
-                        val ytRepo = com.liquidmusicglass.api.youtube.YouTubeMusicRepository.getInstance()
-                        // Search for a seed track based on mood
-                        val seedQuery = mood.seedQueries.firstOrNull() ?: "popular music"
-                        val searchResult = ytRepo.search(seedQuery, com.liquidmusicglass.api.youtube.YtSearchFilter.SONGS)
-                        val seedTrack = searchResult.getOrNull()?.firstOrNull()
+                // === ICM МОЯ ВОЛНА ===
+                val waveRepo = WaveRepository.getInstance(context)
+                val queue = waveRepo.buildWaveQueue()
+                moodLoading = moodLoading - moodId
 
-                        if (seedTrack != null) {
-                            val radioResult = ytRepo.getRadioQueue(seedTrack.videoId)
-                            moodLoading = moodLoading - moodId
-
-                            if (radioResult.isSuccess) {
-                                val ytTracks = radioResult.getOrThrow()
-                                val resolvedTracks = ytTracks.map { ytTrack ->
-                                    ytTrack.toEngineTrack()
-                                }
-
-                                if (resolvedTracks.isNotEmpty()) {
-                                    PlayerController.playFromList(
-                                        context = context,
-                                        tracks = resolvedTracks,
-                                        startIndex = 0,
-                                        autoRefillType = "YOUTUBE_RADIO",
-                                        autoRefillId = seedTrack.videoId,
-                                        autoRefillName = mood.title,
-                                        seedTrackId = seedTrack.videoId
-                                    )
-                                } else {
-                                    activeMoodId = null
-                                    isPlayingMood = false
-                                }
-                            } else {
-                                activeMoodId = null
-                                isPlayingMood = false
-                            }
-                        } else {
-                            moodLoading = moodLoading - moodId
-                            activeMoodId = null
-                            isPlayingMood = false
-                        }
+                if (queue.isNotEmpty()) {
+                    val resolvedQueue = queue.mapNotNull { resolveWaveTrackUrl(it) }
+                    if (resolvedQueue.isNotEmpty()) {
+                        PlayerController.setQueue(resolvedQueue)
+                        PlayerController.playTrack(context, 0)
+                    } else {
+                        pendingMoodId = moodId
+                        activeMoodId = null
+                        isPlayingMood = false
+                        PlayerController.clearAutoRefillContext()
+                        showWaveOnboarding = true
                     }
-                    else -> {
-                        // === ICM МОЯ ВОЛНА ===
-                        val waveRepo = WaveRepository.getInstance(context)
-                        val queue = waveRepo.buildWaveQueue()
-                        moodLoading = moodLoading - moodId
-
-                        if (queue.isNotEmpty()) {
-                            val resolvedQueue = queue.mapNotNull { resolveWaveTrackUrl(it) }
-                            if (resolvedQueue.isNotEmpty()) {
-                                PlayerController.setQueue(resolvedQueue)
-                                PlayerController.playTrack(context, 0)
-                            } else {
-                                pendingMoodId = moodId
-                                activeMoodId = null
-                                isPlayingMood = false
-                                PlayerController.clearAutoRefillContext()
-                                showWaveOnboarding = true
-                            }
-                        } else {
-                            pendingMoodId = moodId
-                            activeMoodId = null
-                            isPlayingMood = false
-                            PlayerController.clearAutoRefillContext()
-                            showWaveOnboarding = true
-                        }
-                    }
+                } else {
+                    pendingMoodId = moodId
+                    activeMoodId = null
+                    isPlayingMood = false
+                    PlayerController.clearAutoRefillContext()
+                    showWaveOnboarding = true
                 }
             } else {
                 // === Остальные настроения через seed-based wave ===
@@ -486,68 +400,6 @@ fun HomeScreen(
         scope.launch { IcmRepository.sendWaveFeedback(feedbackType, value) }
     }
 
-    fun playYtMoodStation(mood: YtMoodItem) {
-        activeMoodId = mood.browseId
-        isPlayingMood = true
-        scope.launch {
-            try {
-                // Browse the mood category to get a playlist
-                val browseResult = ytRepo.browse(mood.browseId, mood.params)
-                if (browseResult.isSuccess) {
-                    val result = browseResult.getOrThrow()
-                    val tracks = result.sections.flatMap { section ->
-                        section.items.mapNotNull { item ->
-                            when (item) {
-                                is com.liquidmusicglass.api.youtube.YtBrowseItem.TrackItem -> item.track.toEngineTrack()
-                                else -> null
-                            }
-                        }
-                    }
-                    if (tracks.isNotEmpty()) {
-                        PlayerController.playFromList(
-                            context = context,
-                            tracks = tracks,
-                            startIndex = 0,
-                            autoRefillType = "YOUTUBE_RADIO",
-                            autoRefillId = mood.browseId,
-                            autoRefillName = mood.title
-                        )
-                    } else {
-                        // Fallback: search by mood name and build radio
-                        val searchResult = ytRepo.search(mood.title, com.liquidmusicglass.api.youtube.YtSearchFilter.SONGS)
-                        val seedTrack = searchResult.getOrNull()?.firstOrNull()
-                        if (seedTrack != null) {
-                            val radioResult = ytRepo.getRadioQueue(seedTrack.videoId)
-                            if (radioResult.isSuccess) {
-                                val radioTracks = radioResult.getOrThrow().map { it.toEngineTrack() }
-                                if (radioTracks.isNotEmpty()) {
-                                    PlayerController.playFromList(
-                                        context = context,
-                                        tracks = radioTracks,
-                                        startIndex = 0,
-                                        autoRefillType = "YOUTUBE_RADIO",
-                                        autoRefillId = seedTrack.videoId,
-                                        autoRefillName = mood.title
-                                    )
-                                }
-                            }
-                        } else {
-                            activeMoodId = null
-                            isPlayingMood = false
-                        }
-                    }
-                } else {
-                    activeMoodId = null
-                    isPlayingMood = false
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("HomeScreen", "YT mood station error: ${e.message}")
-                activeMoodId = null
-                isPlayingMood = false
-            }
-        }
-    }
-
     Box(modifier = Modifier.fillMaxSize().background(LiquidTheme.colors.settingsBackground)) {
         // Фон-аура (Liquid Aurora) — первым слоем, фиксирована; контент скроллится поверх.
         AuraBackground(
@@ -588,88 +440,6 @@ fun HomeScreen(
             }
 
             Spacer(modifier = Modifier.height(28.dp))
-
-            // ─── Camp-aware content ───
-            if (isYoutubeCamp) {
-                // === YOUTUBE CAMP HOME ===
-                if (ytExploreLoading && ytExplore == null) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(400.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CircularProgressIndicator(color = YouTubeRed)
-                    }
-                }
-
-                ytExploreError?.let { errorMsg ->
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 20.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color(0xFF1C1C1E))
-                            .padding(16.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = errorMsg,
-                            color = Color(0xFFFF453A),
-                            fontSize = 14.sp
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(16.dp))
-                }
-
-                // YouTube Moods & Genres
-                val moods = ytExplore?.moodAndGenres ?: emptyList()
-                if (moods.isNotEmpty()) {
-                    SectionHeader(title = "Moods & Genres")
-                    Spacer(modifier = Modifier.height(12.dp))
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = 20.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        items(moods, key = { it.browseId }) { mood ->
-                            YtMoodCard(
-                                mood = mood,
-                                isActive = activeMoodId == mood.browseId,
-                                onClick = {
-                                    if (activeMoodId == mood.browseId) {
-                                        activeMoodId = null
-                                        isPlayingMood = false
-                                        PlayerController.clearAutoRefillContext()
-                                    } else {
-                                        playYtMoodStation(mood)
-                                    }
-                                }
-                            )
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(32.dp))
-                }
-
-                // YouTube New Releases
-                val newReleases = ytExplore?.newReleaseAlbums ?: emptyList()
-                if (newReleases.isNotEmpty()) {
-                    SectionHeader(title = "New Releases")
-                    Spacer(modifier = Modifier.height(12.dp))
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = 20.dp),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp)
-                    ) {
-                        items(newReleases, key = { it.browseId }) { album ->
-                            YtAlbumCard(
-                                album = album,
-                                onClick = { onNavigateToAlbum(album.browseId) }
-                            )
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(32.dp))
-                }
-            } else {
-                // === ICM CAMP HOME (original) ===
 
             // Loading state
             if (isLoading && homeContent == null) {
@@ -953,7 +723,6 @@ fun HomeScreen(
             }
 
             Spacer(modifier = Modifier.height(200.dp))
-            } // end ICM camp else block
         }
     }
 
@@ -1463,113 +1232,6 @@ private fun RecentTrackCard(
         Spacer(modifier = Modifier.height(2.dp))
         Text(
             text = track.artist,
-            color = LiquidTheme.colors.textSecondary,
-            fontSize = 12.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-    }
-}
-
-// ─── YouTube Mood Card ───
-@Composable
-private fun YtMoodCard(
-    mood: YtMoodItem,
-    isActive: Boolean,
-    onClick: () -> Unit
-) {
-    val stripeColor = if (mood.stripeColor != 0L) Color(mood.stripeColor) else YouTubeRed
-    Box(
-        modifier = Modifier
-            .size(130.dp)
-            .clip(RoundedCornerShape(20.dp))
-            .background(Color(0xFF1C1C1E))
-            .drawBehind {
-                drawLine(
-                    color = stripeColor,
-                    start = androidx.compose.ui.geometry.Offset(0f, 0f),
-                    end = androidx.compose.ui.geometry.Offset(0f, size.height),
-                    strokeWidth = 4.dp.toPx()
-                )
-            }
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onClick
-            )
-            .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 16.dp)
-    ) {
-        Text(
-            text = mood.title,
-            color = Color.White,
-            fontSize = 15.sp,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.align(Alignment.BottomStart)
-        )
-        if (isActive) {
-            Box(
-                modifier = Modifier
-                    .size(8.dp)
-                    .background(YouTubeRed, RoundedCornerShape(50))
-                    .align(Alignment.TopEnd)
-            )
-        }
-    }
-}
-
-// ─── YouTube Album Card ───
-@Composable
-private fun YtAlbumCard(
-    album: YtAlbumItem,
-    onClick: () -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .width(140.dp)
-            .clickable(onClick = onClick)
-    ) {
-        if (album.thumbnail.isNotBlank()) {
-            AsyncImage(
-                model = ImageRequest.Builder(LocalContext.current)
-                    .data(album.thumbnail)
-                    .crossfade(true)
-                    .build(),
-                contentDescription = album.title,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .size(140.dp)
-                    .clip(RoundedCornerShape(8.dp))
-            )
-        } else {
-            Box(
-                modifier = Modifier
-                    .size(140.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color(0xFF2A2A2A)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.MusicNote,
-                    contentDescription = null,
-                    tint = Color.White.copy(alpha = 0.5f),
-                    modifier = Modifier.size(32.dp)
-                )
-            }
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = album.title,
-            color = LiquidTheme.colors.textPrimary,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-        Spacer(modifier = Modifier.height(2.dp))
-        Text(
-            text = listOfNotNull(album.artist, album.year?.toString()).joinToString(" · "),
             color = LiquidTheme.colors.textSecondary,
             fontSize = 12.sp,
             maxLines = 1,

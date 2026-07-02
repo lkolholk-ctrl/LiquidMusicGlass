@@ -46,7 +46,7 @@ class EndlessPlaybackEngine(
         val genre: String? = null,
         val mood: String? = null
     ) {
-        enum class Type { WAVE, ARTIST, ALBUM, SEARCH, GENRE, PLAYLIST, LIBRARY, YOUTUBE_RADIO }
+        enum class Type { WAVE, ARTIST, ALBUM, SEARCH, GENRE, PLAYLIST, LIBRARY }
     }
 
     fun setRefillContext(context: RefillContext?) {
@@ -128,32 +128,16 @@ class EndlessPlaybackEngine(
                 val ctx = PlayerController.context
                 if (ctx != null) {
                     val refillCtx = _refillContext.value
-                    when (refillCtx?.type) {
-                        RefillContext.Type.YOUTUBE_RADIO -> {
-                            // YouTube radio refill
-                            val seedId = refillCtx.seedTrackId ?: return@withContext emptyList()
-                            val result = com.liquidmusicglass.api.youtube.YouTubeMusicRepository.getInstance()
-                                .getRadioQueue(seedId)
-                            if (result.isSuccess) {
-                                val ytTracks = result.getOrThrow()
-                                ytTracks.map { ytTrack ->
-                                    ytTrack.toEngineTrack()
-                                }
-                            } else emptyList()
-                        }
-                        else -> {
-                            // ICM wave refill. seedTrackId != null → продолжаем мудовую станцию
-                            // тем же жанром; null → персональная волна.
-                            // Anti-repeat: исключаем ВСЁ, что уже было в этой волне (playedIds —
-                            // и стартовая очередь, и прошлые дозаправки), чтобы треки не повторялись.
-                            val waveRepo = com.liquidmusicglass.data.local.WaveRepository.getInstance(ctx)
-                            waveRepo.buildWaveQueue(
-                                count = REFILL_BATCH_SIZE,
-                                seedTrackId = refillCtx?.seedTrackId,
-                                exclude = playedIds.toList()
-                            )
-                        }
-                    }
+                    // ICM wave refill. seedTrackId != null → продолжаем мудовую станцию
+                    // тем же жанром; null → персональная волна.
+                    // Anti-repeat: исключаем ВСЁ, что уже было в этой волне (playedIds —
+                    // и стартовая очередь, и прошлые дозаправки), чтобы треки не повторялись.
+                    val waveRepo = com.liquidmusicglass.data.local.WaveRepository.getInstance(ctx)
+                    waveRepo.buildWaveQueue(
+                        count = REFILL_BATCH_SIZE,
+                        seedTrackId = refillCtx?.seedTrackId,
+                        exclude = playedIds.toList()
+                    )
                 } else {
                     android.util.Log.e("EndlessEngine", "Context is null, unable to fetch wave repository")
                     emptyList()

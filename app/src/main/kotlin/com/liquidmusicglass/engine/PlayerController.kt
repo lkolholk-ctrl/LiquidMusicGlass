@@ -379,7 +379,7 @@ object PlayerController {
         val campManager = com.liquidmusicglass.camp.FeatureAccessManager.getInstance(context)
         val campCaps = campManager.capabilities.value
         if (!campCaps.flags[com.liquidmusicglass.camp.Feature.BACKGROUND_PLAYBACK]!!) {
-            // Disable gapless/crossfade for YouTube tracks
+            // Лагерь без фонового плейбека — глушим gapless/кроссфейд
             com.liquidmusicglass.engine.AppSettings.setGapless(false)
         }
 

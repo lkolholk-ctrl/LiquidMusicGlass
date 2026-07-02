@@ -13,10 +13,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 /**
- * FeatureAccessManager — Capability Matrix для двух лагерей (ICM / YouTube Music).
- *
- * Ключевой принцип: лагерь YouTube Music полностью изолирован от подписки ICM.
- * Подписка ICM влияет ТОЛЬКО на лагерь ICM.
+ * FeatureAccessManager — Capability Matrix лагеря ICM.
+ * Возможности зависят от статуса подписки ICM (free / premium).
  */
 class FeatureAccessManager private constructor(context: Context) {
 
@@ -90,7 +88,6 @@ class FeatureAccessManager private constructor(context: Context) {
     private fun recalc(subscription: IcmSubscriptionResponse?) {
         val camp = _currentCamp.value
         val caps = when (camp) {
-            is MusicCamp.Youtube -> Capabilities.youtubeFree()
             is MusicCamp.Icm -> {
                 val hasSub = subscription?.isActive == true
                 if (hasSub) Capabilities.icmPremium(256)
@@ -132,7 +129,6 @@ enum class Feature {
 
 enum class AudioFormat {
     AAC,   // m4a — ICM default
-    OPUS,  // webm — YouTube default, best compression
     FLAC,  // lossless — ICM premium only
     MP3    // fallback
 }
@@ -150,22 +146,6 @@ data class Capabilities(
 
     companion object {
         fun default() = icmFree()
-
-        /** YouTube Music — всегда бесплатный, всегда можно скачивать. */
-        fun youtubeFree() = Capabilities(
-            flags = mapOf(
-                Feature.DOWNLOAD to true,
-                Feature.HIGH_QUALITY to false,
-                Feature.LOSSLESS to false,
-                Feature.PERSONAL_WAVE to true,
-                Feature.FULL_CATALOG to true,
-                Feature.BACKGROUND_PLAYBACK to true,
-                Feature.UNLIMITED_SKIPS to true
-            ),
-            maxBitrateKbps = 128,
-            preferredFormat = AudioFormat.OPUS,
-            qualityLabel = "Free · 128K Opus"
-        )
 
         /** ICM без подписки — ограниченный функционал. */
         fun icmFree() = Capabilities(
