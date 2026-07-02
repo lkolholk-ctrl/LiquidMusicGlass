@@ -12,11 +12,12 @@
  * репортится сюда. Сам выбор режима хранится тут (атомик, любой поток).
  *
  * Режимы (значения совпадают с AutoMixNativeEngine.kt / AppSettings):
- *   0 = NORMAL:    Shared    + LowLatency — быстрый путь микшера без exclusive-MMAP.
- *                  Опция из настроек (Safe Audio Output = off) для меньшей задержки.
- *   1 = SAFE:      Shared    + None       — ДЕФОЛТ. Полностью legacy-путь через
- *                  AudioTrack, максимальная совместимость. Единственная конфигурация,
- *                  подтверждённая на всём тест-парке (включая Xiaomi с битым MMAP).
+ *   0 = NORMAL:    Shared    + LowLatency — ДЕФОЛТ. Быстрый путь микшера без
+ *                  exclusive-MMAP (минимальное отклонение от стока JUCE).
+ *   1 = SAFE:      Shared    + None       — legacy-путь. Тумблер «Safe Audio
+ *                  Output» для устройств с шумом/тишиной на fast-path. ВНИМАНИЕ:
+ *                  на части устройств (Honor владельца) None сам даёт тишину —
+ *                  поэтому НЕ дефолт.
  *   2 = EXCLUSIVE: Exclusive + LowLatency — стоковое поведение JUCE, оставлено
  *                  для A/B-сравнения при отладке.
  */

@@ -26,8 +26,8 @@ object AutoMixNativeEngine {
     private var initialised = false
 
     /** Режимы совместимости Oboe (значения совпадают с OboeRuntime.h). */
-    const val OBOE_MODE_NORMAL = 0     // Shared + LowLatency (низкая задержка, опция)
-    const val OBOE_MODE_SAFE = 1       // Shared + None (legacy-путь) — ДЕФОЛТ, проверен на всём парке
+    const val OBOE_MODE_NORMAL = 0     // Shared + LowLatency — ДЕФОЛТ
+    const val OBOE_MODE_SAFE = 1       // Shared + None (legacy-путь; на части девайсов сам даёт тишину)
     const val OBOE_MODE_EXCLUSIVE = 2  // Exclusive + LowLatency (стоковое поведение JUCE)
 
     // Смена режима на живом движке переоткрывает Oboe-поток (close/reopen) —

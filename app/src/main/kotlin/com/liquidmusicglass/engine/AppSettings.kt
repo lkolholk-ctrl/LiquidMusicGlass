@@ -45,11 +45,10 @@ object AppSettings {
     val ignoreShortEnabled: StateFlow<Boolean> = _ignoreShortEnabled
 
     // ── Аудио-совместимость (JUCE/Oboe) ──
-    // 0 = low-latency (Shared + LowLatency), 1 = безопасный (Shared + None,
-    // legacy-путь) — ДЕФОЛТ: единственный режим, проверенный на всём тест-парке,
-    // включая Xiaomi с битым MMAP (шум/тишина на fast-path). 2 = exclusive
-    // (стоковое поведение JUCE, для A/B-отладки).
-    private val _audioCompatMode = MutableStateFlow(1)
+    // 0 = ДЕФОЛТ (Shared + LowLatency), 1 = безопасный (Shared + None, legacy-путь;
+    // тумблер для устройств с шумом на fast-path — но на Honor владельца None сам
+    // даёт тишину, поэтому НЕ дефолт), 2 = exclusive (сток JUCE, A/B-отладка).
+    private val _audioCompatMode = MutableStateFlow(0)
     val audioCompatMode: StateFlow<Int> = _audioCompatMode
 
     private val _ignoreThresholdSec = MutableStateFlow(30f)
@@ -337,7 +336,7 @@ object AppSettings {
         _sleepTimerMinutes.value = p.getInt("sleep_timer", 0)
         _ignoreShortEnabled.value = p.getBoolean("ignore_short", false)
         _ignoreThresholdSec.value = p.getFloat("ignore_threshold", 30f)
-        _audioCompatMode.value = p.getInt("audio_compat_mode", 1).coerceIn(0, 2)
+        _audioCompatMode.value = p.getInt("audio_compat_mode", 0).coerceIn(0, 2)
         _preloadLeadSeconds.value = p.getInt("preload_lead_seconds", 60).coerceIn(30, 90)
 
         _lastTrackIndex.value = p.getInt("last_track", -1)

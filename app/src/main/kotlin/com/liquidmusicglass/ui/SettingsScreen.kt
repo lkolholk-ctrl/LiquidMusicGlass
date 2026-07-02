@@ -138,13 +138,13 @@ fun SettingsScreen(
                     onSelect = { AppSettings.setHideExplicit(it) }
                 )
                 PlainDivider()
-                // Безопасный вывод (ДЕФОЛТ ON): legacy-путь Android-аудио (Shared +
-                // без low-latency) — единственный, проверенный на всём тест-парке;
-                // на части устройств (Xiaomi и др.) fast-path AAudio отдаёт
-                // шум/тишину вместо локального звука. OFF = low-latency путь.
+                // Безопасный вывод (ДЕФОЛТ OFF): legacy-путь Android-аудио (Shared +
+                // без low-latency) для устройств, где fast-path AAudio отдаёт
+                // шум/тишину (часть Xiaomi и др.). Не дефолт: на Honor владельца
+                // этот путь сам даёт тишину — универсального режима нет.
                 SettingsToggleItem(
                     title = "Safe Audio Output",
-                    subtitle = "Most compatible local audio path. Turn off for lower latency",
+                    subtitle = "Try if local playback is noisy or silent on this device",
                     selected = audioCompatMode == 1,
                     onSelect = { AppSettings.setAudioCompatMode(if (it) 1 else 0) }
                 )

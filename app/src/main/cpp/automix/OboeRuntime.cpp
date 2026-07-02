@@ -11,10 +11,13 @@ namespace
 {
     constexpr const char* kLogTag = "OboeCompat";
 
-    // Дефолт — SAFE (Shared+None): единственная конфигурация, полевая-проверенная
-    // на всём парке (Honor владельца + Xiaomi с битым MMAP; ветка greeting возила
-    // её захардкоженной). NORMAL (Shared+LowLatency) — опция для смелых из настроек.
-    std::atomic<int> gCompatMode { 1 };   // 0 NORMAL / 1 SAFE / 2 EXCLUSIVE (см. OboeRuntime.h)
+    // Дефолт — NORMAL (Shared+LowLatency). Полевая матрица (02.07.2026):
+    //   Honor владельца:  Exclusive+LowLatency ✓, Shared+LowLatency ✓, Shared+None ✗ (тишина!)
+    //   Xiaomi (битый MMAP): Exclusive+LowLatency ✗ (шум) — Shared-режимы не проверены.
+    // Т.е. «самый совместимый» Shared+None сам ломает часть устройств — универсального
+    // статического режима нет, дефолт = минимальное отклонение от стока (уходим только
+    // от exclusive-MMAP), SAFE — тумблер в настройках для проблемных девайсов.
+    std::atomic<int> gCompatMode { 0 };   // 0 NORMAL / 1 SAFE / 2 EXCLUSIVE (см. OboeRuntime.h)
 
     // Кольцо последних отчётов об открытых потоках. Открытие идёт с обычных
     // (не realtime) потоков, поэтому мьютекс здесь безопасен.
