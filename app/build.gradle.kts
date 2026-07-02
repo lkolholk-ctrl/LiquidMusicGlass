@@ -16,8 +16,8 @@ android {
         applicationId = "com.liquidmusicglass"
         minSdk = 29
         targetSdk = 36
-        versionCode = 20260530
-        versionName = "2026.05.30 pre-release1 gsm"
+        versionCode = 20260702
+        versionName = "02.07.2026"
 
         // Build native libs only for arm64-v8a (faster builds, smaller APK).
         // Note: won't run on 32-bit (armeabi-v7a) or x86/x86_64 emulators.
@@ -68,9 +68,11 @@ android {
             // Debug uses auto-generated debug signing
         }
         release {
-            // TODO: ВРЕМЕННО для ускорения отладочных сборок — вернуть оба в true.
-            isMinifyEnabled = false
-            isShrinkResources = false
+            // Полная защита: R8-минификация + обфускация + ресурс-шринк.
+            // Keep-правила — в proguard-rules.pro (JNI-мосты, Room, сериализация,
+            // LiteRT сохранены; см. подробные комментарии там).
+            isMinifyEnabled = true
+            isShrinkResources = true
             isDebuggable = false
             isJniDebuggable = false
             vcsInfo.include = false
