@@ -4,6 +4,8 @@ import android.net.Uri
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.withInfiniteAnimationFrameMillis
@@ -971,16 +973,25 @@ private fun WaveProgressFill(
     modifier: Modifier = Modifier
 ) {
     val positionMs by PlayerController.currentPositionMs.collectAsState()
-    val progress = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
+    val rawProgress = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
+    // Позиция приходит тиками (~раз в секунду) — без сглаживания фронт ПРЫГАЕТ
+    // на каждый тик («звук толкает пилюлю»). Линейная интерполяция чуть длиннее
+    // тика — фронт скользит непрерывно, зависит только от времени трека.
+    val progress by animateFloatAsState(
+        targetValue = rawProgress,
+        animationSpec = tween(1200, easing = LinearEasing),
+        label = "waveProgress"
+    )
 
-    // Фаза волны (~1.8 рад/с — спокойное течение). Кадровый цикл живёт ТОЛЬКО
-    // пока playing && animate — на паузе волна замирает, корутина стоит.
+    // Фаза течения: ~2.6 рад/с — волна спокойно ПЛЫВЁТ сама, с постоянной
+    // скоростью, от музыки не зависит. Кадровый цикл живёт ТОЛЬКО пока
+    // playing && animate — на паузе вода замирает, корутина стоит.
     val phase = produceState(0f, playing, animate) {
         if (!playing || !animate) return@produceState
         var last = -1L
         while (true) {
             withInfiniteAnimationFrameMillis { t ->
-                if (last >= 0) value = (value + (t - last) * 0.0018f) % WAVE_TAU
+                if (last >= 0) value = (value + (t - last) * 0.0026f) % (WAVE_TAU * 840f)
                 last = t
             }
         }
@@ -989,7 +1000,8 @@ private fun WaveProgressFill(
     val base = lerp(accent, Color.White, 0.30f)
     Canvas(modifier) {
         if (size.width <= 1f || progress <= 0.002f) return@Canvas
-        val split = size.width * progress
+        // Лёгкое покачивание уровня (±1.5dp, медленное) — вода «дышит» сама.
+        val split = size.width * progress + 1.5.dp.toPx() * sin(phase.value * 0.45f)
         val waveLen = 30.dp.toPx()      // вертикальный период волны кромки
         val step = 3.dp.toPx()
         val h = size.height
@@ -1007,9 +1019,9 @@ private fun WaveProgressFill(
             close()
         }
 
-        // Два слоя с разными фазами/амплитудами — «вода» с глубиной.
+        // Два слоя воды в ПРОТИВОФАЗЕ (плывут навстречу) — живая вода с глубиной.
         drawPath(liquid(5.dp.toPx(), phase.value), base.copy(alpha = 0.34f))
-        drawPath(liquid(8.dp.toPx(), phase.value + 2.1f), base.copy(alpha = 0.16f))
+        drawPath(liquid(8.dp.toPx(), -phase.value * 0.7f + 1.7f), base.copy(alpha = 0.16f))
 
         // Яркая грань передней волны — читаемый «уровень» прогресса.
         val edgeAmp = 5.dp.toPx()
