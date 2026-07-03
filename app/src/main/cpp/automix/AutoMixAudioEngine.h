@@ -262,6 +262,20 @@ private:
     float hapticLpMidLo { 0.0f };
     float hapticLpMidHi { 0.0f };
 
+    // ── DJ FX переходов (состояние ТОЛЬКО аудио-потока) ─────────────────────
+    // Реальный DSP вместо «постелей громкости»:
+    //  - FILTER_SWEEP (type 4): one-pole LP на уходящей деке, срез уезжает
+    //    экспоненциально ~16кГц → ~150Гц по ходу перехода (муффл как у DJ);
+    //  - ECHO_OUT (type 5): feedback-делэй на уходящей деке (pre-fader send:
+    //    сухой звук гаснет фейдером, повторы остаются) + хвост, дозвучивающий
+    //    ПОСЛЕ конца перехода поверх нового трека.
+    // Буфер делэя аллоцируется в prepareInternal (не на аудио-потоке).
+    float djSweepLp[2] { 0.0f, 0.0f };     // состояние LP свипа (стерео)
+    juce::AudioBuffer<float> djEchoBuf;    // кольцевой буфер делэя (2 канала)
+    int djEchoPos { 0 };
+    int djEchoLen { 0 };                   // длина делэя в сэмплах
+    long long djEchoTail { 0 };            // остаток дозвучки хвоста (сэмплы)
+
     std::atomic<bool> initialised { false };
     std::atomic<bool> toneOn { false };
     std::atomic<bool> outputMuted { false };

@@ -41,6 +41,20 @@ namespace
         return style >= 0 && style <= 5 ? style : 0;
     }
 
+    // ── DJ FX: параметры реального DSP переходов ────────────────────────────
+    // FILTER_SWEEP: экспоненциальный съезд среза LP (муффл «уходим в подвал»).
+    constexpr float kDjSweepHiHz = 16000.0f;
+    constexpr float kDjSweepLoHz = 150.0f;
+    // ECHO_OUT: делэй ~375мс (≈ dotted-eighth на 120 BPM — универсально
+    // музыкально), умеренный feedback, хвост дозвучивает ~2.2с после перехода.
+    constexpr double kDjEchoDelaySec  = 0.375;
+    // Умеренные send/feedback: геометрическая сумма повторов ~0.95x пика
+    // уходящей деки — не жарче обычного сложения двух дек в кроссфейде.
+    constexpr float  kDjEchoSend      = 0.55f;
+    constexpr float  kDjEchoFeedback  = 0.42f;
+    constexpr double kDjEchoTailSec   = 2.2;
+    constexpr double kDjEchoTailFade  = 0.25;  // фейд последних 0.25с хвоста
+
     TransitionGains transitionGainsForStyle (float progress, int style)
     {
         const float p = clamp01 (progress);
@@ -68,15 +82,18 @@ namespace
                 const float inPhase  = smoothstep01 (p / 0.60f);
                 return { equalPowerOut (outPhase), equalPowerIn (inPhase) };
             }
-            case 4: // FILTER_SWEEP volume bed: outgoing ducks faster, incoming opens gradually.
+            case 4: // FILTER_SWEEP: сам муффл делает реальный LP в микс-лупе.
             {
-                const float outPhase = smoothstep01 (p * 1.12f);
+                // Громкость уходящей держится почти в полный рост до середины —
+                // съезд фильтра ДОЛЖЕН быть слышен, — и гаснет к концу.
+                const float outPhase = smoothstep01 ((p - 0.45f) / 0.55f);
                 const float inPhase  = smoothstep01 (p);
-                return { (1.0f - outPhase) * (1.0f - outPhase), inPhase * inPhase };
+                return { equalPowerOut (outPhase), equalPowerIn (inPhase) };
             }
-            case 5: // ECHO_OUT bed: keep the tail audible briefly, then hand over cleanly.
+            case 5: // ECHO_OUT: сухая уходящая гаснет раньше — её место занимают
+                    // повторы из делэя (реальное эхо в микс-лупе), не тишина.
             {
-                const float outPhase = smoothstep01 (p * 0.75f) * 0.35f + smoothstep01 (p) * 0.65f;
+                const float outPhase = smoothstep01 (p * 1.4f);
                 const float inPhase  = smoothstep01 (p);
                 return { equalPowerOut (outPhase), equalPowerIn (inPhase) };
             }
@@ -822,6 +839,14 @@ void AutoMixAudioEngine::prepareInternal (double sampleRate, int blockSize)
     for (auto& f : lowpassA) { f.coefficients = bassCoeffs; f.reset(); }
     for (auto& f : lowpassB) { f.coefficients = bassCoeffs; f.reset(); }
 
+    // DJ FX: кольцевой буфер ECHO_OUT — аллокация здесь, НЕ на аудио-потоке.
+    djEchoLen = juce::jmax (1, (int) (currentSampleRate * kDjEchoDelaySec));
+    djEchoBuf.setSize (2, djEchoLen, false, true, false);
+    djEchoBuf.clear();
+    djEchoPos = 0;
+    djEchoTail = 0;
+    djSweepLp[0] = djSweepLp[1] = 0.0f;
+
     // Профессиональная FX-цепочка готовится на стерео-выход.
     audioFx.prepare (currentSampleRate, currentBlockSize, 2);
 }
@@ -875,7 +900,14 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
     juce::AudioBuffer<float> output (outputChannelData, numOutputChannels, numSamples);
 
     if (fxResetRequested.exchange (false, std::memory_order_acq_rel))
+    {
         audioFx.reset();
+        // Пауза/стоп/скип: гасим и хвост DJ-эха, иначе после возобновления
+        // из буфера вылезут повторы прошлого трека.
+        djEchoTail = 0;
+        if (djEchoLen > 0) djEchoBuf.clear();
+        djSweepLp[0] = djSweepLp[1] = 0.0f;
+    }
 
     if (outputMuted.load (std::memory_order_acquire))
     {
@@ -924,6 +956,11 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
         // давно прогреты, щелчков нет.
         for (auto& f : lowpassA) f.reset();
         for (auto& f : lowpassB) f.reset();
+        // DJ FX: чистый старт — свип с нуля, делэй без остатков прошлого эха.
+        djSweepLp[0] = djSweepLp[1] = 0.0f;
+        djEchoBuf.clear();
+        djEchoPos = 0;
+        djEchoTail = 0;
         crossfadeActive.store (true);
     }
 
@@ -1013,11 +1050,36 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
         b[c] = scratchB.getReadPointer (c);
     }
 
+    // ── DJ FX: пред-расчёт на блок ───────────────────────────────────────────
+    // FILTER_SWEEP: срез LP уезжает экспоненциально по прогрессу перехода;
+    // коэффициент обновляем раз на блок (5-20мс) — для one-pole этого более чем
+    // достаточно, ступеней не слышно.
+    const bool sweepOn = active && total > 0.0 && style == 4;
+    float sweepAlpha = 0.0f;
+    if (sweepOn)
+    {
+        double t0 = (double) crossfadePos / total;
+        if (t0 > 1.0) t0 = 1.0;
+        const float cutoff = kDjSweepHiHz * std::pow (kDjSweepLoHz / kDjSweepHiHz, (float) t0);
+        sweepAlpha = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * cutoff
+                                      / (float) currentSampleRate);
+    }
+    // ECHO_OUT: активная фаза (переход идёт) или дозвучка хвоста после него.
+    const bool  echoActive = active && total > 0.0 && style == 5 && djEchoLen > 0;
+    const float tailFadeSamples = juce::jmax (1.0f, (float) (kDjEchoTailFade * currentSampleRate));
+    float* echoPtr[2] = { nullptr, nullptr };
+    if (djEchoLen > 0)
+    {
+        echoPtr[0] = djEchoBuf.getWritePointer (0);
+        echoPtr[1] = djEchoBuf.getWritePointer (1);
+    }
+
     for (int i = 0; i < numSamples; ++i)
     {
         float ga, gb;            // volume envelope (equal power)
         float bassA = 1.0f;      // per-deck bass amount (1 = full low end, 0 = cut)
         float bassB = 1.0f;
+        float echoSend = 0.0f;   // уровень посыла уходящей деки в делэй
 
         if (active && total > 0.0)
         {
@@ -1026,6 +1088,11 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
             const auto gains = transitionGainsForStyle ((float) t, style);
             const float gOut = gains.out; // outgoing always fades down
             const float gIn  = gains.in;  // incoming always fades up
+
+            // ECHO_OUT: посыл нарастает по ходу перехода — сначала эха почти
+            // нет, к концу сухой звук ушёл фейдером, остаются повторы.
+            if (echoActive)
+                echoSend = smoothstep01 ((float) t) * kDjEchoSend;
 
             // Bass swap (Stage 5), only when enabled. Complementary: incoming
             // gains its low end while the outgoing deck gives up its own.
@@ -1053,6 +1120,16 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
         const float cutA = 1.0f - bassA; // how much low band to remove from A
         const float cutB = 1.0f - bassB;
 
+        // Эхо живёт и ПОСЛЕ конца перехода (djEchoTail > 0): повторы
+        // дозвучивают поверх нового трека и плавно гаснут к концу хвоста.
+        // Wet дакается ростом громкости входящего трека — эхо уступает место
+        // (и не суммируется с ним в клиппинг на жирном материале).
+        const bool  echoNow = djEchoLen > 0 && (echoActive || djEchoTail > 0);
+        const float gInNow  = (fOut == 0) ? gb : ga;   // громкость входящей деки
+        const float echoWet = ! echoNow ? 0.0f
+            : (echoActive ? 1.0f - 0.45f * gInNow
+                          : 0.55f * juce::jmin (1.0f, (float) djEchoTail / tailFadeSamples));
+
         for (int c = 0; c < ch; ++c)
         {
             float av = a[c][i];
@@ -1069,7 +1146,33 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
                 bv -= cutB * lb;
             }
 
-            o[c][i] = av * ga + bv * gb;
+            // FILTER_SWEEP: реальный муффл уходящей деки (LP, а не громкость).
+            if (c < 2 && sweepOn)
+            {
+                float& x = (fOut == 0) ? av : bv;
+                djSweepLp[c] += sweepAlpha * (x - djSweepLp[c]);
+                x = djSweepLp[c];
+            }
+
+            float mixed = av * ga + bv * gb;
+
+            // ECHO_OUT: pre-fader send уходящей деки → делэй; возврат — в микс.
+            if (c < 2 && echoNow)
+            {
+                float* eb = echoPtr[c];
+                const float y = eb[djEchoPos];
+                const float send = echoActive ? ((fOut == 0 ? av : bv) * echoSend) : 0.0f;
+                eb[djEchoPos] = send + y * kDjEchoFeedback;
+                mixed += y * echoWet;
+            }
+
+            o[c][i] = mixed;
+        }
+
+        if (echoNow)
+        {
+            if (++djEchoPos >= djEchoLen) djEchoPos = 0;
+            if (! echoActive && djEchoTail > 0) --djEchoTail;
         }
     }
 
@@ -1163,6 +1266,10 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
         if ((double) crossfadePos >= total)
         {
             crossfadeActive.store (false);
+            // ECHO_OUT: переход закончился, но повторы дозвучивают поверх
+            // нового трека и плавно гаснут (классический DJ echo-out).
+            if (style == 5 && djEchoLen > 0)
+                djEchoTail = (long long) (kDjEchoTailSec * currentSampleRate);
             const int out = fOut;                      // deck that faded out
             currentDeck.store (1 - out);               // incoming is now current
             baseGainA.store (out == 0 ? 0.0f : 1.0f);  // outgoing -> 0, incoming -> 1
