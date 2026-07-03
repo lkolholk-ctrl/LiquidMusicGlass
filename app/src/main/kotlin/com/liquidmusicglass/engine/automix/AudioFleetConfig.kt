@@ -29,14 +29,15 @@ object AudioFleetConfig {
     const val QUIRKS_REFRESH_MS = 6 * 60 * 60 * 1000L   // 6 часов
 
     /** Эндпоинт отчётов (Google Form formResponse). Пусто = телеметрия выключена. */
-    const val REPORT_URL = ""
+    const val REPORT_URL =
+        "https://docs.google.com/forms/d/e/1FAIpQLSckq8g2PgK4h0ccdy_Xj0lf_1ir4t1MMJFgqMmF-Ffreyre8w/formResponse"
 
     /** Логическое поле → имя параметра формы (entry.NNNNNNNN). */
     val REPORT_FIELDS: Map<String, String> = mapOf(
-        "device" to "",      // entry.… — MANUFACTURER/BRAND MODEL (DEVICE)
-        "android" to "",     // entry.… — версия Android + SDK
-        "mode" to "",        // entry.… — рабочий режим выхода (0..6)
-        "watchdog" to "",    // entry.… — срабатываний watchdog за сессию
-        "app" to "",         // entry.… — versionName приложения
+        "device" to "entry.712918050",    // MANUFACTURER/BRAND MODEL (DEVICE)
+        "android" to "entry.580788740",   // версия Android + SDK
+        "mode" to "entry.1090594903",     // рабочий режим выхода (0..6)
+        "watchdog" to "entry.154011527",  // срабатываний watchdog за сессию
+        "app" to "entry.571254747",       // versionName приложения
     )
 }
