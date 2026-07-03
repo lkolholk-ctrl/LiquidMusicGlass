@@ -48,10 +48,12 @@ private fun boostDarkColor(color: Int, minBrightness: Float = 0.15f): Color {
         return Color(FALLBACK_DARK)
     }
 
-    // ── Warmth guard: detect cold blue/purple bias ──
-    // If blue is dominant and red is weak → cold artifact
+    // ── Cold-ARTIFACT guard (не анти-синий!): гасим только МАЛОнасыщенный
+    // холодный тон — это грязь сжатия на тёмных обложках. Насыщенный
+    // фиолетовый/розовый/синий — честный цвет обложки, ПРОПУСКАЕМ как есть
+    // (раньше он «согревался» в бурый — фон терял цвет, полевой фидбек).
     val isColdBlueBias = (b > r + 0.12f) && (b > g + 0.08f)
-    if (isColdBlueBias) {
+    if (isColdBlueBias && saturation < 0.30f) {
         // Blend toward warm neutral to kill the cold tint
         val warmR = (r * 0.5f + 0.12f).coerceIn(0f, 1f)
         val warmG = (g * 0.5f + 0.10f).coerceIn(0f, 1f)
@@ -149,16 +151,26 @@ fun rememberAlbumColors(uri: Uri?, coverUrl: String? = null): AlbumColors {
                 val rawDarkMuted = palette.getDarkMutedColor(FALLBACK_DARK)
                 val rawLightVibrant = palette.getLightVibrantColor(FALLBACK_MUTED)
 
-                // ── Population / luminance filter for contrast richness ──
-                val bestVibrant = when {
-                    targetSwatch != null && targetSwatch.population > 40 &&
-                        brightnessOf(targetSwatch.rgb) > 0.06f -> targetSwatch.rgb
-                    isWarmAndSaturated(rawVibrant) -> rawVibrant
-                    isWarmAndSaturated(rawLightVibrant) -> rawLightVibrant
-                    isWarmAndSaturated(rawDominant) -> rawDominant
-                    isWarmAndSaturated(rawMuted) -> rawMuted
-                    else -> FALLBACK_MUTED
-                }
+                // ── Выбор vibrant: решает НАСЫЩЕННОСТЬ × населённость, а не
+                // «теплота». Фиолетовый/розовый/синий — полноправные цвета
+                // фона (раньше isWarmAndSaturated их отбраковывал, и обложка
+                // с сочным фиолетом давала страшно-тёмный фон). ──
+                val candidates = listOfNotNull(
+                    palette.vibrantSwatch,
+                    palette.darkVibrantSwatch,
+                    palette.lightVibrantSwatch,
+                    palette.dominantSwatch,
+                    palette.mutedSwatch
+                )
+                val bestSwatch = candidates
+                    .filter { brightnessOf(it.rgb) > 0.05f && saturationOf(it.rgb) >= 0.18f }
+                    .maxByOrNull {
+                        saturationOf(it.rgb) *
+                            (0.55f + 0.45f * (minOf(it.population, 500) / 500f))
+                    }
+                val bestVibrant = bestSwatch?.rgb
+                    ?: rawVibrant.takeIf { saturationOf(it) >= 0.12f }
+                    ?: FALLBACK_MUTED
 
                 // Двухступенчато: сначала boostDarkColor (коррекция холодного/серого),
                 // затем АДДИТИВНЫЙ нижний порог — гарантирует видимый минимум яркости даже
@@ -187,23 +199,11 @@ private fun brightnessOf(color: Int): Float {
     return (r + g + b) / 3f
 }
 
-/**
- * Returns true if the color is warm-leaning (not cold blue/purple)
- * and has enough saturation to be a real swatch, not compression noise.
- */
-private fun isWarmAndSaturated(color: Int): Boolean {
+private fun saturationOf(color: Int): Float {
     val r = AndroidColor.red(color) / 255f
     val g = AndroidColor.green(color) / 255f
     val b = AndroidColor.blue(color) / 255f
-    val brightness = (r + g + b) / 3f
-    if (brightness < 0.02f) return false
-
     val maxCh = maxOf(r, g, b)
     val minCh = minOf(r, g, b)
-    val saturation = if (maxCh > 0f) (maxCh - minCh) / maxCh else 0f
-    if (saturation < 0.10f) return false
-
-    // Reject cold blue/purple bias
-    val isCold = (b > r + 0.12f) && (b > g + 0.08f)
-    return !isCold
+    return if (maxCh > 0f) (maxCh - minCh) / maxCh else 0f
 }
