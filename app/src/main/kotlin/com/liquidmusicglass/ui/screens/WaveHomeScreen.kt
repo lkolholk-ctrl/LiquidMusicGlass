@@ -55,7 +55,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -258,23 +257,22 @@ fun WaveHomeScreen(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Spacer(Modifier.height(24.dp))
-                        // Имя артиста компактнее (34sp): с гигантским заголовком
-                        // экран не влезал по высоте и начинал листаться.
+                        // Имя артиста — КРУПНО (главный герой экрана). lineHeight >
+                        // fontSize — при переносах (несколько артистов) строки не
+                        // налезают друг на друга; до 3 строк, дальше многоточие.
                         Text(
                             text = track.artist,
                             color = Color.White,
-                            fontSize = 34.sp,
-                            // Межстрочный интервал — чтобы при переносе (длинное имя)
-                            // строки не налезали друг на друга.
-                            lineHeight = 40.sp,
+                            fontSize = 60.sp,
+                            lineHeight = 66.sp,
                             fontWeight = FontWeight.Black,
                             fontFamily = AppFontFamily,
                             textAlign = TextAlign.Center,
-                            maxLines = 2,
+                            maxLines = 3,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 24.dp)
+                                .padding(horizontal = 20.dp)
                         )
                         Spacer(Modifier.height(6.dp))
                         // Текущая строка синхронного текста (пусто, если лирики нет).
@@ -301,7 +299,7 @@ fun WaveHomeScreen(
 
                         Box(
                             modifier = Modifier
-                                .size(216.dp)
+                                .size(248.dp)
                                 .graphicsLayer {
                                     translationX = coverOffset.value
                                     rotationZ = coverOffset.value / 42f
@@ -392,13 +390,12 @@ fun WaveHomeScreen(
                                     // Подложка пилюли красится акцентом обложки —
                                     // экран целиком уходит в палитру трека.
                                     .background(accent.copy(alpha = 0.16f))
-                                    .clickable { onOpenPlayer() }
-                                    .padding(horizontal = 16.dp),
+                                    .clickable { onOpenPlayer() },
                                 contentAlignment = Alignment.Center
                             ) {
-                                // Живой прогресс трека: бегущая волна под названием —
-                                // видно, что трек реально идёт (не прямая полоса).
-                                WaveProgressLine(
+                                // Прогресс — «жидкость»: заливает пилюлю целиком
+                                // слева направо, волнистый край дышит пока играет.
+                                WaveProgressFill(
                                     durationMs = track.durationMs,
                                     accent = accent,
                                     playing = isPlaying,
@@ -414,7 +411,8 @@ fun WaveHomeScreen(
                                     fontFamily = AppFontFamily,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
-                                    textAlign = TextAlign.Center
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.padding(horizontal = 16.dp)
                                 )
                             }
                             FlatCircleButton(onClick = { PlayerController.toggleFavorite(track.id) }) {
@@ -956,16 +954,16 @@ private fun UpNextRow(upNext: List<Pair<Int, Track>>, onPlay: (Int) -> Unit) {
 }
 
 /**
- * Прогресс трека «живой волной» в пилюле с названием: пройденная часть — яркая
- * бегущая синусоида в цвет акцента, остаток — приглушённая; на стыке — точка
- * плейхеда. Фаза движется только когда музыка играет (и не в энергосбережении):
- * волна «течёт» — сразу видно, что трек идёт.
+ * Прогресс трека «жидкостью» в пилюле с названием: пройденная часть заливает
+ * пилюлю НА ВСЮ ВЫСОТУ слева направо, правая кромка — живая волна (два слоя
+ * с разными фазами + яркая грань). Фаза движется только пока музыка играет
+ * (и не в энергосбережении) — видно, что трек идёт.
  *
  * Позиция собирается ЗДЕСЬ (не в родителе), чтобы тики позиции перерисовывали
  * только этот маленький Canvas, а не весь hero.
  */
 @Composable
-private fun WaveProgressLine(
+private fun WaveProgressFill(
     durationMs: Long,
     accent: Color,
     playing: Boolean,
@@ -975,55 +973,58 @@ private fun WaveProgressLine(
     val positionMs by PlayerController.currentPositionMs.collectAsState()
     val progress = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
 
-    // Фаза бегущей волны (~1.6 рад/с — спокойное течение). Кадровый цикл живёт
-    // ТОЛЬКО пока playing && animate — на паузе волна замирает, корутина стоит.
+    // Фаза волны (~1.8 рад/с — спокойное течение). Кадровый цикл живёт ТОЛЬКО
+    // пока playing && animate — на паузе волна замирает, корутина стоит.
     val phase = produceState(0f, playing, animate) {
         if (!playing || !animate) return@produceState
         var last = -1L
         while (true) {
             withInfiniteAnimationFrameMillis { t ->
-                if (last >= 0) value = (value + (t - last) * 0.0016f) % WAVE_TAU
+                if (last >= 0) value = (value + (t - last) * 0.0018f) % WAVE_TAU
                 last = t
             }
         }
     }
 
-    val played = lerp(accent, Color.White, 0.55f)
+    val base = lerp(accent, Color.White, 0.30f)
     Canvas(modifier) {
-        if (size.width <= 1f) return@Canvas
-        val midY = size.height / 2f
-        val amp = 4.dp.toPx()
-        val waveLen = 30.dp.toPx()
-        val strokeW = 2.dp.toPx()
+        if (size.width <= 1f || progress <= 0.002f) return@Canvas
         val split = size.width * progress
-        val step = 2.dp.toPx()
+        val waveLen = 30.dp.toPx()      // вертикальный период волны кромки
+        val step = 3.dp.toPx()
+        val h = size.height
 
-        fun wave(from: Float, to: Float) = Path().apply {
-            var x = from
-            moveTo(x, midY + amp * sin(x / waveLen * WAVE_TAU - phase.value))
-            while (x < to) {
-                x = min(x + step, to)
-                lineTo(x, midY + amp * sin(x / waveLen * WAVE_TAU - phase.value))
+        // Заливка от левого края до волнистой вертикальной кромки на split.
+        fun liquid(amp: Float, ph: Float) = Path().apply {
+            moveTo(0f, 0f)
+            lineTo(split + amp * sin(-ph), 0f)
+            var y = 0f
+            while (y < h) {
+                y = min(y + step, h)
+                lineTo(split + amp * sin(y / waveLen * WAVE_TAU - ph), y)
+            }
+            lineTo(0f, h)
+            close()
+        }
+
+        // Два слоя с разными фазами/амплитудами — «вода» с глубиной.
+        drawPath(liquid(5.dp.toPx(), phase.value), base.copy(alpha = 0.34f))
+        drawPath(liquid(8.dp.toPx(), phase.value + 2.1f), base.copy(alpha = 0.16f))
+
+        // Яркая грань передней волны — читаемый «уровень» прогресса.
+        val edgeAmp = 5.dp.toPx()
+        val edge = Path().apply {
+            moveTo(split + edgeAmp * sin(-phase.value), 0f)
+            var y = 0f
+            while (y < h) {
+                y = min(y + step, h)
+                lineTo(split + edgeAmp * sin(y / waveLen * WAVE_TAU - phase.value), y)
             }
         }
-        if (split > 0f) {
-            drawPath(
-                wave(0f, split),
-                color = played.copy(alpha = 0.8f),
-                style = Stroke(width = strokeW, cap = StrokeCap.Round)
-            )
-        }
-        if (split < size.width) {
-            drawPath(
-                wave(split, size.width),
-                color = Color.White.copy(alpha = 0.16f),
-                style = Stroke(width = strokeW, cap = StrokeCap.Round)
-            )
-        }
-        drawCircle(
-            color = Color.White.copy(alpha = 0.9f),
-            radius = strokeW * 1.4f,
-            center = Offset(split, midY + amp * sin(split / waveLen * WAVE_TAU - phase.value))
+        drawPath(
+            edge,
+            color = lerp(accent, Color.White, 0.6f).copy(alpha = 0.85f),
+            style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
         )
     }
 }
