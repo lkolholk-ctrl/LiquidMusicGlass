@@ -51,8 +51,10 @@ object HapticMusicEngine {
 
     // Состояние детектора (только поток опроса).
     private var lastNativeBeats = -1L
+    private var lastNativeMidBeats = -1L
     private var streamEnv = 0f
     private var lastBeatAtMs = 0L
+    private var lastBassTapAtMs = 0L
 
     // Диагностика (LOG/LCAT): сколько ударов увидели и сколько тапов реально
     // отдали системе — разводит «детектор молчит» и «система глотает вибро».
@@ -89,6 +91,7 @@ object HapticMusicEngine {
         }
         running = true
         lastNativeBeats = -1L
+        lastNativeMidBeats = -1L
         streamEnv = 0f
         beatsSeen = 0L
         tapsSent = 0L
@@ -138,6 +141,14 @@ object HapticMusicEngine {
                 beatsSeen += beats - lastNativeBeats
                 lastNativeBeats = beats
                 tap(AutoMixNativeEngine.hapticBeatStrength())
+            }
+            // Средняя полоса (снейр/клэп) — лёгкие тики поверх басовых тапов.
+            val midBeats = AutoMixNativeEngine.hapticMidBeatCount()
+            if (lastNativeMidBeats < 0) lastNativeMidBeats = midBeats
+            if (midBeats > lastNativeMidBeats) {
+                beatsSeen += midBeats - lastNativeMidBeats
+                lastNativeMidBeats = midBeats
+                tapMid(AutoMixNativeEngine.hapticMidBeatStrength())
             }
         } else {
             // Стриминг: бас из цепочки ExoPlayer, детектор ударов свой
@@ -192,12 +203,44 @@ object HapticMusicEngine {
             // «касания» (USAGE_UNKNOWN/TOUCH), и при выключенной в системе
             // вибрации касаний MagicOS/ColorOS молча глотают ВСЁ — «хаптика
             // не пашет вообще». USAGE_MEDIA — канал медиа, живёт отдельно.
-            if (Build.VERSION.SDK_INT >= 33) {
-                v.vibrate(effect, VibrationAttributes.createForUsage(VibrationAttributes.USAGE_MEDIA))
-            } else {
-                v.vibrate(effect)
-            }
+            vibrateMedia(effect)
             tapsSent++
+            lastBassTapAtMs = android.os.SystemClock.elapsedRealtime()
+        }
+    }
+
+    /**
+     * Лёгкий тик средней полосы (снейр/клэп) — короче и тише басового тапа,
+     * «как у Apple»: низ бьёт глубоко, середина щекочет. Бас в приоритете:
+     * если только что был басовый тап — тик глотается (не месим руку кашей).
+     * На Soft середина не подаётся вовсе (только акценты баса).
+     */
+    private fun tapMid(strength: Float) {
+        val v = vibrator ?: return
+        val level = com.liquidmusicglass.engine.AppSettings.hapticStrength.value
+        if (level == 0) return
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastBassTapAtMs < 70L) return
+        val s = strength.coerceIn(0f, 1f)
+        val scale = if (level == 1) 0.8f else 1.0f
+        runCatching {
+            val effect = if (hasAmplitude) {
+                val amp = ((22 + 80 * s) * scale).toInt().coerceIn(1, 255)
+                VibrationEffect.createOneShot((7 + 6 * s).toLong(), amp)
+            } else {
+                VibrationEffect.createOneShot(8, VibrationEffect.DEFAULT_AMPLITUDE)
+            }
+            vibrateMedia(effect)
+            tapsSent++
+        }
+    }
+
+    private fun vibrateMedia(effect: VibrationEffect) {
+        val v = vibrator ?: return
+        if (Build.VERSION.SDK_INT >= 33) {
+            v.vibrate(effect, VibrationAttributes.createForUsage(VibrationAttributes.USAGE_MEDIA))
+        } else {
+            v.vibrate(effect)
         }
     }
 }

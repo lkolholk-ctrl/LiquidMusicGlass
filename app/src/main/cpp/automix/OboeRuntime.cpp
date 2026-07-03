@@ -125,30 +125,88 @@ namespace automix
         return gCbCount.load (std::memory_order_relaxed);
     }
 
-    // ── Haptic Music: огибающая баса + детектор ударов ──
-    // Пишет ТОЛЬКО аудио-поток (сглаживание/история — обычные статики),
-    // Kotlin читает атомики. Кулдаун между ударами ~120мс (в сэмплах, по 48к —
-    // на 44.1к чуть длиннее, для тактильности некритично).
+    // ── Haptic Music: двухполосный детектор ударов (низ + середина) ──
+    // Пишет ТОЛЬКО аудио-поток (состояние — обычные статики), Kotlin читает
+    // атомики. Полосы независимы: бас (кик) — глубокие тапы, середина
+    // (снейр/клэп) — лёгкие тики. Верха не подаются вовсе (как у Apple).
     static std::atomic<int>  gHapticEnvMilli { 0 };
     static std::atomic<long> gHapticBeatCount { 0 };
     static std::atomic<int>  gHapticBeatStrengthMilli { 0 };
+    static std::atomic<long> gHapticMidBeatCount { 0 };
+    static std::atomic<int>  gHapticMidBeatStrengthMilli { 0 };
 
-    void noteBassLevel (float bassMeanAbs, int numSamples)
+    namespace
     {
-        // Две огибающие с ВРЕМЕННЫМИ константами (не по блокам! на реальном
-        // железе блок бывает 4мс (burst 192) — по-блочное сглаживание липнет
-        // к сигналу мгновенно, и удар никогда не пробивает порог — «два стука
-        // при включении и тишина», полевой баг v1):
-        //   fast — атака ~4мс / спад ~60мс: контур кика;
-        //   slow — ~350мс в обе стороны: средний уровень баса.
-        // Удар = fast пробила slow (снятую ДО обновления) с запасом.
-        static float fast = 0.0f, slow = 0.0f;
+        struct HapticBandDet
+        {
+            float fast = 0.0f, slow = 0.0f;
+            bool  pending = false;
+            bool  armed = true;
+            float peakFast = 0.0f, slowAtCross = 0.0f;
+            long  peakSamples = 0, samplesSinceBeat = 1 << 30;
+            float avgRatio = 0.0f;
+        };
+
+        // Одна полоса: fast (атака 4мс/спад 60мс) против slow (~350мс), удар
+        // взводится на пересечении, сила — peak-hold ~48мс, адаптивная норма
+        // (EMA среднего удара). Перевзвод (armed): после удара ждём, пока fast
+        // опустится к среднему — непрерывная бас-линия НЕ строчит «швейной
+        // машинкой», тапаются только раздельные удары.
+        void processBand (HapticBandDet& d, float x, int numSamples,
+                          float aF, float rF, float cS,
+                          std::atomic<long>& count, std::atomic<int>& strengthMilli)
+        {
+            d.fast += (x > d.fast ? aF : rF) * (x - d.fast);
+            const float slowPrev = d.slow;
+            d.slow += cS * (x - d.slow);
+            d.samplesSinceBeat += numSamples;
+
+            if (! d.armed && d.fast < slowPrev * 1.15f + 0.004f)
+                d.armed = true;
+
+            if (d.pending)
+            {
+                if (d.fast > d.peakFast) d.peakFast = d.fast;
+                d.peakSamples += numSamples;
+                if (d.peakSamples >= 2304)             // ~48мс
+                {
+                    d.pending = false;
+                    const float ratio = d.peakFast /
+                        (d.slowAtCross > 0.015f ? d.slowAtCross : 0.015f);
+                    if (d.avgRatio <= 0.0f) d.avgRatio = ratio;
+                    float strength = 0.2f + 1.2f * (ratio / d.avgRatio - 1.0f);
+                    if (strength > 1.0f) strength = 1.0f;
+                    if (strength < 0.0f) strength = 0.0f;
+                    d.avgRatio += 0.2f * (ratio - d.avgRatio);
+                    strengthMilli.store ((int) (strength * 1000.0f),
+                                         std::memory_order_relaxed);
+                    count.fetch_add (1, std::memory_order_relaxed);
+                }
+            }
+            else if (d.armed && d.samplesSinceBeat >= 7200   // кулдаун ~150мс
+                     && d.fast > slowPrev * 1.5f + 0.006f)
+            {
+                d.samplesSinceBeat = 0;
+                d.pending = true;
+                d.armed = false;
+                d.peakFast = d.fast;
+                d.slowAtCross = slowPrev;
+                d.peakSamples = 0;
+            }
+        }
+
+        HapticBandDet gBassDet, gMidDet;
+    }
+
+    void noteBassLevel (float bassMeanAbs, float midMeanAbs, int numSamples)
+    {
+        // Коэффициенты — с ВРЕМЕННЫМИ константами из реального размера блока
+        // (по-блочное сглаживание на блоках 4мс липло к сигналу — «два стука
+        // и тишина», полевой баг v1).
         static float aF = 0.5f, rF = 0.1f, cS = 0.02f;
         static int   coefsForSamples = -1;
-        static long  samplesSinceBeat = 1 << 30;
         static long  warmupSamples = 0;
         constexpr float kSr = 48000.0f;               // точность sr некритична
-        constexpr long  kBeatCooldownSamples = 7200;  // ~150мс
 
         if (numSamples != coefsForSamples)            // блок-размер меняется редко
         {
@@ -159,60 +217,36 @@ namespace automix
             cS = 1.0f - std::exp (-n / (0.350f * kSr));
         }
 
-        fast += (bassMeanAbs > fast ? aF : rF) * (bassMeanAbs - fast);
-        const float slowPrev = slow;
-        slow += cS * (bassMeanAbs - slow);
-        gHapticEnvMilli.store ((int) (fast * 1000.0f), std::memory_order_relaxed);
+        gHapticEnvMilli.store ((int) (gBassDet.fast * 1000.0f), std::memory_order_relaxed);
 
-        samplesSinceBeat += numSamples;
         // Прогрев ~0.5с после старта/тишины: огибающие с нуля дают ложные
-        // «удары» на первых же блоках (те самые два стука при включении).
+        // «удары» на первых же блоках.
         warmupSamples += numSamples;
-        if (slowPrev < 0.003f && fast < 0.003f)
+        if (gBassDet.slow < 0.003f && gBassDet.fast < 0.003f
+            && bassMeanAbs < 0.003f)
             warmupSamples = 0;
-        if (warmupSamples < 24000)
-            return;
+        const bool warm = warmupSamples >= 24000;
 
-        // Peak-hold: пересечение только ВЗВОДИТ удар; сила меряется по пику
-        // fast за следующие ~48мс (замер в блоке пересечения ловил кик в
-        // случайной фазе — сила прыгала 0.1..1.0 на ровной бочке). Публикация
-        // счётчика происходит после окна: тап опаздывает на ~50мс — на слух
-        // незаметно, зато сила честная.
-        static bool  beatPending = false;
-        static float peakFast = 0.0f, slowAtCross = 0.0f;
-        static long  peakSamples = 0;
-        static float avgRatio = 0.0f;      // средний удар (EMA) — адаптивная норма
-        constexpr long kPeakWindowSamples = 2304;   // ~48мс
-
-        if (beatPending)
+        if (warm)
         {
-            if (fast > peakFast) peakFast = fast;
-            peakSamples += numSamples;
-            if (peakSamples >= kPeakWindowSamples)
-            {
-                beatPending = false;
-                const float ratio = peakFast / (slowAtCross > 0.015f ? slowAtCross : 0.015f);
-                if (avgRatio <= 0.0f) avgRatio = ratio;
-                // Сила ОТНОСИТЕЛЬНО среднего удара трека: ровный кач -> ~0.2,
-                // вдвое жирнее среднего (дроп/акцент) -> 1.0. Самокалибровка
-                // под любой жанр/громкость (EMA по последним ударам).
-                float strength = 0.2f + 1.2f * (ratio / avgRatio - 1.0f);
-                if (strength > 1.0f) strength = 1.0f;
-                if (strength < 0.0f) strength = 0.0f;
-                avgRatio += 0.2f * (ratio - avgRatio);
-                gHapticBeatStrengthMilli.store ((int) (strength * 1000.0f),
-                                                std::memory_order_relaxed);
-                gHapticBeatCount.fetch_add (1, std::memory_order_relaxed);
-            }
+            processBand (gBassDet, bassMeanAbs, numSamples, aF, rF, cS,
+                         gHapticBeatCount, gHapticBeatStrengthMilli);
+            processBand (gMidDet, midMeanAbs, numSamples, aF, rF, cS,
+                         gHapticMidBeatCount, gHapticMidBeatStrengthMilli);
         }
-        else if (samplesSinceBeat >= kBeatCooldownSamples
-                 && fast > slowPrev * 1.5f + 0.006f)
+        else
         {
-            samplesSinceBeat = 0;          // кулдаун — от пересечения
-            beatPending = true;
-            peakFast = fast;
-            slowAtCross = slowPrev;
-            peakSamples = 0;
+            // На прогреве только ведём огибающие — ударов не публикуем.
+            const auto warmupBand = [&] (HapticBandDet& d, float x)
+            {
+                d.fast += (x > d.fast ? aF : rF) * (x - d.fast);
+                d.slow += cS * (x - d.slow);
+                d.pending = false;
+                d.armed = true;
+                d.samplesSinceBeat = 1 << 30;
+            };
+            warmupBand (gBassDet, bassMeanAbs);
+            warmupBand (gMidDet, midMeanAbs);
         }
     }
 
@@ -229,6 +263,16 @@ namespace automix
     float getHapticBeatStrength()
     {
         return (float) gHapticBeatStrengthMilli.load (std::memory_order_relaxed) / 1000.0f;
+    }
+
+    long getHapticMidBeatCount()
+    {
+        return gHapticMidBeatCount.load (std::memory_order_relaxed);
+    }
+
+    float getHapticMidBeatStrength()
+    {
+        return (float) gHapticMidBeatStrengthMilli.load (std::memory_order_relaxed) / 1000.0f;
     }
 
     void setLastCodecInfo (const char* info)

@@ -1107,10 +1107,14 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
     {
         int scrubbed = 0;
         float sumAbs = 0.0f;
-        // Haptic Music: тот же проход по ch0 — one-pole LP ~110 Гц (alpha под
-        // 44.1-48к; точность среза для тактильности некритична) + |бас| блока.
+        // Haptic Music: тот же проход по ch0 — LP ~110 Гц (бас) + полоса
+        // ~200..1800 Гц (LP1800 - LP200, середина: снейр/клэп). Alpha под
+        // 44.1-48к; точность срезов для тактильности некритична.
         float hapticLp = hapticLpState;
+        float midLo = hapticLpMidLo;
+        float midHi = hapticLpMidHi;
         float bassSum = 0.0f;
+        float midSum = 0.0f;
         for (int c = 0; c < ch && c < 2; ++c)
         {
             float* p = o[c];
@@ -1126,14 +1130,20 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
                     sumAbs += std::abs (p[i]);
                     hapticLp += 0.014f * (p[i] - hapticLp);
                     bassSum += std::abs (hapticLp);
+                    midLo += 0.026f * (p[i] - midLo);   // LP ~200 Гц
+                    midHi += 0.21f  * (p[i] - midHi);   // LP ~1800 Гц
+                    midSum += std::abs (midHi - midLo);
                 }
             }
         }
         hapticLpState = hapticLp;
+        hapticLpMidLo = midLo;
+        hapticLpMidHi = midHi;
         if (numSamples > 0)
         {
             automix::noteAudioLevel (sumAbs / (float) numSamples);
-            automix::noteBassLevel (bassSum / (float) numSamples, numSamples);
+            automix::noteBassLevel (bassSum / (float) numSamples,
+                                    midSum / (float) numSamples, numSamples);
         }
         if (scrubbed > 0)
         {

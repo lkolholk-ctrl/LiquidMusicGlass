@@ -495,6 +495,20 @@ Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeHapticBeatStr
     return (jfloat) automix::getHapticBeatStrength();
 }
 
+JNIEXPORT jlong JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeHapticMidBeatCount(
+        JNIEnv* /*env*/, jobject /*thiz*/)
+{
+    return (jlong) automix::getHapticMidBeatCount();
+}
+
+JNIEXPORT jfloat JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeHapticMidBeatStrength(
+        JNIEnv* /*env*/, jobject /*thiz*/)
+{
+    return (jfloat) automix::getHapticMidBeatStrength();
+}
+
 JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeSetPlaybackVolume(
         JNIEnv* /*env*/, jobject /*thiz*/, jfloat v01)

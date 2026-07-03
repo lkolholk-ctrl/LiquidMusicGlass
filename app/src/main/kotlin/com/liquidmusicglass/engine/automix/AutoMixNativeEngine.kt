@@ -181,6 +181,18 @@ object AutoMixNativeEngine {
         return runCatching { nativeHapticBeatStrength() }.getOrDefault(0f)
     }
 
+    /** Счётчик ударов средней полосы (~200..1800 Гц: снейр/клэп). */
+    fun hapticMidBeatCount(): Long {
+        if (!isLoaded || !initialised) return 0L
+        return runCatching { nativeHapticMidBeatCount() }.getOrDefault(0L)
+    }
+
+    /** Сила последнего среднечастотного удара 0..1. */
+    fun hapticMidBeatStrength(): Float {
+        if (!isLoaded || !initialised) return 0f
+        return runCatching { nativeHapticMidBeatStrength() }.getOrDefault(0f)
+    }
+
     /** Мастер-громкость 0..1 (дак при уведомлениях, фейды). Сглаживается в движке. */
     fun setPlaybackVolume(v01: Float) {
         if (!isLoaded || !initialised) return
@@ -585,6 +597,8 @@ object AutoMixNativeEngine {
     private external fun nativeHapticEnv(): Float
     private external fun nativeHapticBeatCount(): Long
     private external fun nativeHapticBeatStrength(): Float
+    private external fun nativeHapticMidBeatCount(): Long
+    private external fun nativeHapticMidBeatStrength(): Float
     private external fun nativeSetPlaybackVolume(v01: Float)
     private external fun nativeLoadIncoming(path: String): Boolean
     private external fun nativeLoadIncomingFd(fd: Int, offset: Long, length: Long): Boolean
