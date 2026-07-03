@@ -157,11 +157,12 @@ fun ProfileScreen(
                         .padding(horizontal = 20.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    // Avatar
+                    // Avatar — БОЛЬШАЯ круглая (полевой фидбек: «вид аккаунта
+                    // с большой аватаркой»).
                     Box(
                         modifier = Modifier
-                            .size(72.dp)
-                            .clip(RoundedCornerShape(24.dp))
+                            .size(132.dp)
+                            .clip(androidx.compose.foundation.shape.CircleShape)
                             .background(if (lc.isDark) SurfaceDark else Color(0xFFF2F2F7)),
                         contentAlignment = Alignment.Center
                     ) {
@@ -169,6 +170,7 @@ fun ProfileScreen(
                             AsyncImage(
                                 model = avatarUrl,
                                 contentDescription = null,
+                                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                                 modifier = Modifier.fillMaxSize()
                             )
                         } else {
@@ -176,12 +178,12 @@ fun ProfileScreen(
                                 Icons.Rounded.Person,
                                 null,
                                 tint = lc.iconMuted,
-                                modifier = Modifier.size(36.dp)
+                                modifier = Modifier.size(64.dp)
                             )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(18.dp))
 
                     // Username + Premium Star inline
                     Row(
@@ -192,7 +194,7 @@ fun ProfileScreen(
                             text = displayName,
                             fontFamily = AppFontFamily,
                             color = lc.textPrimary,
-                            fontSize = 22.sp,
+                            fontSize = 26.sp,
                             fontWeight = FontWeight.Bold,
                             letterSpacing = (-0.02).sp
                         )

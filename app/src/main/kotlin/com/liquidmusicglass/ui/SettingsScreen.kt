@@ -771,7 +771,7 @@ private fun HapticStrengthSelector(
     selected: Int,
     onSelect: (Int) -> Unit
 ) {
-    val options = listOf(0 to "Soft", 1 to "Medium", 2 to "Strong")
+    val options = listOf(1 to "Medium", 2 to "Strong")
     Row(
         modifier = Modifier
             .fillMaxWidth()

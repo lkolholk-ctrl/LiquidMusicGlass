@@ -38,7 +38,7 @@ import kotlinx.coroutines.launch
  */
 object HapticMusicEngine {
 
-    private const val POLL_MS = 25L
+    private const val POLL_MS = 15L   // быстрее опрос — тап ближе к биту
     private const val BEAT_COOLDOWN_MS = 120L
 
     @Volatile private var vibrator: Vibrator? = null
@@ -183,17 +183,18 @@ object HapticMusicEngine {
         val s = strength.coerceIn(0f, 1f)
 
         // Сила из детектора адаптивная — относительно СРЕДНЕГО удара трека:
-        // ровный кач ~0.0-0.3, акценты/дропы 0.35+. Гейты: Soft — только
-        // акценты, Medium — каждый удар легко, Strong — каждый в полную руку.
+        // ровный кач ~0.0-0.3, акценты/дропы 0.35+. Уровни: Medium — каждый
+        // удар в 80% силы, Strong — в полную (Soft выброшен: его гейт при
+        // адаптивной силе душил всё, полевой фидбек «не работает»).
         val level = com.liquidmusicglass.engine.AppSettings.hapticStrength.value
-        val minStrength = when (level) { 0 -> 0.35f; else -> 0.0f }
-        if (s < minStrength) return                    // слабый удар — пропускаем
-        val scale = when (level) { 0 -> 0.6f; 1 -> 0.8f; else -> 1.0f }
+        val scale = if (level >= 2) 1.0f else 0.8f
 
         runCatching {
             val effect = if (hasAmplitude) {
-                val amp = ((45 + 190 * s) * scale).toInt().coerceIn(1, 255)
-                val durMs = ((10 + 16 * s) * (0.7f + 0.3f * scale)).toLong().coerceAtLeast(8L)
+                // Бас пожирнее (полевой фидбек), длительность короткая — стук,
+                // не жужжание.
+                val amp = ((70 + 185 * s) * scale).toInt().coerceIn(1, 255)
+                val durMs = ((12 + 18 * s) * (0.7f + 0.3f * scale)).toLong().coerceAtLeast(9L)
                 VibrationEffect.createOneShot(durMs, amp)
             } else {
                 // Без амплитудного контроля — короткий фиксированный тик.
@@ -218,15 +219,14 @@ object HapticMusicEngine {
     private fun tapMid(strength: Float) {
         val v = vibrator ?: return
         val level = com.liquidmusicglass.engine.AppSettings.hapticStrength.value
-        if (level == 0) return
         val now = android.os.SystemClock.elapsedRealtime()
         if (now - lastBassTapAtMs < 70L) return
         val s = strength.coerceIn(0f, 1f)
-        val scale = if (level == 1) 0.8f else 1.0f
+        val scale = if (level >= 2) 1.0f else 0.8f
         runCatching {
             val effect = if (hasAmplitude) {
-                val amp = ((22 + 80 * s) * scale).toInt().coerceIn(1, 255)
-                VibrationEffect.createOneShot((7 + 6 * s).toLong(), amp)
+                val amp = ((30 + 90 * s) * scale).toInt().coerceIn(1, 255)
+                VibrationEffect.createOneShot((7 + 7 * s).toLong(), amp)
             } else {
                 VibrationEffect.createOneShot(8, VibrationEffect.DEFAULT_AMPLITUDE)
             }

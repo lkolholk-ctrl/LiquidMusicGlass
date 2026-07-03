@@ -943,12 +943,13 @@ private fun ImportedPlaylistRow(
     onDelete: () -> Unit
 ) {
     val lc = LiquidTheme.colors
-    val shape = RoundedCornerShape(12.dp)
+    val shape = RoundedCornerShape(16.dp)
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
+            .background(lc.cardSurface)   // серая подложка как в настройках
             .clickable(remember { MutableInteractionSource() }, null, onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -1017,7 +1018,7 @@ private fun LocalPlaylistRow(
     onDelete: () -> Unit
 ) {
     val lc = LiquidTheme.colors
-    val shape = RoundedCornerShape(12.dp)
+    val shape = RoundedCornerShape(16.dp)
 
     // Get cover from first track if available
     val firstTrackWithCover = playlist.tracks.firstOrNull { !it.coverUrl.isNullOrBlank() }
@@ -1027,6 +1028,7 @@ private fun LocalPlaylistRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
+            .background(lc.cardSurface)   // серая подложка как в настройках
             .clickable(remember { MutableInteractionSource() }, null, onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically

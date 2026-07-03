@@ -148,10 +148,12 @@ namespace automix
         };
 
         // Одна полоса: fast (атака 4мс/спад 60мс) против slow (~350мс), удар
-        // взводится на пересечении, сила — peak-hold ~48мс, адаптивная норма
+        // взводится на пересечении, сила — peak-hold ~24мс, адаптивная норма
         // (EMA среднего удара). Перевзвод (armed): после удара ждём, пока fast
         // опустится к среднему — непрерывная бас-линия НЕ строчит «швейной
-        // машинкой», тапаются только раздельные удары.
+        // машинкой». НО не дольше ~320мс: на плотном миксе fast может вообще
+        // не опускаться, и детектор молчал кусками («иногда пусто», полевой
+        // фидбек) — форс-перевзвод по таймауту возвращает удары.
         void processBand (HapticBandDet& d, float x, int numSamples,
                           float aF, float rF, float cS,
                           std::atomic<long>& count, std::atomic<int>& strengthMilli)
@@ -161,14 +163,16 @@ namespace automix
             d.slow += cS * (x - d.slow);
             d.samplesSinceBeat += numSamples;
 
-            if (! d.armed && d.fast < slowPrev * 1.15f + 0.004f)
+            if (! d.armed
+                && (d.fast < slowPrev * 1.15f + 0.004f
+                    || d.samplesSinceBeat >= 15360))   // форс ~320мс
                 d.armed = true;
 
             if (d.pending)
             {
                 if (d.fast > d.peakFast) d.peakFast = d.fast;
                 d.peakSamples += numSamples;
-                if (d.peakSamples >= 2304)             // ~48мс
+                if (d.peakSamples >= 1152)             // ~24мс: тап ближе к биту
                 {
                     d.pending = false;
                     const float ratio = d.peakFast /

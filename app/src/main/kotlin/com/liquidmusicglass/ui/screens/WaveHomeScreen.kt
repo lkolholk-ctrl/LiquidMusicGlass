@@ -718,7 +718,10 @@ private fun WaveTopBar(onSearch: () -> Unit, onOpenProfile: () -> Unit) {
             .height(56.dp)
             .padding(horizontal = 16.dp)
     ) {
-        // Слева — профиль (вход/аккаунт), заменил фиолетовый play-квадрат.
+        // Слева — профиль: аватарка пользователя, если залогинен (серый
+        // человечек — только для гостя).
+        val avatarUrl by com.liquidmusicglass.api.icm.IcmAuthRepository
+            .avatarUrl.collectAsState()
         Box(
             modifier = Modifier
                 .align(Alignment.CenterStart)
@@ -728,12 +731,21 @@ private fun WaveTopBar(onSearch: () -> Unit, onOpenProfile: () -> Unit) {
                 .clickable { onOpenProfile() },
             contentAlignment = Alignment.Center
         ) {
-            Icon(
-                imageVector = Icons.Rounded.AccountCircle,
-                contentDescription = "Profile",
-                tint = Color.White,
-                modifier = Modifier.size(26.dp)
-            )
+            if (!avatarUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = avatarUrl,
+                    contentDescription = "Profile",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Rounded.AccountCircle,
+                    contentDescription = "Profile",
+                    tint = Color.White,
+                    modifier = Modifier.size(26.dp)
+                )
+            }
         }
 
         Text(

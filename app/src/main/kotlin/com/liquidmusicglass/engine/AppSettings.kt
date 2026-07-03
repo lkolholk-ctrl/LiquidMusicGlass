@@ -58,7 +58,7 @@ object AppSettings {
     private val _hapticMusicEnabled = MutableStateFlow(false)
     val hapticMusicEnabled: StateFlow<Boolean> = _hapticMusicEnabled
 
-    /** Сила хаптики: 0 Soft (только акценты, лёгкие тики), 1 Medium, 2 Strong. */
+    /** Сила хаптики: 1 Medium, 2 Strong (Soft выброшен — гейт душил всё). */
     private val _hapticStrength = MutableStateFlow(1)
     val hapticStrength: StateFlow<Int> = _hapticStrength
 
@@ -163,7 +163,7 @@ object AppSettings {
     }
 
     fun setHapticStrength(level: Int) {
-        val v = level.coerceIn(0, 2)
+        val v = level.coerceIn(1, 2)
         _hapticStrength.value = v
         safePrefs()?.edit()?.putInt("haptic_strength", v)?.apply()
     }
@@ -388,7 +388,8 @@ object AppSettings {
             p.getInt("audio_compat_mode", 0).coerceIn(0, 6)
         _preloadLeadSeconds.value = p.getInt("preload_lead_seconds", 60).coerceIn(30, 90)
         _hapticMusicEnabled.value = p.getBoolean("haptic_music", false)
-        _hapticStrength.value = p.getInt("haptic_strength", 1).coerceIn(0, 2)
+        // 0 (бывший Soft) мигрирует в Medium.
+        _hapticStrength.value = p.getInt("haptic_strength", 1).coerceIn(1, 2)
 
         _lastTrackIndex.value = p.getInt("last_track", -1)
         _lastPositionMs.value = p.getLong("last_position", 0L)

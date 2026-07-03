@@ -99,41 +99,51 @@ fun AuthScreen(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // Logo
-            Text(
-                text = "Liquid Music",
-                color = lc.textPrimary,
-                fontSize = 32.sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center
-            )
-            Text(
-                text = "Glass",
-                color = AppleRed,
-                fontSize = 32.sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center
-            )
+            // Карточка-логотип — стиль настроек (серая подложка, полевой фидбек)
+            val cardBg = if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(cardBg)
+                    .padding(vertical = 28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "Liquid Music",
+                    color = lc.textPrimary,
+                    fontSize = 32.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center
+                )
+                Text(
+                    text = "Glass",
+                    color = AppleRed,
+                    fontSize = 32.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center
+                )
 
-            Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
-            Text(
-                text = "Welcome",
-                color = lc.textSecondary,
-                fontSize = 15.sp,
-                textAlign = TextAlign.Center
-            )
+                Text(
+                    text = "Welcome",
+                    color = lc.textSecondary,
+                    fontSize = 15.sp,
+                    textAlign = TextAlign.Center
+                )
 
-            Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(4.dp))
 
-            Text(
-                text = "powered by ICM Music",
-                color = lc.textTertiary,
-                fontSize = 12.sp,
-                textAlign = TextAlign.Center
-            )
+                Text(
+                    text = "powered by ICM Music",
+                    color = lc.textTertiary,
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.Center
+                )
+            }
 
-            Spacer(modifier = Modifier.height(40.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
             // Telegram auth via ICM API
             val prefs = context.getSharedPreferences("icm_auth", android.content.Context.MODE_PRIVATE)
