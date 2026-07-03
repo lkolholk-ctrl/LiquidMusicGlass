@@ -105,6 +105,34 @@ class LyricsTimeProcessor(
     private var lineCursor = 0
     private var lastProcessedPositionMs = -1L
 
+    /**
+     * Автокалибровка темпа ЭТОГО трека: медиана-п40 (гэп/длина текста) по
+     * строкам. Глобальный MS_PER_CHAR один на все песни не работает в
+     * принципе (полевой фидбек: баллада ползёт, рэп мажет) — у баллады
+     * получится ~120-150 мс/симв, у рэпа ~45, закрас сам подстраивается.
+     * П40 (чуть ниже медианы), потому что гэпы включают дыхание/паузы —
+     * сам вокал быстрее. VAD не используется (модель косячная).
+     */
+    private val trackMsPerChar: Long = run {
+        val samples = ArrayList<Double>()
+        for ((idx, line) in lyrics.lines.withIndex()) {
+            val next = lyrics.lines.getOrNull(idx + 1)?.timeMs ?: continue
+            val text = line.text.replace(DUET_TAG, "").trim()
+            if (text.length < 6) continue          // выкрики не показательны
+            val gap = next - line.timeMs
+            if (gap <= 0L || gap > 15_000L) continue  // проигрыши не считаем
+            samples.add(gap.toDouble() / text.length)
+        }
+        if (samples.size >= 4) {
+            samples.sort()
+            samples[(samples.size * 2) / 5].toLong().coerceIn(40L, 160L)
+        } else MS_PER_CHAR
+    }
+
+    /** Floor длительности строки — тоже от темпа трека (не фикс 1200мс):
+     *  короткий выкрик в балладе держится как ~10 «средних» символов. */
+    private val minLineMs: Long = (trackMsPerChar * 10).coerceIn(600L, 2200L)
+
     /** Предрасчитанная заливка по строкам. */
     private val lineFills: List<LineFill>
 
@@ -157,10 +185,11 @@ class LyricsTimeProcessor(
         val gap = if (nextStartMs != null) (nextStartMs - startMs).coerceAtLeast(1L) else LAST_LINE_MS
         val length = text.length.coerceAtLeast(1)
 
-        // estMs: по содержимому, но не больше 90% реального гэпа (чтоб не отставать от вокала).
-        var est = length * MS_PER_CHAR
+        // estMs: длина × КАЛИБРОВАННЫЙ темп трека (не глобальная константа),
+        // но не больше 90% реального гэпа (чтоб не отставать от вокала).
+        var est = length * trackMsPerChar
         if (nextStartMs != null) est = minOf(est, gap * 9 / 10)
-        est = est.coerceAtLeast(minOf(MIN_MS, gap)).coerceAtLeast(1L)
+        est = est.coerceAtLeast(minOf(minLineMs, gap)).coerceAtLeast(1L)
 
         // Сегменты по знакам препинания: (длина, сырая пауза после).
         val rawSegs = splitSegments(text)

@@ -143,10 +143,16 @@ class JuceLocalPlayer(
             maybeSyncPowerSave()           // буфер движка ↔ Battery Saver
             // Watchdog выхода: «должны играть, а прогресса нет» → авто-уход на
             // AudioTrack. Кормим только когда звук ОБЯЗАН идти прямо сейчас.
+            val playingAudibly = prepared && !loading && playWhenReadyFlag &&
+                !ended && playlist.isNotEmpty() && transitionState != 1
             AudioOutputWatchdog.noteTick(
-                playingAudibly = prepared && !loading && playWhenReadyFlag &&
-                    !ended && playlist.isNotEmpty() && transitionState != 1,
+                playingAudibly = playingAudibly,
                 positionMs = engine.positionMsCurrent().toLong()
+            )
+            // Дыхание дыма/пульс обложки на ЛОКАЛЬНОЙ музыке: кормим AudioReactor
+            // нативной бас-огибающей (у стриминга это делает BassAudioProcessor).
+            com.liquidmusicglass.engine.AudioReactor.feedJuceBass(
+                if (playingAudibly) AutoMixNativeEngine.hapticEnv() else 0f
             )
             invalidateStateFromTicker()
             handler.postDelayed(this, TICK_MS)

@@ -365,6 +365,15 @@ fun LyricsScreen(
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    // Тап по строке = перемотка на неё (Apple Music).
+                                    // Только для синхронной лирики.
+                                    .then(
+                                        if (lyrics.isSynced) Modifier.clickable(
+                                            interactionSource = remember { MutableInteractionSource() },
+                                            indication = null
+                                        ) { PlayerController.seekTo(line.timeMs) }
+                                        else Modifier
+                                    )
                                     .padding(horizontal = 24.dp, vertical = 10.dp),
                                 horizontalAlignment = Alignment.Start
                             ) {

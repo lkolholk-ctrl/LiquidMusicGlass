@@ -16,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Equalizer
+import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -54,6 +55,7 @@ private val Accent = Color(0xFF7FB77E)
 fun SettingsScreen(
     onBack: () -> Unit,
     onOpenEqualizer: () -> Unit = {},
+    onOpenProfile: () -> Unit = {},
     showBack: Boolean = true,
     backdrop: LayerBackdrop
 ) {
@@ -115,7 +117,75 @@ fun SettingsScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // ── Шапка-профиль: аватарка + имя, тап → профиль (как у Apple/TG) ──
+            run {
+                val avatarUrl by com.liquidmusicglass.api.icm.IcmAuthRepository
+                    .avatarUrl.collectAsState()
+                val profileName by com.liquidmusicglass.api.icm.IcmAuthRepository
+                    .profileName.collectAsState()
+                val userEmail by com.liquidmusicglass.api.icm.IcmAuthRepository
+                    .userEmail.collectAsState()
+                val displayName = when {
+                    !profileName.isNullOrBlank() -> profileName!!
+                    userEmail != null -> userEmail!!.substringBefore("@")
+                        .replaceFirstChar { it.uppercase() }
+                    else -> "Guest"
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(28.dp))
+                        .background(if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) { onOpenProfile() }
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(52.dp)
+                            .clip(CircleShape)
+                            .background(if (lc.isDark) Color(0xFF2C2C2E) else Color(0xFFE5E5EA)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (!avatarUrl.isNullOrBlank()) {
+                            coil.compose.AsyncImage(
+                                model = avatarUrl,
+                                contentDescription = null,
+                                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Rounded.Person,
+                                contentDescription = null,
+                                tint = lc.iconMuted,
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(14.dp))
+                    Column {
+                        Text(
+                            text = displayName,
+                            color = lc.textPrimary,
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "Account, premium & data",
+                            color = lc.textSecondary,
+                            fontSize = 13.sp
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(28.dp))
 
             // PLAYBACK
             SectionLabel("PLAYBACK")

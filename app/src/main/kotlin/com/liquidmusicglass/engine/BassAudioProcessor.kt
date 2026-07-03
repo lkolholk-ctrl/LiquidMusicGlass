@@ -30,6 +30,21 @@ object AudioReactor {
 
     /** Алиас баса для обратной совместимости. */
     val level: Float get() = low
+
+    // ── Мост для JUCE-локалки ────────────────────────────────────────────
+    // Стриминг кормит уровни из BassAudioProcessor (цепочка ExoPlayer); у
+    // локального JUCE-пути этой цепочки нет — дым/пульс обложки были МЕРТВЫ
+    // на локальной музыке. Мост нормализует нативную бас-огибающую
+    // (automix LP ~110 Гц, уже считается для хаптики) в тот же 0..1
+    // адаптивным пиком: быстрый захват вверх, медленный спад (~30с на тиках
+    // ~100мс). Кормится из тикера JuceLocalPlayer.
+    @Volatile private var jucePeak = 0.05f
+
+    fun feedJuceBass(env: Float) {
+        val e = if (env.isFinite() && env > 0f) env else 0f
+        jucePeak = if (e > jucePeak) e else (jucePeak * 0.998f).coerceAtLeast(0.02f)
+        low = (e / jucePeak).coerceIn(0f, 1f)
+    }
 }
 
 /**

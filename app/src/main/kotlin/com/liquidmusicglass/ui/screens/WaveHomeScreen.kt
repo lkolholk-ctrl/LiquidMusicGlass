@@ -13,6 +13,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
@@ -64,6 +65,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -384,6 +386,12 @@ fun WaveHomeScreen(
                                     modifier = Modifier.size(26.dp)
                                 )
                             }
+                            // Перемотка водой: горизонтальный свайп по пилюле —
+                            // вода следует за пальцем, отпустил — seek. Тап без
+                            // движения — открытие плеера, как раньше.
+                            var scrubFrac by remember(track.id) {
+                                androidx.compose.runtime.mutableStateOf<Float?>(null)
+                            }
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
@@ -392,7 +400,30 @@ fun WaveHomeScreen(
                                     // Подложка пилюли красится акцентом обложки —
                                     // экран целиком уходит в палитру трека.
                                     .background(accent.copy(alpha = 0.16f))
-                                    .clickable { onOpenPlayer() },
+                                    .clickable { onOpenPlayer() }
+                                    .pointerInput(track.id, track.durationMs) {
+                                        if (track.durationMs <= 0L) return@pointerInput
+                                        detectHorizontalDragGestures(
+                                            onDragStart = { off ->
+                                                scrubFrac = (off.x / size.width)
+                                                    .coerceIn(0f, 1f)
+                                            },
+                                            onDragEnd = {
+                                                scrubFrac?.let { f ->
+                                                    PlayerController.seekTo(
+                                                        (f * track.durationMs).toLong()
+                                                    )
+                                                }
+                                                scrubFrac = null
+                                            },
+                                            onDragCancel = { scrubFrac = null },
+                                            onHorizontalDrag = { change, _ ->
+                                                scrubFrac = (change.position.x / size.width)
+                                                    .coerceIn(0f, 1f)
+                                                change.consume()
+                                            }
+                                        )
+                                    },
                                 contentAlignment = Alignment.Center
                             ) {
                                 // Прогресс — «жидкость»: заливает пилюлю целиком
@@ -403,6 +434,7 @@ fun WaveHomeScreen(
                                     playing = isPlaying,
                                     animate = animationsActive &&
                                         !com.liquidmusicglass.ui.PowerSaveMonitor.active,
+                                    overrideProgress = scrubFrac,
                                     modifier = Modifier.fillMaxSize()
                                 )
                                 Text(
@@ -982,6 +1014,8 @@ private fun WaveProgressFill(
     accent: Color,
     playing: Boolean,
     animate: Boolean,
+    /** Не-null во время перемотки пальцем: вода следует за пальцем мгновенно. */
+    overrideProgress: Float? = null,
     modifier: Modifier = Modifier
 ) {
     val positionMs by PlayerController.currentPositionMs.collectAsState()
@@ -989,11 +1023,12 @@ private fun WaveProgressFill(
     // Позиция приходит тиками (~раз в секунду) — без сглаживания фронт ПРЫГАЕТ
     // на каждый тик («звук толкает пилюлю»). Линейная интерполяция чуть длиннее
     // тика — фронт скользит непрерывно, зависит только от времени трека.
-    val progress by animateFloatAsState(
+    val animated by animateFloatAsState(
         targetValue = rawProgress,
         animationSpec = tween(1200, easing = LinearEasing),
         label = "waveProgress"
     )
+    val progress = overrideProgress ?: animated
 
     // Фаза течения: ~2.6 рад/с — волна спокойно ПЛЫВЁТ сама, с постоянной
     // скоростью, от музыки не зависит. Кадровый цикл живёт ТОЛЬКО пока

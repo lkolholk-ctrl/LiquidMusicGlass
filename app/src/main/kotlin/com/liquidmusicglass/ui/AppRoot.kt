@@ -271,6 +271,7 @@ fun AppRoot() {
                 3 -> SettingsScreen(
                     onBack = {},
                     onOpenEqualizer = { equalizerOpen = true },
+                    onOpenProfile = { profileOpen = true },
                     showBack = false,
                     backdrop = rootBackdrop
                 )
@@ -560,6 +561,7 @@ fun AppRoot() {
             SettingsScreen(
                 onBack = { settingsOpen = false },
                 onOpenEqualizer = { equalizerOpen = true; settingsOpen = false },
+                onOpenProfile = { profileOpen = true; settingsOpen = false },
                 backdrop = rootBackdrop
             )
         }
