@@ -121,8 +121,10 @@ object HapticMusicEngine {
                 level > prevEnv * 1.45f + 0.02f
             ) {
                 lastBeatAtMs = now
-                val strength = ((level - prevEnv) / maxOf(prevEnv, 0.05f)).coerceIn(0f, 1f)
-                tap(strength)
+                // Та же шкала силы, что у нативного детектора: отношение к
+                // среднему качу -> ровный бит лёгкий, акценты в полную силу.
+                val ratio = level / maxOf(prevEnv, 0.05f)
+                tap(((ratio - 1.45f) / 3f).coerceIn(0f, 1f))
             }
         }
     }
@@ -138,15 +140,18 @@ object HapticMusicEngine {
         val v = vibrator ?: return
         val s = strength.coerceIn(0f, 1f)
 
+        // Сила из детектора адаптивная — относительно СРЕДНЕГО удара трека:
+        // ровный кач ~0.0-0.3, акценты/дропы 0.35+. Гейты: Soft — только
+        // акценты, Medium — каждый удар легко, Strong — каждый в полную руку.
         val level = com.liquidmusicglass.engine.AppSettings.hapticStrength.value
-        val minStrength = when (level) { 0 -> 0.45f; 1 -> 0.20f; else -> 0.0f }
+        val minStrength = when (level) { 0 -> 0.35f; else -> 0.0f }
         if (s < minStrength) return                    // слабый удар — пропускаем
-        val scale = when (level) { 0 -> 0.55f; 1 -> 0.8f; else -> 1.0f }
+        val scale = when (level) { 0 -> 0.6f; 1 -> 0.8f; else -> 1.0f }
 
         runCatching {
             if (hasAmplitude) {
-                val amp = ((35 + 165 * s) * scale).toInt().coerceIn(1, 255)
-                val durMs = ((10 + 14 * s) * (0.7f + 0.3f * scale)).toLong().coerceAtLeast(8L)
+                val amp = ((45 + 190 * s) * scale).toInt().coerceIn(1, 255)
+                val durMs = ((10 + 16 * s) * (0.7f + 0.3f * scale)).toLong().coerceAtLeast(8L)
                 v.vibrate(VibrationEffect.createOneShot(durMs, amp))
             } else {
                 // Без амплитудного контроля — короткий фиксированный тик.

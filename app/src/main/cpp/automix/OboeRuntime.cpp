@@ -4,6 +4,7 @@
 #include <android/log.h>
 
 #include <atomic>
+#include <cmath>
 #include <mutex>
 #include <cstdio>
 
@@ -134,28 +135,84 @@ namespace automix
 
     void noteBassLevel (float bassMeanAbs, int numSamples)
     {
-        static float env = 0.0f;              // огибающая (атака быстрая, спад медленный)
+        // Две огибающие с ВРЕМЕННЫМИ константами (не по блокам! на реальном
+        // железе блок бывает 4мс (burst 192) — по-блочное сглаживание липнет
+        // к сигналу мгновенно, и удар никогда не пробивает порог — «два стука
+        // при включении и тишина», полевой баг v1):
+        //   fast — атака ~4мс / спад ~60мс: контур кика;
+        //   slow — ~350мс в обе стороны: средний уровень баса.
+        // Удар = fast пробила slow (снятую ДО обновления) с запасом.
+        static float fast = 0.0f, slow = 0.0f;
+        static float aF = 0.5f, rF = 0.1f, cS = 0.02f;
+        static int   coefsForSamples = -1;
         static long  samplesSinceBeat = 1 << 30;
-        constexpr long kBeatCooldownSamples = 5760;   // ~120мс @48к
+        static long  warmupSamples = 0;
+        constexpr float kSr = 48000.0f;               // точность sr некритична
+        constexpr long  kBeatCooldownSamples = 7200;  // ~150мс
 
-        const float attack  = 0.5f;
-        const float release = 0.06f;
-        const float k = bassMeanAbs > env ? attack : release;
-        env += k * (bassMeanAbs - env);
-        gHapticEnvMilli.store ((int) (env * 1000.0f), std::memory_order_relaxed);
+        if (numSamples != coefsForSamples)            // блок-размер меняется редко
+        {
+            coefsForSamples = numSamples;
+            const float n = (float) numSamples;
+            aF = 1.0f - std::exp (-n / (0.004f * kSr));
+            rF = 1.0f - std::exp (-n / (0.060f * kSr));
+            cS = 1.0f - std::exp (-n / (0.350f * kSr));
+        }
+
+        fast += (bassMeanAbs > fast ? aF : rF) * (bassMeanAbs - fast);
+        const float slowPrev = slow;
+        slow += cS * (bassMeanAbs - slow);
+        gHapticEnvMilli.store ((int) (fast * 1000.0f), std::memory_order_relaxed);
 
         samplesSinceBeat += numSamples;
-        // Удар: блок заметно выше огибающей И не в мёртвой зоне после прошлого.
-        if (samplesSinceBeat >= kBeatCooldownSamples
-            && bassMeanAbs > env * 1.45f + 0.008f)
+        // Прогрев ~0.5с после старта/тишины: огибающие с нуля дают ложные
+        // «удары» на первых же блоках (те самые два стука при включении).
+        warmupSamples += numSamples;
+        if (slowPrev < 0.003f && fast < 0.003f)
+            warmupSamples = 0;
+        if (warmupSamples < 24000)
+            return;
+
+        // Peak-hold: пересечение только ВЗВОДИТ удар; сила меряется по пику
+        // fast за следующие ~48мс (замер в блоке пересечения ловил кик в
+        // случайной фазе — сила прыгала 0.1..1.0 на ровной бочке). Публикация
+        // счётчика происходит после окна: тап опаздывает на ~50мс — на слух
+        // незаметно, зато сила честная.
+        static bool  beatPending = false;
+        static float peakFast = 0.0f, slowAtCross = 0.0f;
+        static long  peakSamples = 0;
+        static float avgRatio = 0.0f;      // средний удар (EMA) — адаптивная норма
+        constexpr long kPeakWindowSamples = 2304;   // ~48мс
+
+        if (beatPending)
         {
-            samplesSinceBeat = 0;
-            float strength = (bassMeanAbs - env) / (env > 0.02f ? env : 0.02f);
-            if (strength > 1.0f) strength = 1.0f;
-            if (strength < 0.0f) strength = 0.0f;
-            gHapticBeatStrengthMilli.store ((int) (strength * 1000.0f),
-                                            std::memory_order_relaxed);
-            gHapticBeatCount.fetch_add (1, std::memory_order_relaxed);
+            if (fast > peakFast) peakFast = fast;
+            peakSamples += numSamples;
+            if (peakSamples >= kPeakWindowSamples)
+            {
+                beatPending = false;
+                const float ratio = peakFast / (slowAtCross > 0.015f ? slowAtCross : 0.015f);
+                if (avgRatio <= 0.0f) avgRatio = ratio;
+                // Сила ОТНОСИТЕЛЬНО среднего удара трека: ровный кач -> ~0.2,
+                // вдвое жирнее среднего (дроп/акцент) -> 1.0. Самокалибровка
+                // под любой жанр/громкость (EMA по последним ударам).
+                float strength = 0.2f + 1.2f * (ratio / avgRatio - 1.0f);
+                if (strength > 1.0f) strength = 1.0f;
+                if (strength < 0.0f) strength = 0.0f;
+                avgRatio += 0.2f * (ratio - avgRatio);
+                gHapticBeatStrengthMilli.store ((int) (strength * 1000.0f),
+                                                std::memory_order_relaxed);
+                gHapticBeatCount.fetch_add (1, std::memory_order_relaxed);
+            }
+        }
+        else if (samplesSinceBeat >= kBeatCooldownSamples
+                 && fast > slowPrev * 1.5f + 0.006f)
+        {
+            samplesSinceBeat = 0;          // кулдаун — от пересечения
+            beatPending = true;
+            peakFast = fast;
+            slowAtCross = slowPrev;
+            peakSamples = 0;
         }
     }
 
