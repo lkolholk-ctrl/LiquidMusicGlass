@@ -7,6 +7,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.withInfiniteAnimationFrameMillis
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
@@ -15,7 +16,6 @@ import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -26,10 +26,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.FavoriteBorder
@@ -56,9 +55,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -84,7 +88,10 @@ import com.liquidmusicglass.ui.player.AuraBackground
 import com.liquidmusicglass.ui.theme.AppFontFamily
 import com.liquidmusicglass.ui.viewmodel.HomeViewModel
 import java.util.Calendar
+import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.min
+import kotlin.math.sin
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -92,11 +99,10 @@ import kotlinx.coroutines.withContext
 /**
  * "My Wave" — the main screen, our own take on the Yandex-Music style feed.
  *
- * It is a single scrollable feed:
- *  - a wave hero (idle: big title + Play; playing: artist, cover and flat controls);
- *  - a row of animated mood tiles (patterned, color-shifting);
- *  - content sections reusing [HomeViewModel] data (recently played, charts,
- *    new releases and recommendations).
+ * The screen is now just the wave hero, vertically centered (idle: big title +
+ * Play; playing: artist, cover, flat controls and a live wave progress line in
+ * the title pill). Mood tiles and content sections (recently played, charts,
+ * recommendations) live in the New tab.
  *
  * Glass is intentionally avoided (heavy blur lags on devices) — controls are flat
  * and the background is a single animated aura Canvas. Tapping the cover or the
@@ -125,9 +131,6 @@ fun WaveHomeScreen(
     val isBuildingWave by viewModel.isBuildingWave.collectAsState()
     val needsOnboarding by viewModel.needsOnboarding.collectAsState()
     val needsLink by viewModel.needsLink.collectAsState()
-    val recentlyPlayed by PlayerController.recentlyPlayed.collectAsState()
-    val homeContent by viewModel.homeContent.collectAsState()
-    val charts by viewModel.charts.collectAsState()
 
     // Активная «именованная» волна (по муду/треку/артисту). У дефолтной «Моей волны»
     // имени нет → индикатор не показываем.
@@ -175,23 +178,6 @@ fun WaveHomeScreen(
         waveContext != null &&
         backend == PlaybackBackend.EXO_STREAMING
 
-    // Long-press по мудкарточке → предпросмотр станции (сеть только на IO).
-    var previewMood by remember { mutableStateOf<WaveMood?>(null) }
-    var previewTracks by remember { mutableStateOf<List<Track>?>(null) }
-    LaunchedEffect(previewMood) {
-        val mood = previewMood ?: return@LaunchedEffect
-        previewTracks = null
-        previewTracks = withContext(Dispatchers.IO) {
-            runCatching { IcmRepository.searchTracks(mood.query, limit = 4) }.getOrDefault(emptyList())
-        }
-    }
-
-    // Все смысловые блоки home-контента (popular / banners / new_releases /
-    // recommendations …). Чарты идут отдельной секцией из viewModel.charts.
-    val homeBlocks = remember(homeContent) {
-        homeContent?.blocks?.filter { it.type != "charts" && it.items.isNotEmpty() } ?: emptyList()
-    }
-
     Box(modifier = Modifier.fillMaxSize()) {
 
         // ── Living aura background (own AGSL shader, reacts to the music) ──
@@ -203,28 +189,37 @@ fun WaveHomeScreen(
             smokeContrast = 1.16f
         )
 
-        LazyColumn(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
-                .statusBarsPadding(),
-            // Снизу — место под оверлей мудкарточек (116dp) + бар: контент ленты
-            // при скролле не прячется под ними.
-            contentPadding = PaddingValues(bottom = 220.dp)
+                .statusBarsPadding()
         ) {
-            item { WaveTopBar(onSearch = onNavigateToSearch, onOpenProfile = onOpenProfile) }
+            WaveTopBar(onSearch = onNavigateToSearch, onOpenProfile = onOpenProfile)
 
             // ── Индикатор активной волны (по муду/треку/артисту) + сброс на «Мою волну» ──
             if (activeStationName != null) {
-                item {
-                    WaveStationIndicator(
-                        name = activeStationName,
-                        onClear = { viewModel.buildWaveQueue(context) }
-                    )
-                }
+                WaveStationIndicator(
+                    name = activeStationName,
+                    onClear = { viewModel.buildWaveQueue(context) }
+                )
             }
 
-            // ── Hero ──
-            item {
+            // ── Hero — по центру освободившегося экрана (мудкарточки уехали в New).
+            // Box центрует, внутренний скролл — страховка для маленьких экранов. ──
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(bottom = 72.dp),   // высота нижнего бара + зазор
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
                 if (track == null) {
                     Column(
                         modifier = Modifier
@@ -401,6 +396,16 @@ fun WaveHomeScreen(
                                     .padding(horizontal = 16.dp),
                                 contentAlignment = Alignment.Center
                             ) {
+                                // Живой прогресс трека: бегущая волна под названием —
+                                // видно, что трек реально идёт (не прямая полоса).
+                                WaveProgressLine(
+                                    durationMs = track.durationMs,
+                                    accent = accent,
+                                    playing = isPlaying,
+                                    animate = animationsActive &&
+                                        !com.liquidmusicglass.ui.PowerSaveMonitor.active,
+                                    modifier = Modifier.fillMaxSize()
+                                )
                                 Text(
                                     text = track.title,
                                     color = Color.White,
@@ -461,31 +466,10 @@ fun WaveHomeScreen(
                         }
                     }
                 }
+                }
             }
-
-            // Рекомендации (recently played / home-блоки / charts) перенесены в таб New.
-            // На Wave остаются только мудкарточки + плеер волны/текущий трек.
-        }
-
-        // ── Мудкарточки — оверлей, прижатый к НИЖНЕМУ бару (не элемент ленты):
-        // всегда сидят прямо над баром, сколько бы воздуха ни было выше. ──
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(bottom = 72.dp)   // высота бара (60dp) + зазор
-        ) {
-            WaveMoodTiles(
-                onSelect = { mood -> viewModel.buildMoodWave(context, mood.query, mood.label) },
-                animate = animationsActive,
-                // Палитра обложки текущего трека — та же, из которой рисуется
-                // аура-дым: карточки подстраиваются под каждую музыку. Без трека
-                // (палитра дефолтно тёмно-нейтральная) — свои цвета мудов.
-                albumColors = if (track != null) albumColors else null,
-                bassLevel = bassLevel,
-                onPreview = { mood -> previewMood = mood }
-            )
+            // Мудкарточки и рекомендации живут в табе New — низ Wave свободен,
+            // герой отцентрован по вертикали.
         }
 
         // ── Онбординг волны: показываем, когда персональная волна пуста и юзер
@@ -526,39 +510,6 @@ fun WaveHomeScreen(
             )
         }
 
-        // ── Long-press по мудкарточке: предпросмотр станции перед запуском ──
-        previewMood?.let { mood ->
-            androidx.compose.material3.AlertDialog(
-                onDismissRequest = { previewMood = null },
-                title = { Text(mood.label) },
-                text = {
-                    val tracks = previewTracks
-                    when {
-                        tracks == null -> Text("Loading…")
-                        tracks.isEmpty() -> Text("Nothing found for this mood.")
-                        else -> Column {
-                            tracks.forEach { t ->
-                                Text(
-                                    text = "${t.title} — ${t.artist}",
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Spacer(Modifier.height(6.dp))
-                            }
-                        }
-                    }
-                },
-                confirmButton = {
-                    androidx.compose.material3.TextButton(onClick = {
-                        previewMood = null
-                        viewModel.buildMoodWave(context, mood.query, mood.label)
-                    }) { Text("Play station") }
-                },
-                dismissButton = {
-                    androidx.compose.material3.TextButton(onClick = { previewMood = null }) { Text("Close") }
-                }
-            )
-        }
     }
 }
 
@@ -1003,6 +954,81 @@ private fun UpNextRow(upNext: List<Pair<Int, Track>>, onPlay: (Int) -> Unit) {
         }
     }
 }
+
+/**
+ * Прогресс трека «живой волной» в пилюле с названием: пройденная часть — яркая
+ * бегущая синусоида в цвет акцента, остаток — приглушённая; на стыке — точка
+ * плейхеда. Фаза движется только когда музыка играет (и не в энергосбережении):
+ * волна «течёт» — сразу видно, что трек идёт.
+ *
+ * Позиция собирается ЗДЕСЬ (не в родителе), чтобы тики позиции перерисовывали
+ * только этот маленький Canvas, а не весь hero.
+ */
+@Composable
+private fun WaveProgressLine(
+    durationMs: Long,
+    accent: Color,
+    playing: Boolean,
+    animate: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val positionMs by PlayerController.currentPositionMs.collectAsState()
+    val progress = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
+
+    // Фаза бегущей волны (~1.6 рад/с — спокойное течение). Кадровый цикл живёт
+    // ТОЛЬКО пока playing && animate — на паузе волна замирает, корутина стоит.
+    val phase = produceState(0f, playing, animate) {
+        if (!playing || !animate) return@produceState
+        var last = -1L
+        while (true) {
+            withInfiniteAnimationFrameMillis { t ->
+                if (last >= 0) value = (value + (t - last) * 0.0016f) % WAVE_TAU
+                last = t
+            }
+        }
+    }
+
+    val played = lerp(accent, Color.White, 0.55f)
+    Canvas(modifier) {
+        if (size.width <= 1f) return@Canvas
+        val midY = size.height / 2f
+        val amp = 4.dp.toPx()
+        val waveLen = 30.dp.toPx()
+        val strokeW = 2.dp.toPx()
+        val split = size.width * progress
+        val step = 2.dp.toPx()
+
+        fun wave(from: Float, to: Float) = Path().apply {
+            var x = from
+            moveTo(x, midY + amp * sin(x / waveLen * WAVE_TAU - phase.value))
+            while (x < to) {
+                x = min(x + step, to)
+                lineTo(x, midY + amp * sin(x / waveLen * WAVE_TAU - phase.value))
+            }
+        }
+        if (split > 0f) {
+            drawPath(
+                wave(0f, split),
+                color = played.copy(alpha = 0.8f),
+                style = Stroke(width = strokeW, cap = StrokeCap.Round)
+            )
+        }
+        if (split < size.width) {
+            drawPath(
+                wave(split, size.width),
+                color = Color.White.copy(alpha = 0.16f),
+                style = Stroke(width = strokeW, cap = StrokeCap.Round)
+            )
+        }
+        drawCircle(
+            color = Color.White.copy(alpha = 0.9f),
+            radius = strokeW * 1.4f,
+            center = Offset(split, midY + amp * sin(split / waveLen * WAVE_TAU - phase.value))
+        )
+    }
+}
+
+private val WAVE_TAU = (2.0 * PI).toFloat()
 
 // Бледно-зелёный акцент волны (заменил жёлтый — цвет Яндекса убран).
 private val WaveAccent = Color(0xFF88C088)

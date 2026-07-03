@@ -27,7 +27,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -41,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.api.icm.toTrack
 import com.liquidmusicglass.data.local.db.AppDatabase
 import com.liquidmusicglass.engine.PlayerController
@@ -49,6 +52,8 @@ import com.liquidmusicglass.ui.glass.AlbumArtImage
 import com.liquidmusicglass.ui.theme.AppFontFamily
 import com.liquidmusicglass.ui.theme.LiquidTheme
 import com.liquidmusicglass.ui.viewmodel.HomeViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Таб «New» — все предложки (recently played / home-блоки / charts), перенесённые
@@ -74,6 +79,18 @@ fun NewScreen(
     val dao = remember { AppDatabase.getInstance(context).listenHistoryDao() }
     val history by remember { dao.observe() }.collectAsState(initial = emptyList())
 
+    // Long-press по мудкарточке → предпросмотр станции (сеть только на IO).
+    // Переехали сюда с Wave вместе с карточками.
+    var previewMood by remember { mutableStateOf<WaveMood?>(null) }
+    var previewTracks by remember { mutableStateOf<List<Track>?>(null) }
+    LaunchedEffect(previewMood) {
+        val mood = previewMood ?: return@LaunchedEffect
+        previewTracks = null
+        previewTracks = withContext(Dispatchers.IO) {
+            runCatching { IcmRepository.searchTracks(mood.query, limit = 4) }.getOrDefault(emptyList())
+        }
+    }
+
     val lc = LiquidTheme.colors
 
     Box(modifier = Modifier.fillMaxSize().background(lc.settingsBackground)) {
@@ -91,6 +108,16 @@ fun NewScreen(
                     fontFamily = AppFontFamily,
                     modifier = Modifier.padding(start = 20.dp, top = 12.dp, bottom = 16.dp)
                 )
+            }
+
+            // ── Волны по настроению (мудкарточки, переехали с экрана Wave) ──
+            item {
+                NewSectionHeader("Waves by mood")
+                WaveMoodTiles(
+                    onSelect = { mood -> viewModel.buildMoodWave(context, mood.query, mood.label) },
+                    onPreview = { mood -> previewMood = mood }
+                )
+                Spacer(Modifier.height(28.dp))
             }
 
             // ── Recently played ──
@@ -229,6 +256,40 @@ fun NewScreen(
                     }
                 }
             }
+        }
+
+        // ── Long-press по мудкарточке: предпросмотр станции перед запуском ──
+        previewMood?.let { mood ->
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { previewMood = null },
+                title = { Text(mood.label) },
+                text = {
+                    val tracks = previewTracks
+                    when {
+                        tracks == null -> Text("Loading…")
+                        tracks.isEmpty() -> Text("Nothing found for this mood.")
+                        else -> Column {
+                            tracks.forEach { t ->
+                                Text(
+                                    text = "${t.title} — ${t.artist}",
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(Modifier.height(6.dp))
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(onClick = {
+                        previewMood = null
+                        viewModel.buildMoodWave(context, mood.query, mood.label)
+                    }) { Text("Play station") }
+                },
+                dismissButton = {
+                    androidx.compose.material3.TextButton(onClick = { previewMood = null }) { Text("Close") }
+                }
+            )
         }
     }
 }
