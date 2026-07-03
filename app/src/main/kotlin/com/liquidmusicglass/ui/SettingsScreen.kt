@@ -180,6 +180,20 @@ fun SettingsScreen(
                     )
                 }
                 PlainDivider()
+                // Warm Sound: «звук как на Track» для быстрых выходов — свой
+                // bass-shelf + ширина в JUCE-цепочке (вендорский Histen быстрые
+                // пути обходит). На Track отключается сам (иначе бас двоится).
+                run {
+                    val warmEnabled by com.liquidmusicglass.engine.AudioFxController
+                        .warmEnabled.collectAsState()
+                    SettingsToggleItem(
+                        title = "Warm Sound",
+                        subtitle = "Track-like bass & width on the Fast output",
+                        selected = warmEnabled,
+                        onSelect = { com.liquidmusicglass.engine.AudioFxController.setWarmEnabled(it) }
+                    )
+                }
+                PlainDivider()
                 // Haptic Music: тактильные удары в такт (свой детектор в нативном
                 // колбэке — системный HapticGenerator вендоры не открывают).
                 SettingsToggleItem(
