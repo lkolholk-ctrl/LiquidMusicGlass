@@ -124,6 +124,7 @@ fun SettingsScreen(
             val audioCompatMode by AppSettings.audioCompatMode.collectAsState()
             val audioCompatAuto by AppSettings.audioCompatAuto.collectAsState()
             val hapticMusicEnabled by AppSettings.hapticMusicEnabled.collectAsState()
+            val hapticStrength by AppSettings.hapticStrength.collectAsState()
 
             PlainCard {
                 SettingsToggleItem(
@@ -187,6 +188,14 @@ fun SettingsScreen(
                     selected = hapticMusicEnabled,
                     onSelect = { AppSettings.setHapticMusicEnabled(it) }
                 )
+                if (hapticMusicEnabled) {
+                    // Сила: Soft — только акценты (лёгкие тики), Medium — баланс,
+                    // Strong — каждый удар в полную руку.
+                    HapticStrengthSelector(
+                        selected = hapticStrength,
+                        onSelect = { AppSettings.setHapticStrength(it) }
+                    )
+                }
                 PlainDivider()
                 SettingsActionItem(
                     title = "Audio",
@@ -730,6 +739,55 @@ private fun AudioOutputSelector(
                     targetValue = if (isSelected) Color.White else unselectedTextColor,
                     animationSpec = tween(200),
                     label = "audioOutText"
+                )
+                Text(
+                    text = label,
+                    color = textColor,
+                    fontSize = 13.sp,
+                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+                )
+            }
+        }
+    }
+}
+
+/** Сила Haptic Music: Soft / Medium / Strong (стиль AudioOutputSelector). */
+@Composable
+private fun HapticStrengthSelector(
+    selected: Int,
+    onSelect: (Int) -> Unit
+) {
+    val options = listOf(0 to "Soft", 1 to "Medium", 2 to "Strong")
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp)
+            .padding(bottom = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        options.forEach { (key, label) ->
+            val isSelected = selected == key
+            val isDark = LiquidTheme.colors.isDark
+            val itemBg = if (isSelected) Accent else (if (isDark) Color(0xFF1C1C1E) else Color(0xFFE5E5EA))
+            val unselectedTextColor = if (isDark) Color.White.copy(alpha = 0.45f) else Color.Black.copy(alpha = 0.45f)
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(36.dp)
+                    .background(itemBg, RoundedCornerShape(50))
+                    .clip(RoundedCornerShape(50))
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = { onSelect(key) }
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                val textColor by animateColorAsState(
+                    targetValue = if (isSelected) Color.White else unselectedTextColor,
+                    animationSpec = tween(200),
+                    label = "hapticStrengthText"
                 )
                 Text(
                     text = label,

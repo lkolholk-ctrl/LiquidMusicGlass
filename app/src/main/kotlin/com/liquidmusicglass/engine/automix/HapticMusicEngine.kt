@@ -127,18 +127,30 @@ object HapticMusicEngine {
         }
     }
 
-    /** Тактильный «тап»: длительность и амплитуда следуют за силой удара. */
+    /**
+     * Тактильный «тап»: длительность и амплитуда следуют за силой удара и
+     * уровнем в настройках. Soft — только акценты (слабые удары ГЛОТАЮТСЯ,
+     * не каждый кик!), лёгкие тики; Strong — каждый удар, в полную руку.
+     * Полевой фидбек v1: тап на каждый кик жирным one-shot = «отбойный
+     * молоток» — базовая сила снижена, добавлен гейт по силе удара.
+     */
     private fun tap(strength: Float) {
         val v = vibrator ?: return
         val s = strength.coerceIn(0f, 1f)
+
+        val level = com.liquidmusicglass.engine.AppSettings.hapticStrength.value
+        val minStrength = when (level) { 0 -> 0.45f; 1 -> 0.20f; else -> 0.0f }
+        if (s < minStrength) return                    // слабый удар — пропускаем
+        val scale = when (level) { 0 -> 0.55f; 1 -> 0.8f; else -> 1.0f }
+
         runCatching {
             if (hasAmplitude) {
-                val amp = (70 + 185 * s).toInt().coerceIn(1, 255)
-                val durMs = (18 + 14 * s).toLong()
+                val amp = ((35 + 165 * s) * scale).toInt().coerceIn(1, 255)
+                val durMs = ((10 + 14 * s) * (0.7f + 0.3f * scale)).toLong().coerceAtLeast(8L)
                 v.vibrate(VibrationEffect.createOneShot(durMs, amp))
             } else {
                 // Без амплитудного контроля — короткий фиксированный тик.
-                v.vibrate(VibrationEffect.createOneShot(15, VibrationEffect.DEFAULT_AMPLITUDE))
+                v.vibrate(VibrationEffect.createOneShot(12, VibrationEffect.DEFAULT_AMPLITUDE))
             }
         }
     }
