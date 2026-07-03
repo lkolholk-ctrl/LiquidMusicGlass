@@ -25,7 +25,7 @@ import kotlinx.coroutines.flow.asStateFlow
  * Waiting (точки ожидания) — ОТДЕЛЬНЫЙ механизм: только когда строка докрашена
  * ПОЛНОСТЬЮ и до следующей строки разрыв > WAIT_GAP_MS (реальный проигрыш).
  *
- * VAD-модель отключена флагом [com.liquidmusicglass.engine.vad.VadLyricsEngine.ENABLED].
+ * VAD-модель НЕ используется (косячная): экран лирики её больше не запускает.
  */
 @Stable
 class LyricsTimeProcessor(
@@ -101,6 +101,11 @@ class LyricsTimeProcessor(
     private val _isInterlude = MutableStateFlow(false)
     val isInterlude: StateFlow<Boolean> = _isInterlude.asStateFlow()
 
+    /** Прогресс текущего ожидания 0..1 (интро до первой строки или проигрыш):
+     *  точки WaitingDots «наливаются» по нему и схлопываются к концу. */
+    private val _interludeProgress = MutableStateFlow(0f)
+    val interludeProgress: StateFlow<Float> = _interludeProgress.asStateFlow()
+
     /** Монотонный курсор по строкам. */
     private var lineCursor = 0
     private var lastProcessedPositionMs = -1L
@@ -159,8 +164,10 @@ class LyricsTimeProcessor(
         var charPos = 0
         for ((i, w) in words.withIndex()) {
             val start = w.timeMs
+            // Последнее слово последней строки: длительность от темпа трека.
             val end = if (i + 1 < words.size) words[i + 1].timeMs
-                      else (nextStartMs ?: (start + LAST_LINE_MS))
+                      else (nextStartMs
+                          ?: (start + (w.text.length * trackMsPerChar).coerceIn(500L, LAST_LINE_MS)))
             // длина слова + пробел после (кроме последнего) — закрас «течёт» и через пробел
             val len = (w.text.length + if (i < words.size - 1) 1 else 0).coerceAtLeast(1)
             spans.add(WordSpan(charPos, len, start, end.coerceAtLeast(start + 1)))
@@ -182,8 +189,12 @@ class LyricsTimeProcessor(
 
     /** Строит таймлайн заливки одной строки. */
     private fun buildLineFill(startMs: Long, nextStartMs: Long?, text: String): LineFill {
-        val gap = if (nextStartMs != null) (nextStartMs - startMs).coerceAtLeast(1L) else LAST_LINE_MS
         val length = text.length.coerceAtLeast(1)
+        // Последняя строка (нет следующей): синтетический «гэп» от темпа ЭТОГО
+        // трека, а не фикс LAST_LINE_MS — финал баллады держится дольше,
+        // финал рэпа не тянется.
+        val gap = if (nextStartMs != null) (nextStartMs - startMs).coerceAtLeast(1L)
+                  else (length * trackMsPerChar * 6 / 5).coerceIn(2000L, 12_000L)
 
         // estMs: длина × КАЛИБРОВАННЫЙ темп трека (не глобальная константа),
         // но не больше 90% реального гэпа (чтоб не отставать от вокала).
@@ -264,6 +275,9 @@ class LyricsTimeProcessor(
         if (currentLine < 0) {
             _currentLineProgress.value = 0f
             _isInterlude.value = false
+            // Интро: точки перед первой строкой наливаются от старта трека.
+            _interludeProgress.value =
+                (safePosition.toFloat() / lineFills[0].startMs.coerceAtLeast(1L)).coerceIn(0f, 1f)
             return
         }
 
@@ -277,10 +291,15 @@ class LyricsTimeProcessor(
 
         // Waiting: строка докрашена полностью И до следующей строки реальный разрыв.
         val fullyDrawnAt = lf.startMs + lf.estMs
-        _isInterlude.value = lf.hasNext &&
+        val interlude = lf.hasNext &&
                 safePosition >= fullyDrawnAt &&
                 (lf.nextStartMs - fullyDrawnAt) >= WAIT_GAP_MS &&
                 safePosition < lf.nextStartMs
+        _isInterlude.value = interlude
+        _interludeProgress.value = if (interlude) {
+            ((safePosition - fullyDrawnAt).toFloat() /
+                (lf.nextStartMs - fullyDrawnAt).coerceAtLeast(1L)).coerceIn(0f, 1f)
+        } else 0f
     }
 
     /** Доля закрашенных символов строки в момент [now] (мс от старта строки). */
@@ -362,6 +381,7 @@ class LyricsTimeProcessor(
         _pastWords.value = emptyList()
         _currentWords.value = emptyList()
         _isInterlude.value = false
+        _interludeProgress.value = 0f
     }
 
     data class WordToken(
