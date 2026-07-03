@@ -109,16 +109,18 @@ object AudioFxController {
 
     // ── Warm Sound: «звук как на Track» для быстрых выходов ────────────────
     // Полевое наблюдение: на Track (системный AudioTrack) звук «басистее и
-    // объёмнее» — это вендорская DSP (Histen у Honor и т.п.), которая живёт в
-    // системном микшере; быстрые пути (AAudio/OpenSL) летят мимо неё. Warm —
-    // наш аналог ПОВЕРХ пользовательских настроек: bass-shelf +4.5 дБ и
-    // ширина x1.18. На режиме Track (6) отключается сам — иначе бас двоился
-    // бы с вендорской обработкой.
+    // объёмнее» — это вендорская DSP (Honor Sound / тюнинг динамиков), которая
+    // живёт в системном тракте; быстрые пути (AAudio/OpenSL) летят мимо неё.
+    // Warm — наш аналог ПОВЕРХ пользовательских настроек: bass-shelf +6 дБ на
+    // 160 Гц (панч-зона, которую ДИНАМИКИ телефона реально воспроизводят —
+    // шельф на 90 Гц в динамиках не слышен вообще, «сухие верхушки»),
+    // ширина x1.25 и тонкомпенсация (loudness) как у вендоров. На режиме
+    // Track (6) отключается сам — иначе бас двоился бы с вендорской DSP.
     private val _warmEnabled = MutableStateFlow(false)
     val warmEnabled: StateFlow<Boolean> = _warmEnabled
-    private const val WARM_BASS_DB = 4.5f
-    private const val WARM_BASS_FREQ = 90f
-    private const val WARM_WIDTH_MULT = 1.18f
+    private const val WARM_BASS_DB = 6.0f
+    private const val WARM_BASS_FREQ = 160f
+    private const val WARM_WIDTH_MULT = 1.25f
 
     private val _compEnabled = MutableStateFlow(false)
     val compEnabled: StateFlow<Boolean> = _compEnabled
@@ -180,7 +182,7 @@ object AudioFxController {
         // Warm зависит от режима выхода (на Track отключается сам) — при смене
         // режима переотправляем бас/ширину с учётом нового состояния.
         scope.launch {
-            AppSettings.audioCompatMode.collect { pushBass(); pushWidth() }
+            AppSettings.audioCompatMode.collect { pushBass(); pushWidth(); pushLoudness() }
         }
         // Следим за системной громкостью (для loudness-компенсации).
         runCatching {
@@ -234,7 +236,7 @@ object AudioFxController {
         e.setEqEnabled(_eqEnabled.value)
         e.setEqBands(_eqGains.value.toFloatArray())
         pushBass()
-        e.fxSetLoudnessEnabled(_loudnessEnabled.value)
+        pushLoudness()
         pushWidth()
         e.fxSetCompressor(_compEnabled.value, _compThreshold.value, _compRatio.value, _compAttack.value, _compRelease.value)
         e.fxSetLimiter(_limEnabled.value, _limThreshold.value, _limRelease.value)
@@ -258,10 +260,19 @@ object AudioFxController {
         AutoMixNativeEngine.fxSetStereoWidth(w.coerceIn(0f, 2f))
     }
 
+    private fun pushLoudness() {
+        // Warm включает тонкомпенсацию (низ+верх по громкости) — часть
+        // вендорского «насыщенного» характера на обычном тракте.
+        val on = _loudnessEnabled.value || warmActive()
+        AutoMixNativeEngine.fxSetLoudnessEnabled(on)
+        if (on) refreshSystemVolume()
+    }
+
     fun setWarmEnabled(on: Boolean) {
         _warmEnabled.value = on
         pushBass()
         pushWidth()
+        pushLoudness()
         persist { it[K_WARM] = on }
     }
 
@@ -340,8 +351,7 @@ object AudioFxController {
 
     fun setLoudnessEnabled(on: Boolean) {
         _loudnessEnabled.value = on
-        AutoMixNativeEngine.fxSetLoudnessEnabled(on)
-        if (on) refreshSystemVolume()
+        pushLoudness()
         persist { it[K_LOUD_ON] = on }
     }
 

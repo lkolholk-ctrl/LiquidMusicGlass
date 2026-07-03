@@ -4,9 +4,11 @@ import android.content.Context
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.VibrationAttributes
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import com.liquidmusicglass.debug.DebugLog
 import com.liquidmusicglass.engine.AudioReactor
 import com.liquidmusicglass.engine.PlaybackBackend
 import com.liquidmusicglass.engine.PlayerController
@@ -52,6 +54,12 @@ object HapticMusicEngine {
     private var streamEnv = 0f
     private var lastBeatAtMs = 0L
 
+    // Диагностика (LOG/LCAT): сколько ударов увидели и сколько тапов реально
+    // отдали системе — разводит «детектор молчит» и «система глотает вибро».
+    private var beatsSeen = 0L
+    private var tapsSent = 0L
+    private var lastStatAtMs = 0L
+
     fun init(context: Context) {
         vibrator = if (Build.VERSION.SDK_INT >= 31) {
             (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager)
@@ -74,10 +82,18 @@ object HapticMusicEngine {
 
     @Synchronized
     private fun start() {
-        if (running || vibrator?.hasVibrator() != true) return
+        if (running) return
+        if (vibrator?.hasVibrator() != true) {
+            DebugLog.add("HAPTIC: vibrator недоступен (hasVibrator=false)")
+            return
+        }
         running = true
         lastNativeBeats = -1L
         streamEnv = 0f
+        beatsSeen = 0L
+        tapsSent = 0L
+        lastStatAtMs = android.os.SystemClock.elapsedRealtime()
+        DebugLog.add("HAPTIC start: amplitudeControl=$hasAmplitude sdk=${Build.VERSION.SDK_INT}")
         val t = HandlerThread("lmg-haptic").apply { start() }
         thread = t
         handler = Handler(t.looper).also { it.post(tick) }
@@ -85,6 +101,8 @@ object HapticMusicEngine {
 
     @Synchronized
     private fun stop() {
+        if (running)
+            DebugLog.add("HAPTIC stop: beats=$beatsSeen taps=$tapsSent")
         running = false
         handler = null
         thread?.quitSafely()
@@ -95,6 +113,17 @@ object HapticMusicEngine {
         override fun run() {
             if (!running) return
             runCatching { pollOnce() }
+            // Каждые 10с — счётчики в LOG: beats>0 && taps=0 -> система глотает
+            // вибро; beats=0 -> молчит детектор (см. env в OBOE-дампе).
+            val now = android.os.SystemClock.elapsedRealtime()
+            if (now - lastStatAtMs >= 10_000L) {
+                lastStatAtMs = now
+                DebugLog.add(
+                    "HAPTIC: beats=$beatsSeen taps=$tapsSent env=%.3f".format(
+                        AutoMixNativeEngine.hapticEnv()
+                    )
+                )
+            }
             handler?.postDelayed(this, POLL_MS)
         }
     }
@@ -106,6 +135,7 @@ object HapticMusicEngine {
             val beats = AutoMixNativeEngine.hapticBeatCount()
             if (lastNativeBeats < 0) lastNativeBeats = beats
             if (beats > lastNativeBeats) {
+                beatsSeen += beats - lastNativeBeats
                 lastNativeBeats = beats
                 tap(AutoMixNativeEngine.hapticBeatStrength())
             }
@@ -121,6 +151,7 @@ object HapticMusicEngine {
                 level > prevEnv * 1.45f + 0.02f
             ) {
                 lastBeatAtMs = now
+                beatsSeen++
                 // Та же шкала силы, что у нативного детектора: отношение к
                 // среднему качу -> ровный бит лёгкий, акценты в полную силу.
                 val ratio = level / maxOf(prevEnv, 0.05f)
@@ -149,14 +180,24 @@ object HapticMusicEngine {
         val scale = when (level) { 0 -> 0.6f; 1 -> 0.8f; else -> 1.0f }
 
         runCatching {
-            if (hasAmplitude) {
+            val effect = if (hasAmplitude) {
                 val amp = ((45 + 190 * s) * scale).toInt().coerceIn(1, 255)
                 val durMs = ((10 + 16 * s) * (0.7f + 0.3f * scale)).toLong().coerceAtLeast(8L)
-                v.vibrate(VibrationEffect.createOneShot(durMs, amp))
+                VibrationEffect.createOneShot(durMs, amp)
             } else {
                 // Без амплитудного контроля — короткий фиксированный тик.
-                v.vibrate(VibrationEffect.createOneShot(12, VibrationEffect.DEFAULT_AMPLITUDE))
+                VibrationEffect.createOneShot(12, VibrationEffect.DEFAULT_AMPLITUDE)
             }
+            // КРИТИЧНО: без явного usage система классифицирует вибро как
+            // «касания» (USAGE_UNKNOWN/TOUCH), и при выключенной в системе
+            // вибрации касаний MagicOS/ColorOS молча глотают ВСЁ — «хаптика
+            // не пашет вообще». USAGE_MEDIA — канал медиа, живёт отдельно.
+            if (Build.VERSION.SDK_INT >= 33) {
+                v.vibrate(effect, VibrationAttributes.createForUsage(VibrationAttributes.USAGE_MEDIA))
+            } else {
+                v.vibrate(effect)
+            }
+            tapsSent++
         }
     }
 }
