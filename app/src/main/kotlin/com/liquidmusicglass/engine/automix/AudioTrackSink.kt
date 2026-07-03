@@ -47,17 +47,12 @@ object AudioTrackSink {
         thread = null
     }
 
-    private fun loop() {
-        // THREAD_PRIORITY_URGENT_AUDIO — как у системных аудио-потоков: пейсинг
-        // стабильнее, меньше шанс underrun'а при нагрузке на UI.
-        runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO) }
-
+    private fun createTrack(): AudioTrack? {
         val minBuf = AudioTrack.getMinBufferSize(
             SAMPLE_RATE, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT
         )
         val bufBytes = maxOf(minBuf, BLOCK_FRAMES * 2 /*ch*/ * 2 /*bytes*/ * 4)
-
-        val track = runCatching {
+        return runCatching {
             AudioTrack.Builder()
                 .setAudioAttributes(
                     AudioAttributes.Builder()
@@ -77,19 +72,60 @@ object AudioTrackSink {
                 .build()
         }.getOrElse {
             Log.e(TAG, "AudioTrack create failed", it)
-            running = false
-            return
+            null
+        }
+    }
+
+    private fun loop() {
+        // THREAD_PRIORITY_URGENT_AUDIO — как у системных аудио-потоков: пейсинг
+        // стабильнее, меньше шанс underrun'а при нагрузке на UI.
+        runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO) }
+
+        var track = createTrack() ?: run { running = false; return }
+        runCatching { track.play() }.onFailure {
+            Log.e(TAG, "AudioTrack play failed", it); running = false
+            runCatching { track.release() }; return
         }
 
-        runCatching {
-            track.play()
-            val buf = ShortArray(BLOCK_FRAMES * 2)
-            while (running) {
-                AutoMixNativeEngine.sinkRender(buf, BLOCK_FRAMES)
-                // Блокирующий write пейсит цикл под темп воспроизведения.
-                track.write(buf, 0, buf.size)
+        val buf = ShortArray(BLOCK_FRAMES * 2)
+        var consecutiveErrors = 0
+        var lastUnderruns = 0
+        var lastUnderrunCheckAt = android.os.SystemClock.elapsedRealtime()
+
+        while (running) {
+            AutoMixNativeEngine.sinkRender(buf, BLOCK_FRAMES)
+            // Блокирующий write пейсит цикл под темп воспроизведения.
+            val written = runCatching { track.write(buf, 0, buf.size) }.getOrDefault(-1)
+
+            if (written < 0) {
+                // ERROR_DEAD_OBJECT и т.п.: система убила трек (смена маршрута/
+                // рестарт audioserver). Без обработки цикл крутился бы вхолостую
+                // (тишина + сожжённый CPU). Пересоздаём на месте — позиция
+                // воспроизведения не теряется (движок продолжает с того же места).
+                consecutiveErrors++
+                com.liquidmusicglass.debug.DebugLog.add(
+                    "SINK write=$written — пересоздаю AudioTrack (#$consecutiveErrors)"
+                )
+                runCatching { track.release() }
+                if (consecutiveErrors >= 3 || !running) break
+                track = createTrack() ?: break
+                if (runCatching { track.play() }.isFailure) break
+                continue
             }
-        }.onFailure { Log.e(TAG, "sink loop failed", it) }
+            consecutiveErrors = 0
+
+            // Телеметрия underrun'ов раз в ~10с: рост = sink-поток голодает
+            // (тротлинг/нагрузка) — видно в логе без гаданий.
+            val now = android.os.SystemClock.elapsedRealtime()
+            if (now - lastUnderrunCheckAt > 10_000) {
+                lastUnderrunCheckAt = now
+                val u = runCatching { track.underrunCount }.getOrDefault(lastUnderruns)
+                if (u > lastUnderruns) {
+                    com.liquidmusicglass.debug.DebugLog.add("SINK underruns +${u - lastUnderruns} (всего $u)")
+                    lastUnderruns = u
+                }
+            }
+        }
 
         runCatching { track.stop() }
         runCatching { track.release() }

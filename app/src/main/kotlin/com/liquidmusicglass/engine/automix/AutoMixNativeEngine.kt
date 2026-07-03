@@ -159,6 +159,12 @@ object AutoMixNativeEngine {
         return runCatching { nativeCallbackCount() }.getOrDefault(0L)
     }
 
+    /** Мастер-громкость 0..1 (дак при уведомлениях, фейды). Сглаживается в движке. */
+    fun setPlaybackVolume(v01: Float) {
+        if (!isLoaded || !initialised) return
+        runCatching { nativeSetPlaybackVolume(v01) }
+    }
+
     /** Текущий режим + последние открытые Oboe-потоки (для DebugOverlay/логов). */
     fun audioDiagnostics(): String {
         if (!isLoaded) return "native lib not loaded"
@@ -554,6 +560,7 @@ object AutoMixNativeEngine {
     private external fun nativeSinkRender(out: ShortArray, frames: Int)
     private external fun nativeSinkStop()
     private external fun nativeCallbackCount(): Long
+    private external fun nativeSetPlaybackVolume(v01: Float)
     private external fun nativeLoadIncoming(path: String): Boolean
     private external fun nativeLoadIncomingFd(fd: Int, offset: Long, length: Long): Boolean
     private external fun nativeStartTransition(durationMs: Double, entryMs: Double, transitionType: Int)

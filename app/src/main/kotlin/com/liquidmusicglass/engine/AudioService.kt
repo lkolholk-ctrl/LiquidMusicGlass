@@ -117,17 +117,51 @@ class AudioService : MediaSessionService() {
     private var errorRetryCount = 0
     private var lastErrorTrackId: String? = null
 
+    // Пауза, поставленная НАМИ на временной потере фокуса (звонок/ассистент) —
+    // только такую можно автоматически снимать на AUDIOFOCUS_GAIN. Пользовательскую
+    // паузу не трогаем (флаг сбрасывается при USER_REQUEST в onPlayWhenReadyChanged).
+    @Volatile private var pausedByTransientFocusLoss = false
+
     private val focusChangeListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
         when (focusChange) {
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> requestDuck(true)
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
-                // Не паузим на временной потере — воспроизведение продолжается.
+                // Звонок/ассистент: пауза с авто-резюме на GAIN — поведение всех
+                // плееров. Флаг ставим ТОЛЬКО если реально играли, иначе GAIN
+                // «воскресил» бы паузу пользователя.
+                duckHandler.removeCallbacksAndMessages(null)
+                if (runCatching { activePlayer().isPlaying }.getOrDefault(false)) {
+                    pausedByTransientFocusLoss = true
+                    runCatching { activePlayer().pause() }
+                }
             }
-            AudioManager.AUDIOFOCUS_GAIN -> requestDuck(false)
+            AudioManager.AUDIOFOCUS_GAIN -> {
+                requestDuck(false)
+                if (pausedByTransientFocusLoss) {
+                    pausedByTransientFocusLoss = false
+                    runCatching { activePlayer().play() }
+                }
+            }
             AudioManager.AUDIOFOCUS_LOSS -> {
                 // Перманентная потеря — паузим сразу (без дебаунса), снимаем отложенный дак.
                 duckHandler.removeCallbacksAndMessages(null)
+                pausedByTransientFocusLoss = false
                 setDucked(false)
+                runCatching { activePlayer().pause() }
+            }
+        }
+    }
+
+    // ── Выдернули наушники (BECOMING_NOISY) ──────────────────────────────────
+    // ExoPlayer-путь обрабатывает это сам (setHandleAudioBecomingNoisy), а
+    // JUCE-путь (SimpleBasePlayer) события не видит: без ресивера выдёргивание
+    // наушников продолжало бы играть из динамика на весь автобус.
+    private val becomingNoisyReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: android.content.Intent?) {
+            if (intent?.action != AudioManager.ACTION_AUDIO_BECOMING_NOISY) return
+            pausedByTransientFocusLoss = false   // это пауза «навсегда», не авто-резюмим
+            if (runCatching { activePlayer().isPlaying }.getOrDefault(false)) {
+                android.util.Log.d("VOIDPIXEL_MEDIA", "[PAUSE_TRIGGER] BECOMING_NOISY (receiver)")
                 runCatching { activePlayer().pause() }
             }
         }
@@ -183,8 +217,11 @@ class AudioService : MediaSessionService() {
                     android.util.Log.d("VOIDPIXEL_MEDIA", "[PAUSE_TRIGGER] Reason: REMOTE (notification/bluetooth)")
                 Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM ->
                     android.util.Log.d("VOIDPIXEL_MEDIA", "[PAUSE_TRIGGER] Reason: END_OF_MEDIA_ITEM")
-                Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST ->
+                Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST -> {
                     android.util.Log.d("VOIDPIXEL_MEDIA", "[PAUSE_TRIGGER] Reason: USER_REQUEST")
+                    // Явное действие пользователя отменяет наш авто-резюме после звонка.
+                    pausedByTransientFocusLoss = false
+                }
                 else ->
                     android.util.Log.d("VOIDPIXEL_MEDIA", "[PAUSE_TRIGGER] Reason: UNKNOWN/other ($reason)")
             }
@@ -335,6 +372,18 @@ class AudioService : MediaSessionService() {
         // Audio focus setup
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         requestAudioFocus()
+
+        // Наушники выдернули → пауза (для JUCE-пути; Exo обрабатывает сам).
+        // ContextCompat + NOT_EXPORTED: системные бродкасты доходят, а требование
+        // флага экспорта (targetSdk 34+) соблюдено.
+        runCatching {
+            androidx.core.content.ContextCompat.registerReceiver(
+                this,
+                becomingNoisyReceiver,
+                android.content.IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY),
+                androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED
+            )
+        }
 
         // WakeLock initialization
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -551,6 +600,7 @@ class AudioService : MediaSessionService() {
         positionJob?.cancel()
         cancelCrossfadeFade(resetVolume = false)
         abandonAudioFocus()
+        runCatching { unregisterReceiver(becomingNoisyReceiver) }
 
         // Release WakeLock
         if (wakeLock?.isHeld == true) {

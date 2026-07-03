@@ -68,6 +68,10 @@ public:
     /** RT-safe emergency mute. Used before async pause/skip/load reaches the engine. */
     void silenceOutput();
 
+    /** Мастер-громкость 0..1 (дак при уведомлениях, фейды сервиса). Применяется
+     *  в колбэке со сглаживанием ~20мс — без щелчков. Любой поток. */
+    void setPlaybackVolume (float v01);
+
     /** Crossfade deck A -> deck B over durationMs. Starts both decks. */
     void startCrossfade (double durationMs, int transitionType = 0);
 
@@ -245,6 +249,11 @@ private:
     // применяется к уже сведённому локальному миксу. Вся обработка и RT-безопасные
     // апдейты коэффициентов — внутри AudioFxChain.
     AudioFxChain audioFx;
+
+    // Мастер-громкость (дак/фейды сервиса): target — атомик из любого потока,
+    // smoothed — состояние ТОЛЬКО аудио-потока (линейный рамп в колбэке).
+    std::atomic<float> masterVolumeTarget { 1.0f };
+    float masterVolumeSmoothed { 1.0f };
 
     std::atomic<bool> initialised { false };
     std::atomic<bool> toneOn { false };

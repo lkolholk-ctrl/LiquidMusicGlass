@@ -563,6 +563,11 @@ void AutoMixAudioEngine::silenceOutput()
     fxResetRequested.store (true, std::memory_order_release);
 }
 
+void AutoMixAudioEngine::setPlaybackVolume (float v01)
+{
+    masterVolumeTarget.store (juce::jlimit (0.0f, 1.0f, v01), std::memory_order_relaxed);
+}
+
 void AutoMixAudioEngine::startCrossfade (double durationMs, int transitionType)
 {
     outputMuted.store (false, std::memory_order_release);
@@ -1073,6 +1078,25 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
     // AutoMix-кроссфейд). Сама пропускает выключенные стадии (лёгкий путь).
     // o[0..ch) — указатели выхода; обрабатываем до 2 каналов (стерео).
     audioFx.process (o, ch, numSamples);
+
+    // Мастер-громкость (дак при уведомлениях/навигаторе, фейды сервиса). Линейный
+    // рамп ~20мс на полный ход — смена громкости без щелчков. Оба на 1.0 → пропуск.
+    {
+        const float target = masterVolumeTarget.load (std::memory_order_relaxed);
+        if (target != 1.0f || masterVolumeSmoothed != 1.0f)
+        {
+            const float step = 1.0f / (0.02f * (float) currentSampleRate);
+            for (int i = 0; i < numSamples; ++i)
+            {
+                if (masterVolumeSmoothed < target)
+                    masterVolumeSmoothed = juce::jmin (target, masterVolumeSmoothed + step);
+                else if (masterVolumeSmoothed > target)
+                    masterVolumeSmoothed = juce::jmax (target, masterVolumeSmoothed - step);
+                for (int c = 0; c < ch && c < 2; ++c)
+                    o[c][i] *= masterVolumeSmoothed;
+            }
+        }
+    }
 
     // NaN-ловушка: не-конечный сэмпл (NaN/Inf) отравляет рекурсивные IIR/лимитер
     // навсегда и на выходе слышен как постоянный шум. Вычищаем и СЧИТАЕМ

@@ -75,6 +75,10 @@ class JuceLocalPlayer(
     private var prepared = false
     @Volatile private var ended = false
     @Volatile private var released = false
+    // Мастер-громкость плеера (дак 0.2 при уведомлениях, фейды сервиса). Раньше
+    // activePlayer().volume=… тихо глотался (COMMAND_SET_VOLUME не был реализован),
+    // и JUCE-путь играл в полный голос поверх навигатора/уведомлений.
+    @Volatile private var volume01 = 1f
 
     // ── Stage 8c (ШАГ 1: ТОЛЬКО НАБЛЮДЕНИЕ) ──────────────────────────────────
     // Когда трек подходит к концу и включён тумблер AutoMix — в фоне анализируем
@@ -171,6 +175,8 @@ class JuceLocalPlayer(
             .add(Player.COMMAND_GET_METADATA)
             .add(Player.COMMAND_SET_MEDIA_ITEM)
             .add(Player.COMMAND_CHANGE_MEDIA_ITEMS)
+            .add(Player.COMMAND_SET_VOLUME)
+            .add(Player.COMMAND_GET_VOLUME)
             .add(Player.COMMAND_RELEASE)
             .build()
 
@@ -204,6 +210,7 @@ class JuceLocalPlayer(
         val builder = State.Builder()
             .setAvailableCommands(commands)
             .setPlaybackState(state)
+            .setVolume(volume01)
             .setPlayWhenReady(playWhenReadyFlag, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
         if (items.isNotEmpty()) {
             builder.setPlaylist(items)
@@ -412,6 +419,14 @@ class JuceLocalPlayer(
             val seq = loadSeq.get()
             loadHandler.post { if (!released && seq == loadSeq.get()) engine.seekCurrent(to) }
         }
+        invalidateState()
+        return Futures.immediateVoidFuture()
+    }
+
+    override fun handleSetVolume(volume: Float): ListenableFuture<*> {
+        volume01 = volume.coerceIn(0f, 1f)
+        // Применяется в аудио-колбэке движка со сглаживанием ~20мс (без щелчков).
+        engine.setPlaybackVolume(volume01)
         invalidateState()
         return Futures.immediateVoidFuture()
     }
