@@ -94,6 +94,10 @@ class App : Application(), ImageLoaderFactory {
         // Initialize AppSettings (SharedPreferences) — лёгкая, можно на main
         AppSettings.init(this)
 
+        // Haptic Music: тактильные удары в такт музыке (цикл живёт только пока
+        // тумблер включён и музыка играет — иначе спит, батарею не тратит)
+        com.liquidmusicglass.engine.automix.HapticMusicEngine.init(this)
+
         // Player settings (DataStore) — лёгкая инициализация
         com.liquidmusicglass.engine.PlayerSettings.init(this)
 

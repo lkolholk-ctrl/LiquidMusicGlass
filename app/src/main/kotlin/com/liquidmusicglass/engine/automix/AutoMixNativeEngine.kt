@@ -161,6 +161,26 @@ object AutoMixNativeEngine {
         return runCatching { nativeCallbackCount() }.getOrDefault(0L)
     }
 
+    // ── Haptic Music: бас-огибающая и удары из нативного колбэка ──
+
+    /** Огибающая баса 0..~1 (LP ~110 Гц, атака быстрая/спад медленный). */
+    fun hapticEnv(): Float {
+        if (!isLoaded || !initialised) return 0f
+        return runCatching { nativeHapticEnv() }.getOrDefault(0f)
+    }
+
+    /** Счётчик ударов (кик/бас-транзиент) с запуска — растёт на каждом ударе. */
+    fun hapticBeatCount(): Long {
+        if (!isLoaded || !initialised) return 0L
+        return runCatching { nativeHapticBeatCount() }.getOrDefault(0L)
+    }
+
+    /** Сила последнего удара 0..1 (насколько блок выше огибающей). */
+    fun hapticBeatStrength(): Float {
+        if (!isLoaded || !initialised) return 0f
+        return runCatching { nativeHapticBeatStrength() }.getOrDefault(0f)
+    }
+
     /** Мастер-громкость 0..1 (дак при уведомлениях, фейды). Сглаживается в движке. */
     fun setPlaybackVolume(v01: Float) {
         if (!isLoaded || !initialised) return
@@ -562,6 +582,9 @@ object AutoMixNativeEngine {
     private external fun nativeSinkRender(out: ShortArray, frames: Int)
     private external fun nativeSinkStop()
     private external fun nativeCallbackCount(): Long
+    private external fun nativeHapticEnv(): Float
+    private external fun nativeHapticBeatCount(): Long
+    private external fun nativeHapticBeatStrength(): Float
     private external fun nativeSetPlaybackVolume(v01: Float)
     private external fun nativeLoadIncoming(path: String): Boolean
     private external fun nativeLoadIncomingFd(fd: Int, offset: Long, length: Long): Boolean

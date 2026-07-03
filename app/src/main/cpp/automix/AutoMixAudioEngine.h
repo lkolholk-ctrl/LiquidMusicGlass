@@ -255,6 +255,10 @@ private:
     std::atomic<float> masterVolumeTarget { 1.0f };
     float masterVolumeSmoothed { 1.0f };
 
+    // Haptic Music: состояние LP-фильтра ~110 Гц (только аудио-поток) —
+    // бас-огибающая для тактильных ударов (automix::noteBassLevel).
+    float hapticLpState { 0.0f };
+
     std::atomic<bool> initialised { false };
     std::atomic<bool> toneOn { false };
     std::atomic<bool> outputMuted { false };

@@ -124,6 +124,56 @@ namespace automix
         return gCbCount.load (std::memory_order_relaxed);
     }
 
+    // ── Haptic Music: огибающая баса + детектор ударов ──
+    // Пишет ТОЛЬКО аудио-поток (сглаживание/история — обычные статики),
+    // Kotlin читает атомики. Кулдаун между ударами ~120мс (в сэмплах, по 48к —
+    // на 44.1к чуть длиннее, для тактильности некритично).
+    static std::atomic<int>  gHapticEnvMilli { 0 };
+    static std::atomic<long> gHapticBeatCount { 0 };
+    static std::atomic<int>  gHapticBeatStrengthMilli { 0 };
+
+    void noteBassLevel (float bassMeanAbs, int numSamples)
+    {
+        static float env = 0.0f;              // огибающая (атака быстрая, спад медленный)
+        static long  samplesSinceBeat = 1 << 30;
+        constexpr long kBeatCooldownSamples = 5760;   // ~120мс @48к
+
+        const float attack  = 0.5f;
+        const float release = 0.06f;
+        const float k = bassMeanAbs > env ? attack : release;
+        env += k * (bassMeanAbs - env);
+        gHapticEnvMilli.store ((int) (env * 1000.0f), std::memory_order_relaxed);
+
+        samplesSinceBeat += numSamples;
+        // Удар: блок заметно выше огибающей И не в мёртвой зоне после прошлого.
+        if (samplesSinceBeat >= kBeatCooldownSamples
+            && bassMeanAbs > env * 1.45f + 0.008f)
+        {
+            samplesSinceBeat = 0;
+            float strength = (bassMeanAbs - env) / (env > 0.02f ? env : 0.02f);
+            if (strength > 1.0f) strength = 1.0f;
+            if (strength < 0.0f) strength = 0.0f;
+            gHapticBeatStrengthMilli.store ((int) (strength * 1000.0f),
+                                            std::memory_order_relaxed);
+            gHapticBeatCount.fetch_add (1, std::memory_order_relaxed);
+        }
+    }
+
+    float getHapticEnv()
+    {
+        return (float) gHapticEnvMilli.load (std::memory_order_relaxed) / 1000.0f;
+    }
+
+    long getHapticBeatCount()
+    {
+        return gHapticBeatCount.load (std::memory_order_relaxed);
+    }
+
+    float getHapticBeatStrength()
+    {
+        return (float) gHapticBeatStrengthMilli.load (std::memory_order_relaxed) / 1000.0f;
+    }
+
     void setLastCodecInfo (const char* info)
     {
         if (info == nullptr)

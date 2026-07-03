@@ -123,6 +123,7 @@ fun SettingsScreen(
             val hideExplicit by AppSettings.hideExplicit.collectAsState()
             val audioCompatMode by AppSettings.audioCompatMode.collectAsState()
             val audioCompatAuto by AppSettings.audioCompatAuto.collectAsState()
+            val hapticMusicEnabled by AppSettings.hapticMusicEnabled.collectAsState()
 
             PlainCard {
                 SettingsToggleItem(
@@ -177,6 +178,15 @@ fun SettingsScreen(
                         modifier = Modifier.padding(horizontal = 16.dp)
                     )
                 }
+                PlainDivider()
+                // Haptic Music: тактильные удары в такт (свой детектор в нативном
+                // колбэке — системный HapticGenerator вендоры не открывают).
+                SettingsToggleItem(
+                    title = "Haptic Music",
+                    subtitle = "Feel the beat — vibration taps follow the music",
+                    selected = hapticMusicEnabled,
+                    onSelect = { AppSettings.setHapticMusicEnabled(it) }
+                )
                 PlainDivider()
                 SettingsActionItem(
                     title = "Audio",

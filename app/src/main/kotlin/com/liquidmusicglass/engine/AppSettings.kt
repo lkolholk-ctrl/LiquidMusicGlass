@@ -54,6 +54,10 @@ object AppSettings {
     private val _audioCompatAuto = MutableStateFlow(true)
     val audioCompatAuto: StateFlow<Boolean> = _audioCompatAuto
 
+    // ── Haptic Music: тактильные удары в такт музыке (HapticMusicEngine) ──
+    private val _hapticMusicEnabled = MutableStateFlow(false)
+    val hapticMusicEnabled: StateFlow<Boolean> = _hapticMusicEnabled
+
     private val _ignoreThresholdSec = MutableStateFlow(30f)
     val ignoreThresholdSec: StateFlow<Float> = _ignoreThresholdSec
 
@@ -147,6 +151,11 @@ object AppSettings {
     fun setIgnoreShort(enabled: Boolean) {
         _ignoreShortEnabled.value = enabled
         safePrefs()?.edit()?.putBoolean("ignore_short", enabled)?.apply()
+    }
+
+    fun setHapticMusicEnabled(enabled: Boolean) {
+        _hapticMusicEnabled.value = enabled
+        safePrefs()?.edit()?.putBoolean("haptic_music", enabled)?.apply()
     }
 
     fun setAudioCompatMode(mode: Int) {
@@ -368,6 +377,7 @@ object AppSettings {
         else
             p.getInt("audio_compat_mode", 0).coerceIn(0, 6)
         _preloadLeadSeconds.value = p.getInt("preload_lead_seconds", 60).coerceIn(30, 90)
+        _hapticMusicEnabled.value = p.getBoolean("haptic_music", false)
 
         _lastTrackIndex.value = p.getInt("last_track", -1)
         _lastPositionMs.value = p.getLong("last_position", 0L)

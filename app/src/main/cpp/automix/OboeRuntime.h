@@ -53,6 +53,16 @@ namespace automix
      *  В дампе level>0 при «тишине из динамика» = звук портит система, не мы. */
     void noteAudioLevel (float meanAbs);
 
+    /** Haptic Music: бас-огибающая + детектор ударов. Кормится из аудио-колбэка
+     *  (RT-safe, только audio thread пишет): [bassMeanAbs] — средний |сэмпл|
+     *  блока после LP-фильтра ~110 Гц, [numSamples] — размер блока (кулдаун
+     *  между ударами считается в сэмплах). Kotlin-опрос ~40 Гц читает
+     *  огибающую, счётчик ударов и силу последнего удара (0..1). */
+    void noteBassLevel (float bassMeanAbs, int numSamples);
+    float getHapticEnv();
+    long getHapticBeatCount();
+    float getHapticBeatStrength();
+
     /** Человекочитаемый отчёт: текущий режим + формат декодера + последние
      *  открытые потоки (API/sharing/perf/format/rate/buffer/burst). */
     std::string getAudioDiagnostics();

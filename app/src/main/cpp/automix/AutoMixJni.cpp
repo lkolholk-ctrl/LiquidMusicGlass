@@ -472,6 +472,29 @@ Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeCallbackCount
     return (jlong) automix::getCallbackCount();
 }
 
+// ── Haptic Music: бас-огибающая/удары для тактильного движка (опрос ~40 Гц) ──
+
+JNIEXPORT jfloat JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeHapticEnv(
+        JNIEnv* /*env*/, jobject /*thiz*/)
+{
+    return (jfloat) automix::getHapticEnv();
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeHapticBeatCount(
+        JNIEnv* /*env*/, jobject /*thiz*/)
+{
+    return (jlong) automix::getHapticBeatCount();
+}
+
+JNIEXPORT jfloat JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeHapticBeatStrength(
+        JNIEnv* /*env*/, jobject /*thiz*/)
+{
+    return (jfloat) automix::getHapticBeatStrength();
+}
+
 JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeSetPlaybackVolume(
         JNIEnv* /*env*/, jobject /*thiz*/, jfloat v01)
