@@ -22,8 +22,11 @@ package com.liquidmusicglass.engine.automix
  */
 object AudioFleetConfig {
 
-    /** Прямая ссылка на quirks.json. Пусто = удалённая карта выключена. */
-    const val QUIRKS_URL = ""
+    /** Прямая ссылка на quirks.json. Пусто = удалённая карта выключена.
+     *  Gist «lkolholk-ctrl/quirks.json»; /raw без имени файла и ревизии —
+     *  всегда последняя версия единственного файла гиста. */
+    const val QUIRKS_URL =
+        "https://gist.githubusercontent.com/lkolholk-ctrl/b679e26d8b6fe008b2d887513070ef4b/raw"
 
     /** Не чаще одного сетевого обновления карты в этот интервал. */
     const val QUIRKS_REFRESH_MS = 6 * 60 * 60 * 1000L   // 6 часов
