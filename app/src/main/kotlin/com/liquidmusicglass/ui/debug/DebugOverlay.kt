@@ -36,6 +36,13 @@ import com.liquidmusicglass.engine.automix.AutoMixNativeEngine
 @Composable
 fun DebugOverlay() {
     val visible by DebugLog.visible
+    val logcatOpen by LogcatReader.viewerOpen
+
+    // Полноэкранный logcat поверх всего (открывается кнопкой LCAT).
+    if (logcatOpen) {
+        LogcatScreen(onClose = { LogcatReader.viewerOpen.value = false })
+        return
+    }
 
     Box(modifier = Modifier.fillMaxWidth()) {
         if (visible) {
@@ -79,6 +86,15 @@ fun DebugOverlay() {
                                 else -> "NORMAL(shared+lowlat)"
                             }}")
                         }.padding(4.dp))
+                    Spacer(Modifier.width(8.dp))
+                    // Полноценный logcat своего процесса (без рута/ПК) + экспорт
+                    // одним файлом в «Поделиться» — для полевых репортов.
+                    Text("LCAT", color = Color(0xFF9CFF9C), fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.clickable { LogcatReader.viewerOpen.value = true }.padding(4.dp))
+                    Spacer(Modifier.width(8.dp))
+                    val ctx = androidx.compose.ui.platform.LocalContext.current
+                    Text("EXP", color = Color(0xFF9CFF9C), fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.clickable { LogcatReader.exportLogs(ctx) }.padding(4.dp))
                     Spacer(Modifier.width(8.dp))
                     Text("HIDE", color = Color(0xFF4FC3F7), fontSize = 11.sp, fontFamily = FontFamily.Monospace,
                         modifier = Modifier.clickable { DebugLog.visible.value = false }.padding(4.dp))
