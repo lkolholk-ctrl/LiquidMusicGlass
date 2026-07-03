@@ -86,6 +86,11 @@ class App : Application(), ImageLoaderFactory {
         IcmApiFileLogger.init(this)
         IcmApiFileLogger.log("I", "App", "App started, IcmApiFileLogger initialized at ${IcmApiFileLogger.getLogPath()}")
 
+        // Удалённая карта аудио-причуд — ДО AppSettings: auto-режим выхода должен
+        // резолвиться уже с учётом кэша карты (сетевое обновление уйдёт в фон само).
+        com.liquidmusicglass.engine.automix.RemoteQuirks.preload(this)
+        com.liquidmusicglass.engine.automix.AudioTelemetry.init(this)
+
         // Initialize AppSettings (SharedPreferences) — лёгкая, можно на main
         AppSettings.init(this)
 

@@ -39,12 +39,16 @@ object AudioQuirks {
         "poco" to AUDIOTRACK,
     )
 
-    /** Стартовый режим для ЭТОГО устройства (когда явного выбора ещё не было). */
+    /** Стартовый режим для ЭТОГО устройства (когда явного выбора ещё не было).
+     *  Удалённая карта (RemoteQuirks) сильнее встроенной на каждом уровне:
+     *  правка quirks.json чинит вендора у всего парка без релиза. */
     fun defaultMode(): Int {
         val model = (Build.MODEL + " " + Build.DEVICE).lowercase()
+        RemoteQuirks.modeForModel(model)?.let { return it }
         modelRules.firstOrNull { (sub, _) -> sub in model }?.let { return it.second }
 
         val family = (Build.MANUFACTURER + " " + Build.BRAND).lowercase()
+        RemoteQuirks.modeForFamily(family)?.let { return it }
         familyRules.firstOrNull { (sub, _) -> sub in family }?.let { return it.second }
 
         return NORMAL
@@ -52,5 +56,6 @@ object AudioQuirks {
 
     /** Строка для диагностики: что за устройство и какой дефолт ему выпал. */
     fun describe(): String =
-        "${Build.MANUFACTURER}/${Build.BRAND} ${Build.MODEL} (${Build.DEVICE}) -> default=${defaultMode()}"
+        "${Build.MANUFACTURER}/${Build.BRAND} ${Build.MODEL} (${Build.DEVICE}) " +
+            "-> default=${defaultMode()} [${RemoteQuirks.describe()}]"
 }

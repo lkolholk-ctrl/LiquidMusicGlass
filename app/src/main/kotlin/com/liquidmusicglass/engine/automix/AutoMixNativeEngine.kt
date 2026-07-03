@@ -112,6 +112,8 @@ object AutoMixNativeEngine {
             runCatching { com.liquidmusicglass.engine.AudioRouteMonitor.reapplyToEngine() }
             // Сохранённый AudioTrack-режим: поднять Java-sink после старта движка.
             if (savedMode == OBOE_MODE_AUDIOTRACK) setOboeCompatMode(OBOE_MODE_AUDIOTRACK)
+            // Телеметрия: через 90с зафиксировать устоявшийся режим (раз в сессию).
+            runCatching { AudioTelemetry.onEngineStarted() }
             // Фактические параметры открытого Oboe-потока (API/sharing/perf/format/
             // rate/burst) — в on-screen лог: видно, каким путём пошёл звук на девайсе.
             runCatching { com.liquidmusicglass.debug.DebugLog.add("QUIRKS ${AudioQuirks.describe()}") }

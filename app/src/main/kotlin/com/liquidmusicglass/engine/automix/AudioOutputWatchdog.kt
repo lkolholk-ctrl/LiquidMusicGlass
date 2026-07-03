@@ -90,6 +90,7 @@ object AudioOutputWatchdog {
             "WATCHDOG: играем, но прогресса нет >${STALL_MS}мс " +
                 "(mode=$mode pos=$positionMs cb=$cb) → AUDIOTRACK"
         )
+        AudioTelemetry.onWatchdogEscalated()
         // Персистится: следующий запуск на этом устройстве сразу в рабочем режиме.
         AppSettings.setAudioCompatMode(AutoMixNativeEngine.OBOE_MODE_AUDIOTRACK)
         reset(now, positionMs)
