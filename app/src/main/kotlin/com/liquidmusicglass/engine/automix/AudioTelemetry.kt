@@ -59,6 +59,17 @@ object AudioTelemetry {
         main.postDelayed({ sendIfChanged() }, REPORT_DELAY_MS)
     }
 
+    private val modeChangeRunnable = Runnable { sendIfChanged() }
+
+    /** Пользователь/watchdog сменил режим выхода: через 30с (когда выбор
+     *  устоялся — дебаунс на быстрые перещёлкивания) отправить свежую связку.
+     *  sendIfChanged() сам не шлёт дубликаты, так что это дёшево. */
+    fun onModeChanged() {
+        if (!enabled()) return
+        main.removeCallbacks(modeChangeRunnable)
+        main.postDelayed(modeChangeRunnable, 30_000L)
+    }
+
     /** Watchdog переключил режим — считаем для отчёта (и это сигнал сам по себе). */
     fun onWatchdogEscalated() {
         watchdogFires.incrementAndGet()

@@ -162,6 +162,7 @@ object AppSettings {
         // Живой движок переоткроет Oboe-поток с новым режимом (на фоне);
         // если движок ещё не поднят — режим подхватится при init().
         com.liquidmusicglass.engine.automix.AutoMixNativeEngine.setOboeCompatMode(m)
+        com.liquidmusicglass.engine.automix.AudioTelemetry.onModeChanged()
     }
 
     /** Вернуться в «Авто»: явный выбор стирается, действует вендорная таблица
@@ -174,6 +175,7 @@ object AppSettings {
             _audioCompatMode.value = m
             com.liquidmusicglass.engine.automix.AutoMixNativeEngine.setOboeCompatMode(m)
         }
+        com.liquidmusicglass.engine.automix.AudioTelemetry.onModeChanged()
     }
 
     fun setIgnoreThreshold(sec: Float) {
