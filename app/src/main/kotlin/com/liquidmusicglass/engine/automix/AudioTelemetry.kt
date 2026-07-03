@@ -102,9 +102,17 @@ object AudioTelemetry {
             runCatching {
                 http.newCall(
                     Request.Builder().url(AudioFleetConfig.REPORT_URL).post(body).build()
-                ).execute().use { /* результат не важен — fire-and-forget */ }
-                p.edit().putString("last_sent", signature).apply()
-                DebugLog.add("TELEMETRY sent: mode=$mode watchdog=$fires")
+                ).execute().use { resp ->
+                    // «Отправлено» помечаем ТОЛЬКО при HTTP 2xx: неопубликованная
+                    // Google Form отвечает заглушкой, и раньше такой ответ навсегда
+                    // гасил повторную отправку этой связки.
+                    if (resp.isSuccessful) {
+                        p.edit().putString("last_sent", signature).apply()
+                        DebugLog.add("TELEMETRY sent: mode=$mode watchdog=$fires")
+                    } else {
+                        DebugLog.add("TELEMETRY rejected: HTTP ${resp.code} — повтор в следующей сессии")
+                    }
+                }
             }
         }
     }
