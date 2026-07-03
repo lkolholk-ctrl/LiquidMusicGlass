@@ -135,7 +135,16 @@ class SearchViewModel : ViewModel() {
             _isLoading.value = true
             _error.value = null
             try {
-                val result = IcmRepository.searchAll(q, source = _selectedSource.value)
+                var result = IcmRepository.searchAll(q, source = _selectedSource.value)
+                // Транзиент от быстрого ввода: сервер мог ответить rate_limited
+                // на очередь запросов, или таймаут на слабой сети. Один ТИХИЙ
+                // повтор через 1.2с вместо мгновенного Error — к этому моменту
+                // очередь рассосалась. delay отменяемый: новый запрос его убьёт.
+                if (result == null && q == _query.value.trim()) {
+                    kotlinx.coroutines.delay(1200)
+                    if (q == _query.value.trim())
+                        result = IcmRepository.searchAll(q, source = _selectedSource.value)
+                }
                 // Пока летел ответ, пользователь уже напечатал другое — не
                 // показываем устаревшие результаты (отмена ловит не всё:
                 // новый debounce мог ещё не выстрелить).
