@@ -179,17 +179,30 @@ class HomeViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 val repo = WaveRepository(context)
-                val tracks = repo.buildWaveQueue()
-                _waveTracks.value = tracks
+                var started = false
+                // Мгновенный старт: музыка играет после ПЕРВОГО wave/next,
+                // остальная пачка доклеивается в очередь фоном.
+                repo.buildWaveQueueFast(
+                    onFirst = { tracks ->
+                        if (tracks.isNotEmpty()) {
+                            started = true
+                            _waveTracks.value = tracks
+                            PlayerController.playFromList(
+                                context = context,
+                                tracks = tracks,
+                                startIndex = 0,
+                                autoRefillType = "WAVE"
+                            )
+                            _isBuildingWave.value = false   // спиннер гаснет со стартом музыки
+                        }
+                    },
+                    onTopUp = { rest ->
+                        _waveTracks.value = _waveTracks.value + rest
+                        PlayerController.addTracksToQueue(rest)
+                    }
+                )
 
-                if (tracks.isNotEmpty()) {
-                    PlayerController.playFromList(
-                        context = context,
-                        tracks = tracks,
-                        startIndex = 0,
-                        autoRefillType = "WAVE"
-                    )
-                } else {
+                if (!started) {
                     // Пусто → по доке: у сервера нет seed-артистов/лайков. Если онбординг
                     // ещё не пройден — показываем выбор артистов (персонализация стартует
                     // только после него). Иначе просто молчим.
@@ -228,19 +241,28 @@ class HomeViewModel : ViewModel() {
                 }
 
                 val repo = WaveRepository(context)
-                val tracks = repo.buildWaveQueue(seedTrackId = seedId)
-                _waveTracks.value = tracks
-
-                if (tracks.isNotEmpty()) {
-                    PlayerController.playFromList(
-                        context = context,
-                        tracks = tracks,
-                        startIndex = 0,
-                        autoRefillType = "WAVE",
-                        autoRefillName = name,
-                        seedTrackId = seedId
-                    )
-                }
+                // Мгновенный старт станции: первый трек → играем, хвост фоном.
+                repo.buildWaveQueueFast(
+                    seedTrackId = seedId,
+                    onFirst = { tracks ->
+                        if (tracks.isNotEmpty()) {
+                            _waveTracks.value = tracks
+                            PlayerController.playFromList(
+                                context = context,
+                                tracks = tracks,
+                                startIndex = 0,
+                                autoRefillType = "WAVE",
+                                autoRefillName = name,
+                                seedTrackId = seedId
+                            )
+                            _isBuildingWave.value = false
+                        }
+                    },
+                    onTopUp = { rest ->
+                        _waveTracks.value = _waveTracks.value + rest
+                        PlayerController.addTracksToQueue(rest)
+                    }
+                )
             } catch (_: Exception) {
                 _error.value = "Failed to build wave"
             } finally {

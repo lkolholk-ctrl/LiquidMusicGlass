@@ -320,6 +320,14 @@ object PlayerController {
             queue = queue + fresh
             _queueFlow.value = queue
 
+            // Анти-повтор волны: всё, что попало в очередь, регистрируем в
+            // playedIds движка — иначе следующий рефилл может запросить у
+            // сервера то, что уже стоит в очереди (дубль отсеется, но
+            // wave/next-запрос сгорит зря).
+            if (_playbackContext is PlaybackContext.Global) {
+                endlessEngine.registerTracks(fresh.map { it.id })
+            }
+
             withContext(Dispatchers.Main) {
                 val player = controller ?: appContext?.let { getPlayer(it) }
                 player?.let { p ->
@@ -1178,10 +1186,18 @@ object PlayerController {
                 com.liquidmusicglass.data.local.db.LibraryRepository.getInstance(it)
             } ?: return@launch
             val track = _currentTrack.value
-            if (track != null && track.id == trackId) {
+            val nowLiked = if (track != null && track.id == trackId) {
                 repo.toggleFavorite(track)
             } else {
                 repo.toggleFavoriteById(trackId)
+            }
+            // Лайк — сильнейший позитивный сигнал волне (more_track, decay 30д
+            // на сервере). Снятие лайка фидбеком НЕ шлём: «разлюбил» ≠ «реже
+            // такое». Не залинкован — Result внутри вернёт 401, глотаем.
+            if (nowLiked) {
+                runCatching {
+                    com.liquidmusicglass.api.icm.IcmRepository.sendWaveFeedback("more_track", trackId)
+                }
             }
         }
     }
@@ -1193,23 +1209,21 @@ object PlayerController {
      */
     fun startTrackWave(context: Context, seedTrack: Track) {
         ioScope.launch {
-            val repo = com.liquidmusicglass.data.local.WaveRepository.getInstance(context)
-            val station = repo.buildWaveQueue(seedTrackId = seedTrack.id)
-            val queue = if (station.isEmpty()) {
-                listOf(seedTrack)
-            } else {
-                buildList {
-                    add(seedTrack)
-                    addAll(station.filter { it.id != seedTrack.id })
-                }
-            }
+            // Мгновенный старт: seed-трек играет СРАЗУ (ноль сетевых запросов),
+            // станция вокруг него добирается фоном и доклеивается в очередь.
             playFromList(
                 context = context,
-                tracks = queue,
+                tracks = listOf(seedTrack),
                 startIndex = 0,
                 autoRefillType = "WAVE",
                 seedTrackId = seedTrack.id
             )
+            val repo = com.liquidmusicglass.data.local.WaveRepository.getInstance(context)
+            val station = repo.buildWaveQueue(seedTrackId = seedTrack.id)
+            val rest = station.filter { it.id != seedTrack.id }
+            if (rest.isNotEmpty()) {
+                withContext(Dispatchers.Main) { addTracksToQueue(rest) }
+            }
         }
     }
 

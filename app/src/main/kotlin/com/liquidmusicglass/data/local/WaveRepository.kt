@@ -173,6 +173,29 @@ class WaveRepository(context: Context) {
      * 
      * Uses random favorite seeds, applies ban filters and skipRatio filters, and heuristic genre tagging.
      */
+    /**
+     * Мгновенный старт волны: ПЕРВЫЙ трек отдаётся как только пришёл (музыка
+     * стартует через ОДИН сетевой запрос), остальная пачка добирается следом
+     * и доклеивается в очередь. Вместо прежнего «строим волну 5×RTT молча».
+     */
+    suspend fun buildWaveQueueFast(
+        seedTrackId: String? = null,
+        exclude: Collection<String> = emptyList(),
+        topUpCount: Int = 5,
+        onFirst: suspend (List<Track>) -> Unit,
+        onTopUp: suspend (List<Track>) -> Unit
+    ) {
+        val first = buildWaveQueue(count = 1, seedTrackId = seedTrackId, exclude = exclude)
+        onFirst(first)
+        if (first.isEmpty()) return
+        val rest = buildWaveQueue(
+            count = topUpCount,
+            seedTrackId = seedTrackId,
+            exclude = exclude + first.map { it.id }
+        )
+        if (rest.isNotEmpty()) onTopUp(rest)
+    }
+
     suspend fun buildWaveQueue(
         count: Int = 5,
         seedTrackId: String? = null,
@@ -220,9 +243,14 @@ class WaveRepository(context: Context) {
                 // лайки / completion / skip-streak). Иначе — станция вокруг seed-трека (мудовая плитка).
                 val recentSkipsVal = com.liquidmusicglass.engine.PlayerController.consecutiveSkips
 
+                // exclude капим ПОСЛЕДНИМИ 80 id (LinkedHashSet держит порядок
+                // вставки → свежие в конце): на длинной сессии полный набор
+                // (до 550 id) раздувал GET-запрос до километрового query-string
+                // с риском 414. Сервер и так ведёт свою playback_history по
+                // нашим wave/playback-событиям — древние эксклюды избыточны.
                 var response = IcmRepository.getWaveNext(
                     seedTrackId = seedTrackId,
-                    exclude = excludeIds.toList().takeIf { it.isNotEmpty() },
+                    exclude = excludeIds.toList().takeLast(80).takeIf { it.isNotEmpty() },
                     recentSkips = recentSkipsVal,
                     genre = null
                 )
