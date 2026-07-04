@@ -123,7 +123,7 @@ private fun ActionRow(
         modifier = Modifier
             .fillMaxWidth()
             .height(52.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(50))   // строки-пилюли, как в настройках
             .background(bg)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },

@@ -139,6 +139,33 @@ fun rememberAlbumColors(uri: Uri?, coverUrl: String? = null): AlbumColors {
                 // Recycle bitmap immediately after palette extraction to free native memory
                 bitmap.recycle()
 
+                // ── Монохромная обложка (ч/б или серая): цвет оттуда не выжать
+                // ВООБЩЕ — «вибрант» на такой обложке это шумовой пиксель, и фон
+                // получал случайный грязный оттенок. Честно признаём монохром:
+                // дым — светло-серый (заметно ярче обычного), база — графит.
+                // Тонированные ч/б (сепия, холодный синеватый) сюда НЕ попадают:
+                // у них есть заселённый свотч с sat >= 0.12. ──
+                val isMonochrome = palette.swatches.isNotEmpty() &&
+                    palette.swatches.none { saturationOf(it.rgb) >= 0.12f && it.population >= 40 }
+                if (isMonochrome) {
+                    // Светлота серых следует за яркостью обложки:
+                    // тёмный ч/б → графит + серый дым, светлый → серебро.
+                    val avgB = brightnessOf(palette.getDominantColor(FALLBACK_DARK))
+                    fun gray(v: Float): Color {
+                        val c = (v.coerceIn(0f, 1f) * 255).toInt()
+                        return Color(c, c, c)
+                    }
+                    val hi = 0.60f + avgB * 0.25f      // дым — светлый
+                    val lo = 0.15f + avgB * 0.10f      // база — графит
+                    return@withContext AlbumColors(
+                        dominant = gray(lo + 0.06f),
+                        darkMuted = gray(lo),
+                        vibrant = gray(hi),
+                        lightVibrant = gray(hi + 0.12f),
+                        muted = gray(lo + 0.10f)
+                    )
+                }
+
                 // ── Vibrant swatch priority chain (high-contrast, punchy) ──
                 val targetSwatch = palette.vibrantSwatch
                     ?: palette.darkVibrantSwatch

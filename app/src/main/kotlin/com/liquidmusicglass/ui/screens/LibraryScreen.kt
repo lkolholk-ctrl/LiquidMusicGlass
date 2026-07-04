@@ -673,7 +673,7 @@ private fun MenuCard(
     onClick: () -> Unit
 ) {
     val lc = LiquidTheme.colors
-    val shape = RoundedCornerShape(16.dp)
+    val shape = RoundedCornerShape(28.dp)   // эталон радиуса — карточки настроек
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -943,7 +943,7 @@ private fun ImportedPlaylistRow(
     onDelete: () -> Unit
 ) {
     val lc = LiquidTheme.colors
-    val shape = RoundedCornerShape(16.dp)
+    val shape = RoundedCornerShape(28.dp)   // эталон радиуса — карточки настроек
 
     Row(
         modifier = Modifier
@@ -1018,7 +1018,7 @@ private fun LocalPlaylistRow(
     onDelete: () -> Unit
 ) {
     val lc = LiquidTheme.colors
-    val shape = RoundedCornerShape(16.dp)
+    val shape = RoundedCornerShape(28.dp)   // эталон радиуса — карточки настроек
 
     // Get cover from first track if available
     val firstTrackWithCover = playlist.tracks.firstOrNull { !it.coverUrl.isNullOrBlank() }

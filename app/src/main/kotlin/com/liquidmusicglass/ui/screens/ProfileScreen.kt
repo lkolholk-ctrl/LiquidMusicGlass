@@ -22,12 +22,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ExitToApp
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
-import androidx.compose.material.icons.rounded.DeleteForever
-import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Person
-import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Star
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -55,15 +51,8 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.liquidmusicglass.api.icm.IcmAuthRepository
 import com.liquidmusicglass.data.local.LocalAuthManager
-import com.liquidmusicglass.engine.AudioDownloadManager
-import com.liquidmusicglass.ui.glass.GlassDialog
-import com.liquidmusicglass.ui.glass.GlassDialogButton
-import com.liquidmusicglass.ui.screens.camp.CampSelectorScreen
 import com.liquidmusicglass.ui.theme.AppFontFamily
 import com.liquidmusicglass.ui.theme.LiquidTheme
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -92,8 +81,6 @@ fun ProfileScreen(
     val avatarUrl by IcmAuthRepository.avatarUrl.collectAsState()
     val subscription by IcmAuthRepository.subscription.collectAsState()
 
-    var showClearDialog by remember { mutableStateOf(false) }
-
     LaunchedEffect(isLoggedIn) {
         if (isLoggedIn) IcmAuthRepository.fetchUserData()
     }
@@ -103,35 +90,6 @@ fun ProfileScreen(
         userEmail != null -> userEmail!!.substringBefore("@").replaceFirstChar { it.uppercase() }
         telegramId != null -> "Telegram user"
         else -> "Guest"
-    }
-
-    // ── Danger Zone Dialog ──
-    if (showClearDialog) {
-        GlassDialog(
-            visible = showClearDialog,
-            onDismiss = { showClearDialog = false },
-            icon = Icons.Rounded.DeleteForever,
-            iconTint = AppleRed,
-            title = "CLEAR ALL DOWNLOADS",
-            message = "This will permanently delete all downloaded tracks from your device. This action cannot be undone.",
-            primaryButton = GlassDialogButton(
-                text = "Clear All",
-                onClick = {
-                    showClearDialog = false
-                    scope.launch(Dispatchers.IO) {
-                        AudioDownloadManager.clearAllDownloads(context)
-                    }
-                },
-                backgroundColor = AppleRed,
-                textColor = Color.White
-            ),
-            secondaryButton = GlassDialogButton(
-                text = "Cancel",
-                onClick = { showClearDialog = false },
-                backgroundColor = if (lc.isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.05f),
-                textColor = lc.textSecondary
-            )
-        )
     }
 
     Box(
@@ -273,98 +231,48 @@ fun ProfileScreen(
             item { Spacer(modifier = Modifier.height(24.dp)) }
 
             // ═══════════════════════════════════════════════════════════
-            //  4. SETTINGS LIST
+            //  4. ACCOUNT — единственная карточка-подложка (28dp, как в
+            //  настройках). «Playback & Appearance» удалён (профиль и так
+            //  открывается ИЗ настроек — ссылка на самого себя), «Danger
+            //  Zone / Clear All Downloads» удалён как бессмысленный здесь.
             // ═══════════════════════════════════════════════════════════
             item {
-                Text(
-                    text = "SETTINGS",
-                    fontFamily = AppFontFamily,
-                    color = lc.textSecondary,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.5.sp,
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 8.dp)
-                )
-            }
-
-            item {
-                SettingRowNavigable(
-                    icon = Icons.Rounded.Settings,
-                    label = "Playback & Appearance",
-                    value = "EQ, Theme, Quality",
-                    onClick = onOpenSettings
-                )
-            }
-
-            item {
-                HorizontalDivider(
-                    modifier = Modifier.padding(horizontal = 20.dp),
-                    color = lc.divider
-                )
-            }
-
-            // ── Account section ──
-            if (isLoggedIn) {
-                item {
-                    SettingRowAction(
-                        icon = Icons.AutoMirrored.Rounded.ExitToApp,
-                        label = "Sign Out",
-                        tint = AppleRed,
-                        onClick = {
-                            LocalAuthManager.logout()
-                            IcmAuthRepository.logout()
-                            onLogout()
-                        }
-                    )
+                        .padding(horizontal = 20.dp)
+                        .clip(RoundedCornerShape(28.dp))
+                        .background(if (lc.isDark) SurfaceDark else Color(0xFFF2F2F7))
+                ) {
+                    if (isLoggedIn) {
+                        SettingRowAction(
+                            icon = Icons.AutoMirrored.Rounded.ExitToApp,
+                            label = "Sign Out",
+                            tint = AppleRed,
+                            onClick = {
+                                LocalAuthManager.logout()
+                                IcmAuthRepository.logout()
+                                onLogout()
+                            }
+                        )
+                    } else {
+                        SettingRowNavigable(
+                            icon = Icons.Rounded.Person,
+                            label = "Sign In",
+                            value = "Connect your account",
+                            onClick = onOpenAuth
+                        )
+                    }
                 }
-            } else {
-                item {
-                    SettingRowNavigable(
-                        icon = Icons.Rounded.Person,
-                        label = "Sign In",
-                        value = "Connect your account",
-                        onClick = onOpenAuth
-                    )
-                }
-            }
-
-            item { Spacer(modifier = Modifier.height(24.dp)) }
-
-            // ═══════════════════════════════════════════════════════════
-            //  5. DANGER ZONE
-            // ═══════════════════════════════════════════════════════════
-            item {
-                Text(
-                    text = "DANGER ZONE",
-                    fontFamily = AppFontFamily,
-                    color = AppleRed,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.5.sp,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 8.dp)
-                )
-            }
-
-            item {
-                SettingRowAction(
-                    icon = Icons.Rounded.DeleteForever,
-                    label = "Clear All Downloads",
-                    subtitle = "Permanently delete offline tracks",
-                    tint = AppleRed,
-                    onClick = { showClearDialog = true }
-                )
             }
 
             item { Spacer(modifier = Modifier.height(32.dp)) }
 
-            // ── Footer ──
+            // ── Footer: честная версия из BuildConfig (versionName у нас —
+            // дата сборки CI), а не зашитое «v1.0». ──
             item {
                 Text(
-                    text = "Liquid Music Glass v1.0",
+                    text = "Liquid Music Glass • ${com.liquidmusicglass.BuildConfig.VERSION_NAME}",
                     fontFamily = AppFontFamily,
                     color = lc.textTertiary,
                     fontSize = 10.sp,

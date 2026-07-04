@@ -3,9 +3,13 @@ package com.liquidmusicglass.ui.screens
 import android.content.Context
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -38,6 +42,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -160,44 +165,62 @@ fun SearchScreen(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Source selector
+            // Источники — единый сегмент-контрол пилюлей (вместо трёх чипов).
+            val segBg = if (LiquidTheme.colors.isDark) Color(0xFF1A1A1A) else Color(0xFFF2F2F7)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    .padding(horizontal = 20.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(segBg)
+                    .padding(4.dp)
             ) {
-                SourceChip(
+                SourceSegment(
                     text = "Apple Music",
                     selected = selectedSource == IcmSearchSource.APPLE,
+                    modifier = Modifier.weight(1f),
                     onClick = { viewModel.setSource(IcmSearchSource.APPLE) }
                 )
-                SourceChip(
+                SourceSegment(
                     text = "VK",
                     selected = selectedSource == IcmSearchSource.VK,
+                    modifier = Modifier.weight(1f),
                     onClick = { viewModel.setSource(IcmSearchSource.VK) }
                 )
-                SourceChip(
+                SourceSegment(
                     text = "All",
                     selected = selectedSource == IcmSearchSource.ALL,
+                    modifier = Modifier.weight(1f),
                     onClick = { viewModel.setSource(IcmSearchSource.ALL) }
                 )
             }
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Search field — solid dark background
+            // Search field — пилюля с подсветкой при фокусе + Cancel рядом.
             val isDark = LiquidTheme.colors.isDark
             val searchBarBg = if (isDark) Color(0xFF1A1A1A) else Color(0xFFF2F2F7)
             val accentColor = AppleRed
+            var searchFocused by remember { mutableStateOf(false) }
+            val focusBorder by animateColorAsState(
+                targetValue = if (searchFocused) accentColor.copy(alpha = 0.65f) else Color.Transparent,
+                animationSpec = tween(200),
+                label = "focusBorder"
+            )
 
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp)
+                    .padding(horizontal = 20.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+            Row(
+                modifier = Modifier
+                    .weight(1f)
                     .height(44.dp)
                     .clip(CircleShape)
                     .background(searchBarBg)
+                    .border(1.5.dp, focusBorder, CircleShape)
                     .padding(horizontal = 14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -217,7 +240,9 @@ fun SearchScreen(
                     ),
                     singleLine = true,
                     cursorBrush = SolidColor(accentColor),
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .onFocusChanged { searchFocused = it.isFocused },
                     keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                         imeAction = androidx.compose.ui.text.input.ImeAction.Search
                     ),
@@ -264,6 +289,26 @@ fun SearchScreen(
                         )
                     }
                 }
+            }
+
+            // Cancel — появляется при фокусе/вводе, сбрасывает поиск.
+            AnimatedVisibility(visible = searchFocused || query.isNotEmpty()) {
+                Text(
+                    text = "Cancel",
+                    color = accentColor,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier
+                        .padding(start = 12.dp)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) {
+                            viewModel.clearQuery()
+                            hideKeyboard()
+                        }
+                )
+            }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -348,19 +393,28 @@ fun SearchScreen(
                                     )
                                 }
                             }
-                            itemsIndexed(
-                                items = history,
-                                key = { index, item -> "hist_${index}_${item.hashCode()}" }
-                            ) { _, item ->
-                                HistoryRow(
-                                    query = item,
-                                    onClick = {
-                                        hideKeyboard()
-                                        viewModel.setQuery(item)
-                                        viewModel.searchNow()
+                            // Чипы-пилюли в несколько рядов: компактнее списка,
+                            // тап — искать сразу.
+                            item(key = "hist_chips") {
+                                @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+                                androidx.compose.foundation.layout.FlowRow(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 20.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    history.forEach { item ->
+                                        HistoryChip(
+                                            query = item,
+                                            onClick = {
+                                                hideKeyboard()
+                                                viewModel.setQuery(item)
+                                                viewModel.searchNow()
+                                            }
+                                        )
                                     }
-                                )
-                                Spacer(modifier = Modifier.height(6.dp))
+                                }
                             }
                         }
                     }
@@ -374,33 +428,53 @@ fun SearchScreen(
                 ) {
                         when {
                             isLoading -> {
-                                Box(
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    CircularProgressIndicator(
-                                        color = AppleRed,
-                                        modifier = Modifier.size(32.dp)
-                                    )
-                                }
+                                // Шиммер-скелетоны: сразу видно структуру будущих
+                                // результатов, а не крутилку в пустоте.
+                                SearchSkeleton()
                             }
                             error != null -> {
                                 Box(
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentAlignment = Alignment.Center
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(horizontal = 20.dp),
+                                    contentAlignment = Alignment.TopCenter
                                 ) {
-                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 24.dp)
+                                            .clip(RoundedCornerShape(28.dp))
+                                            .background(if (isDark) Color(0xFF1A1A1A) else Color(0xFFF2F2F7))
+                                            .padding(24.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
                                         Text(
-                                            text = "Error",
-                                            color = AppleRed,
-                                            fontSize = 18.sp,
-                                            fontWeight = FontWeight.Medium
+                                            text = "Something went wrong",
+                                            color = LiquidTheme.colors.textPrimary,
+                                            fontSize = 16.sp,
+                                            fontWeight = FontWeight.SemiBold
                                         )
-                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Spacer(modifier = Modifier.height(6.dp))
                                         Text(
                                             text = error ?: "Unknown error",
                                             color = LiquidTheme.colors.textTertiary,
-                                            fontSize = 14.sp
+                                            fontSize = 13.sp,
+                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                        )
+                                        Spacer(modifier = Modifier.height(16.dp))
+                                        Text(
+                                            text = "Retry",
+                                            color = Color.White,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(50))
+                                                .background(AppleRed)
+                                                .clickable(
+                                                    interactionSource = remember { MutableInteractionSource() },
+                                                    indication = null
+                                                ) { viewModel.searchNow() }
+                                                .padding(horizontal = 24.dp, vertical = 10.dp)
                                         )
                                     }
                                 }
@@ -506,16 +580,27 @@ fun SearchScreen(
 
                                     if (tracks.isEmpty() && albums.isEmpty() && artists.isEmpty()) {
                                         item {
-                                            Box(
+                                            Column(
                                                 modifier = Modifier
                                                     .fillMaxWidth()
-                                                    .padding(top = 60.dp),
-                                                contentAlignment = Alignment.Center
+                                                    .padding(horizontal = 20.dp)
+                                                    .padding(top = 24.dp)
+                                                    .clip(RoundedCornerShape(28.dp))
+                                                    .background(if (isDark) Color(0xFF1A1A1A) else Color(0xFFF2F2F7))
+                                                    .padding(24.dp),
+                                                horizontalAlignment = Alignment.CenterHorizontally
                                             ) {
+                                                Text(
+                                                    text = "Nothing found",
+                                                    color = LiquidTheme.colors.textPrimary,
+                                                    fontSize = 16.sp,
+                                                    fontWeight = FontWeight.SemiBold
+                                                )
+                                                Spacer(modifier = Modifier.height(6.dp))
                                                 Text(
                                                     text = "No results for \"$query\"",
                                                     color = LiquidTheme.colors.textTertiary,
-                                                    fontSize = 16.sp
+                                                    fontSize = 13.sp
                                                 )
                                             }
                                         }
@@ -560,7 +645,7 @@ private fun CategoryCard(
     Box(
         modifier = modifier
             .height(100.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(24.dp))   // большой радиус, в тон карточкам
             .background(Brush.linearGradient(gradientColors))
             .clickable(onClick = onClick)
             .padding(16.dp)
@@ -687,47 +772,74 @@ private fun AlbumCard(
     }
 }
 
+/** Чип-пилюля недавнего запроса (тап = искать сразу). */
 @Composable
-private fun HistoryRow(
+private fun HistoryChip(
     query: String,
     onClick: () -> Unit
 ) {
     Row(
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp)
-            .height(52.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(50))
             .background(if (LiquidTheme.colors.isDark) Color(0xFF1A1A1A) else Color(0xFFF2F2F7))
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = onClick
             )
-            .padding(horizontal = 14.dp),
+            .padding(horizontal = 14.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
             imageVector = Icons.Rounded.History,
             contentDescription = null,
             tint = LiquidTheme.colors.iconMuted,
-            modifier = Modifier.size(20.dp)
+            modifier = Modifier.size(15.dp)
         )
-        Spacer(modifier = Modifier.width(12.dp))
+        Spacer(modifier = Modifier.width(7.dp))
         Text(
             text = query,
             color = LiquidTheme.colors.textPrimary,
-            fontSize = 15.sp,
+            fontSize = 14.sp,
             maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f)
+            overflow = TextOverflow.Ellipsis
         )
-        Icon(
-            imageVector = Icons.Rounded.Search,
-            contentDescription = null,
-            tint = LiquidTheme.colors.iconMuted,
-            modifier = Modifier.size(18.dp)
+    }
+}
+
+/** Шиммер-скелетоны результатов: пульсирующие пилюли на месте будущих строк. */
+@Composable
+private fun SearchSkeleton() {
+    val pulse by androidx.compose.animation.core.rememberInfiniteTransition(label = "skeleton")
+        .animateFloat(
+            initialValue = 0.45f,
+            targetValue = 1f,
+            animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+                animation = androidx.compose.animation.core.tween(650),
+                repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
+            ),
+            label = "skeletonPulse"
         )
+    val base = if (LiquidTheme.colors.isDark) Color(0xFF1A1A1A) else Color(0xFFEAEAEF)
+    Column(modifier = Modifier.fillMaxSize()) {
+        // Плашка на месте заголовка секции
+        Box(
+            modifier = Modifier
+                .padding(horizontal = 20.dp, vertical = 14.dp)
+                .size(width = 110.dp, height = 20.dp)
+                .clip(RoundedCornerShape(50))
+                .background(base.copy(alpha = pulse))
+        )
+        repeat(7) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
+                    .height(64.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(base.copy(alpha = pulse))
+            )
+        }
     }
 }
 
@@ -748,7 +860,7 @@ private fun SearchResultRow(
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
             .height(64.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(50))   // строки-пилюли, как в настройках
             .background(if (LiquidTheme.colors.isDark) Color(0xFF1A1A1A) else Color(0xFFF2F2F7))
             .combinedClickable(
                 interactionSource = remember { MutableInteractionSource() },
@@ -820,46 +932,37 @@ private fun SearchResultRow(
     }
 }
 
+/** Сегмент источника внутри единой пилюли (Apple Music / VK / All). */
 @Composable
-private fun SourceChip(
+private fun SourceSegment(
     text: String,
     selected: Boolean,
-    enabled: Boolean = true,
-    accentColor: Color = AppleRed,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
-        val isDark = LiquidTheme.colors.isDark
-        val chipBg = if (isDark) Color(0xFF1A1A1A) else Color(0xFFF2F2F7)
-        Box(
-            modifier = Modifier
-                .clip(RoundedCornerShape(20.dp))
-                .background(
-                    when {
-                        !enabled -> chipBg
-                        selected -> accentColor
-                        else -> chipBg
-                    }
-                )
-            .then(
-                if (enabled) {
-                    Modifier.clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = onClick
-                    )
-                } else Modifier
-            )
-            .padding(horizontal = 14.dp, vertical = 6.dp)
+    val bg by animateColorAsState(
+        targetValue = if (selected) AppleRed else Color.Transparent,
+        animationSpec = tween(220),
+        label = "segBg"
+    )
+    Box(
+        modifier = modifier
+            .height(32.dp)
+            .clip(RoundedCornerShape(50))
+            .background(bg)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick
+            ),
+        contentAlignment = Alignment.Center
     ) {
         Text(
-            text = if (enabled) text else "$text (soon)",
-            color = when {
-                !enabled -> LiquidTheme.colors.textSecondary.copy(alpha = 0.4f)
-                selected -> Color.White
-                else -> LiquidTheme.colors.textSecondary
-            },
+            text = text,
+            color = if (selected) Color.White else LiquidTheme.colors.textSecondary,
             fontSize = 13.sp,
-            fontWeight = FontWeight.Medium
+            fontWeight = FontWeight.Medium,
+            maxLines = 1
         )
     }
 }

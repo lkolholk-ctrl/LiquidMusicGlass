@@ -3,6 +3,7 @@ package com.liquidmusicglass.ui
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -13,7 +14,9 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -417,6 +420,24 @@ fun AppRoot() {
             val bottomBarTranslateY = expandProgress.value * density.run { 160.dp.toPx() }
             val bottomBarAlpha = if (expandProgress.value >= 0.99f) 0f else 1f
 
+            // ── Автоскрытие бара на главной (Wave): 3с бездействия → бар плавно
+            // уезжает вниз, фон обложки дотекает до края. Тап по нижней зоне —
+            // бар возвращается (и таймер перезапускается). Без жестов. ──
+            var waveBarShown by remember { mutableStateOf(true) }
+            var waveBarPokes by remember { mutableStateOf(0) }
+            LaunchedEffect(selectedIndex) { waveBarShown = true }  // смена вкладки — показать
+            LaunchedEffect(selectedIndex, waveBarShown, waveBarPokes) {
+                if (selectedIndex == 0 && waveBarShown) {
+                    kotlinx.coroutines.delay(3000)
+                    waveBarShown = false
+                }
+            }
+            val waveHideFrac by animateFloatAsState(
+                targetValue = if (selectedIndex == 0 && !waveBarShown) 1f else 0f,
+                animationSpec = tween(350),
+                label = "waveBarHide"
+            )
+
             // На вкладке Wave бар подстраивается под дым: красится тёмной базой
             // палитры обложки (darkMuted — тот же цвет, к которому аура гасит дым
             // у нижней кромки), с плавным переливом при смене трека. На остальных
@@ -439,7 +460,8 @@ fun AppRoot() {
                     .fillMaxWidth()
                     .align(Alignment.BottomCenter)
                     .graphicsLayer {
-                        translationY = bottomBarTranslateY
+                        translationY = bottomBarTranslateY +
+                            waveHideFrac * 160.dp.toPx()   // автоскрытие на Wave
                         alpha = bottomBarAlpha
                     }
                     .background(barBackground)
@@ -451,6 +473,7 @@ fun AppRoot() {
                         selectedIndex = selectedIndex,
                         onItemSelected = {
                             com.liquidmusicglass.debug.DebugLog.add("TAB -> $it")
+                            waveBarPokes++                 // взаимодействие — перезапуск таймера
                             selectedIndex = it; AppSettings.setLastScreen(it)
                         }
                     )
@@ -459,6 +482,21 @@ fun AppRoot() {
 
                 Spacer(
                     modifier = Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)
+                )
+            }
+
+            // Невидимая тап-зона внизу: пока бар скрыт, тап возвращает его
+            // (и НЕ проваливается в контент под ним). Только Wave + плеер свёрнут.
+            if (onWaveTab && !waveBarShown && expandProgress.value < 0.1f) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .height(64.dp)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) { waveBarShown = true }
                 )
             }
         }
