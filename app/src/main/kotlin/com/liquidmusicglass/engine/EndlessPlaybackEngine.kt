@@ -40,6 +40,7 @@ class EndlessPlaybackEngine(
     private val playedIds = mutableSetOf<String>()
     private val isRefilling = AtomicBoolean(false)
     private val lastRefillTime = AtomicLong(0L)
+    private var refillCounter = 0
 
     data class RefillContext(
         val type: Type,
@@ -61,6 +62,7 @@ class EndlessPlaybackEngine(
         playedIds.clear()
         isRefilling.set(false)
         lastRefillTime.set(0L)
+        refillCounter = 0
         _refillContext.value = null
         android.util.Log.d("EndlessEngine", "Reset complete")
     }
@@ -130,7 +132,20 @@ class EndlessPlaybackEngine(
                     // Волна: seed из контекста (мудовая/трековая станция) или null
                     // (личная волна). Не-волна: станция по ПОСЛЕДНЕМУ треку
                     // очереди — альбом кончился, продолжаем «по мотивам».
-                    val seed = if (isGlobal) refillCtx?.seedTrackId else queueIds.lastOrNull()
+                    val baseSeed = if (isGlobal) refillCtx?.seedTrackId else queueIds.lastOrNull()
+                    // Ротация seed — станция как у Яндекса (пул 500+): похожих
+                    // ИМЕННО на исходный трек у сервера обычно немного, зато
+                    // соседей-соседей — сотни. Чередуем: нечётный рефилл строит
+                    // от исходного seed (ДНК станции держится), чётный — от
+                    // случайного из последних треков станции (пул расширяется
+                    // транзитивно, волна блуждает по окрестностям, не по кругу).
+                    // Контекстный seed при этом НЕ трогаем — исходный трек
+                    // остаётся якорем станции.
+                    val seed = if (isGlobal && baseSeed != null) {
+                        refillCounter++
+                        if (refillCounter % 2 == 1) baseSeed
+                        else queueIds.takeLast(5).randomOrNull() ?: baseSeed
+                    } else baseSeed
                     // Anti-repeat: playedIds (вся история этой сессии волны) +
                     // текущая очередь (в не-Global контекстах playedIds пуст).
                     val exclude = (playedIds + queueIds).toList()
