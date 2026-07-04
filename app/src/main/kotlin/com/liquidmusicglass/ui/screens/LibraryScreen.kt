@@ -1463,8 +1463,11 @@ private fun ImportPlaylistDialog(
                     consecutiveErrors++
                     // Treat 404 playlist_not_found as transient for the first few attempts
                     // ICM may need more time to create the job
-                    val isTransient404 = lastPollHttpCode == 404 && 
-                        (lastPollError == "playlist_not_found" || lastPollError == "job_not_found_or_expired")
+                    // По доке транзиентен для полла только job_not_found_or_expired
+                    // (гонка создания джобы); playlist_not_found — терминальная
+                    // ошибка ДРУГИХ эндпоинтов, ретраить её здесь нечего.
+                    val isTransient404 = lastPollHttpCode == 404 &&
+                        lastPollError == "job_not_found_or_expired"
                     if (consecutiveErrors >= maxConsecutiveErrors && !isTransient404) {
                         importError = when (lastPollError) {
                             "job_not_found_or_expired" -> "Import session expired. Please try importing again."
@@ -1819,11 +1822,14 @@ private fun ImportPlaylistDialog(
                                                 )
                                                     if (res != null) {
                                                         if (res.jobId != null || res.playlistId != null) {
-                                                            if (source == "yandex") {
+                                                            if (source == "yandex" && res.jobId != null) {
                                                                 importJobId = res.jobId
                                                                 res.pollAfter?.let { importPollAfter = it }
                                                                 // isImporting stays true while polling
                                                             } else {
+                                                                // Apple — синхронный импорт; сюда же попадает
+                                                                // Yandex с playlist_id БЕЗ job_id (страховка:
+                                                                // иначе спиннер крутился бы вечно — поллить нечего).
                                                                 // Apple Music — synchronous import
                                                                 importCompleted = true
                                                                 isImporting = false

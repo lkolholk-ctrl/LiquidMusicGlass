@@ -762,7 +762,8 @@ object IcmRepository {
             _lastException = it as? Exception
             _lastError.value = it.message
         }
-        return result.getOrNull()?.ok == true
+        // Успех = HTTP 2xx. Поле `ok` в доке не описано — не завязываемся.
+        return result.isSuccess
     }
 
     // ── Доставка сигналов волны для оффлайн-очереди (WaveSignalQueue) ──
@@ -867,27 +868,11 @@ object IcmRepository {
      * Get user's preferred stream quality.
      * Requires linked user with active subscription.
      */
-    suspend fun getUserQuality(): IcmUserQualityResponse? {
-        val result = api.getUserQuality()
-        result.exceptionOrNull()?.let {
-            _lastException = it as? Exception
-            _lastError.value = it.message
-        }
-        return result.getOrNull()
-    }
 
     /**
      * Set user's preferred stream quality.
      * Requires linked user with active subscription.
      */
-    suspend fun setUserQuality(quality: String): IcmUserQualityResponse? {
-        val result = api.setUserQuality(quality)
-        result.exceptionOrNull()?.let {
-            _lastException = it as? Exception
-            _lastError.value = it.message
-        }
-        return result.getOrNull()
-    }
 
     /**
      * Get current user preferences (quality, region, hide_explicit, source).
@@ -1148,18 +1133,27 @@ object IcmRepository {
         intervalMs: Long
     ): String? {
         var attempts = 0
+        var consecutiveErrors = 0
         while (attempts < maxAttempts) {
             if (IcmRateGate.isBanned()) return null
             delay(pending.pollAfterSeconds.coerceAtLeast(1) * 1000L)
             val pollResult = api.pollAsyncJob(pending.jobId)
             pollResult.getOrNull()?.let { ready ->
-                if (ready.status == "ready") {
+                consecutiveErrors = 0
+                if (ready.status == "ready" && ready.url != null) {
                     return ready.url
                 }
+                // status=pending → просто ждём следующий полл (раньше
+                // обязательные поля модели роняли парсер на pending-ответе,
+                // и «холодные» треки (202) не стартовали вообще).
             }
             pollResult.exceptionOrNull()?.let {
-                _lastError.value = "Poll failed: ${it.message}"
-                return null
+                // Единичная ошибка полла — НЕ фатал (сеть моргнула): ретраим,
+                // фатал только после 3 подряд.
+                if (++consecutiveErrors >= 3) {
+                    _lastError.value = "Poll failed: ${it.message}"
+                    return null
+                }
             }
             attempts++
         }
@@ -1173,18 +1167,23 @@ object IcmRepository {
         intervalMs: Long
     ): IcmAsyncTrackReady? {
         var attempts = 0
+        var consecutiveErrors = 0
         while (attempts < maxAttempts) {
             if (IcmRateGate.isBanned()) return null
             delay(pending.pollAfterSeconds.coerceAtLeast(1) * 1000L)
             val pollResult = api.pollAsyncJob(pending.jobId)
             pollResult.getOrNull()?.let { ready ->
-                if (ready.status == "ready") {
+                consecutiveErrors = 0
+                if (ready.status == "ready" && ready.url != null) {
                     return ready
                 }
+                // pending → ждём дальше
             }
             pollResult.exceptionOrNull()?.let {
-                _lastError.value = "Poll failed: ${it.message}"
-                return null
+                if (++consecutiveErrors >= 3) {
+                    _lastError.value = "Poll failed: ${it.message}"
+                    return null
+                }
             }
             attempts++
         }

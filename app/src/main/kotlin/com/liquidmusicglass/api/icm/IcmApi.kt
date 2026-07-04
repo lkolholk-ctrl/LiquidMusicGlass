@@ -233,9 +233,14 @@ class IcmApi private constructor() {
             builder.header("X-LMG-Fast", "1")
         }
 
-        // Auth: session token for user-scoped endpoints (/me/*, wave, likes)
-        sessionToken?.let {
-            builder.header("Authorization", "Bearer $it")
+        // Auth: session token for user-scoped endpoints (/me/*, wave, likes).
+        // S2S-only эндпоинты (session/issue, link/email/*) с Bearer'ом дают
+        // 403 s2s_only по доке — для них шлём только X-Partner-Key.
+        val s2sOnly = url.contains("/session/issue") || url.contains("/link/email")
+        if (!s2sOnly) {
+            sessionToken?.let {
+                builder.header("Authorization", "Bearer $it")
+            }
         }
 
         // X-Partner-Key is always required for source validation (VK, etc.)
@@ -504,7 +509,7 @@ class IcmApi private constructor() {
  * Search tracks, albums, and artists.
  * @param query Search string (up to 200 chars, min 2 alphanumeric)
  * @param region Region (us/ru/nz), null uses defaultRegion
- * @param source Music source: "primary" (default), "secondary", "all". Per ICM API docs.
+ * @param source Music source: "apple" (default), "vk", "all" — по доке ICM.
  * @param limit Max results (clamped to partner.config.search.max_results)
  * @return Search response with mixed items (artists, albums, tracks)
  */
@@ -797,6 +802,11 @@ suspend fun search(
     /**
      * Like a track.
      */
+    // ВНИМАНИЕ (аудит по доке): POST/DELETE на /library/likes в партнёрской
+    // доке НЕ описаны (документирован только GET), сервер отвечает 405 —
+    // IcmRepository.likesBlocked гасит повторы. Лайк до волны доходит через
+    // документированный wave/feedback more_track. Вопрос о write-эндпоинте
+    // задан менеджеру ICM; до ответа код оставлен под предохранителем.
     suspend fun likeTrack(trackId: String): Result<IcmLikeResponse> {
         val body = json.encodeToString(IcmLikeRequest(trackIdSnake = trackId, trackIdCamel = trackId))
         return execute("/library/likes", method = "POST", body = body)
@@ -948,22 +958,8 @@ suspend fun search(
     //  Personal Cabinet (/me/*) — requires linked user + subscription
     // ═══════════════════════════════════════════════════════════
 
-    /**
-     * Get user's preferred stream quality (legacy endpoint).
-     * Prefer [getUserPreferences] going forward.
-     */
-    suspend fun getUserQuality(): Result<IcmUserQualityResponse> {
-        return execute("/me/quality")
-    }
-
-    /**
-     * Set user's preferred stream quality (legacy endpoint).
-     * Prefer [updateUserPreferences].
-     */
-    suspend fun setUserQuality(quality: String): Result<IcmUserQualityResponse> {
-        val body = json.encodeToString(IcmUserQualityRequest(quality = quality))
-        return execute("/me/quality", method = "POST", body = body)
-    }
+    // /me/quality удалён: эндпоинта нет в доке (404) — качество задаётся
+    // через GET/PUT /me/preferences (getUserPreferences/updateUserPreferences).
 
     /**
      * Get current user preferences (quality, region, hide_explicit, source).
@@ -982,7 +978,7 @@ suspend fun search(
     }
 
     /**
-     * Get user profile (icm_user_id, email, subscription).
+     * Get user profile (partner_user_id, name, username, avatar_url — email/phone дока не отдаёт никогда).
      */
     suspend fun getUserProfile(): Result<IcmUserProfile> {
         return execute("/me/profile")

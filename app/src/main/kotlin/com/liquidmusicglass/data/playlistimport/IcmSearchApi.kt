@@ -20,6 +20,14 @@ class IcmSearchApi(
     private val authProvider: () -> Pair<String?, String?>  // (partnerKey, sessionToken)
 ) {
 
+    /** Дока ICM: source ∈ apple/vk/all. Старые алиасы primary/secondary мапим. */
+    private fun normalizeSource(src: String): String = when (src.lowercase()) {
+        "primary" -> "apple"
+        "secondary" -> "vk"
+        "apple", "vk", "all" -> src.lowercase()
+        else -> "all"
+    }
+
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
@@ -37,7 +45,7 @@ class IcmSearchApi(
      *
      * @param q Search query (artist + title)
      * @param region us/ru/nz
-     * @param source primary/secondary/all
+     * @param source apple/vk/all (по доке ICM)
      * @param limit Max results
      * @param logger Optional file logger for debugging
      */
@@ -49,7 +57,7 @@ class IcmSearchApi(
         logger: ImportFileLogger? = null
     ): IcmSearchResponseDto {
         val encodedQuery = java.net.URLEncoder.encode(q, "UTF-8")
-        val url = "$baseUrl/search?q=$encodedQuery&region=$region&source=$source&limit=$limit"
+        val url = "$baseUrl/search?q=$encodedQuery&region=$region&source=${normalizeSource(source)}&limit=$limit"
 
         logger?.log("D", "IcmSearch", "Searching: $q")
 
