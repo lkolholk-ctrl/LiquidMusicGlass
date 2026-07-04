@@ -107,14 +107,15 @@ fun SearchScreen(
 
     // Search history — упорядоченная, СВЕЖИЕ СВЕРХУ. Старый StringSet терял
     // порядок (сортировался по алфавиту и обрезался произвольно) — мигрируем.
-    var history by remember {
-        mutableStateOf<List<String>>(
-            run {
-                val v2 = prefs.getString("queries_v2", null)
-                if (v2 != null) v2.split('\n').filter { it.isNotBlank() }
-                else prefs.getStringSet("queries", emptySet())?.toList()?.take(8) ?: emptyList()
-            }
-        )
+    // Первое чтение prefs — С ДИСКА и НЕ на main (первый кадр экрана поиска
+    // не должен ждать I/O; см. полевые ANR на тапе по лупе).
+    var history by remember { mutableStateOf<List<String>>(emptyList()) }
+    LaunchedEffect(Unit) {
+        history = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val v2 = prefs.getString("queries_v2", null)
+            if (v2 != null) v2.split('\n').filter { it.isNotBlank() }
+            else prefs.getStringSet("queries", emptySet())?.toList()?.take(8) ?: emptyList()
+        }
     }
     fun saveQuery(q: String) {
         val t = q.trim()

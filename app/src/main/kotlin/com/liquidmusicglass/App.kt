@@ -82,6 +82,11 @@ class App : Application(), ImageLoaderFactory {
         val logDir = File(filesDir, "crash_logs").apply { mkdirs() }
         Fishnet.init(this, logDir.absolutePath) // Native/ANR крэши
 
+        // Ловушка зависаний UI: Fishnet-дампы ANR приходят БЕЗ стека main —
+        // вачдог сам пишет полный Java-дамп в crash_logs/ui_freeze_*.txt,
+        // когда main-лупер молчит > 6с (полевой кейс: тап по поиску).
+        com.liquidmusicglass.debug.UiWatchdog.start(this)
+
         // Initialize file logger for IcmApi (works even when system logcat is encrypted)
         IcmApiFileLogger.init(this)
         IcmApiFileLogger.log("I", "App", "App started, IcmApiFileLogger initialized at ${IcmApiFileLogger.getLogPath()}")
