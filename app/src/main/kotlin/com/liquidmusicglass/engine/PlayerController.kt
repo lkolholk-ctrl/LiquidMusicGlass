@@ -109,7 +109,10 @@ object PlayerController {
 
     // ── Stream URL cache ──
     private val streamUrlCache = java.util.concurrent.ConcurrentHashMap<String, CachedStreamUrl>()
-    private const val STREAM_CACHE_TTL_MS = 10 * 60 * 1000L
+    // Подпись URL у ICM живёт 10 минут — кэшируем на 8: ссылка, выданная из
+    // кэша на 10-й минуте, протухала при старте воспроизведения (спасал только
+    // handleExpiredUrl с лишним round-trip и паузой).
+    private const val STREAM_CACHE_TTL_MS = 8 * 60 * 1000L
 
     // In-flight резолвы: один и тот же трек резолвится максимум ОДНОЙ корутиной,
     // остальные ждут тот же результат — без дублирующих POST /track (их раньше

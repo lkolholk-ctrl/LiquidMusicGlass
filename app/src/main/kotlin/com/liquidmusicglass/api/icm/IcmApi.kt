@@ -205,6 +205,10 @@ class IcmApi private constructor() {
     /** Callback for X-Request-Id tracing */
     var onRequestId: ((String) -> Unit)? = null
 
+    /** Перевыпуск session-токена для авто-рефреша на 401 (ставит IcmAuthRepository).
+     *  Возвращает СВЕЖИЙ токен или null, если перевыпуск невозможен. */
+    var sessionRefresher: (suspend () -> String?)? = null
+
     private inline fun <reified T> parseResponse(body: okhttp3.ResponseBody?): T {
         val text = body?.string() ?: throw IcmApiException(0, "Empty response body")
         return json.decodeFromString(text)
@@ -256,6 +260,32 @@ class IcmApi private constructor() {
     }
 
     private suspend inline fun <reified T> execute(
+        endpoint: String,
+        method: String = "GET",
+        body: String? = null,
+        async: Boolean = false
+    ): Result<T> {
+        val first = executeOnce<T>(endpoint, method, body, async)
+        // Session-токен живёт ~1ч, а раньше обновлялся ТОЛЬКО на старте
+        // приложения: через час слушания все юзерские вызовы (волна, лайки,
+        // playback-лог) падали 401 до перезапуска. Теперь: 401 при активном
+        // токене → перевыпуск через sessionRefresher и ОДИН повтор запроса.
+        val e = first.exceptionOrNull()
+        if (e is IcmApiException && e.code == 401 && sessionToken != null) {
+            val fresh = try {
+                sessionRefresher?.invoke()
+            } catch (_: Exception) {
+                null
+            }
+            if (!fresh.isNullOrBlank() && fresh != sessionToken) {
+                sessionToken = fresh
+                return executeOnce(endpoint, method, body, async)
+            }
+        }
+        return first
+    }
+
+    private suspend inline fun <reified T> executeOnce(
         endpoint: String,
         method: String = "GET",
         body: String? = null,

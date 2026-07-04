@@ -77,7 +77,14 @@ class LibraryRepository private constructor(context: Context) {
                     limit = limit,
                     offset = offset
                 )
-                val items = response?.items ?: break
+                // ОШИБКА сети/API посреди пагинации → ОБРЫВАЕМ ВЕСЬ синк.
+                // Раньше break с частичным списком: шаг 3 («удалить локальные,
+                // которых нет в облаке») сносил лайки, которые на сервере ЕСТЬ,
+                // просто не докачались — потеря данных на рваной сети.
+                    ?: return@withContext Result.failure(
+                        Exception("likes page fetch failed at offset=$offset")
+                    )
+                val items = response.items
                 if (items.isEmpty()) break
                 cloudLikes.addAll(items)
                 if (items.size < limit) break

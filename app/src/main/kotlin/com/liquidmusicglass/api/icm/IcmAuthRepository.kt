@@ -165,8 +165,30 @@ object IcmAuthRepository {
         val api = IcmApi.getInstance()
         api.partnerUserId = _partnerUserId.value
         api.sessionToken = getSessionToken()
+        // Авто-рефреш на 401: токен живёт ~1ч, без этого через час слушания
+        // юзерские вызовы (волна/лайки) молча дохли до перезапуска приложения.
+        api.sessionRefresher = { reissueSessionToken() }
         IcmRepository.setPartnerUserId(_partnerUserId.value)
         IcmRepository.setSessionToken(getSessionToken())
+    }
+
+    /**
+     * ФОРСИРОВАННЫЙ перевыпуск session-токена (для авто-рефреша на 401):
+     * локальная валидность не важна — сервер токен уже отверг. Ключ и юзер
+     * берутся из собственного состояния. null = перевыпуск невозможен
+     * (нет ключа/юзера или сеть легла).
+     */
+    suspend fun reissueSessionToken(): String? = withContext(Dispatchers.IO) {
+        val key = getPartnerKey().takeIf { it.isNotBlank() } ?: return@withContext null
+        val userId = _partnerUserId.value ?: return@withContext null
+        val tokenData = issueSessionToken(userId, key).getOrNull() ?: return@withContext null
+        prefs?.edit()?.apply {
+            putString(KEY_TOKEN, tokenData.token)
+            putLong(KEY_TOKEN_EXPIRES, tokenData.expiresAt)
+            apply()
+        }
+        IcmRepository.setSessionToken(tokenData.token)
+        tokenData.token
     }
 
     /**
