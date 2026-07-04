@@ -361,6 +361,24 @@ fun LyricsScreen(
                         }
 
                         itemsIndexed(lyrics.lines) { index, line ->
+                            // Несинхронная лирика — обычный текст: мельче и кучнее
+                            // (32sp-строки с воздухом рассчитаны на караоке-свип,
+                            // без таймкодов они просто раздувают простыню).
+                            if (!lyrics.isSynced) {
+                                Text(
+                                    text = line.text,
+                                    color = Color.White.copy(alpha = 0.82f),
+                                    fontSize = 17.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    fontFamily = AppFontFamily,
+                                    lineHeight = 24.sp,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 24.dp, vertical = 4.dp)
+                                )
+                                return@itemsIndexed
+                            }
+
                             val isCurrent = index == currentLineIndex
                             val isPast = index < currentLineIndex
 
