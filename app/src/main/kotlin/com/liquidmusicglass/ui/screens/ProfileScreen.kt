@@ -424,8 +424,17 @@ fun ProfileScreen(
                                         .padding(horizontal = 20.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
+                                    // Пометка честно из ДВУХ полей сервера:
+                                    // requires_subscription главнее флага free
+                                    // (флаг у ICM может значить «доступен твоему
+                                    // партнёрскому ключу», а не «бесплатен всем»).
+                                    val needsSub = r.code in ri.requiresSubscription
                                     Text(
-                                        text = r.name + if (r.free) " • free" else "",
+                                        text = r.name + when {
+                                            needsSub -> " • premium"
+                                            r.free -> " • free"
+                                            else -> ""
+                                        },
                                         fontFamily = AppFontFamily,
                                         color = if (selected) AppleRed else lc.textPrimary,
                                         fontSize = 14.sp,
