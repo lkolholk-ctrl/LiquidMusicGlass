@@ -45,14 +45,42 @@ object UiWatchdog {
 
         Thread {
             var dumps = 0
+            var lastCheckAt = SystemClock.uptimeMillis()
             while (dumps < MAX_DUMPS) {
                 try {
                     Thread.sleep(CHECK_MS)
-                    val silentMs = SystemClock.uptimeMillis() - lastBeat.get()
+                    val now = SystemClock.uptimeMillis()
+                    val checkGap = now - lastCheckAt
+                    lastCheckAt = now
+
+                    // Страж №1: наш СОБСТВЕННЫЙ цикл проспал сильно дольше
+                    // запрошенного → процесс был заморожен целиком (cached-app
+                    // freezer / доза при уходе в фон). Это не фриз UI — весь
+                    // процесс стоял. Сбрасываем базу и даём main очнуться.
+                    if (checkGap > CHECK_MS * 3) {
+                        lastBeat.set(now)
+                        continue
+                    }
+
+                    val silentMs = now - lastBeat.get()
                     if (silentMs > FREEZE_THRESHOLD_MS) {
+                        // Страж №2: heartbeat молчит, но main стоит в холостом
+                        // nativePollOnce (лупер ПУСТ) → это разморозка после
+                        // фона, а не зависание. Настоящий фриз = main застрял
+                        // в коде/локе/биндере. Полевой кейс: три дампа по
+                        // 7-132с, во всех main idle — спам, не диагноз.
+                        val top = Looper.getMainLooper().thread.stackTrace.firstOrNull()
+                        val mainIdle = top != null &&
+                            top.className == "android.os.MessageQueue" &&
+                            top.methodName == "nativePollOnce"
+                        if (mainIdle) {
+                            lastBeat.set(now)
+                            continue
+                        }
                         dumpAllThreads(appContext, silentMs)
                         dumps++
                         Thread.sleep(COOLDOWN_MS)
+                        lastCheckAt = SystemClock.uptimeMillis()
                     }
                 } catch (_: InterruptedException) {
                     return@Thread
