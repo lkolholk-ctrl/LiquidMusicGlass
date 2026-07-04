@@ -52,10 +52,9 @@ object AudioTrackSink {
         // @Synchronized — join под локом дедлочил выход цикла (поток ждал лок,
         // stop() ждал поток), 5с таймаут и «остаёмся в режиме 6» на КАЖДОЙ
         // попытке уйти с AudioTrack. Лок — только на чтение/чистку состояния.
-        val t: Thread?
-        synchronized(this) {
+        val t: Thread = synchronized(this) {
             running = false
-            t = thread ?: return true
+            thread ?: return true
         }
         var waitedMs = 0L
         while (t.isAlive && waitedMs < 5_000L) {
