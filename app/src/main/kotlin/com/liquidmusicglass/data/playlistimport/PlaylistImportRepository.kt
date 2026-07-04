@@ -12,14 +12,15 @@ import java.net.UnknownHostException
  * into the local player via ICM catalog matching.
  *
  * Architecture:
- *   - Yandex URLs: Resolved via private FastAPI (bypasses geo-blocks),
- *     then matched against ICM catalog track-by-track.
+ *   - Yandex URLs: разбираются НА УСТРОЙСТВЕ ([YandexPlaylistFetcher] —
+ *     запрос к Яндексу идёт с жилого IP юзера; ICM Яндексом заблокирован,
+ *     личный сервер-резолвер умер вместе с хостингом), потом матчинг
+ *     по каталогу ICM трек-за-треком.
  *   - Apple URLs: Delegated to native ICM import API (server-side matching).
  *
  * All operations run on Dispatchers.IO. No UI blocking.
  */
 class PlaylistImportRepository(
-    private val yandexResolver: YandexResolverApi,
     private val icmSearch: IcmSearchApi
 ) {
 
@@ -67,7 +68,7 @@ class PlaylistImportRepository(
 
     /**
      * Yandex import flow:
-     *   1. Resolve URL via FastAPI → [{title, artist}]
+     *   1. Resolve URL on-device ([YandexPlaylistFetcher]) → [{title, artist}]
      *   2. Match each track against ICM catalog (concurrent, limited)
      *   3. Collect results and save to local playlist
      */
@@ -82,15 +83,16 @@ class PlaylistImportRepository(
 
         onState?.invoke(ImportState.Loading(0, 0, LoadingPhase.RESOLVING))
 
-        // Step 1: Resolve Yandex URL to raw tracks
+        // Step 1: Resolve Yandex URL to raw tracks — прямо с устройства.
         val rawTracks = try {
-            logger?.log("I", "ImportRepo", "Fetching playlist from Yandex...")
-            yandexResolver.resolvePlaylist(url)
+            logger?.log("I", "ImportRepo", "Fetching playlist from Yandex (on-device)...")
+            YandexPlaylistFetcher.resolve(url)
         } catch (e: Exception) {
             logger?.log("E", "ImportRepo", "Resolver failed: ${e.message}")
             val errorMsg = when (e) {
+                is YandexResolveException -> e.message ?: "Failed to resolve Yandex playlist."
                 is SocketTimeoutException -> "Network timeout while fetching playlist. Please check your connection."
-                is UnknownHostException -> "Cannot reach Yandex resolver. Is the server running?"
+                is UnknownHostException -> "Cannot reach Yandex Music. Check your connection."
                 else -> "Failed to resolve Yandex playlist: ${e.message}"
             }
             onState?.invoke(ImportState.Error(errorMsg))
