@@ -14,6 +14,7 @@ import com.liquidmusicglass.automix.TrackFeatures
 import com.liquidmusicglass.automix.Transition
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
@@ -182,9 +183,13 @@ class ServiceBackedAutoMixEngine(
 
         val crossfadeDuration = transition.crossfadeDurationMs
 
-        fadeJob?.cancel()
+        // cancelAndJoin: дожидаемся, пока finally предыдущего fadeJob выполнит
+        // DjStreamFx.stop(), ИНАЧЕ отменённая корутина глушила FX уже ПОСЛЕ
+        // begin() нового перехода (новый переход шёл без эффектов).
+        val prevFade = fadeJob
         fadeJob = scope.launch {
             try {
+                prevFade?.cancelAndJoin()
                 mixing = true
                 crossfadeActive = true
 

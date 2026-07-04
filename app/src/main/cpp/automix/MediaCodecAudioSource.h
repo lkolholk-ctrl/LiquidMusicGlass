@@ -64,6 +64,7 @@ namespace automix
          *  вместо 16 — без этого байты парсятся со сдвигом → «шипение». */
         void refreshOutputFormat();
         void pushDecoded (const uint8_t* data, int sizeBytes);
+        void push8  (const uint8_t* s, int totalSamples);   // unsigned 8-бит, центр 128
         void push16 (const int16_t* s, int totalSamples);
         void push24 (const uint8_t* s, int totalSamples);   // 3 байта/сэмпл, packed LE
         void push32 (const int32_t* s, int totalSamples);

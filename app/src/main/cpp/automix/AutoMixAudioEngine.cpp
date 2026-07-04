@@ -155,6 +155,15 @@ namespace
         if (lastGood.getNumChannels() < channels || lastGood.getNumSamples() < samples)
             return;
 
+        // Не запоминаем блок с NaN/Inf как «последний хороший»: иначе он
+        // повторялся бы при следующем промахе лока (NaN×gain остаётся NaN).
+        for (int c = 0; c < channels; ++c)
+        {
+            const float* s = src.getReadPointer (c);
+            for (int i = 0; i < samples; ++i)
+                if (! std::isfinite (s[i])) return;
+        }
+
         for (int c = 0; c < channels; ++c)
             lastGood.copyFrom (c, 0, src, c, 0, samples);
         repeatCounter.store (0, std::memory_order_release);
@@ -436,18 +445,36 @@ bool AutoMixAudioEngine::decodeFullPCM (const juce::String& path, juce::AudioBuf
     if (! file.existsAsFile())
         return false;
 
+    // Кап длины: оффлайн-стретч держит в памяти до трёх полных float-копий
+    // трека (src + stretched + decodedBuffer деки). 10-мин трек ≈ 700 МБ пика
+    // → на слабом устройстве OOM-kill прямо на переходе. Режем на 12 минутах
+    // (по частоте деки; для стретча этого более чем достаточно).
+    const auto capSamples = [] (double sr) -> juce::int64
+    {
+        const double effSr = (sr > 0.0) ? sr : 48000.0;
+        return (juce::int64) (effSr * 12.0 * 60.0);
+    };
+
     if (std::unique_ptr<juce::AudioFormatReader> reader { formatManager.createReaderFor (file) })
     {
-        const int len = (int) reader->lengthInSamples;
-        if (len <= 0)
+        const juce::int64 cap = capSamples (reader->sampleRate);
+        const juce::int64 len64 = juce::jmin ((juce::int64) reader->lengthInSamples, cap);
+        if (len64 <= 0)
             return false;
+        const int len = (int) len64;   // ≤ 12 мин — в int влезает с запасом
         out.setSize (2, len);
         reader->read (&out, 0, len, 0, true, true);
         rate = reader->sampleRate;
         return true;
     }
 
-    return automix::decodeWithMediaCodec (path, out, rate);
+    if (! automix::decodeWithMediaCodec (path, out, rate))
+        return false;
+    // MediaCodec-путь декодит целиком — подрезаем постфактум.
+    const juce::int64 cap = capSamples (rate);
+    if ((juce::int64) out.getNumSamples() > cap)
+        out.setSize (out.getNumChannels(), (int) cap, true, false, true);
+    return true;
 }
 
 bool AutoMixAudioEngine::prepareStretchB (double bpmA, double bpmB)
@@ -907,6 +934,15 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
         djEchoTail = 0;
         if (djEchoLen > 0) djEchoBuf.clear();
         djSweepLp[0] = djSweepLp[1] = 0.0f;
+        // ЛЕЧЕНИЕ NaN: bass-swap IIR (lowpassA/B) сбрасывались только на старте
+        // перехода — а один NaN из деки отравлял их состояние, и `av -= cutA*la`
+        // выдавал NaN каждый блок (0*NaN=NaN) до конца перехода → тишина после
+        // скраба. Плюс инвалидируем hold-буферы: rememberLastGoodBlock мог
+        // захватить NaN-блок и повторять его. Теперь fxReset чинит ВСЁ.
+        for (auto& f : lowpassA) f.reset();
+        for (auto& f : lowpassB) f.reset();
+        holdValid[0].store (false, std::memory_order_release);
+        holdValid[1].store (false, std::memory_order_release);
     }
 
     if (outputMuted.load (std::memory_order_acquire))
@@ -1140,6 +1176,10 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
             // cutA/cutB = 0 и вычитать нечего — фильтры пропускаем.
             if (c < 2 && bassSwapActive)
             {
+                // Санитизация входа фильтра: один NaN из деки иначе навсегда
+                // отравляет состояние IIR (и весь остаток перехода = NaN).
+                if (! std::isfinite (av)) av = 0.0f;
+                if (! std::isfinite (bv)) bv = 0.0f;
                 const float la = lowpassA[(size_t) c].processSample (av);
                 const float lb = lowpassB[(size_t) c].processSample (bv);
                 av -= cutA * la;

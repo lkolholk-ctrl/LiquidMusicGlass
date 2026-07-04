@@ -30,6 +30,9 @@ object AudioOutputWatchdog {
     private const val COOLDOWN_MS = 15_000L    // не чаще одной эскалации в кулдаун
     private const val MAX_ESCALATIONS = 2      // защита от бесконечного цикла за сессию
 
+    private const val REOPEN_GRACE_MS = 8_000L   // реопен девайса (BT) легально молчит дольше STALL_MS
+    private const val HEALTHY_RESET_MS = 60_000L // минута здоровой игры → амнистия счётчику эскалаций
+
     private var lastMode = -1
     private var lastPosMs = Long.MIN_VALUE
     private var lastPosProgressAt = 0L
@@ -37,6 +40,17 @@ object AudioOutputWatchdog {
     private var lastCbProgressAt = 0L
     private var lastEscalationAt = 0L
     private var escalations = 0
+    @Volatile private var reopenGraceUntil = 0L
+    private var healthySince = 0L
+
+    /**
+     * Сигнал «идёт реопен аудио-девайса» (смена маршрута/режима): колбэк
+     * легально молчит секунды (BT-стек бывает медленным) — это не отказ.
+     * Даём грейс-окно, чтобы не эскалировать на живом переоткрытии.
+     */
+    fun noteDeviceReopen() {
+        reopenGraceUntil = SystemClock.elapsedRealtime() + REOPEN_GRACE_MS
+    }
 
     /**
      * Тик наблюдения. [playingAudibly] — прямо сейчас ДОЛЖЕН идти звук
@@ -70,7 +84,29 @@ object AudioOutputWatchdog {
             lastCbProgressAt = now
         }
 
-        val stalled = now - lastPosProgressAt > STALL_MS || now - lastCbProgressAt > STALL_MS
+        // Амнистия: минута непрерывно здоровой игры сбрасывает счётчик
+        // эскалаций — иначе два ложных срабатывания за сессию навсегда
+        // отключали watchdog даже для настоящего отказа.
+        val progressing = now - lastPosProgressAt < 1_000L && now - lastCbProgressAt < 1_000L
+        if (progressing) {
+            if (healthySince == 0L) healthySince = now
+            else if (escalations > 0 && now - healthySince > HEALTHY_RESET_MS) {
+                escalations = 0
+                DebugLog.add("WATCHDOG: ${HEALTHY_RESET_MS / 1000}с здоровой игры — счётчик эскалаций сброшен")
+            }
+        } else {
+            healthySince = 0L
+        }
+
+        // Реопен девайса (BT-подключение и т.п.) легально молчит дольше порога.
+        if (now < reopenGraceUntil) return
+
+        // Отказ ВЫХОДА = замерли И колбэк, И позиция. Раньше хватало одной
+        // замершей позиции — но позиция при живом колбэке замирает на треках,
+        // у которых реальное аудио короче заявленной длительности (обычные
+        // VBR mp3): это конец файла, а не смерть выхода. Один такой файл
+        // навсегда загонял устройство в AUDIOTRACK-режим с выключенным авто.
+        val stalled = now - lastPosProgressAt > STALL_MS && now - lastCbProgressAt > STALL_MS
         if (!stalled) return
 
         if (mode == AutoMixNativeEngine.OBOE_MODE_AUDIOTRACK) {

@@ -86,7 +86,13 @@ class JuceLocalPlayer(
     // переход трека идёт как обычно. Это безопасная проверка, что v4 даёт
     // вменяемые параметры свода, прежде чем реально исполнять кроссфейд (шаг 2).
     private val autoMixScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
-    private val autoMixController by lazy { AutoMixController(context.applicationContext) }
+    @Volatile private var autoMixControllerCreated = false
+    private val autoMixController by lazy {
+        autoMixControllerCreated = true
+        AutoMixController(context.applicationContext)
+    }
+    // Поколение движка, инициализированного ЭТИМ плеером, — для безопасного release.
+    @Volatile private var engineGeneration = -1L
     @Volatile private var autoMixAnalyzedIndex = -1
     private val AUTOMIX_LEAD_MS = 40_000L   // окно до конца трека для анализа (хватает на свод ≤30с)
     private val MIN_AUTOMIX_XFADE_MS = 5_000L
@@ -460,7 +466,14 @@ class JuceLocalPlayer(
         loadHandler.removeCallbacksAndMessages(null)
         // release() движка тоже @Synchronized — на фоне, чтобы не ждать монитор на
         // main. quitSafely даёт этой задаче выполниться перед остановкой потока.
-        loadHandler.post { runCatching { engine.release() } }
+        // Поколение защищает НОВЫЙ движок пересозданного сервиса от нашего
+        // отложенного release (см. AutoMixNativeEngine.release).
+        val gen = engineGeneration
+        loadHandler.post {
+            runCatching { engine.release(gen) }
+            // TFLite-интерпретатор течёт на каждый рестарт сервиса без релиза.
+            if (autoMixControllerCreated) runCatching { autoMixController.release() }
+        }
         loadThread.quitSafely()
         return Futures.immediateVoidFuture()
     }
@@ -497,6 +510,7 @@ class JuceLocalPlayer(
             runCatching {
                 if (released || seq != loadSeq.get()) return@runCatching
                 engine.init(context)
+                engineGeneration = engine.currentGeneration()
                 if (released || seq != loadSeq.get()) return@runCatching
                 engine.stop()              // current deck back to A
                 engine.clearDeck(1)        // incoming empty
@@ -810,17 +824,44 @@ class JuceLocalPlayer(
         return try {
             val dir = File(context.cacheDir, "juce_local_audio").apply { mkdirs() }
             val target = File(dir, cacheFileName(uri))
-            if (target.exists() && target.length() > 0L) return target.absolutePath
+            if (target.exists() && target.length() > 0L) {
+                target.setLastModified(System.currentTimeMillis())  // «использован» — для LRU
+                return target.absolutePath
+            }
 
             context.contentResolver.openInputStream(uri)?.use { input ->
                 target.outputStream().use { output -> input.copyTo(output) }
             } ?: return null
 
+            evictLocalAudioCache(dir)  // не даём кэшу расти бесконечно
             target.takeIf { it.exists() && it.length() > 0L }?.absolutePath
         } catch (t: Throwable) {
             DebugLog.add("JUCE.cacheCopyFAILED uri=$uri err=${t.message}")
             null
         }
+    }
+
+    /**
+     * LRU-эвикция кэша локального аудио: раньше каждый content://-трек без
+     * прямого пути копировался сюда целиком и НИКОГДА не удалялся — за долгую
+     * жизнь приложения гигабайты мусора на диске. Держим ≤512 МБ / ≤40 файлов,
+     * вытесняя самые давно использованные.
+     */
+    private fun evictLocalAudioCache(dir: File) {
+        try {
+            val files = dir.listFiles()?.filter { it.isFile } ?: return
+            val maxBytes = 512L * 1024 * 1024
+            val maxCount = 40
+            var total = files.sumOf { it.length() }
+            if (total <= maxBytes && files.size <= maxCount) return
+            val byOldest = files.sortedBy { it.lastModified() }
+            var count = files.size
+            for (f in byOldest) {
+                if (total <= maxBytes && count <= maxCount) break
+                val len = f.length()
+                if (f.delete()) { total -= len; count-- }
+            }
+        } catch (_: Throwable) {}
     }
 
     private fun cacheFileName(uri: Uri): String {

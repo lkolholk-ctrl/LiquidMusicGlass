@@ -23,15 +23,36 @@ object DjStreamFx {
     private val modeA = AtomicInteger(MODE_NONE)
     private val progressMilli = AtomicInteger(0)
     private val outVolMilli = AtomicInteger(1000)
+    private val generationA = AtomicInteger(0)
+
+    // Порядковый номер процессоров: каждый новый DjFxAudioProcessor (=новый
+    // плеер) регистрируется и становится «новейшим». Эффект применяется ТОЛЬКО
+    // к НЕ-новейшему процессору — т.е. к уходящему плееру. Входящий (secondary
+    // строится перед началом перехода → он новейший) остаётся чистым. Это
+    // переживает свап: после свапа уходящий уничтожается, следующий secondary
+    // снова новейший, а бывший secondary становится не-новейшим и получает FX.
+    private val procSeqCounter = AtomicInteger(0)
+    private val newestSeq = AtomicInteger(-1)
+
+    fun registerProcessor(): Int {
+        val s = procSeqCounter.incrementAndGet()
+        newestSeq.set(s)
+        return s
+    }
+
+    /** true, если процессор с этим seq — уходящий (не новейший из живых). */
+    fun isOutgoing(seq: Int): Boolean = seq != newestSeq.get()
 
     val mode: Int get() = modeA.get()
     val progress: Float get() = progressMilli.get() / 1000f
+    val generation: Int get() = generationA.get()
     /** Текущая громкость уходящего плеера — для компенсации post-fader эха. */
     val outVolume: Float get() = outVolMilli.get() / 1000f
 
     fun begin(transitionType: Int) {
         progressMilli.set(0)
         outVolMilli.set(1000)
+        generationA.incrementAndGet()   // новый переход → процессор сбросит состояние
         modeA.set(
             when (transitionType) {
                 4 -> MODE_SWEEP
@@ -81,6 +102,11 @@ class DjFxAudioProcessor : BaseAudioProcessor() {
     private var tailArmed = false
     private var dirty = false                // нужен сброс состояний перед новым переходом
     private var sampleRate = 44100
+    // Идентичность процессора: seq присваивается при конструировании (=на плеер),
+    // gen отслеживает переход — чтобы сбросить состояние между back-to-back
+    // переходами на одном процессоре (иначе эхо старого перехода звенело в новом).
+    private val procSeq = DjStreamFx.registerProcessor()
+    private var seenGen = -1
 
     override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
         if (inputAudioFormat.encoding != C.ENCODING_PCM_16BIT) {
@@ -110,13 +136,22 @@ class DjFxAudioProcessor : BaseAudioProcessor() {
 
         val mode = DjStreamFx.mode
 
-        // Быстрый путь: вне перехода — прозрачная передача.
-        if (mode == DjStreamFx.MODE_NONE || echoLen == 0) {
+        // Быстрый путь: вне перехода ИЛИ этот процессор — ВХОДЯЩИЙ плеер
+        // (новейший): прозрачная передача. Раньше эффект применялся к обоим
+        // плеерам — входящий трек глушился/эхоился ровно на выходе на полную
+        // громкость (крит-баг аудита).
+        if (mode == DjStreamFx.MODE_NONE || echoLen == 0 || !DjStreamFx.isOutgoing(procSeq)) {
             if (dirty) resetFxState()
             val output = replaceOutputBuffer(sizeBytes)
             output.put(inputBuffer)
             output.flip()
             return
+        }
+        // Новый переход на том же процессоре → сбросить хвосты старого.
+        val gen = DjStreamFx.generation
+        if (gen != seenGen) {
+            resetFxState()
+            seenGen = gen
         }
         dirty = true
 

@@ -591,6 +591,12 @@ class AudioService : MediaSessionService() {
         }
         juceLocalPlayer = null
 
+        // Явно гасим AudioTrack-sink (режим 6): его реалтайм-поток с живым
+        // AudioTrack иначе пережил бы смерть сервиса и вечно писал тишину
+        // 50 раз/с (батарея). release() движка тоже его останавливает, но тот
+        // идёт асинхронно на умирающем loadThread — здесь страховка в лоб.
+        runCatching { com.liquidmusicglass.engine.automix.AudioTrackSink.stop() }
+
         session?.release()
         session = null
 

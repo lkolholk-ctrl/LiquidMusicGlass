@@ -206,6 +206,36 @@ bool MediaCodecAudioSource::recreateCodec()
 // Bulk-append: один resize на выходной буфер кодека и запись по указателям.
 // push_back на каждый сэмпл (проверка capacity + вызов на фрейм) заметно грел
 // декод-поток на длинных предчтениях; здесь это плоский проход по памяти.
+void MediaCodecAudioSource::push8 (const uint8_t* s, int totalSamples)
+{
+    // Android ENCODING_PCM_8BIT — БЕЗзнаковый, центр 128. Раньше кейса не было
+    // и 8-бит поток шёл в push16 → «песок» (читались int16 из 8-бит байтов).
+    const int ch = outChannels > 0 ? outChannels : 2;
+    const int frames = totalSamples / ch;
+    if (frames <= 0)
+        return;
+
+    constexpr float kScale = 1.0f / 128.0f;
+    const size_t base = leftBuf.size();
+    leftBuf.resize  (base + (size_t) frames);
+    rightBuf.resize (base + (size_t) frames);
+    float* l = leftBuf.data()  + base;
+    float* r = rightBuf.data() + base;
+
+    if (ch == 1)
+        for (int fr = 0; fr < frames; ++fr)
+        {
+            const float v = ((float) s[fr] - 128.0f) * kScale;
+            l[fr] = v; r[fr] = v;
+        }
+    else
+        for (int fr = 0; fr < frames; ++fr)
+        {
+            l[fr] = ((float) s[fr * ch + 0] - 128.0f) * kScale;
+            r[fr] = ((float) s[fr * ch + 1] - 128.0f) * kScale;
+        }
+}
+
 void MediaCodecAudioSource::push16 (const int16_t* s, int totalSamples)
 {
     const int ch = outChannels > 0 ? outChannels : 2;
@@ -338,6 +368,7 @@ void MediaCodecAudioSource::pushDecoded (const uint8_t* data, int sizeBytes)
 {
     switch (pcmEncoding)
     {
+        case 3:  push8  (data,                                    sizeBytes);                          break;
         case 4:  pushF  (reinterpret_cast<const float*>   (data), sizeBytes / (int) sizeof (float));   break;
         case 21: push24 (data,                                    sizeBytes / 3);                      break;
         case 22: push32 (reinterpret_cast<const int32_t*> (data), sizeBytes / (int) sizeof (int32_t)); break;
@@ -377,6 +408,11 @@ void MediaCodecAudioSource::fillLeftover (int framesWanted)
     // ложный «конец трека» на ~3с → тишина и петля на локальном воспроизведении.
     int noProgressIters = 0;
     constexpr int kMaxNoProgressIters = 500;   // ~2с; выход БЕЗ EOS — безвредно
+    // Кодек мог быть отобран системой за часы фоновой игры (mediaserver reclaim).
+    // Тогда dequeue вечно молчит и дека немеет НАВСЕГДА. Одна попытка пересоздать
+    // декодер на эпизод залипания (бюджет сбрасывается при реальном прогрессе) —
+    // возвращает звук, не реанимируя прежнюю петлю с ложным EOS.
+    int recreateBudget = 1;
 
     while (! outputEOS && (int) (leftBuf.size() - leftoverStart) < framesWanted)
     {
@@ -451,9 +487,24 @@ void MediaCodecAudioSource::fillLeftover (int framesWanted)
         // не пересоздаём. noProgressIters ниже выведет из цикла.
 
         if (progressed)
+        {
             noProgressIters = 0;
+            recreateBudget = 1;   // живой кодек — бюджет восстановления обновляем
+        }
         else if (++noProgressIters >= kMaxNoProgressIters)
+        {
+            // Кодек заглох (вход не исчерпан, а выхода нет ~2с) — вероятно
+            // reclaim системой. Одна попытка пересоздать и продолжить с того
+            // же кадра; если не вышло — выходим БЕЗ EOS (транспорт дольёт
+            // тишину, следующий pull повторит), как раньше.
+            if (recreateBudget > 0 && ! inputEOS && recreateCodec())
+            {
+                --recreateBudget;
+                noProgressIters = 0;
+                continue;
+            }
             break;
+        }
     }
 }
 

@@ -39,12 +39,41 @@ object AudioTrackSink {
         }
     }
 
-    /** Остановить sink и дождаться потока (идемпотентно). */
+    /**
+     * Остановить sink и ДОЖДАТЬСЯ смерти потока. Возвращает true, только если
+     * поток гарантированно мёртв. Раньше join(1000) по таймауту молча
+     * проглатывался, thread=null — а живой sink продолжал рендерить, пока
+     * Oboe реопенился и перевыделял буферы: два рендерера на одной памяти,
+     * порча кучи/UAF. Теперь вызывающий обязан проверять результат и НЕ
+     * реопенить Oboe, если sink не умер.
+     */
     @Synchronized
-    fun stop() {
+    fun stop(): Boolean {
         running = false
-        thread?.let { runCatching { it.join(1000) } }
-        thread = null
+        val t = thread ?: return true
+        var waitedMs = 0L
+        while (t.isAlive && waitedMs < 5_000L) {
+            runCatching { t.join(250) }
+            waitedMs += 250
+        }
+        return if (t.isAlive) {
+            com.liquidmusicglass.debug.DebugLog.add(
+                "SINK stop: поток жив после ${waitedMs}мс — реопен Oboe отложен"
+            )
+            false
+        } else {
+            thread = null
+            true
+        }
+    }
+
+    /** Самотерминация цикла (см. loop): вычистить состояние под локом объекта. */
+    @Synchronized
+    private fun onLoopExit() {
+        if (thread === Thread.currentThread()) {
+            thread = null
+            running = false
+        }
     }
 
     private fun createTrack(): AudioTrack? {
@@ -129,5 +158,9 @@ object AudioTrackSink {
 
         runCatching { track.stop() }
         runCatching { track.release() }
+        // Вычищаем состояние: раньше после самотерминации (3 ошибки подряд)
+        // thread оставался != null → следующий start() был no-op, режим 6
+        // молчал до ручного передёргивания. Теперь start() сможет перезапустить.
+        onLoopExit()
     }
 }

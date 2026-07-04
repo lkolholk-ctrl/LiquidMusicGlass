@@ -7,7 +7,9 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.net.Uri
 import com.liquidmusicglass.debug.DebugLog
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -500,9 +502,19 @@ class AutoMixController(
     }
 
     fun release() {
-        try { predictor?.close() } catch (_: Throwable) {}
+        // Закрытие СТРОГО на analysisDispatcher: инференс сериализован на этом
+        // единственном потоке, и close() из чужого потока освобождал нативный
+        // интерпретатор ПОД работающим interpreter.run → UAF/нативный краш.
+        // Очередь single-thread гарантирует: close выполнится после того, как
+        // in-flight анализ доработает.
+        val p = predictor
         predictor = null
         energyCache.clear()
+        if (p != null) {
+            CoroutineScope(analysisDispatcher).launch {
+                try { p.close() } catch (_: Throwable) {}
+            }
+        }
     }
 
     companion object {

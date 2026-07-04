@@ -23,7 +23,7 @@ object AutoMixNativeEngine {
 
     // 0 = not loaded yet, 1 = loaded, -1 = load failed.
     @Volatile private var libState = 0
-    private var initialised = false
+    @Volatile private var initialised = false
 
     /** Режимы совместимости Oboe (значения совпадают с OboeRuntime.h). */
     const val OBOE_MODE_NORMAL = 0      // Shared + LowLatency + Float — ДЕФОЛТ
@@ -104,6 +104,7 @@ object AutoMixNativeEngine {
                 Log.w(TAG, "nativeInit failed", it); false
             }
         }
+        if (ok) generation.incrementAndGet()
         initialised = ok
         // Движок поднялся (лениво, на первом проигрывании) — переотправляем
         // сохранённые настройки аудио-обработки и текущий маршрут вывода.
@@ -131,6 +132,7 @@ object AutoMixNativeEngine {
     fun setOboeCompatMode(mode: Int) {
         if (!isLoaded) return  // применится в init() из AppSettings
         compatExecutor.execute {
+            AudioOutputWatchdog.noteDeviceReopen()
             if (mode == OBOE_MODE_AUDIOTRACK) {
                 // Режим 6: закрыть Oboe-девайс, поднять Java-sink (путь ExoPlayer).
                 runCatching { nativeSinkStart(48_000, 960) }
@@ -140,10 +142,18 @@ object AutoMixNativeEngine {
             } else {
                 // Любой режим ≤5: сначала остановить sink (no-op, если не работал),
                 // затем применить режим — реопен Oboe вернёт нативный выход.
-                runCatching { AudioTrackSink.stop() }
-                runCatching { nativeSinkStop() }
-                runCatching { nativeSetOboeCompatMode(mode) }
-                    .onFailure { Log.w(TAG, "nativeSetOboeCompatMode failed", it) }
+                // КРИТИЧНО: реопенить Oboe можно только если sink-поток ТОЧНО
+                // мёртв — иначе два рендерера на одних буферах (порча кучи).
+                val sinkDead = runCatching { AudioTrackSink.stop() }.getOrDefault(false)
+                if (sinkDead) {
+                    runCatching { nativeSinkStop() }
+                    runCatching { nativeSetOboeCompatMode(mode) }
+                        .onFailure { Log.w(TAG, "nativeSetOboeCompatMode failed", it) }
+                } else {
+                    com.liquidmusicglass.debug.DebugLog.add(
+                        "OBOE mode=$mode отложен: sink не остановился, остаёмся в режиме 6"
+                    )
+                }
             }
             runCatching { com.liquidmusicglass.debug.DebugLog.add("OBOE ${audioDiagnostics()}") }
         }
@@ -381,6 +391,9 @@ object AutoMixNativeEngine {
      */
     @Synchronized fun setOutputRouteBluetooth(isBluetooth: Boolean) {
         if (!isLoaded || !initialised) return
+        // Реопен девайса может занять секунды (BT-стек) — watchdog не должен
+        // принимать это за отказ выхода и эскалировать.
+        AudioOutputWatchdog.noteDeviceReopen()
         runCatching { nativeSetOutputRouteBluetooth(isBluetooth) }
             .onFailure { Log.w(TAG, "nativeSetOutputRouteBluetooth failed", it) }
     }
@@ -557,10 +570,29 @@ object AutoMixNativeEngine {
         runCatching { nativeStopTone() }.onFailure { Log.w(TAG, "nativeStopTone failed", it) }
     }
 
+    // Поколение движка: каждый успешный init() его инкрементит. Отложенный
+    // release() от УМЕРШЕГО плеера (сервис пересоздан системой, старый
+    // loadThread дорабатывает очередь) прилетал ПОСЛЕ init() нового плеера
+    // и разрушал свежесозданный движок — тишина посреди игры до следующего
+    // loadCurrent. Теперь release с чужим поколением игнорируется.
+    private val generation = java.util.concurrent.atomic.AtomicLong(0L)
+
+    /** Текущее поколение движка — захватить после init() и передать в release(). */
+    fun currentGeneration(): Long = generation.get()
+
     /** Close the device and free the engine. */
     @Synchronized
-    fun release() {
+    fun release(expectedGeneration: Long = -1L) {
         if (!isLoaded || !initialised) return
+        if (expectedGeneration >= 0L && expectedGeneration != generation.get()) {
+            com.liquidmusicglass.debug.DebugLog.add(
+                "ENGINE release пропущен: поколение $expectedGeneration != ${generation.get()} (движок уже пересоздан)"
+            )
+            return
+        }
+        // Sink-поток (режим 6) не должен пережить движок: реалтайм-поток
+        // с живым AudioTrack продолжал бы писать тишину 50 раз/с вечно.
+        runCatching { AudioTrackSink.stop() }
         runCatching { nativeRelease() }.onFailure { Log.w(TAG, "nativeRelease failed", it) }
         initialised = false
     }
