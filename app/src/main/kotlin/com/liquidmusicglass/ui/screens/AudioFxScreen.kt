@@ -320,7 +320,7 @@ private fun LimiterSection(lc: LiquidColors, master: Boolean) {
 @Composable
 private fun ResetButton(lc: LiquidColors, enabled: Boolean) {
     Box(
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(lc.cardSurface)
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(lc.cardSurface)
             .clickable(enabled = enabled) { AudioFxController.resetAll() }
             .padding(vertical = 14.dp),
         contentAlignment = Alignment.Center
@@ -334,7 +334,7 @@ private fun ResetButton(lc: LiquidColors, enabled: Boolean) {
 @Composable
 private fun Section(title: String, lc: LiquidColors, valueText: String? = null, content: @Composable () -> Unit) {
     Column(
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp))
             .background(lc.cardSurface).padding(16.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -353,7 +353,7 @@ private fun SectionWithToggle(
     onCheckedChange: (Boolean) -> Unit, master: Boolean, content: @Composable () -> Unit
 ) {
     Column(
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp))
             .background(lc.cardSurface).padding(16.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
