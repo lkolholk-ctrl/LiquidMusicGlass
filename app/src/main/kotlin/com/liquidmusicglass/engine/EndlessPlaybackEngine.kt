@@ -80,20 +80,14 @@ class EndlessPlaybackEngine(
      * @return true, если дозагрузка была успешно выполнена.
      */
     suspend fun checkAndRefillIfNeeded(remainingCount: Int = -1): Boolean {
-        // ── AutoMix toggle (DataStore, единый источник правды) ──
-        // Выключен → не дозаправляем очередь: трек доигрывает и плеер возвращается
-        // к обычному Media3-поведению (конец очереди = остановка). Движок читает
-        // актуальное значение Flow на каждой проверке → реакция мгновенная.
-        if (!PlayerSettings.autoMix.value) {
-            android.util.Log.d("EndlessEngine", "Refill blocked: AutoMix is off")
-            return false
-        }
-
-        // ── BOUNDARY LOCK: refill is strictly allowed in Global (Wave) context ──
-        if (PlayerController.playbackContext !is PlaybackContext.Global) {
-            android.util.Log.d("EndlessEngine", "Refill blocked: active context is ${PlayerController.playbackContext}")
-            return false
-        }
+        // Дозаправка работает ВЕЗДЕ (полевой фидбек: «одно и то же по кругу —
+        // не по кайфу»):
+        //  - волна (Global) — продолжаем волну: личную или станцию по seed;
+        //  - альбом/плейлист/поиск/артист — когда свой материал кончается,
+        //    бесшовно переходим в станцию по хвосту очереди (как у Яндекса).
+        // Прежние гейты (AutoMix-тумблер и boundary-lock на Global) убраны:
+        // тумблер AutoMix управляет кроссфейдами, а не бесконечностью, и
+        // именно эта связка оставляла очередь «ходить по кругу».
 
         if (isRefilling.get()) {
             android.util.Log.d("EndlessEngine", "Already refilling in background, skip")
@@ -128,16 +122,32 @@ class EndlessPlaybackEngine(
                 val ctx = PlayerController.context
                 if (ctx != null) {
                     val refillCtx = _refillContext.value
-                    // ICM wave refill. seedTrackId != null → продолжаем мудовую станцию
-                    // тем же жанром; null → персональная волна.
-                    // Anti-repeat: исключаем ВСЁ, что уже было в этой волне (playedIds —
-                    // и стартовая очередь, и прошлые дозаправки), чтобы треки не повторялись.
+                    val isGlobal = PlayerController.playbackContext is PlaybackContext.Global
+                    val queueIds = PlayerController.getCurrentQueue().map { it.id }
+                    // Волна: seed из контекста (мудовая/трековая станция) или null
+                    // (личная волна). Не-волна: станция по ПОСЛЕДНЕМУ треку
+                    // очереди — альбом кончился, продолжаем «по мотивам».
+                    val seed = if (isGlobal) refillCtx?.seedTrackId else queueIds.lastOrNull()
+                    // Anti-repeat: playedIds (вся история этой сессии волны) +
+                    // текущая очередь (в не-Global контекстах playedIds пуст).
+                    val exclude = (playedIds + queueIds).toList()
                     val waveRepo = com.liquidmusicglass.data.local.WaveRepository.getInstance(ctx)
-                    waveRepo.buildWaveQueue(
+                    var tracks = waveRepo.buildWaveQueue(
                         count = REFILL_BATCH_SIZE,
-                        seedTrackId = refillCtx?.seedTrackId,
-                        exclude = playedIds.toList()
+                        seedTrackId = seed,
+                        exclude = exclude
                     )
+                    // Станция пересохла (сервер отдал empty по seed) → личная
+                    // волна: музыка не должна останавливаться и идти по кругу.
+                    if (tracks.isEmpty() && seed != null) {
+                        android.util.Log.w("EndlessEngine", "Station dried up (seed=$seed) — falling back to personal wave")
+                        tracks = waveRepo.buildWaveQueue(
+                            count = REFILL_BATCH_SIZE,
+                            seedTrackId = null,
+                            exclude = exclude
+                        )
+                    }
+                    tracks
                 } else {
                     android.util.Log.e("EndlessEngine", "Context is null, unable to fetch wave repository")
                     emptyList()

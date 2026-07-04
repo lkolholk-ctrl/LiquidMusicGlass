@@ -222,6 +222,7 @@ class WaveRepository(context: Context) {
 
         var attempts = 0
         val maxAttempts = count * 6 // Fail-safe boundary limit
+        var nullStreak = 0          // подряд «нет ответа» → сеть лежит, не молотим
 
         while (queue.size < count && attempts < maxAttempts) {
             attempts++
@@ -269,9 +270,16 @@ class WaveRepository(context: Context) {
                     }
                     // Пустая станция (нет кандидатов) — прекращаем, чтоб не крутить вхолостую.
                     if (response?.status == "empty") break
+                    // 3 «нет ответа» подряд = сеть лежит (оффлайн/обрыв): выходим,
+                    // иначе каждая дозаправка молотила бы до 60 холостых запросов.
+                    if (response == null && ++nullStreak >= 3) {
+                        Log.w(TAG, "No response 3x in a row — network looks down, aborting wave build.")
+                        break
+                    }
                     Log.w(TAG, "Wave response status: ${response?.status ?: "null"}")
                     continue
                 }
+                nullStreak = 0
 
                 val waveTrack = response.track ?: run {
                     Log.w(TAG, "Wave track is null")

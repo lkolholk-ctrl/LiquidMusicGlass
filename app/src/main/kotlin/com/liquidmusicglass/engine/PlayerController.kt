@@ -98,7 +98,8 @@ object PlayerController {
      * дедуплицирует через свой lock + throttle. Только для волны (Global).
      */
     fun ensureWaveRefill() {
-        if (_playbackContext !is PlaybackContext.Global) return
+        // Без гейта по контексту: дозаправка работает везде (в не-волне —
+        // станция по хвосту очереди, решает сам EndlessPlaybackEngine).
         ioScope.launch { endlessEngine.checkAndRefillIfNeeded() }
     }
 
@@ -1159,12 +1160,14 @@ object PlayerController {
                     onTrackChanged(mediaId)
 
                     // ── Endless refill background monitoring ──
+                    // Проверяем в ЛЮБОМ контексте: очередь у края — движок сам
+                    // решит, чем дозаправить (волна или станция по хвосту).
                     val player = controller
                     if (player != null) {
                         val total = player.mediaItemCount
                         val current = player.currentMediaItemIndex
                         val remaining = if (total > 0 && current >= 0) (total - current) else 0
-                        if (_playbackContext is PlaybackContext.Global && remaining < 3) {
+                        if (remaining < 3) {
                             ioScope.launch {
                                 endlessEngine.checkAndRefillIfNeeded(remaining)
                             }
