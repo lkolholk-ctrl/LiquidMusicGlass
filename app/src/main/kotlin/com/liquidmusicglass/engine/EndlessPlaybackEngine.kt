@@ -26,7 +26,10 @@ class EndlessPlaybackEngine(
 ) {
 
     companion object {
-        const val REFILL_THRESHOLD = 3
+        // Порог 8 (было 3): очередь держится «сытой» — в Up Next всегда
+        // ~8-18 треков, а не «3 и обрыв» (полевой фидбек: «чтоб не было
+        // пусто»). Частота запросов та же: батч 10 на каждые ~10 сыгранных.
+        const val REFILL_THRESHOLD = 8
         const val REFILL_BATCH_SIZE = 10
         const val MIN_REFILL_INTERVAL_MS = 8000L
     }

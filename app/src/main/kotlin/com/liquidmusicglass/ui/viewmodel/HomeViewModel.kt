@@ -199,6 +199,8 @@ class HomeViewModel : ViewModel() {
                     onTopUp = { rest ->
                         _waveTracks.value = _waveTracks.value + rest
                         PlayerController.addTracksToQueue(rest)
+                        // Сразу добить очередь до сытого запаса (порог 8).
+                        PlayerController.ensureWaveRefill()
                     }
                 )
 
@@ -261,6 +263,8 @@ class HomeViewModel : ViewModel() {
                     onTopUp = { rest ->
                         _waveTracks.value = _waveTracks.value + rest
                         PlayerController.addTracksToQueue(rest)
+                        // Сразу добить очередь до сытого запаса (порог 8).
+                        PlayerController.ensureWaveRefill()
                     }
                 )
             } catch (_: Exception) {

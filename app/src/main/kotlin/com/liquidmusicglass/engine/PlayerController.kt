@@ -1168,7 +1168,7 @@ object PlayerController {
                         val total = player.mediaItemCount
                         val current = player.currentMediaItemIndex
                         val remaining = if (total > 0 && current >= 0) (total - current) else 0
-                        if (remaining < 3) {
+                        if (remaining < EndlessPlaybackEngine.REFILL_THRESHOLD) {
                             ioScope.launch {
                                 endlessEngine.checkAndRefillIfNeeded(remaining)
                             }
@@ -1222,6 +1222,8 @@ object PlayerController {
             if (rest.isNotEmpty()) {
                 withContext(Dispatchers.Main) { addTracksToQueue(rest) }
             }
+            // Добить очередь до «сытого» запаса сразу, не дожидаясь перехода.
+            endlessEngine.checkAndRefillIfNeeded()
         }
     }
 
