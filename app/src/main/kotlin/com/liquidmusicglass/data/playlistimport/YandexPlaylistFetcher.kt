@@ -24,7 +24,7 @@ class YandexResolveException(message: String, cause: Throwable? = null) :
  *
  * Схема:
  *  1. Страница плейлиста тянется с заголовками живого Chrome
- *     (без Sec-Fetch-*/ru-локали Яндекс отдаёт 403/451).
+ *     (без Sec-Fetch-заголовков и ru-локали Яндекс отдаёт 403/451).
  *  2. Новая ссылка (/playlists/lk.<uuid>): из HTML достаём "uid"/"kind"
  *     владельца → официальное api.music.yandex.net/users/{uid}/playlists/{kind}
  *     отвечает БЕЗ авторизации чистым JSON со всеми треками.
