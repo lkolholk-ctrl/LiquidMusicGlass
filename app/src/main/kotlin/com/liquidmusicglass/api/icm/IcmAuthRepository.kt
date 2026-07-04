@@ -278,7 +278,10 @@ object IcmAuthRepository {
     private fun issueSessionToken(
         partnerUserId: String,
         apiKey: String,
-        hideExplicit: Boolean = false
+        // hide_explicit — флаг СЕССИИ (per-user настройка на сервере ICM):
+        // сервер фильтрует поиск/треки. Дефолт читает тумблер из настроек —
+        // так флаг уходит при ЛЮБОМ выпуске токена (логин, рестарт, 401-рефреш).
+        hideExplicit: Boolean = com.liquidmusicglass.engine.AppSettings.hideExplicit.value
     ): Result<TokenData> {
         val jsonBody = JSONObject().apply {
             put("partner_user_id", partnerUserId)
@@ -437,7 +440,10 @@ object IcmAuthRepository {
      * Issue session token after Telegram auth.
      * Must be called after setTelegramAuth with valid API key.
      */
-    suspend fun issueSessionAfterTelegramAuth(apiKey: String, hideExplicit: Boolean = false): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun issueSessionAfterTelegramAuth(
+        apiKey: String,
+        hideExplicit: Boolean = com.liquidmusicglass.engine.AppSettings.hideExplicit.value
+    ): Result<String> = withContext(Dispatchers.IO) {
         val userId = _partnerUserId.value ?: return@withContext Result.failure(IOException("No partner_user_id set"))
         val tokenResult = issueSessionToken(userId, apiKey, hideExplicit)
 

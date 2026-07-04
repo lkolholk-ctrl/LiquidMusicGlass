@@ -156,6 +156,11 @@ object IcmRepository {
     }
     private const val SEARCH_CACHE_TTL_MS = 60_000L
 
+    /** Сброс кэша поиска — нужен при смене hide_explicit: старая выдача нефильтрованная. */
+    fun clearSearchCache() {
+        synchronized(searchCache) { searchCache.clear() }
+    }
+
     /**
      * Search — all results (tracks + albums + artists).
      * @param query Search string

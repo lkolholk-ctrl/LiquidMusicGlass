@@ -63,7 +63,6 @@ fun SettingsScreen(
     val scroll = rememberScrollState()
     val scope = rememberCoroutineScope()
 
-    val gaplessEnabled by AppSettings.gaplessEnabled.collectAsState()
     val sleepTimerMinutes by AppSettings.sleepTimerMinutes.collectAsState()
     val sleepOptions = listOf(0, 15, 30, 45, 60, 90)
 
@@ -220,18 +219,23 @@ fun SettingsScreen(
             val hapticStrength by AppSettings.hapticStrength.collectAsState()
 
             PlainCard {
-                SettingsToggleItem(
-                    title = "Gapless Playback",
-                    subtitle = "No silence between tracks",
-                    selected = gaplessEnabled,
-                    onSelect = { AppSettings.setGapless(it) }
-                )
-                PlainDivider()
+                // Gapless-тумблер удалён: флаг никто не читал (ExoPlayer бесшовный
+                // сам по себе, у JUCE — AutoMix), мёртвая настройка врала юзеру.
                 SettingsToggleItem(
                     title = "Hide Explicit",
                     subtitle = "Filter explicit content from search & artist",
                     selected = hideExplicit,
-                    onSelect = { AppSettings.setHideExplicit(it) }
+                    onSelect = { enabled ->
+                        AppSettings.setHideExplicit(enabled)
+                        // hide_explicit живёт в токене сессии ICM → перевыпускаем
+                        // его сразу, чтобы фильтр включился без перезапуска.
+                        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                            try {
+                                com.liquidmusicglass.api.icm.IcmAuthRepository.reissueSessionToken()
+                                com.liquidmusicglass.api.icm.IcmRepository.clearSearchCache()
+                            } catch (_: Exception) {}
+                        }
+                    }
                 )
                 PlainDivider()
                 // Выход локального аудио. Auto — вендорная таблица AudioQuirks +
