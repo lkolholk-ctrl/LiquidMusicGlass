@@ -47,10 +47,16 @@ object AudioTrackSink {
      * порча кучи/UAF. Теперь вызывающий обязан проверять результат и НЕ
      * реопенить Oboe, если sink не умер.
      */
-    @Synchronized
     fun stop(): Boolean {
-        running = false
-        val t = thread ?: return true
+        // Ждать поток НЕЛЬЗЯ под локом объекта: onLoopExit() потока тоже
+        // @Synchronized — join под локом дедлочил выход цикла (поток ждал лок,
+        // stop() ждал поток), 5с таймаут и «остаёмся в режиме 6» на КАЖДОЙ
+        // попытке уйти с AudioTrack. Лок — только на чтение/чистку состояния.
+        val t: Thread?
+        synchronized(this) {
+            running = false
+            t = thread ?: return true
+        }
         var waitedMs = 0L
         while (t.isAlive && waitedMs < 5_000L) {
             runCatching { t.join(250) }
@@ -62,7 +68,7 @@ object AudioTrackSink {
             )
             false
         } else {
-            thread = null
+            synchronized(this) { if (thread === t) thread = null }
             true
         }
     }
