@@ -340,15 +340,23 @@ fun FullPlayer(
                         shape = artShape
                     }
             ) {
-                AlbumArtImage(
-                    uri = albumArtUri,
-                    coverUrl = coverUrl,
-                    audioFileUri = audioFileUri,
-                    albumId = albumId,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
+                // Кроссфейд обложек: при смене трека (авто или скип) старая
+                // растворяется, новая проявляется — вместо мгновенной подмены.
+                androidx.compose.animation.Crossfade(
+                    targetState = ArtCrossfadeKey(albumArtUri, coverUrl, audioFileUri, albumId),
+                    animationSpec = tween(450),
+                    label = "artCrossfade"
+                ) { art ->
+                    AlbumArtImage(
+                        uri = art.uri,
+                        coverUrl = art.coverUrl,
+                        audioFileUri = art.audioFileUri,
+                        albumId = art.albumId,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
             }
         }
 
@@ -558,26 +566,18 @@ fun FullPlayer(
                         )
                     }
                     Spacer(Modifier.width(12.dp))
-                    Box(
-                        modifier = Modifier
-                            .size(44.dp)
-                            .pressScale {
-                                currentTrackObj?.let { track ->
-                                    scope.launch {
-                                        libraryRepo.toggleFavorite(track)
-                                    }
+                    com.liquidmusicglass.ui.components.LikeBurstHeart(
+                        isLiked = isFavorite,
+                        modifier = Modifier.size(44.dp),
+                        iconSize = 26.dp,
+                        onToggle = {
+                            currentTrackObj?.let { track ->
+                                scope.launch {
+                                    libraryRepo.toggleFavorite(track)
                                 }
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            if (isFavorite) Icons.Rounded.Favorite
-                            else Icons.Rounded.FavoriteBorder, null,
-                            tint = if (isFavorite) Color(0xFFFC3C44)
-                            else Color.White.copy(alpha = 0.70f),
-                            modifier = Modifier.size(26.dp)
-                        )
-                    }
+                            }
+                        }
+                    )
                     Box(
                         modifier = Modifier
                             .size(44.dp)
@@ -1424,3 +1424,11 @@ private fun DebugPanel(onDismiss: () -> Unit) {
         }
     }
 }
+
+/** Ключ кроссфейда обложки: все параметры арта одного трека одним значением. */
+private data class ArtCrossfadeKey(
+    val uri: Uri?,
+    val coverUrl: String?,
+    val audioFileUri: Uri?,
+    val albumId: Long
+)

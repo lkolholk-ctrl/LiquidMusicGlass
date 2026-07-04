@@ -2,11 +2,17 @@ package com.liquidmusicglass.ui.player
 
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -48,13 +54,18 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -65,6 +76,7 @@ import com.liquidmusicglass.ui.glass.AlbumArtImage
 import com.liquidmusicglass.ui.glass.AlbumColors
 import com.liquidmusicglass.ui.glass.pressScale
 import kotlinx.coroutines.launch
+import kotlin.math.abs
 
 private val AppleRed = Color(0xFFFC3C44)
 
@@ -240,8 +252,13 @@ fun QueueSheet(
                     }
                 }
 
-                val queue = PlayerController.getCurrentQueue()
+                // Реактивно: reorder/удаление обновляют список сразу.
+                val queue by PlayerController.queueFlow.collectAsState()
                 val currentIndex = PlayerController.getCurrentIndex()
+
+                // Drag-reorder: ключ таскаемой строки + её текущее смещение.
+                var draggingKey by remember { mutableStateOf<String?>(null) }
+                var dragOffsetY by remember { mutableStateOf(0f) }
 
                 Box(
                     modifier = Modifier
@@ -275,14 +292,33 @@ fun QueueSheet(
                                 )
                             )
                         }
+                        // Стабильные ключи по id (дубли, если плейлист содержит
+                        // один трек дважды, получают суффикс #n) — иначе при
+                        // reorder узел строки пересоздаётся и жест обрывается.
+                        val upNextKeys = run {
+                            val seen = HashMap<String, Int>()
+                            upNext.map { t ->
+                                val n = seen.getOrDefault(t.id, 0)
+                                seen[t.id] = n + 1
+                                if (n == 0) "q_${t.id}" else "q_${t.id}#$n"
+                            }
+                        }
                         itemsIndexed(
                             upNext,
-                            key = { index, track -> "upnext_${index}_${track.id}" }
+                            key = { index, _ -> upNextKeys[index] }
                         ) { idx, track ->
-                            QueueTrackRow(
+                            DraggableQueueRow(
                                 track = track,
-                                isPlaying = false,
-                                showDragHandle = true,
+                                rowKey = upNextKeys[idx],
+                                index = idx,
+                                upNextLastIndex = upNext.lastIndex,
+                                draggingKey = draggingKey,
+                                dragOffsetY = dragOffsetY,
+                                onDragStateChange = { key, offset ->
+                                    draggingKey = key
+                                    dragOffsetY = offset
+                                },
+                                absoluteIndex = { i -> PlayerController.getCurrentIndex() + 1 + i },
                                 onClick = {
                                     PlayerController.playTrack(
                                         context,
@@ -326,21 +362,75 @@ fun QueueSheet(
     }
 }
 
+/**
+ * Строка Up Next с двумя жестами:
+ * - вертикальный drag за хэндл справа → перестановка в очереди (moveQueueItem);
+ * - горизонтальный свайп по строке → удаление из очереди (removeQueueItem).
+ * Состояние drag хранится у родителя по ключу строки — при reorder узел
+ * не пересоздаётся (стабильные ключи) и жест не обрывается.
+ */
 @Composable
-private fun QueueTrackRow(
+private fun DraggableQueueRow(
     track: Track,
-    isPlaying: Boolean,
-    showDragHandle: Boolean,
+    rowKey: String,
+    index: Int,
+    upNextLastIndex: Int,
+    draggingKey: String?,
+    dragOffsetY: Float,
+    onDragStateChange: (String?, Float) -> Unit,
+    absoluteIndex: (Int) -> Int,
     onClick: () -> Unit
 ) {
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val rowHeightPx = remember(density) { with(density) { 56.dp.toPx() } }
+    val removeThresholdPx = remember(density) { with(density) { 96.dp.toPx() } }
+    val indexState = rememberUpdatedState(index)
+    val lastIndexState = rememberUpdatedState(upNextLastIndex)
+    val removeOffset = remember(rowKey) { Animatable(0f) }
+    val isDragging = draggingKey == rowKey
+
     Row(
         modifier = Modifier
+            .zIndex(if (isDragging) 1f else 0f)
+            .graphicsLayer {
+                translationY = if (isDragging) dragOffsetY else 0f
+                translationX = removeOffset.value
+                alpha = 1f - (abs(removeOffset.value) / (removeThresholdPx * 3f))
+                    .coerceAtMost(0.35f)
+                shadowElevation = if (isDragging) 12f else 0f
+            }
             .fillMaxWidth()
             .height(56.dp)
+            .background(
+                if (isDragging) Color.White.copy(alpha = 0.06f) else Color.Transparent
+            )
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = onClick
+            )
+            .draggable(
+                orientation = Orientation.Horizontal,
+                state = rememberDraggableState { delta ->
+                    scope.launch { removeOffset.snapTo(removeOffset.value + delta) }
+                },
+                onDragStopped = { velocity ->
+                    val off = removeOffset.value
+                    if (abs(off) > removeThresholdPx || abs(velocity) > 3000f) {
+                        val target = if (off < 0 || (off == 0f && velocity < 0)) -1400f else 1400f
+                        scope.launch {
+                            removeOffset.animateTo(target, tween(150))
+                            PlayerController.removeQueueItem(absoluteIndex(indexState.value))
+                            // Узел может переиспользоваться под другой трек — возвращаем на место.
+                            removeOffset.snapTo(0f)
+                        }
+                    } else {
+                        scope.launch {
+                            removeOffset.animateTo(0f, spring(dampingRatio = 0.8f, stiffness = 400f))
+                        }
+                    }
+                }
             )
             .padding(horizontal = 20.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -365,9 +455,9 @@ private fun QueueTrackRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = track.title,
-                color = if (isPlaying) AppleRed else Color.White,
+                color = Color.White,
                 fontSize = 14.sp,
-                fontWeight = if (isPlaying) FontWeight.Bold else FontWeight.SemiBold,
+                fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -381,8 +471,47 @@ private fun QueueTrackRow(
             )
         }
 
-        if (showDragHandle) {
-            Spacer(modifier = Modifier.width(8.dp))
+        Spacer(modifier = Modifier.width(8.dp))
+        // Хэндл перестановки: вертикальный drag двигает трек по очереди.
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .pointerInput(rowKey) {
+                    var myIdx = 0
+                    var acc = 0f
+                    detectDragGestures(
+                        onDragStart = {
+                            myIdx = indexState.value
+                            acc = 0f
+                            onDragStateChange(rowKey, 0f)
+                        },
+                        onDrag = { change, amount ->
+                            change.consume()
+                            acc += amount.y
+                            val steps = (acc / rowHeightPx).toInt()
+                            if (steps != 0) {
+                                val target = (myIdx + steps)
+                                    .coerceIn(0, lastIndexState.value)
+                                if (target != myIdx) {
+                                    PlayerController.moveQueueItem(
+                                        absoluteIndex(myIdx),
+                                        absoluteIndex(target)
+                                    )
+                                    acc -= (target - myIdx) * rowHeightPx
+                                    myIdx = target
+                                } else {
+                                    // упёрлись в край — не копим смещение бесконечно
+                                    acc = acc.coerceIn(-rowHeightPx, rowHeightPx)
+                                }
+                            }
+                            onDragStateChange(rowKey, acc)
+                        },
+                        onDragEnd = { onDragStateChange(null, 0f) },
+                        onDragCancel = { onDragStateChange(null, 0f) }
+                    )
+                },
+            contentAlignment = Alignment.Center
+        ) {
             Icon(
                 imageVector = Icons.Rounded.DragHandle,
                 contentDescription = null,

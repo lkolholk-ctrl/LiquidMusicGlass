@@ -15,6 +15,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -140,84 +141,208 @@ fun LibraryScreen(
     ) {
         when (currentView) {
             LibraryView.MAIN -> {
-                Column(modifier = Modifier.fillMaxSize()) {
-                    // Header
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 48.dp, bottom = 24.dp, start = 20.dp, end = 20.dp)
-                    ) {
-                        Text(
-                            text = "Playlists",
-                            fontSize = 34.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = lc.textPrimary
+                // ── Вариант A (редизайн): системные разделы одной карточкой 28dp
+                // с живыми сабтайтлами, ниже — сетка плейлистов 2 колонки с
+                // мозаикой обложек. My Playlists и Imported слиты в одну сетку
+                // (импортные — с бейджем источника), Local Audio + Медиатека —
+                // один раздел «On this device». ──
+                val localPlaylists by com.liquidmusicglass.engine.PlaylistManager.playlists.collectAsState()
+
+                // Размер загрузок на диске — фоном, чтобы не трогать main.
+                var downloadsSize by remember { mutableStateOf<String?>(null) }
+                LaunchedEffect(downloadedTracks) {
+                    downloadsSize = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                        val bytes = downloadedTracks.sumOf { entity ->
+                            runCatching { java.io.File(entity.localPath).length() }.getOrDefault(0L)
+                        }
+                        when {
+                            bytes <= 0L -> null
+                            bytes < (1L shl 20) -> "%.0f KB".format(bytes / 1024.0)
+                            bytes < (1L shl 30) -> "%.0f MB".format(bytes / 1048576.0)
+                            else -> "%.1f GB".format(bytes / 1073741824.0)
+                        }
+                    }
+                }
+
+                // Объединённая сетка плейлистов: свои + импортированные.
+                val playlistCells = remember(localPlaylists, importedPlaylists) {
+                    localPlaylists.map { p ->
+                        PlaylistCellData(
+                            key = "local_${p.id}",
+                            id = p.id,
+                            name = p.name,
+                            trackCount = p.tracks.size,
+                            covers = p.tracks.mapNotNull { it.coverUrl }.distinct().take(4),
+                            badge = null,
+                            isImported = false
+                        )
+                    } + importedPlaylists.map { p ->
+                        PlaylistCellData(
+                            key = "icm_${p.id}",
+                            id = p.id ?: "",
+                            name = p.name.orEmpty(),
+                            trackCount = p.trackCount ?: 0,
+                            covers = listOfNotNull(p.cover?.replace("1000x1000", "400x400")),
+                            badge = when {
+                                p.source?.contains("yandex", true) == true -> "Yandex"
+                                p.source?.contains("apple", true) == true -> "Apple"
+                                else -> "Cloud"
+                            },
+                            isImported = true
                         )
                     }
+                }
+                var playlistToDelete by remember { mutableStateOf<PlaylistCellData?>(null) }
 
-                    // Options list
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 20.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        // 1. Favorites Card
-                        MenuCard(
-                            title = "Favorites",
-                            subtitle = "${favorites.size} tracks",
-                            icon = Icons.Default.Favorite,
-                            tint = AppleRed,
-                            onClick = { currentView = LibraryView.FAVORITES }
-                        )
+                androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
+                    columns = androidx.compose.foundation.lazy.grid.GridCells.Fixed(2),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 178.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                        Column {
+                            Spacer(Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
+                            Text(
+                                text = "Playlists",
+                                fontSize = 34.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = lc.textPrimary,
+                                modifier = Modifier.padding(top = 12.dp, bottom = 8.dp)
+                            )
+                        }
+                    }
 
-                        // 2. Downloads Card
-                        MenuCard(
-                            title = "Downloads",
-                            subtitle = "${downloadedTracks.size} tracks",
-                            icon = Icons.Default.Download,
-                            tint = Color(0xFF29B6F6),
-                            onClick = { currentView = LibraryView.DOWNLOADS }
-                        )
+                    // ── Системные разделы: одна карточка, строки с живым контентом ──
+                    item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(28.dp))
+                                .background(lc.cardSurface)
+                        ) {
+                            MenuCard(
+                                title = "Favorites",
+                                subtitle = "${favorites.size} tracks",
+                                icon = Icons.Default.Favorite,
+                                tint = AppleRed,
+                                onClick = { currentView = LibraryView.FAVORITES },
+                                trailing = {
+                                    CoverStack(favorites.take(3).mapNotNull { it.imageUrl })
+                                }
+                            )
+                            SystemRowDivider()
+                            MenuCard(
+                                title = "Downloads",
+                                subtitle = downloadsSize
+                                    ?.let { "${downloadedTracks.size} tracks · $it" }
+                                    ?: "${downloadedTracks.size} tracks",
+                                icon = Icons.Default.Download,
+                                tint = Color(0xFF29B6F6),
+                                onClick = { currentView = LibraryView.DOWNLOADS }
+                            )
+                            SystemRowDivider()
+                            MenuCard(
+                                title = "On this device",
+                                subtitle = "Артисты · Альбомы · Треки · Поиск",
+                                icon = Icons.Rounded.LibraryMusic,
+                                tint = Color(0xFFFF9F0A),
+                                onClick = onOpenLocalLibrary
+                            )
+                        }
+                    }
 
-                        // 3. Local Playlists Card (from PlaylistManager)
-                        val localPlaylists by com.liquidmusicglass.engine.PlaylistManager.playlists.collectAsState()
-                        MenuCard(
-                            title = "My Playlists",
-                            subtitle = "${localPlaylists.size} playlists",
-                            icon = Icons.AutoMirrored.Rounded.PlaylistPlay,
-                            tint = Color(0xFF30D158),
-                            onClick = { currentView = LibraryView.LOCAL_PLAYLISTS }
-                        )
-
-                        // 4. Imported Card (ICM cloud)
-                        MenuCard(
-                            title = "Imported",
-                            subtitle = if (isLoggedIn) "${importedPlaylists.size} playlists" else "Sign in to sync",
-                            icon = Icons.AutoMirrored.Rounded.PlaylistPlay,
-                            tint = Color(0xFFAB47BC),
-                            onClick = {
-                                loadImportedPlaylists()
-                                currentView = LibraryView.IMPORTED
+                    // ── Секция плейлистов: заголовок + импорт ──
+                    item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "My Playlists",
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = lc.textPrimary
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .background(Color(0xFF30D158).copy(alpha = 0.14f), CircleShape)
+                                    .clip(CircleShape)
+                                    .clickable(remember { MutableInteractionSource() }, null) {
+                                        showImportDialog = true
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Rounded.Add, null, tint = Color(0xFF30D158), modifier = Modifier.size(20.dp))
                             }
-                        )
-
-                        // 5. Local Audio Card (device music via MediaStore) — Stage 7b
-                        MenuCard(
-                            title = "Local Audio",
-                            subtitle = "Music on this device",
-                            icon = Icons.Rounded.MusicNote,
-                            tint = Color(0xFFFF9F0A),
-                            onClick = { currentView = LibraryView.LOCAL_AUDIO }
-                        )
-                        MenuCard(
-                            title = "Медиатека",
-                            subtitle = "Артисты · Альбомы · Треки · Поиск",
-                            icon = Icons.Rounded.LibraryMusic,
-                            tint = Color(0xFF34C759),
-                            onClick = onOpenLocalLibrary
-                        )
+                        }
                     }
+
+                    if (playlistCells.isEmpty()) {
+                        item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Icon(
+                                    Icons.AutoMirrored.Rounded.PlaylistPlay, null,
+                                    tint = lc.iconMuted, modifier = Modifier.size(48.dp)
+                                )
+                                Spacer(Modifier.height(10.dp))
+                                Text(
+                                    if (isLoggedIn) "No playlists yet. Tap + to import one!"
+                                    else "Sign in to sync playlists, or tap + to import",
+                                    color = lc.textSecondary,
+                                    fontSize = 14.sp
+                                )
+                            }
+                        }
+                    } else {
+                        items(playlistCells.size, key = { playlistCells[it].key }) { i ->
+                            PlaylistCell(
+                                data = playlistCells[i],
+                                onClick = { onOpenPlaylist(playlistCells[i].id) },
+                                onLongPress = { playlistToDelete = playlistCells[i] }
+                            )
+                        }
+                    }
+                }
+
+                // ── Долгий тап по плейлисту → удаление ──
+                playlistToDelete?.let { cell ->
+                    GlassDialog(
+                        visible = true,
+                        onDismiss = { playlistToDelete = null },
+                        title = "Delete Playlist",
+                        message = "Are you sure you want to delete '${cell.name}'?",
+                        icon = Icons.Rounded.Close,
+                        iconTint = Color(0xFFFF5252),
+                        primaryButton = GlassDialogButton(
+                            text = "Delete",
+                            onClick = {
+                                if (cell.isImported) {
+                                    scope.launch {
+                                        IcmRepository.deleteUserPlaylist(cell.id)
+                                        loadImportedPlaylists()
+                                    }
+                                } else {
+                                    com.liquidmusicglass.engine.PlaylistManager.delete(cell.id)
+                                }
+                                playlistToDelete = null
+                            },
+                            backgroundColor = Color(0xFFFF5252),
+                            textColor = Color.White
+                        ),
+                        secondaryButton = GlassDialogButton(
+                            text = "Cancel",
+                            onClick = { playlistToDelete = null },
+                            backgroundColor = lc.textPrimary.copy(alpha = 0.08f),
+                            textColor = lc.textSecondary
+                        )
+                    )
                 }
             }
 
@@ -264,7 +389,7 @@ fun LibraryScreen(
                     } else {
                         LazyColumn(
                             modifier = Modifier.weight(1f),
-                            contentPadding = PaddingValues(bottom = 120.dp)
+                            contentPadding = PaddingValues(bottom = 178.dp)
                         ) {
                             items(favorites, key = { it.trackId }) { track ->
                                 FavoriteTrackItem(
@@ -329,7 +454,7 @@ fun LibraryScreen(
                     } else {
                         LazyColumn(
                             modifier = Modifier.weight(1f),
-                            contentPadding = PaddingValues(bottom = 120.dp)
+                            contentPadding = PaddingValues(bottom = 178.dp)
                         ) {
                             items(downloadedTracks, key = { it.trackId }) { trackEntity ->
                                 DownloadedTrackItem(
@@ -670,16 +795,14 @@ private fun MenuCard(
     subtitle: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     tint: Color,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    trailing: @Composable () -> Unit = {}
 ) {
     val lc = LiquidTheme.colors
-    val shape = RoundedCornerShape(28.dp)   // эталон радиуса — карточки настроек
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .height(72.dp)
-            .background(Color.Transparent, shape)
-            .clip(shape)
             .clickable(remember { MutableInteractionSource() }, null, onClick = onClick)
             .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -701,8 +824,150 @@ private fun MenuCard(
             Text(subtitle, color = lc.textSecondary, fontSize = 13.sp)
         }
 
+        trailing()
+
         Icon(Icons.Rounded.ChevronRight, null, tint = lc.textTertiary, modifier = Modifier.size(24.dp))
     }
+}
+
+/** Разделитель строк внутри системной карточки (с отступом под иконку). */
+@Composable
+private fun SystemRowDivider() {
+    val lc = LiquidTheme.colors
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 74.dp, end = 16.dp)
+            .height(0.8.dp)
+            .background(lc.textPrimary.copy(alpha = 0.06f))
+    )
+}
+
+/** Стопка обложек внахлёст (последние лайкнутые) — живой контент строки Favorites. */
+@Composable
+private fun CoverStack(covers: List<String>) {
+    if (covers.isEmpty()) return
+    val overlap = 18
+    Box(modifier = Modifier.width(((covers.size - 1) * overlap + 28).dp)) {
+        covers.forEachIndexed { i, url ->
+            AsyncImage(
+                model = url.replace("1000x1000", "200x200"),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .padding(start = (i * overlap).dp)
+                    .size(28.dp)
+                    .clip(RoundedCornerShape(7.dp))
+            )
+        }
+    }
+    Spacer(Modifier.width(8.dp))
+}
+
+/** Данные ячейки сетки плейлистов (свой или импортированный). */
+private data class PlaylistCellData(
+    val key: String,
+    val id: String,
+    val name: String,
+    val trackCount: Int,
+    val covers: List<String>,
+    val badge: String?,
+    val isImported: Boolean
+)
+
+/** Ячейка плейлиста: мозаика 2×2 из обложек (или одна/заглушка) + имя + счётчик. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun PlaylistCell(
+    data: PlaylistCellData,
+    onClick: () -> Unit,
+    onLongPress: () -> Unit
+) {
+    val lc = LiquidTheme.colors
+    Column(
+        modifier = Modifier
+            .clip(RoundedCornerShape(20.dp))
+            .combinedClickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+                onLongClick = onLongPress
+            )
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .clip(RoundedCornerShape(16.dp))
+                .background(lc.cardSurface)
+        ) {
+            when {
+                data.covers.size >= 4 -> {
+                    Column(Modifier.fillMaxSize()) {
+                        Row(Modifier.weight(1f)) {
+                            MosaicTile(data.covers[0], Modifier.weight(1f))
+                            MosaicTile(data.covers[1], Modifier.weight(1f))
+                        }
+                        Row(Modifier.weight(1f)) {
+                            MosaicTile(data.covers[2], Modifier.weight(1f))
+                            MosaicTile(data.covers[3], Modifier.weight(1f))
+                        }
+                    }
+                }
+                data.covers.isNotEmpty() -> {
+                    AsyncImage(
+                        model = data.covers.first(),
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+                else -> {
+                    Icon(
+                        Icons.AutoMirrored.Rounded.PlaylistPlay,
+                        null,
+                        tint = lc.iconMuted,
+                        modifier = Modifier.size(40.dp).align(Alignment.Center)
+                    )
+                }
+            }
+            data.badge?.let { badge ->
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp)
+                        .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(50))
+                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                ) {
+                    Text(badge, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+        Spacer(Modifier.height(7.dp))
+        Text(
+            data.name,
+            color = lc.textPrimary,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            "${data.trackCount} tracks",
+            color = lc.textSecondary,
+            fontSize = 12.sp
+        )
+    }
+}
+
+@Composable
+private fun MosaicTile(url: String, modifier: Modifier) {
+    AsyncImage(
+        model = url.replace("1000x1000", "300x300"),
+        contentDescription = null,
+        contentScale = ContentScale.Crop,
+        modifier = modifier.fillMaxHeight()
+    )
 }
 
 /**

@@ -99,7 +99,7 @@ fun NewScreen(
     Box(modifier = Modifier.fillMaxSize().background(lc.settingsBackground)) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 110.dp)
+            contentPadding = PaddingValues(bottom = 178.dp)
         ) {
             item { Spacer(Modifier.windowInsetsTopHeight(WindowInsets.statusBars)) }
             item {

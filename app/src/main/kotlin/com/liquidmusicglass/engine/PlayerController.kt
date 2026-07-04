@@ -749,6 +749,36 @@ object PlayerController {
         }
     }
 
+    /** Переставить трек в очереди (drag-reorder в шторке Queue). Текущий не двигаем. */
+    fun moveQueueItem(from: Int, to: Int) {
+        if (from == to || from !in queue.indices || to !in queue.indices) return
+        if (from == currentIndex) return
+        val playingId = _currentTrack.value?.id
+        queue = queue.toMutableList().apply { add(to, removeAt(from)) }
+        // Текущий индекс мог сдвинуться — восстанавливаем по id играющего трека.
+        queue.indexOfFirst { it.id == playingId }.takeIf { it >= 0 }?.let { currentIndex = it }
+        _queueFlow.value = queue
+        mainScope.launch {
+            val player = controller ?: appContext?.let { getPlayer(it) }
+            if (player != null && from < player.mediaItemCount && to < player.mediaItemCount) {
+                player.moveMediaItem(from, to)
+            }
+        }
+    }
+
+    /** Убрать трек из очереди (свайп в шторке Queue). Текущий не убираем. */
+    fun removeQueueItem(index: Int) {
+        if (index !in queue.indices || index == currentIndex) return
+        val playingId = _currentTrack.value?.id
+        queue = queue.toMutableList().apply { removeAt(index) }
+        queue.indexOfFirst { it.id == playingId }.takeIf { it >= 0 }?.let { currentIndex = it }
+        _queueFlow.value = queue
+        mainScope.launch {
+            val player = controller ?: appContext?.let { getPlayer(it) }
+            if (player != null && index < player.mediaItemCount) player.removeMediaItem(index)
+        }
+    }
+
     fun setAutoRefillContext(type: String, id: String, name: String, seedTrackId: String? = null) {
         val newContext = when {
             type.equals("library", ignoreCase = true) && id.equals("downloads", ignoreCase = true) ->

@@ -463,8 +463,35 @@ fun AppRoot() {
                             waveHideFrac * 160.dp.toPx()   // автоскрытие на Wave
                         alpha = bottomBarAlpha
                     }
-                    .background(barBackground)
+                    .background(barBackground),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                // Мини-плеер (стиль ЯМ, плоский — без стекла): только на вкладках,
+                // где включают музыку. На Wave-главной не нужен — экран сам плеер.
+                val miniTrack = currentTrack
+                if (selectedIndex != 0 && miniTrack != null) {
+                    val miniLibraryRepo = remember {
+                        com.liquidmusicglass.data.local.db.LibraryRepository.getInstance(context)
+                    }
+                    val miniLiked by miniLibraryRepo.isFavoriteFlow(miniTrack.id)
+                        .collectAsState(initial = false)
+                    Spacer(Modifier.height(6.dp))
+                    com.liquidmusicglass.ui.player.MiniPlayer(
+                        trackTitle = trackTitle,
+                        artistName = artistName,
+                        isPlaying = isPlaying,
+                        albumArtUri = miniTrack.displayArtUri,
+                        coverUrl = miniTrack.coverUrl,
+                        tint = albumColorsForBar.darkMuted,
+                        isLiked = miniLiked,
+                        onToggleLike = { scope.launch { miniLibraryRepo.toggleFavorite(miniTrack) } },
+                        onExpand = { animateExpand() },
+                        onPlayPause = { PlayerController.togglePlayPause(context) },
+                        onSkipNext = { PlayerController.skipNext(context) },
+                        onSkipPrevious = { PlayerController.skipPrevious(context) }
+                    )
+                    Spacer(Modifier.height(6.dp))
+                }
                 // Wave-контент всегда тёмный → на дымном фоне иконки бара тоже
                 // должны быть «тёмной темы» (белые), даже если тема приложения светлая.
                 val barContent: @Composable () -> Unit = {
