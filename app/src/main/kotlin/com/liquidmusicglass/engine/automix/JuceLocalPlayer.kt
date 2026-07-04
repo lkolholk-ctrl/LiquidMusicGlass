@@ -742,7 +742,22 @@ class JuceLocalPlayer(
                 transitionState == 1 &&
                 transitionFromIndex == plan.fromIndex &&
                 currentIndex == plan.fromIndex
-            val ok = canStart && loadUriIntoIncoming(plan.nextUri)
+            var ok = canStart && loadUriIntoIncoming(plan.nextUri)
+            if (!ok && canStart) {
+                // Разовый ретрай: провал загрузки incoming часто разовый
+                // (сеть/5xx на резолве URL). Времени хватает — до конца
+                // трека ещё целый xfade (5-30с).
+                val canRetry = !released &&
+                    playWhenReadyFlag &&
+                    transitionState == 1 &&
+                    transitionFromIndex == plan.fromIndex &&
+                    currentIndex == plan.fromIndex
+                if (canRetry) {
+                    runCatching { Thread.sleep(700) }
+                    DebugLog.add("AutoMix.xfade load retry")
+                    ok = loadUriIntoIncoming(plan.nextUri)
+                }
+            }
             val stillCurrent = ok &&
                 !released &&
                 playWhenReadyFlag &&

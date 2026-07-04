@@ -289,6 +289,22 @@ class IcmApi private constructor() {
                 return executeOnce(endpoint, method, body, async)
             }
         }
+        // 5xx на /track* — временные ошибки шлюза: разовый 502 срывал
+        // кроссфейд AutoMix и предзагрузку (полевой лог: «ICM 502 /track …
+        // xfade LOAD FAILED»). До 2 повторов с коротким бэкоффом.
+        if (endpoint.startsWith("/track")) {
+            var res = first
+            var attempt = 0
+            while (attempt < 2) {
+                val ex = res.exceptionOrNull()
+                if (ex !is IcmApiException || ex.code !in 500..599) break
+                kotlinx.coroutines.delay(700L * (attempt + 1))
+                attempt++
+                com.liquidmusicglass.debug.DebugLog.add("ICM retry #$attempt $endpoint (${ex.code})")
+                res = executeOnce(endpoint, method, body, async)
+            }
+            return res
+        }
         return first
     }
 

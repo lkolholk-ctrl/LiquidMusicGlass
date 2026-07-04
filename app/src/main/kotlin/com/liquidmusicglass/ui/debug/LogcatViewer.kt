@@ -136,7 +136,7 @@ object LogcatReader {
      */
     fun exportLogs(context: Context) {
         val appCtx = context.applicationContext
-        val debugLines = DebugLog.lines.toList()   // snapshot читается на main
+        val debugLines = DebugLog.snapshotHistory()   // snapshot читается на main
         Thread({
             runCatching {
                 val dir = File(appCtx.cacheDir, "logs").apply { mkdirs() }
@@ -238,10 +238,27 @@ fun LogcatScreen(onClose: () -> Unit) {
     var follow by remember { mutableStateOf(true) }
     var levelIdx by remember { mutableStateOf(0) }
     var query by remember { mutableStateOf("") }
+    // Источник: SYS — системный logcat процесса, DBG — внутренний журнал
+    // (DebugLog, 2000 строк). Honor/Huawei режут logcat на уровне системы —
+    // если за 1.5с не пришло ни строки, сами переключаемся на DBG.
+    var showDebug by remember { mutableStateOf(false) }
+    var autoSwitched by remember { mutableStateOf(false) }
     val version by LogcatReader.version
+    val dbgVersion by DebugLog.version
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(1500)
+        if (LogcatReader.snapshot().isEmpty()) {
+            showDebug = true
+            autoSwitched = true
+        }
+    }
 
-    val lines = remember(version, levelIdx, query) {
-        LogcatReader.snapshot().filter { l ->
+    val lines = remember(version, dbgVersion, levelIdx, query, showDebug) {
+        if (showDebug) {
+            DebugLog.snapshotHistory().filter { l ->
+                query.isBlank() || l.contains(query, ignoreCase = true)
+            }
+        } else LogcatReader.snapshot().filter { l ->
             passesLevel(l, levelIdx) && (query.isBlank() || l.contains(query, ignoreCase = true))
         }
     }
@@ -270,6 +287,10 @@ fun LogcatScreen(onClose: () -> Unit) {
                 fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace
             )
             Spacer(Modifier.width(14.dp))
+            OverlayButton(if (showDebug) "DBG" else "SYS", Color(0xFFCE93D8)) {
+                showDebug = !showDebug
+            }
+            Spacer(Modifier.width(10.dp))
             OverlayButton(LEVEL_FILTERS[levelIdx], Color(0xFF4FC3F7)) {
                 levelIdx = (levelIdx + 1) % LEVEL_FILTERS.size
             }
@@ -319,7 +340,7 @@ fun LogcatScreen(onClose: () -> Unit) {
             items(lines) { l ->
                 Text(
                     l,
-                    color = colorFor(l),
+                    color = if (showDebug) Color(0xFF9CFF9C) else colorFor(l),
                     fontSize = 9.sp,
                     lineHeight = 11.sp,
                     fontFamily = FontFamily.Monospace
@@ -328,8 +349,13 @@ fun LogcatScreen(onClose: () -> Unit) {
         }
 
         Text(
-            "${lines.size} строк${if (levelIdx != 0 || query.isNotBlank()) " (фильтр)" else ""} · " +
-                "только логи этого приложения",
+            "${lines.size} строк${if (query.isNotBlank() || (!showDebug && levelIdx != 0)) " (фильтр)" else ""} · " +
+                when {
+                    showDebug && autoSwitched ->
+                        "внутренний журнал (вендор порезал logcat — Honor/Huawei)"
+                    showDebug -> "внутренний журнал (DBG)"
+                    else -> "только логи этого приложения"
+                },
             color = Color(0x88FFFFFF), fontSize = 9.sp, fontFamily = FontFamily.Monospace,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
         )

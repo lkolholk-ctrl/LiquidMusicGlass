@@ -18,12 +18,18 @@ import androidx.compose.runtime.mutableStateOf
 object DebugLog {
     private const val TAG = "JUCELocalDbg"
     private const val MAX = 120
+    private const val MAX_HISTORY = 2000
 
     private val main = Handler(Looper.getMainLooper())
     private val t0 = SystemClock.elapsedRealtime()
 
     /** Compose-наблюдаемый список строк (новые внизу). */
     val lines = mutableStateListOf<String>()
+    /** Полная история для LCAT-просмотрщика/экспорта (панель — только хвост).
+     *  Правится и читается ТОЛЬКО на главном потоке (как и [lines]). */
+    private val history = ArrayDeque<String>()
+    /** Счётчик версий истории — Compose пересобирает список LCAT по нему. */
+    val version = mutableStateOf(0L)
     /** Видимость оверлея (тумблер в самом оверлее). По умолчанию свёрнут — UI чистый,
      *  но инструмент под рукой (чип «LOG» сверху). Снять после стабилизации. */
     val visible = mutableStateOf(false)
@@ -36,10 +42,20 @@ object DebugLog {
         main.post {
             lines.add(line)
             while (lines.size > MAX) lines.removeAt(0)
+            history.addLast(line)
+            while (history.size > MAX_HISTORY) history.removeFirst()
+            version.value++
         }
     }
 
-    fun clear() = main.post { lines.clear() }
+    /** Снимок полной истории — звать с главного потока (Compose/клик). */
+    fun snapshotHistory(): List<String> = history.toList()
+
+    fun clear() = main.post {
+        lines.clear()
+        history.clear()
+        version.value++
+    }
 
     /**
      * Короткий снимок вызывающих кадров — «кто дёрнул». Отбрасываем собственные

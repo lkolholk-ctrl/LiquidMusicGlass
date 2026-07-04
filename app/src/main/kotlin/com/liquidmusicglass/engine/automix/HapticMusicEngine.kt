@@ -53,6 +53,9 @@ object HapticMusicEngine {
     private var lastNativeBeats = -1L
     private var lastNativeMidBeats = -1L
     private var streamEnv = 0f
+    // Окно динамики низа (~3с): на «стене баса» размах мал → порог ниже.
+    private var streamCeil = 0f
+    private var streamFloor = 0f
     private var lastBeatAtMs = 0L
     private var lastBassTapAtMs = 0L
 
@@ -93,6 +96,8 @@ object HapticMusicEngine {
         lastNativeBeats = -1L
         lastNativeMidBeats = -1L
         streamEnv = 0f
+        streamCeil = 0f
+        streamFloor = 0f
         beatsSeen = 0L
         tapsSent = 0L
         lastStatAtMs = android.os.SystemClock.elapsedRealtime()
@@ -157,16 +162,26 @@ object HapticMusicEngine {
             val k = if (level > streamEnv) 0.5f else 0.06f
             val prevEnv = streamEnv
             streamEnv += k * (level - streamEnv)
+            // Динамика окна ~3с: непрерывный компрессированный 808 («стена
+            // баса», кейс Oliver Tree — Jerk) прижимает огибающую к уровню —
+            // фикс-порог +45% слеп. Малый размах → порог опускается до +15%.
+            streamCeil = if (level > streamCeil) level
+                else streamCeil + 0.005f * (level - streamCeil)
+            streamFloor = if (level < streamFloor) level
+                else streamFloor + 0.005f * (level - streamFloor)
+            val dyn = (streamCeil - streamFloor) / maxOf(streamCeil, 0.05f)
+            val dynK = ((dyn - 0.15f) / 0.45f).coerceIn(0f, 1f)
+            val trigMul = 1.15f + (1.45f - 1.15f) * dynK
             val now = android.os.SystemClock.elapsedRealtime()
             if (now - lastBeatAtMs >= BEAT_COOLDOWN_MS &&
-                level > prevEnv * 1.45f + 0.02f
+                level > prevEnv * trigMul + 0.02f
             ) {
                 lastBeatAtMs = now
                 beatsSeen++
                 // Та же шкала силы, что у нативного детектора: отношение к
                 // среднему качу -> ровный бит лёгкий, акценты в полную силу.
                 val ratio = level / maxOf(prevEnv, 0.05f)
-                tap(((ratio - 1.45f) / 3f).coerceIn(0f, 1f))
+                tap(((ratio - trigMul) / 3f).coerceIn(0f, 1f))
             }
         }
     }
@@ -192,8 +207,9 @@ object HapticMusicEngine {
         runCatching {
             val effect = if (hasAmplitude) {
                 // Бас пожирнее (полевой фидбек), длительность короткая — стук,
-                // не жужжание.
-                val amp = ((70 + 185 * s) * scale).toInt().coerceIn(1, 255)
+                // не жужжание. База 110 (было 70): слабые тапы «ровного кача»
+                // тонули в физической вибрации корпуса от динамика.
+                val amp = ((110 + 145 * s) * scale).toInt().coerceIn(1, 255)
                 val durMs = ((12 + 18 * s) * (0.7f + 0.3f * scale)).toLong().coerceAtLeast(9L)
                 VibrationEffect.createOneShot(durMs, amp)
             } else {

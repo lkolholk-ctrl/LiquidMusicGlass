@@ -21,6 +21,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
@@ -300,19 +301,14 @@ object PlayerController {
     }
 
     /**
-     * Предзагружает следующие треки очереди.
-     *
-     * Без [cacheAudio] — только прогрев URL (быстрый скип). С [cacheAudio]
-     * (таймер «за N сек до конца») — ближайший следующий трек скачивается
-     * в медиа-кэш ЦЕЛИКОМ: переход мгновенный и не зависит от сети. Раньше
-     * «предзагрузка» не качала ни байта аудио — на переходе плеер грузил
-     * трек с нуля и стопорился.
+     * Прогрев URL следующих треков очереди (быстрый скип). Полную закачку
+     * аудио в кэш делает [scheduleAudioPreCache] — отдельный агрессивный
+     * контур, стартующий сразу после смены трека.
      */
     private fun prefetchAhead(
         context: Context,
         currentIndex: Int,
-        depth: Int = 3,
-        cacheAudio: Boolean = false
+        depth: Int = 3
     ) {
         val currentQueue = queue.toList()
         if (currentQueue.isEmpty()) return
@@ -324,13 +320,58 @@ object PlayerController {
             indicesToPrefetch.forEach { idx ->
                 val track = currentQueue.getOrNull(idx) ?: return@forEach
                 if (track.isOnlineTrack) {
-                    val result = resolveStreamUrl(track.id)
-                    if (cacheAudio && idx == currentIndex + 1 && result is StreamResult.Success) {
-                        MediaCacheManager.preCacheTrack(track.id, result.uri)
-                    }
+                    resolveStreamUrl(track.id)
                 }
             }
-            android.util.Log.d("PlayerController", "Pre-warmed caches for indices $indicesToPrefetch (audio=$cacheAudio)")
+            android.util.Log.d("PlayerController", "Pre-warmed caches for indices $indicesToPrefetch")
+        }
+    }
+
+    // ── Предзагрузка аудио v2: два трека вперёд, сразу после смены трека ──
+    private var preCacheJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * Полная закачка СЛЕДУЮЩИХ ДВУХ онлайн-треков в медиа-кэш. Стартует через
+     * [initialDelayMs] после смены трека (текущему треку — приоритет сети на
+     * старте), качает последовательно: next, потом next+1 — двойной скип тоже
+     * мгновенный. До 3 попыток на трек с бэкоффом (URL ре-резолвится на каждой).
+     *
+     * Раньше закачка шла только по таймеру «за N сек до конца» и один раз:
+     * ручной скип оставлял следующий трек без кэша, а провал сети хоронил
+     * попытку без ретрая (полевой фидбек: «треки не предзагружаются вообще»).
+     */
+    private fun scheduleAudioPreCache(
+        context: Context,
+        fromIndex: Int,
+        initialDelayMs: Long = 8_000L
+    ) {
+        if (!MediaCacheManager.isCacheEnabled()) return
+        preCacheJob?.cancel()
+        preCacheJob = ioScope.launch {
+            kotlinx.coroutines.delay(initialDelayMs)
+            val snapshot = queue.toList()
+            val lastIdx = kotlin.math.min(fromIndex + 2, snapshot.lastIndex)
+            for (idx in (fromIndex + 1)..lastIdx) {
+                if (!isActive) break
+                val track = snapshot.getOrNull(idx) ?: break
+                if (!track.isOnlineTrack) continue
+                var ok = false
+                var attempt = 0
+                while (!ok && attempt < 3 && isActive) {
+                    if (attempt > 0) kotlinx.coroutines.delay(1_500L * attempt)
+                    attempt++
+                    val result = resolveStreamUrl(track.id)
+                    if (result is StreamResult.Success) {
+                        ok = MediaCacheManager.preCacheTrack(track.id, result.uri)
+                    }
+                }
+                if (isActive || ok) {
+                    DebugLog.add(
+                        "PRELOAD [+${idx - fromIndex}] ${track.title.take(28)}: " +
+                            if (ok) "в кэше целиком" else "провал ($attempt попыт.)"
+                    )
+                }
+            }
         }
     }
 
@@ -385,7 +426,8 @@ object PlayerController {
         autoRefillType: String? = null,
         autoRefillId: String? = null,
         autoRefillName: String? = null,
-        seedTrackId: String? = null
+        seedTrackId: String? = null,
+        seedPool: List<String> = emptyList()
     ) {
         if (tracks.isEmpty() || startIndex !in tracks.indices) {
             android.util.Log.e("VOIDPIXEL_MEDIA", "playFromList called with empty tracks or invalid startIndex=$startIndex")
@@ -442,7 +484,8 @@ object PlayerController {
                         type = type,
                         id = autoRefillId,
                         name = autoRefillName,
-                        seedTrackId = seedTrackId
+                        seedTrackId = seedTrackId,
+                        seedPool = seedPool
                     )
                 )
                 endlessEngine.registerTracks(tracks.map { it.id })
@@ -498,6 +541,7 @@ object PlayerController {
                     }
 
                     prefetchAhead(context, startIndex, depth = 3)
+                    scheduleAudioPreCache(context, startIndex)
                 }
                 is StreamResult.Error -> {
                     android.util.Log.e("PlayerController", "Stream error for ${startTrack.id}: ${startStreamResult.code}")
@@ -685,8 +729,12 @@ object PlayerController {
                 val leadMs = AppSettings.preloadLeadSeconds.value * 1000L
                 if (remaining in 1..leadMs) {
                     preloadDoneForIndex = currentIndex
-                    // cacheAudio: следующий трек — В КЭШ целиком, не только URL.
-                    appContext?.let { prefetchAhead(it, currentIndex, depth = 2, cacheAudio = true) }
+                    // Бэкстоп: если агрессивный контур не докачал (сеть моргала
+                    // всю дорогу) — под конец трека даём ему свежий заход.
+                    appContext?.let {
+                        prefetchAhead(it, currentIndex, depth = 2)
+                        scheduleAudioPreCache(it, currentIndex, initialDelayMs = 0L)
+                    }
                 }
             }
         }
@@ -712,9 +760,12 @@ object PlayerController {
         _currentPositionMs.value = 0L
 
         resetPlaybackLogging(track.durationMs)
-        // Только ближайший следующий — для мгновенного скипа. Более глубокая
-        // предзагрузка управляется настройкой «Preload next track» (по таймеру до конца).
-        appContext?.let { prefetchAhead(it, index, depth = 1) }
+        appContext?.let {
+            // URL-прогрев ближайшего — для мгновенного скипа.
+            prefetchAhead(it, index, depth = 1)
+            // Аудио следующих двух — в кэш, сразу (не ждём конца трека).
+            scheduleAudioPreCache(it, index)
+        }
     }
 
     fun onTrackEnded() {
@@ -1260,7 +1311,7 @@ object PlayerController {
      * через ICM `wave/next?seed_track_id`, ставит сам трек первым и продолжает
      * похожими; авто-рефилл держит ту же станцию по seed.
      */
-    fun startTrackWave(context: Context, seedTrack: Track) {
+    fun startTrackWave(context: Context, seedTrack: Track, seedPool: List<String> = emptyList()) {
         ioScope.launch {
             // Мгновенный старт: seed-трек играет СРАЗУ (ноль сетевых запросов),
             // станция вокруг него добирается фоном и доклеивается в очередь.
@@ -1269,7 +1320,8 @@ object PlayerController {
                 tracks = listOf(seedTrack),
                 startIndex = 0,
                 autoRefillType = "WAVE",
-                seedTrackId = seedTrack.id
+                seedTrackId = seedTrack.id,
+                seedPool = seedPool
             )
             val repo = com.liquidmusicglass.data.local.WaveRepository.getInstance(context)
             val station = repo.buildWaveQueue(seedTrackId = seedTrack.id)
@@ -1288,11 +1340,14 @@ object PlayerController {
      */
     fun startArtistWave(context: Context, artistId: String, artistName: String? = null) {
         ioScope.launch {
-            val seed = try {
-                com.liquidmusicglass.api.icm.IcmRepository.getArtistTopTracks(artistId).firstOrNull()
+            // Пул топ-треков артиста: первый — мгновенный seed, все вместе —
+            // якоря ротации (чётные рефиллы тянут станцию обратно к артисту).
+            val topTracks = try {
+                com.liquidmusicglass.api.icm.IcmRepository.getArtistTopTracks(artistId).take(10)
             } catch (_: Exception) {
-                null
+                emptyList()
             }
+            val seed = topTracks.firstOrNull()
             if (seed == null) {
                 withContext(Dispatchers.Main) {
                     android.widget.Toast.makeText(
@@ -1303,7 +1358,7 @@ object PlayerController {
                 }
                 return@launch
             }
-            startTrackWave(context, seed)
+            startTrackWave(context, seed, seedPool = topTracks.map { it.id })
         }
     }
 

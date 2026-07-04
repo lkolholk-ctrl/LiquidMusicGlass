@@ -145,6 +145,8 @@ namespace automix
             float peakFast = 0.0f, slowAtCross = 0.0f;
             long  peakSamples = 0, samplesSinceBeat = 1 << 30;
             float avgRatio = 0.0f;
+            // Окно динамики (~2.5с): на «стене баса» размах мал → порог ниже.
+            float dynLo = 0.0f, dynHi = 0.0f;
         };
 
         // Одна полоса: fast (атака 4мс/спад 60мс) против slow (~350мс), удар
@@ -155,7 +157,7 @@ namespace automix
         // не опускаться, и детектор молчал кусками («иногда пусто», полевой
         // фидбек) — форс-перевзвод по таймауту возвращает удары.
         void processBand (HapticBandDet& d, float x, int numSamples,
-                          float aF, float rF, float cS,
+                          float aF, float rF, float cS, float cD,
                           std::atomic<long>& count, std::atomic<int>& strengthMilli)
         {
             d.fast += (x > d.fast ? aF : rF) * (x - d.fast);
@@ -163,8 +165,22 @@ namespace automix
             d.slow += cS * (x - d.slow);
             d.samplesSinceBeat += numSamples;
 
+            // Динамика полосы за окно ~2.5с: непрерывный компрессированный
+            // 808 («стена баса», полевой кейс Oliver Tree — Jerk) прижимает
+            // fast к slow — фикс-порог 1.5x слеп (~0.6 удара/с вместо ~1.8).
+            // Малый размах → порог удара и порог перевзвода опускаются.
+            d.dynHi += (x > d.dynHi ? aF : cD) * (x - d.dynHi);
+            d.dynLo += (x < d.dynLo ? aF : cD) * (x - d.dynLo);
+            const float dynRange = (d.dynHi - d.dynLo)
+                / (d.dynHi > 0.015f ? d.dynHi : 0.015f);
+            float dynK = (dynRange - 0.15f) / 0.45f;   // 0.15..0.6 → 0..1
+            if (dynK < 0.0f) dynK = 0.0f;
+            if (dynK > 1.0f) dynK = 1.0f;
+            const float trigMul  = 1.18f + (1.50f - 1.18f) * dynK;
+            const float rearmMul = 1.05f + (1.15f - 1.05f) * dynK;
+
             if (! d.armed
-                && (d.fast < slowPrev * 1.15f + 0.004f
+                && (d.fast < slowPrev * rearmMul + 0.004f
                     || d.samplesSinceBeat >= 15360))   // форс ~320мс
                 d.armed = true;
 
@@ -188,7 +204,7 @@ namespace automix
                 }
             }
             else if (d.armed && d.samplesSinceBeat >= 7200   // кулдаун ~150мс
-                     && d.fast > slowPrev * 1.5f + 0.006f)
+                     && d.fast > slowPrev * trigMul + 0.006f)
             {
                 d.samplesSinceBeat = 0;
                 d.pending = true;
@@ -207,7 +223,7 @@ namespace automix
         // Коэффициенты — с ВРЕМЕННЫМИ константами из реального размера блока
         // (по-блочное сглаживание на блоках 4мс липло к сигналу — «два стука
         // и тишина», полевой баг v1).
-        static float aF = 0.5f, rF = 0.1f, cS = 0.02f;
+        static float aF = 0.5f, rF = 0.1f, cS = 0.02f, cD = 0.001f;
         static int   coefsForSamples = -1;
         static long  warmupSamples = 0;
         constexpr float kSr = 48000.0f;               // точность sr некритична
@@ -219,6 +235,7 @@ namespace automix
             aF = 1.0f - std::exp (-n / (0.004f * kSr));
             rF = 1.0f - std::exp (-n / (0.060f * kSr));
             cS = 1.0f - std::exp (-n / (0.350f * kSr));
+            cD = 1.0f - std::exp (-n / (2.500f * kSr));  // окно динамики ~2.5с
         }
 
         gHapticEnvMilli.store ((int) (gBassDet.fast * 1000.0f), std::memory_order_relaxed);
@@ -233,9 +250,9 @@ namespace automix
 
         if (warm)
         {
-            processBand (gBassDet, bassMeanAbs, numSamples, aF, rF, cS,
+            processBand (gBassDet, bassMeanAbs, numSamples, aF, rF, cS, cD,
                          gHapticBeatCount, gHapticBeatStrengthMilli);
-            processBand (gMidDet, midMeanAbs, numSamples, aF, rF, cS,
+            processBand (gMidDet, midMeanAbs, numSamples, aF, rF, cS, cD,
                          gHapticMidBeatCount, gHapticMidBeatStrengthMilli);
         }
         else
@@ -245,6 +262,8 @@ namespace automix
             {
                 d.fast += (x > d.fast ? aF : rF) * (x - d.fast);
                 d.slow += cS * (x - d.slow);
+                d.dynHi += (x > d.dynHi ? aF : cD) * (x - d.dynHi);
+                d.dynLo += (x < d.dynLo ? aF : cD) * (x - d.dynLo);
                 d.pending = false;
                 d.armed = true;
                 d.samplesSinceBeat = 1 << 30;

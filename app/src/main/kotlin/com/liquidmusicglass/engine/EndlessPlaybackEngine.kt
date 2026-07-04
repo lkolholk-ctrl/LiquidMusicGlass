@@ -48,7 +48,11 @@ class EndlessPlaybackEngine(
         val name: String? = null,
         val seedTrackId: String? = null,
         val genre: String? = null,
-        val mood: String? = null
+        val mood: String? = null,
+        // Пул якорных сидов (артист-волна: топ-треки артиста). Ротация seed
+        // идёт по нему, а не по хвосту очереди — станция «притягивается»
+        // обратно к артисту вместо транзитивного дрейфа в соседей-соседей.
+        val seedPool: List<String> = emptyList()
     ) {
         enum class Type { WAVE, ARTIST, ALBUM, SEARCH, GENRE, PLAYLIST, LIBRARY }
     }
@@ -141,10 +145,19 @@ class EndlessPlaybackEngine(
                     // транзитивно, волна блуждает по окрестностям, не по кругу).
                     // Контекстный seed при этом НЕ трогаем — исходный трек
                     // остаётся якорем станции.
+                    // Артист-волна (seedPool не пуст): чётный рефилл берёт seed
+                    // из пула топ-треков артиста, а не из хвоста очереди —
+                    // станция постоянно «притягивается» обратно к артисту
+                    // вместо транзитивного уползания в соседей-соседей.
+                    val seedPool = refillCtx?.seedPool.orEmpty()
                     val seed = if (isGlobal && baseSeed != null) {
                         refillCounter++
-                        if (refillCounter % 2 == 1) baseSeed
-                        else queueIds.takeLast(5).randomOrNull() ?: baseSeed
+                        when {
+                            refillCounter % 2 == 1 -> baseSeed
+                            seedPool.isNotEmpty() ->
+                                seedPool.randomOrNull() ?: baseSeed
+                            else -> queueIds.takeLast(5).randomOrNull() ?: baseSeed
+                        }
                     } else baseSeed
                     // Anti-repeat: playedIds (вся история этой сессии волны) +
                     // текущая очередь (в не-Global контекстах playedIds пуст).

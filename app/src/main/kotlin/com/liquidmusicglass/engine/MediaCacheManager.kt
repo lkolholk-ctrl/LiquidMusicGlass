@@ -218,10 +218,10 @@ object MediaCacheManager {
      * закэшированного трека выходит быстро (CacheWriter пропускает готовые
      * куски). Новый префетч отменяет предыдущий незавершённый.
      */
-    fun preCacheTrack(trackId: String, url: android.net.Uri) {
-        val factory = getCacheDataSourceFactory() ?: return
+    fun preCacheTrack(trackId: String, url: android.net.Uri): Boolean {
+        val factory = getCacheDataSourceFactory() ?: return false
         val key = "icm_$trackId"
-        if (activePreCacheKey == key) return
+        if (activePreCacheKey == key) return false
         try { activePreCache?.cancel() } catch (_: Throwable) {}
 
         val spec = androidx.media3.datasource.DataSpec.Builder()
@@ -233,12 +233,15 @@ object MediaCacheManager {
         )
         activePreCache = writer
         activePreCacheKey = key
-        try {
+        return try {
             writer.cache()
             android.util.Log.d("MediaCacheManager", "Pre-cached audio for $trackId")
+            true
         } catch (e: Exception) {
-            // отмена/сеть — не страшно, докачается при воспроизведении
+            // отмена/сеть — не страшно: вызывающий ретраит, а недокачанное
+            // доберётся при воспроизведении (CacheWriter пропускает готовые куски).
             android.util.Log.d("MediaCacheManager", "Pre-cache stopped for $trackId: ${e.message}")
+            false
         } finally {
             if (activePreCacheKey == key) {
                 activePreCache = null
