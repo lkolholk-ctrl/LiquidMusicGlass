@@ -529,7 +529,11 @@ fun IcmSearchItem.toTrack(uri: String? = null): com.liquidmusicglass.engine.Trac
         durationMs = durationMs,
         albumId = collectionId?.hashCode()?.toLong() ?: id.hashCode().toLong(),
         coverUrl = cover?.replace("1000x1000", "600x600") ?: cover,
-        artists = artists,
+        // Сервер часто шлёт artistId скаляром при ПУСТОМ списке artists —
+        // без фолбэка артист в плеере был некликабелен для треков из поиска.
+        artists = artists.ifEmpty {
+            artistId?.let { listOf(IcmMiniArtist(id = it, name = displayArtist)) } ?: emptyList()
+        },
         isExplicit = isExplicit,
         isCustom = isCustom,
         source = source

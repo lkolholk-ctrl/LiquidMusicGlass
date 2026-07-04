@@ -591,6 +591,11 @@ internal fun IcmHomeItem.toWaveTrack(): Track = Track(
     durationMs = durationMs,
     albumId = collectionId?.hashCode()?.toLong() ?: -1L,
     coverUrl = cover,
+    // artistId есть в модели — без него тап по артисту в плеере молчал
+    // для треков, запущенных с главной/New.
+    artists = artistId?.let {
+        listOf(com.liquidmusicglass.api.icm.IcmMiniArtist(id = it, name = displayArtist))
+    } ?: emptyList(),
     isExplicit = isExplicit,
     // без source резолвер стрима не знал, откуда тянуть (apple/vk) → трек не грузился
     source = source,

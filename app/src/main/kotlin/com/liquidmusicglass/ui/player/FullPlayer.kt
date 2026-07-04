@@ -560,7 +560,33 @@ fun FullPlayer(
                                 when {
                                     withId.size > 1 -> showArtistSheet = true
                                     withId.size == 1 -> onNavigateToArtist(withId.first().id!!)
-                                    else -> { /* локалка без artistId — некуда вести */ }
+                                    else -> {
+                                        // Метаданные без artistId (старый лайк, VK,
+                                        // локалка) — резолвим по ИМЕНИ через поиск:
+                                        // тап работает везде, где артист существует.
+                                        val name = artistName
+                                        if (name.isNotBlank() && name != "Unknown Artist" && name != "—") {
+                                            scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                                val resolved = try {
+                                                    com.liquidmusicglass.api.icm.IcmRepository
+                                                        .searchAll(name, limit = 5)?.items
+                                                        ?.firstOrNull { it.isArtist }
+                                                        ?.let { it.artistId ?: it.id }
+                                                } catch (_: Exception) { null }
+                                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                                    if (resolved != null) {
+                                                        onNavigateToArtist(resolved)
+                                                    } else {
+                                                        Toast.makeText(
+                                                            context,
+                                                            "Artist page unavailable",
+                                                            Toast.LENGTH_SHORT
+                                                        ).show()
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         )
