@@ -631,29 +631,6 @@ fun AppRoot() {
             )
         }
 
-        // ── Auth Screen ──
-        AnimatedVisibility(
-            visible = authOpen,
-            enter = slideInVertically(
-                initialOffsetY = { it },
-                animationSpec = spring(dampingRatio = 0.88f, stiffness = 300f)
-            ) + fadeIn(tween(200)),
-            exit = slideOutVertically(
-                targetOffsetY = { it },
-                animationSpec = spring(dampingRatio = 0.92f, stiffness = 400f)
-            ) + fadeOut(tween(150))
-        ) {
-            AuthScreen(
-                onAuthSuccess = {
-                    authOpen = false
-                    // На Wave (профиль теперь иконка слева вверху, не таб).
-                    selectedIndex = 0
-                    AppSettings.setLastScreen(0)
-                },
-                onBack = { authOpen = false }
-            )
-        }
-
         // ── Profile Screen ──
         AnimatedVisibility(
             visible = profileOpen,
@@ -670,6 +647,34 @@ fun AppRoot() {
                 onOpenSettings = { profileOpen = false; selectedIndex = 3 },
                 onLogout = { profileOpen = false },
                 onOpenAuth = { authOpen = true }
+            )
+        }
+
+        // ── Auth Screen ──
+        // ДОЛЖЕН идти ПОСЛЕ ProfileScreen: экраны — соседние AnimatedVisibility
+        // в одном Box, порядок в коде = z-порядок. Раньше Auth рисовался ДО
+        // профиля и при «Sign In» из профиля выезжал ПОД ним — казалось, что
+        // кнопка мертва. Теперь Auth — верхний слой, открывается поверх всего.
+        AnimatedVisibility(
+            visible = authOpen,
+            enter = slideInVertically(
+                initialOffsetY = { it },
+                animationSpec = spring(dampingRatio = 0.88f, stiffness = 300f)
+            ) + fadeIn(tween(200)),
+            exit = slideOutVertically(
+                targetOffsetY = { it },
+                animationSpec = spring(dampingRatio = 0.92f, stiffness = 400f)
+            ) + fadeOut(tween(150))
+        ) {
+            AuthScreen(
+                onAuthSuccess = {
+                    authOpen = false
+                    profileOpen = false
+                    // На Wave (профиль теперь иконка слева вверху, не таб).
+                    selectedIndex = 0
+                    AppSettings.setLastScreen(0)
+                },
+                onBack = { authOpen = false }
             )
         }
 
