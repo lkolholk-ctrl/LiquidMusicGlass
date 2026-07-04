@@ -169,14 +169,17 @@ fun AuthScreen(
                         prefs.edit().putString("oauth_state", state).apply()
 
                         // Build link URL via IcmApi (handles URL-encoding)
-                        // Docs: /partner/<partner_id>/link?partner_user_id=...&redirect_uri=...&state=...
-                        // Server (liquid.glassfiles.ru) is whitelisted and will redirect to app
+                        // Docs: /partner/<partner_id>/link?partner_user_id=...&redirect_uri=...&state=...&app_name=...
+                        // redirect_uri — custom-scheme deep link напрямую (ICM
+                        // добавил его в whitelist): промежуточный сервер больше
+                        // не нужен. MainActivity ловит liquidmusicglass://oauth/icm.
                         val telegramAuthUrl = com.liquidmusicglass.api.icm.IcmApi.getInstance()
                             .buildAccountLinkUrl(
                                 partnerId = "msng",
                                 partnerUserId = partnerUserId,
-                                redirectUri = "https://liquid.glassfiles.ru/auth/telegram",
-                                state = state
+                                redirectUri = "liquidmusicglass://oauth/icm",
+                                state = state,
+                                appName = "Liquid Music Glass"
                             )
 
                         // Use Chrome Custom Tabs for proper Telegram widget support

@@ -1205,9 +1205,10 @@ object IcmRepository {
         partnerId: String,
         partnerUserId: String,
         redirectUri: String,
-        state: String
+        state: String,
+        appName: String? = null
     ): String {
-        return api.buildAccountLinkUrl(partnerId, partnerUserId, redirectUri, state)
+        return api.buildAccountLinkUrl(partnerId, partnerUserId, redirectUri, state, appName)
     }
 
     /**

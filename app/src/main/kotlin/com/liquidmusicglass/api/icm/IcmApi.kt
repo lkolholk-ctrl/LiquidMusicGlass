@@ -698,19 +698,26 @@ suspend fun search(
     /**
      * Generate URL for linking user account to ICM via Telegram.
      * @param partnerUserId User ID in your system
-     * @param redirectUri Callback URI after authorization
+     * @param redirectUri Callback URI after authorization (custom-scheme deep link,
+     *   whitelisted by ICM — no intermediate redirect server needed)
      * @param state Random string for CSRF protection
+     * @param appName Название приложения, которое юзер увидит на экране входа
+     *   в аккаунт (параметр app_name, добавлен ICM). Пусто — дефолт сервера.
      */
     fun buildAccountLinkUrl(
         partnerId: String,
         partnerUserId: String,
         redirectUri: String,
-        state: String
+        state: String,
+        appName: String? = null
     ): String {
         val encRedirect = java.net.URLEncoder.encode(redirectUri, "UTF-8")
         val encState = java.net.URLEncoder.encode(state, "UTF-8")
         val encUserId = java.net.URLEncoder.encode(partnerUserId, "UTF-8")
-        return "https://byicloud.online/partner/$partnerId/link?partner_user_id=$encUserId&redirect_uri=$encRedirect&state=$encState"
+        val appNameParam = appName?.takeIf { it.isNotBlank() }?.let {
+            "&app_name=${java.net.URLEncoder.encode(it, "UTF-8")}"
+        } ?: ""
+        return "https://byicloud.online/partner/$partnerId/link?partner_user_id=$encUserId&redirect_uri=$encRedirect&state=$encState$appNameParam"
     }
 
     /**
