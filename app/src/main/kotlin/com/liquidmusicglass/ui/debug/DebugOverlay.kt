@@ -17,6 +17,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,6 +36,12 @@ import com.liquidmusicglass.engine.automix.AutoMixNativeEngine
  */
 @Composable
 fun DebugOverlay() {
+    // Мастер-гейт: отладочный UI (панель, LOG-чип, LCAT) существует только
+    // когда включён жестом — 5 быстрых тапов по заголовку «Settings».
+    val uiEnabled by com.liquidmusicglass.engine.AppSettings.debugUiEnabled
+        .collectAsState()
+    if (!uiEnabled) return
+
     val visible by DebugLog.visible
     val logcatOpen by LogcatReader.viewerOpen
 

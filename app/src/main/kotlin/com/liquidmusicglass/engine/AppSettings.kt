@@ -65,6 +65,12 @@ object AppSettings {
     private val _ignoreThresholdSec = MutableStateFlow(30f)
     val ignoreThresholdSec: StateFlow<Float> = _ignoreThresholdSec
 
+    // ── Debug UI (оверлей JUCE DEBUG / LOG-чип / LCAT) ──
+    // По умолчанию СКРЫТ: включается жестом — 5 быстрых тапов по заголовку
+    // «Settings». Публичной сборке отладочные чипы на экране не нужны.
+    private val _debugUiEnabled = MutableStateFlow(false)
+    val debugUiEnabled: StateFlow<Boolean> = _debugUiEnabled
+
     // ── Preload next track (lead time before current track ends) ──
     // За сколько секунд до конца трека начинать предзагрузку следующего. 30..90.
     private val _preloadLeadSeconds = MutableStateFlow(60)
@@ -160,6 +166,11 @@ object AppSettings {
     fun setHapticMusicEnabled(enabled: Boolean) {
         _hapticMusicEnabled.value = enabled
         safePrefs()?.edit()?.putBoolean("haptic_music", enabled)?.apply()
+    }
+
+    fun setDebugUiEnabled(enabled: Boolean) {
+        _debugUiEnabled.value = enabled
+        safePrefs()?.edit()?.putBoolean("debug_ui", enabled)?.apply()
     }
 
     fun setHapticStrength(level: Int) {
@@ -390,6 +401,7 @@ object AppSettings {
         _hapticMusicEnabled.value = p.getBoolean("haptic_music", false)
         // 0 (бывший Soft) мигрирует в Medium.
         _hapticStrength.value = p.getInt("haptic_strength", 1).coerceIn(1, 2)
+        _debugUiEnabled.value = p.getBoolean("debug_ui", false)
 
         _lastTrackIndex.value = p.getInt("last_track", -1)
         _lastPositionMs.value = p.getLong("last_position", 0L)

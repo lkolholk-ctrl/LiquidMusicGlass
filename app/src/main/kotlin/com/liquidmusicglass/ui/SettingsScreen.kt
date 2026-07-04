@@ -109,11 +109,34 @@ fun SettingsScreen(
                     }
                     Spacer(modifier = Modifier.width(16.dp))
                 }
+                // 5 быстрых тапов по заголовку — вкл/выкл отладочный UI
+                // (панель JUCE DEBUG, LOG-чип, LCAT). Скрыт по умолчанию.
+                var dbgTaps by remember { mutableStateOf(0) }
+                var dbgLastTapAt by remember { mutableStateOf(0L) }
+                val dbgContext = LocalContext.current
                 Text(
                     text = "Settings",
                     color = lc.textPrimary,
                     fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) {
+                        val now = System.currentTimeMillis()
+                        dbgTaps = if (now - dbgLastTapAt < 1200L) dbgTaps + 1 else 1
+                        dbgLastTapAt = now
+                        if (dbgTaps >= 5) {
+                            dbgTaps = 0
+                            val on = !AppSettings.debugUiEnabled.value
+                            AppSettings.setDebugUiEnabled(on)
+                            android.widget.Toast.makeText(
+                                dbgContext,
+                                if (on) "Debug tools: ON" else "Debug tools: OFF",
+                                android.widget.Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    }
                 )
             }
 

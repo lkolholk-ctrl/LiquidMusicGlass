@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -22,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
@@ -45,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.liquidmusicglass.engine.LyricsFxController
 import com.liquidmusicglass.engine.LyricsParser
+import com.liquidmusicglass.engine.LyricsSyncStore
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.ui.glass.AlbumArtImage
 import com.liquidmusicglass.ui.glass.AlbumColors
@@ -164,6 +167,20 @@ fun LyricsScreen(
     val interludeProgress by timeProcessor?.interludeProgress?.collectAsState()
         ?: remember { mutableFloatStateOf(0f) }
 
+    // ── Ручная подстройка синхры (± мс, память на трек) ──
+    // Лечит кривые таймкоды источника: + = лирика раньше, − = позже.
+    var syncOffsetMs by remember(resolvedTrackId) {
+        mutableLongStateOf(LyricsSyncStore.get(context, resolvedTrackId))
+    }
+    var syncUiOpen by remember { mutableStateOf(false) }
+    fun adjustSync(deltaMs: Long) {
+        syncOffsetMs = (syncOffsetMs + deltaMs).coerceIn(-10_000L, 10_000L)
+        LyricsSyncStore.set(context, resolvedTrackId, syncOffsetMs)
+        // Сброс процессора: монотонный курсор не пускает позицию назад,
+        // без сброса сдвиг «−» применился бы только на следующей строке.
+        timeProcessor?.reset()
+    }
+
     // ── Smooth 60/120 FPS position ticker ──
     val isPlaying by PlayerController.isPlaying.collectAsState()
     var smoothPositionMs by remember { mutableLongStateOf(0L) }
@@ -171,10 +188,10 @@ fun LyricsScreen(
     // Sync with coarse position only when paused — во время игры позицией
     // владеет покадровый тикер (getSmoothPositionMs), иначе грубые апдейты
     // дёргали бы плавный sweep.
-    LaunchedEffect(currentPositionMs) {
+    LaunchedEffect(currentPositionMs, syncOffsetMs) {
         if (!isPlaying) {
             smoothPositionMs = currentPositionMs
-            timeProcessor?.updatePosition(currentPositionMs)
+            timeProcessor?.updatePosition(currentPositionMs + syncOffsetMs)
         }
     }
 
@@ -194,7 +211,8 @@ fun LyricsScreen(
             withFrameMillis { _ ->
                 if (PlayerController.isPlaying.value) {
                     smoothPositionMs = PlayerController.getSmoothPositionMs()
-                    currentProcessor?.updatePosition(smoothPositionMs)
+                    // syncOffsetMs — state: тикер всегда читает свежий сдвиг.
+                    currentProcessor?.updatePosition(smoothPositionMs + syncOffsetMs)
                 }
             }
         }
@@ -482,8 +500,71 @@ fun LyricsScreen(
                     maxLines = 1
                 )
             }
+
+            // ── Подстройка синхры: бейдж SYNC в правом верхнем углу ──
+            // Тап раскрывает чипы −0.5s / +0.5s / Reset; сдвиг хранится на трек.
+            if (lyrics.isSynced) {
+                // Авто-скрытие чипов через 6с бездействия.
+                LaunchedEffect(syncUiOpen, syncOffsetMs) {
+                    if (syncUiOpen) {
+                        delay(6000)
+                        syncUiOpen = false
+                    }
+                }
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = 12.dp, end = 12.dp),
+                    horizontalAlignment = Alignment.End
+                ) {
+                    val badgeActive = syncUiOpen || syncOffsetMs != 0L
+                    Text(
+                        text = if (syncOffsetMs == 0L) "SYNC"
+                               else "SYNC %+.1fs".format(syncOffsetMs / 1000f),
+                        color = Color.White.copy(alpha = if (badgeActive) 0.95f else 0.45f),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color.Black.copy(alpha = 0.35f))
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) { syncUiOpen = !syncUiOpen }
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    )
+                    if (syncUiOpen) {
+                        Spacer(Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            SyncChip("−0.5s") { adjustSync(-500L) }
+                            SyncChip("+0.5s") { adjustSync(+500L) }
+                            SyncChip("Reset") { adjustSync(-syncOffsetMs) }
+                        }
+                    }
+                }
+            }
         }
     }
+}
+
+/** Чип панели подстройки синхры лирики. */
+@Composable
+private fun SyncChip(label: String, onClick: () -> Unit) {
+    Text(
+        text = label,
+        color = Color.White,
+        fontSize = 13.sp,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color.Black.copy(alpha = 0.45f))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick
+            )
+            .padding(horizontal = 14.dp, vertical = 8.dp)
+    )
 }
 
 /**

@@ -515,6 +515,19 @@ object LyricsParser {
             }
         }
 
+        // Строго возрастающие таймкоды: дубликаты (копипаст-опечатки в LRC,
+        // клампы offset у нуля) раздвигаем на +10мс. Порядок текста стабилен
+        // (sortBy устойчив), а заливка не получает нулевых гэпов.
+        if (hasSyncedLines) {
+            var prev = -1L
+            for (i in lyricLines.indices) {
+                val l = lyricLines[i]
+                if (l.timeMs < 0) continue
+                if (l.timeMs <= prev) lyricLines[i] = l.copy(timeMs = prev + 10)
+                prev = lyricLines[i].timeMs
+            }
+        }
+
         return Lyrics(lyricLines, hasSyncedLines, title, artist)
     }
 

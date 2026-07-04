@@ -111,32 +111,44 @@ class LyricsTimeProcessor(
     private var lastProcessedPositionMs = -1L
 
     /**
-     * Автокалибровка темпа ЭТОГО трека: медиана-п40 (гэп/длина текста) по
-     * строкам. Глобальный MS_PER_CHAR один на все песни не работает в
-     * принципе (полевой фидбек: баллада ползёт, рэп мажет) — у баллады
-     * получится ~120-150 мс/симв, у рэпа ~45, закрас сам подстраивается.
-     * П40 (чуть ниже медианы), потому что гэпы включают дыхание/паузы —
-     * сам вокал быстрее. VAD не используется (модель косячная).
+     * Автокалибровка темпа: сырой сэмпл «мс на символ» ПО КАЖДОЙ строке
+     * (гэп до следующей / длина текста), null = строка не показательна
+     * (выкрик, проигрыш). VAD не используется (модель косячная).
      */
-    private val trackMsPerChar: Long = run {
-        val samples = ArrayList<Double>()
-        for ((idx, line) in lyrics.lines.withIndex()) {
-            val next = lyrics.lines.getOrNull(idx + 1)?.timeMs ?: continue
-            val text = line.text.replace(DUET_TAG, "").trim()
-            if (text.length < 6) continue          // выкрики не показательны
-            val gap = next - line.timeMs
-            if (gap <= 0L || gap > 15_000L) continue  // проигрыши не считаем
-            samples.add(gap.toDouble() / text.length)
-        }
-        if (samples.size >= 4) {
-            samples.sort()
-            samples[(samples.size * 2) / 5].toLong().coerceIn(40L, 160L)
-        } else MS_PER_CHAR
+    private val rateSamples: List<Double?> = lyrics.lines.mapIndexed { idx, line ->
+        val next = lyrics.lines.getOrNull(idx + 1)?.timeMs ?: return@mapIndexed null
+        val text = line.text.replace(DUET_TAG, "").trim()
+        if (text.length < 6) return@mapIndexed null      // выкрики не показательны
+        val gap = next - line.timeMs
+        if (gap <= 0L || gap > 15_000L) return@mapIndexed null  // проигрыши не считаем
+        gap.toDouble() / text.length
     }
 
-    /** Floor длительности строки — тоже от темпа трека (не фикс 1200мс):
-     *  короткий выкрик в балладе держится как ~10 «средних» символов. */
-    private val minLineMs: Long = (trackMsPerChar * 10).coerceIn(600L, 2200L)
+    /** П40 по набору сэмплов (чуть ниже медианы: гэпы включают дыхание —
+     *  сам вокал быстрее), клампы 40..160 мс/симв. */
+    private fun p40Rate(samples: List<Double>): Long? {
+        if (samples.size < 4) return null
+        val sorted = samples.sorted()
+        return sorted[(sorted.size * 2) / 5].toLong().coerceIn(40L, 160L)
+    }
+
+    /** Глобальный темп трека — фолбэк, когда локального окна не хватает. */
+    private val trackMsPerChar: Long =
+        p40Rate(rateSamples.filterNotNull()) ?: MS_PER_CHAR
+
+    /**
+     * ЛОКАЛЬНЫЙ темп строки: п40 по окну ±5 соседних строк. Куплет и припев
+     * одной песни часто идут с разной скоростью (Godzilla: рэп 10 слов/с и
+     * тянучий припев) — глобальный темп мажет по обоим, окно даёт каждой
+     * секции свой.
+     */
+    private fun rateForLine(idx: Int): Long {
+        val local = ArrayList<Double>(11)
+        for (j in (idx - 5)..(idx + 5)) {
+            rateSamples.getOrNull(j)?.let { local.add(it) }
+        }
+        return p40Rate(local) ?: trackMsPerChar
+    }
 
     /** Предрасчитанная заливка по строкам. */
     private val lineFills: List<LineFill>
@@ -150,7 +162,7 @@ class LyricsTimeProcessor(
                 buildWordLineFill(line, next)
             } else {
                 val text = line.text.replace(DUET_TAG, "").trim()
-                buildLineFill(line.timeMs, next, text)
+                buildLineFill(line.timeMs, next, text, rateForLine(idx))
             }
             fills.add(fill)
         }
@@ -187,20 +199,24 @@ class LyricsTimeProcessor(
         )
     }
 
-    /** Строит таймлайн заливки одной строки. */
-    private fun buildLineFill(startMs: Long, nextStartMs: Long?, text: String): LineFill {
+    /** Строит таймлайн заливки одной строки ([rate] — локальный темп мс/симв). */
+    private fun buildLineFill(startMs: Long, nextStartMs: Long?, text: String, rate: Long): LineFill {
         val length = text.length.coerceAtLeast(1)
         // Последняя строка (нет следующей): синтетический «гэп» от темпа ЭТОГО
         // трека, а не фикс LAST_LINE_MS — финал баллады держится дольше,
         // финал рэпа не тянется.
         val gap = if (nextStartMs != null) (nextStartMs - startMs).coerceAtLeast(1L)
-                  else (length * trackMsPerChar * 6 / 5).coerceIn(2000L, 12_000L)
+                  else (length * rate * 6 / 5).coerceIn(2000L, 12_000L)
 
-        // estMs: длина × КАЛИБРОВАННЫЙ темп трека (не глобальная константа),
-        // но не больше 90% реального гэпа (чтоб не отставать от вокала).
-        var est = length * trackMsPerChar
+        // Floor длительности строки от ЛОКАЛЬНОГО темпа: короткий выкрик
+        // в балладе держится как ~10 «средних» символов её секции.
+        val minLine = (rate * 10).coerceIn(600L, 2200L)
+
+        // estMs: длина × локальный темп секции (окно ±5 строк), но не больше
+        // 90% реального гэпа (чтоб не отставать от вокала).
+        var est = length * rate
         if (nextStartMs != null) est = minOf(est, gap * 9 / 10)
-        est = est.coerceAtLeast(minOf(minLineMs, gap)).coerceAtLeast(1L)
+        est = est.coerceAtLeast(minOf(minLine, gap)).coerceAtLeast(1L)
 
         // Сегменты по знакам препинания: (длина, сырая пауза после).
         val rawSegs = splitSegments(text)

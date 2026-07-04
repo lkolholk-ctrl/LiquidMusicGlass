@@ -722,6 +722,21 @@ object PlayerController {
         }
     }
 
+    /** Вставить трек СЛЕДУЮЩИМ после текущего (контекст-меню «Play next»).
+     *  В отличие от [playNext], не трогает воспроизведение и не кидает в конец. */
+    fun insertNext(track: Track) {
+        val idx = (currentIndex + 1).coerceIn(0, queue.size)
+        queue = queue.toMutableList().apply { add(idx, track) }
+        _queueFlow.value = queue
+        mainScope.launch {
+            val player = controller ?: appContext?.let { getPlayer(it) }
+            if (player != null && idx <= player.mediaItemCount)
+                player.addMediaItem(idx, buildMediaItem(track, track.uri))
+            else
+                player?.addMediaItem(buildMediaItem(track, track.uri))
+        }
+    }
+
     fun setAutoRefillContext(type: String, id: String, name: String, seedTrackId: String? = null) {
         val newContext = when {
             type.equals("library", ignoreCase = true) && id.equals("downloads", ignoreCase = true) ->

@@ -7,6 +7,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -61,6 +62,7 @@ import com.liquidmusicglass.api.icm.IcmWaveOnboardingArtist
 import com.liquidmusicglass.api.icm.toTrack
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.Track
+import com.liquidmusicglass.ui.components.TrackActionsSheet
 import com.liquidmusicglass.ui.glass.AlbumArtImage
 import com.liquidmusicglass.ui.theme.LiquidTheme
 import com.liquidmusicglass.ui.viewmodel.SearchViewModel
@@ -98,22 +100,31 @@ fun SearchScreen(
         keyboardController?.hide()
     }
 
-    // Search history
+    // Search history — упорядоченная, СВЕЖИЕ СВЕРХУ. Старый StringSet терял
+    // порядок (сортировался по алфавиту и обрезался произвольно) — мигрируем.
     var history by remember {
         mutableStateOf<List<String>>(
-            prefs.getStringSet("queries", emptySet())?.toList()?.sortedDescending() ?: emptyList()
+            run {
+                val v2 = prefs.getString("queries_v2", null)
+                if (v2 != null) v2.split('\n').filter { it.isNotBlank() }
+                else prefs.getStringSet("queries", emptySet())?.toList()?.take(8) ?: emptyList()
+            }
         )
     }
     fun saveQuery(q: String) {
-        if (q.isBlank()) return
-        val current = prefs.getStringSet("queries", emptySet())?.toMutableSet() ?: mutableSetOf()
-        current.add(q)
-        val trimmed = if (current.size > 20) current.drop(current.size - 20).toSet() else current
-        prefs.edit().putStringSet("queries", trimmed).apply()
-        history = trimmed.toList().sortedDescending()
+        val t = q.trim()
+        if (t.length < 2) return
+        // Дедуп без учёта регистра, свежий — наверх, максимум 8.
+        val updated = (listOf(t) + history.filter { !it.equals(t, ignoreCase = true) }).take(8)
+        if (updated == history) return
+        history = updated
+        prefs.edit()
+            .putString("queries_v2", updated.joinToString("\n"))
+            .remove("queries")
+            .apply()
     }
     fun clearHistory() {
-        prefs.edit().remove("queries").apply()
+        prefs.edit().remove("queries_v2").remove("queries").apply()
         history = emptyList()
     }
 
@@ -127,6 +138,9 @@ fun SearchScreen(
     val tracks = searchResults.filter { it.isTrack }
     val albums = searchResults.filter { it.isAlbum }
     val artists = searchResults.filter { it.isArtist }
+
+    // Долгий тап по треку → контекст-меню (в очередь / поделиться).
+    var actionsTrack by remember { mutableStateOf<Track?>(null) }
 
     Box(modifier = Modifier.fillMaxSize().background(LiquidTheme.colors.settingsBackground)) {
         Column(
@@ -480,6 +494,11 @@ fun SearchScreen(
                                                         autoRefillId = query,
                                                         autoRefillName = query
                                                     )
+                                                },
+                                                onLongClick = {
+                                                    hideKeyboard()
+                                                    actionsTrack = playableTracks
+                                                        .firstOrNull { it.id == item.id }
                                                 }
                                             )
                                         }
@@ -508,6 +527,11 @@ fun SearchScreen(
                         }
                 }
             }
+        }
+
+        // Контекст-меню трека (долгий тап по строке результата).
+        actionsTrack?.let { t ->
+            TrackActionsSheet(track = t, onDismiss = { actionsTrack = null })
         }
     }
 }
@@ -707,6 +731,7 @@ private fun HistoryRow(
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun SearchResultRow(
     title: String,
@@ -715,7 +740,8 @@ private fun SearchResultRow(
     coverUrl: String?,
     isExplicit: Boolean = false,
     isCustom: Boolean = false,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null
 ) {
     Row(
         modifier = Modifier
@@ -724,10 +750,11 @@ private fun SearchResultRow(
             .height(64.dp)
             .clip(RoundedCornerShape(12.dp))
             .background(if (LiquidTheme.colors.isDark) Color(0xFF1A1A1A) else Color(0xFFF2F2F7))
-            .clickable(
+            .combinedClickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
-                onClick = onClick
+                onClick = onClick,
+                onLongClick = onLongClick
             )
             .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically
