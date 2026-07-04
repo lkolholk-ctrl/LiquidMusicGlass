@@ -307,7 +307,11 @@ class LibraryRepository private constructor(context: Context) {
             durationMs = durationMs,
             albumId = collectionId?.hashCode()?.toLong() ?: trackId.hashCode().toLong(),
             coverUrl = imageUrl,
-            artists = emptyList(),
+            // artistId хранится в БД — прокидываем, чтобы тап по артисту
+            // в FullPlayer работал и для лайкнутых треков.
+            artists = artistId?.let {
+                listOf(com.liquidmusicglass.api.icm.IcmMiniArtist(id = it, name = artistName))
+            } ?: emptyList(),
             isExplicit = isExplicit,
             source = source,
             genre = genre

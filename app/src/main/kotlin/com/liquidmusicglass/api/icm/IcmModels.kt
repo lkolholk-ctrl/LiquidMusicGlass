@@ -544,7 +544,10 @@ fun IcmAlbumTrack.toTrack(): com.liquidmusicglass.engine.Track {
         durationMs = durationMs,
         albumId = collectionId?.hashCode()?.toLong() ?: id.hashCode().toLong(),
         coverUrl = cover.replace("1000x1000", "600x600"),
-        artists = emptyList(),
+        // artistId есть в модели — прокидываем, чтобы артист был кликабелен
+        artists = if (artistId != null)
+            listOf(IcmMiniArtist(id = artistId, name = artist))
+        else emptyList(),
         isExplicit = isExplicit,
         isCustom = isCustom,
         source = source
@@ -700,6 +703,11 @@ data class IcmWaveTrack(
             durationMs = durationMs,
             albumId = collectionId?.hashCode()?.toLong() ?: id.hashCode().toLong(),
             coverUrl = cover?.replace("1000x1000", "600x600"),
+            // artistId сервер отдаёт — без него артист в FullPlayer был
+            // некликабельным для ВСЕХ треков волны (главный сценарий).
+            artists = if (artistId != null)
+                listOf(IcmMiniArtist(id = artistId, name = artist))
+            else emptyList(),
             isExplicit = isExplicit,
             isCustom = isCustom,
             source = source
