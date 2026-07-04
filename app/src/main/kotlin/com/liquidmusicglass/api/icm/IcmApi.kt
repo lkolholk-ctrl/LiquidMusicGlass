@@ -107,13 +107,15 @@ class IcmApi private constructor() {
             maxRequestsPerHost = 5
         }
         OkHttpClient.Builder()
-            .connectTimeout(5, TimeUnit.SECONDS)
+            // Чуть щедрее к долгому хендшейку (туннели/дальние маршруты): 5с
+            // connect давал ложные фейлы на ровном месте при высокой латентности.
+            .connectTimeout(7, TimeUnit.SECONDS)
             .readTimeout(8, TimeUnit.SECONDS)
             .writeTimeout(8, TimeUnit.SECONDS)
-            // callTimeout ограничивает ВЕСЬ вызов (connect+TLS+retry+ответ). 10с — чтобы
+            // callTimeout ограничивает ВЕСЬ вызов (connect+TLS+retry+ответ). 12с — чтобы
             // при мёртвой/медленной сети запрос падал БЫСТРО (юзер не думает, что
             // приложение встало колом), а зависшие коннекты не копились.
-            .callTimeout(10, TimeUnit.SECONDS)
+            .callTimeout(12, TimeUnit.SECONDS)
             // ВКЛючаем штатное восстановление соединения OkHttp: прозрачный повтор на
             // протухших keep-alive соединениях (сервер закрыл сокет) и перебор маршрутов
             // (IPv6→IPv4). Без этого единичный мёртвый маршрут/протухший коннект давал
@@ -296,7 +298,8 @@ class IcmApi private constructor() {
         // короткими таймаутами (callTimeout) + ограниченными ретраями, а не очередью.
         // ВНЕШНИЙ корутинный таймаут — на случай, если OkHttp callTimeout не сработает
         // (висение на socketRead0): корутина гарантированно отменяется, не вешает пул.
-        return withTimeoutOrNull(11_000L) {
+        // Внешний лимит > callTimeout (12с), иначе корутина отваливалась бы раньше OkHttp.
+        return withTimeoutOrNull(14_000L) {
         withContext(Dispatchers.IO) {
             // Circuit-breaker: пока активен бан — мгновенно фейлим, не выходя в сеть.
             if (IcmRateGate.isBanned()) {
@@ -310,6 +313,7 @@ class IcmApi private constructor() {
                 val request = buildRequest(url, method, body)
                 val response = client.newCall(request).execute()
                 IcmRateGate.recordSuccess()   // ответ получен → хост жив, сбрасываем счётчик фейлов
+                com.liquidmusicglass.engine.NetworkVitality.onRequestSuccess()
 
                 val requestId = extractRequestId(response)
                 requestId?.let { onRequestId?.invoke(it) }
@@ -367,12 +371,17 @@ class IcmApi private constructor() {
                 }
             } catch (e: Exception) {
                 IcmRateGate.recordFailure()   // сетевой фейл без ответа → копим к circuit-breaker
+                // Fail-streak детект: N таких подряд = маршрут протух тихо
+                // (реконнект туннеля без смены Network id) → NetworkVitality
+                // сам вычистит пулы, не дожидаясь системного колбэка.
+                com.liquidmusicglass.engine.NetworkVitality.onRequestNetworkError()
                 Result.failure(e)
             }
         }
         } ?: run {
-            // Корутинный таймаут (запрос завис дольше 11с) — фиксируем фейл, не виснем.
+            // Корутинный таймаут (запрос завис дольше 14с) — фиксируем фейл, не виснем.
             IcmRateGate.recordFailure()
+            com.liquidmusicglass.engine.NetworkVitality.onRequestNetworkError()
             Result.failure(IcmApiException(408, "icm call coroutine timeout"))
         }
     }

@@ -44,6 +44,9 @@ class App : Application(), ImageLoaderFactory {
             // первом экране не выходим пачкой в TLS-handshake (в ANR-дампе обложки
             // висели именно там). maxRequestsPerHost=4 — на один CDN.
             .dispatcher(Dispatcher().apply { maxRequests = 6; maxRequestsPerHost = 4 })
+            // Короткий keep-alive: долгоживущие сокеты тихо умирают при
+            // пересоздании маршрута — не держим их дольше минуты.
+            .connectionPool(okhttp3.ConnectionPool(4, 60, TimeUnit.SECONDS))
             .build()
     }
 
@@ -53,6 +56,51 @@ class App : Application(), ImageLoaderFactory {
             coverHttpClient.dispatcher.cancelAll()
             coverHttpClient.connectionPool.evictAll()
         } catch (_: Throwable) {}
+    }
+
+    private var netReconnectJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * Application-level колбэк дефолтной сети: живёт весь срок процесса
+     * (в отличие от Activity). Смена сети → NetworkVitality оживляет пулы;
+     * затем с дебаунсом 1.5с один ресинк: профиль, лайки, очередь сигналов
+     * волны, ретрай застрявшего плеера.
+     */
+    private fun registerAppNetworkCallback() {
+        val cm = getSystemService(android.net.ConnectivityManager::class.java) ?: return
+        try {
+            cm.registerDefaultNetworkCallback(object : android.net.ConnectivityManager.NetworkCallback() {
+                private var currentNetwork: android.net.Network? = null
+
+                override fun onAvailable(network: android.net.Network) {
+                    val isNew = currentNetwork != network
+                    currentNetwork = network
+                    if (isNew) {
+                        com.liquidmusicglass.engine.NetworkVitality.onDefaultNetworkChanged()
+                    }
+                    // Debounce: флапающая сеть шлёт onAvailable пачками — ждём
+                    // 1.5с стабильности и делаем ОДИН ресинк, а не залп.
+                    netReconnectJob?.cancel()
+                    netReconnectJob = appScope.launch {
+                        kotlinx.coroutines.delay(1500)
+                        if (IcmAuthRepository.isLoggedIn.value) {
+                            runCatching { IcmAuthRepository.fetchUserData() }
+                            runCatching {
+                                LibraryRepository.getInstance(this@App).syncWithCloud()
+                            }
+                        }
+                        runCatching { com.liquidmusicglass.api.icm.WaveSignalQueue.drain() }
+                        PlayerController.retryCurrentIfStalled(this@App)
+                    }
+                }
+
+                override fun onLost(network: android.net.Network) {
+                    if (currentNetwork == network) currentNetwork = null
+                }
+            })
+        } catch (_: Exception) {
+            // отдельные прошивки кидают исключение на лимит колбэков — не падаем
+        }
     }
 
     override fun newImageLoader(): ImageLoader {
@@ -128,6 +176,25 @@ class App : Application(), ImageLoaderFactory {
 
         // Initialize PlayerController — просто сохраняет context
         PlayerController.init(this)
+
+        // ── Сетевая живучесть ────────────────────────────────────────────
+        // Оживители: принудительный evict пулов ВСЕХ HTTP-клиентов. Дёргаются
+        // при смене дефолтной сети и при fail-streak (NetworkVitality).
+        com.liquidmusicglass.engine.NetworkVitality.registerReviver("icm") {
+            com.liquidmusicglass.api.icm.IcmApi.getInstance().evictConnections()
+        }
+        com.liquidmusicglass.engine.NetworkVitality.registerReviver("covers") {
+            evictImageConnections()
+        }
+        com.liquidmusicglass.engine.NetworkVitality.registerReviver("auth") {
+            IcmAuthRepository.evictConnections()
+        }
+
+        // Колбэк дефолтной сети — на уровне ПРИЛОЖЕНИЯ (раньше жил в
+        // MainActivity и умирал вместе с ней: слушаешь с погашенным экраном —
+        // эвикта и ресинка нет). Транспорт-агностичен: реагирует на смену
+        // дефолтной сети, чем бы она ни была — тип транспорта не спрашиваем.
+        registerAppNetworkCallback()
 
         // Всё тяжёлое — в IO корутину
         appScope.launch {

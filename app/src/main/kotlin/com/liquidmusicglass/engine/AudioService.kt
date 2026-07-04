@@ -510,8 +510,11 @@ class AudioService : MediaSessionService() {
     private fun buildPlayer(): ExoPlayer {
         val httpFactory = DefaultHttpDataSource.Factory()
             .setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(30_000)
-            .setReadTimeoutMs(30_000)
+            // 30с на мёртвом маршруте = полминуты «висим» до ошибки и ретрая.
+            // 12/15с: живой CDN укладывается с запасом (буфер сглаживает),
+            // мёртвый детектится быстро → авто-ретрай/скип, музыка не встаёт.
+            .setConnectTimeoutMs(12_000)
+            .setReadTimeoutMs(15_000)
             .setDefaultRequestProperties(mapOf(
                 "User-Agent" to "LiquidMusicGlass/1.0"
             ))

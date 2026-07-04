@@ -80,11 +80,25 @@ object IcmAuthRepository {
     private var prefs: SharedPreferences? = null
     private var appContext: Context? = null
 
+    /** Вычистить пул соединений (смена сети/fail-streak — см. NetworkVitality).
+     *  Только evict, БЕЗ cancelAll: обрывать выпуск токена на полпути нельзя. */
+    fun evictConnections() {
+        try {
+            httpClient.connectionPool.evictAll()
+        } catch (_: Throwable) {}
+    }
+
     private val httpClient by lazy {
         OkHttpClient.Builder()
             .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
             .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
             .writeTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+            // Потолок всего вызова: 3 ретрая интерсептора с бэкоффом не должны
+            // держать выпуск токена дольше 45с при мёртвой сети.
+            .callTimeout(45, java.util.concurrent.TimeUnit.SECONDS)
+            // Короткий keep-alive: долгоживущие сокеты тихо умирают при
+            // пересоздании маршрута — не держим их дольше минуты.
+            .connectionPool(okhttp3.ConnectionPool(3, 60, java.util.concurrent.TimeUnit.SECONDS))
             // Единая политика ретраев — только наш интерсептор (без двойных повторов).
             .retryOnConnectionFailure(false)
             .addInterceptor { chain ->
