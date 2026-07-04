@@ -68,6 +68,7 @@ import com.liquidmusicglass.api.icm.toTrack
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.Track
 import com.liquidmusicglass.ui.components.TrackActionsSheet
+import com.liquidmusicglass.ui.components.WrapRow
 import com.liquidmusicglass.ui.glass.AlbumArtImage
 import com.liquidmusicglass.ui.theme.LiquidTheme
 import com.liquidmusicglass.ui.viewmodel.SearchViewModel
@@ -395,15 +396,15 @@ fun SearchScreen(
                                 }
                             }
                             // Чипы-пилюли в несколько рядов: компактнее списка,
-                            // тап — искать сразу.
+                            // тап — искать сразу. WrapRow (свой Layout), НЕ
+                            // androidx FlowRow — его сигнатура плавает между
+                            // версиями foundation → NoSuchMethodError на рендере
+                            // (поймано полевым дампом краша поиска).
                             item(key = "hist_chips") {
-                                @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
-                                androidx.compose.foundation.layout.FlowRow(
+                                WrapRow(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 20.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        .padding(horizontal = 20.dp)
                                 ) {
                                     history.forEach { item ->
                                         HistoryChip(
