@@ -700,7 +700,11 @@ object IcmRepository {
             android.util.Log.w("IcmRepository", "Failed to read Room exclude list: ${e.message}")
             emptyList()
         }
-        val mergedExclude = ((exclude ?: emptyList()) + roomExclude).distinct()
+        // Кап 150 id: roomExclude (до 200) сводил на нет кап 80 у вызывающего и
+        // раздувал query-string до ~6КБ (риск 414/обрезки на прокси). distinct
+        // держит порядок → приоритет у caller-списка (свежие эксклюды очереди),
+        // room-история добивает остаток.
+        val mergedExclude = ((exclude ?: emptyList()) + roomExclude).distinct().take(150)
 
         val result = api.getWaveNext(
             seedTrackId,

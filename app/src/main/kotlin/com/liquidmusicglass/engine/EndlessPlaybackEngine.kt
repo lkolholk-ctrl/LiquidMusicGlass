@@ -140,15 +140,39 @@ class EndlessPlaybackEngine(
                         seedTrackId = seed,
                         exclude = exclude
                     )
-                    // Станция пересохла (сервер отдал empty по seed) → личная
-                    // волна: музыка не должна останавливаться и идти по кругу.
+                    // Станция пересохла (похожие на seed кончились) → ДРЕЙФ,
+                    // как у Яндекса: строим станцию вокруг последнего трека
+                    // очереди (похожие-на-похожие — пул расширяется транзитивно,
+                    // «подобных очень много»). Seed в контексте обновляем, чтобы
+                    // следующие рефиллы не молотили сухую станцию.
                     if (tracks.isEmpty() && seed != null) {
-                        android.util.Log.w("EndlessEngine", "Station dried up (seed=$seed) — falling back to personal wave")
+                        val driftSeed = queueIds.lastOrNull()?.takeIf { it != seed }
+                        if (driftSeed != null) {
+                            android.util.Log.w("EndlessEngine", "Station dried up (seed=$seed) — drifting to seed=$driftSeed")
+                            tracks = waveRepo.buildWaveQueue(
+                                count = REFILL_BATCH_SIZE,
+                                seedTrackId = driftSeed,
+                                exclude = exclude
+                            )
+                            if (tracks.isNotEmpty() && isGlobal && refillCtx != null) {
+                                _refillContext.value = refillCtx.copy(seedTrackId = driftSeed)
+                                com.liquidmusicglass.debug.DebugLog.add("WAVE drift seed -> $driftSeed")
+                            }
+                        }
+                    }
+                    // Дрейфовать некуда/нечем → личная волна: музыка не должна
+                    // останавливаться и идти по кругу.
+                    if (tracks.isEmpty() && seed != null) {
+                        android.util.Log.w("EndlessEngine", "Drift dried up too — falling back to personal wave")
                         tracks = waveRepo.buildWaveQueue(
                             count = REFILL_BATCH_SIZE,
                             seedTrackId = null,
                             exclude = exclude
                         )
+                        if (tracks.isNotEmpty() && isGlobal && refillCtx?.seedTrackId != null) {
+                            _refillContext.value = refillCtx.copy(seedTrackId = null)
+                            com.liquidmusicglass.debug.DebugLog.add("WAVE station -> personal (dried up)")
+                        }
                     }
                     tracks
                 } else {

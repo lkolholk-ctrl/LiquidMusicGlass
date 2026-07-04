@@ -223,6 +223,7 @@ class WaveRepository(context: Context) {
         var attempts = 0
         val maxAttempts = count * 6 // Fail-safe boundary limit
         var nullStreak = 0          // подряд «нет ответа» → сеть лежит, не молотим
+        var knownStreak = 0         // подряд УЖЕ ИЗВЕСТНЫХ треков → станция пересохла
 
         while (queue.size < count && attempts < maxAttempts) {
             attempts++
@@ -287,6 +288,23 @@ class WaveRepository(context: Context) {
                 }
 
                 val trackId = waveTrack.id
+
+                // Клиентский анти-повтор: сервер МОЖЕТ вернуть трек из нашего
+                // exclude (пул похожих у seed-станции выжат — сервер начинает
+                // ходить по кругу). Раньше такой трек молча добавлялся в очередь
+                // → «15 песен и поехало по кругу». Теперь: дубль пропускаем, а
+                // 5 знакомых подряд = станция пересохла → обрываем сборку, чтобы
+                // выше сработал fallback (дрейф станции / личная волна).
+                if (trackId in excludeIds) {
+                    knownStreak++
+                    Log.d(TAG, "Server returned known track $trackId (streak=$knownStreak)")
+                    if (knownStreak >= 5) {
+                        Log.w(TAG, "Station dried up: 5 known tracks in a row, aborting build")
+                        break
+                    }
+                    continue
+                }
+                knownStreak = 0
 
                 // Единственный локальный фильтр — ПЕРСОНАЛЬНЫЙ: если юзер стабильно скипает
                 // этот трек (skipRatio > 70% за ≥2 показа), не предлагаем снова. Никаких
