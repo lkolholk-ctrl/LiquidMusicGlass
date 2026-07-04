@@ -79,6 +79,7 @@ import coil.request.ImageRequest
 import com.liquidmusicglass.api.icm.IcmChart
 import com.liquidmusicglass.api.icm.IcmHomeItem
 import com.liquidmusicglass.api.icm.IcmRepository
+import com.liquidmusicglass.api.icm.WaveSignalQueue
 import com.liquidmusicglass.api.icm.toTrack
 import com.liquidmusicglass.engine.AudioReactor
 import com.liquidmusicglass.engine.LyricsParser
@@ -472,7 +473,7 @@ fun WaveHomeScreen(
                                     tint = accent
                                 ) {
                                     scope.launch(Dispatchers.IO) {
-                                        runCatching { IcmRepository.sendWaveFeedback("more_track", track.id) }
+                                        runCatching { WaveSignalQueue.sendFeedback("more_track", track.id) }
                                     }
                                 }
                                 WaveFeedbackChip(
@@ -481,10 +482,46 @@ fun WaveHomeScreen(
                                     tint = Color.White.copy(alpha = 0.75f)
                                 ) {
                                     scope.launch(Dispatchers.IO) {
-                                        runCatching { IcmRepository.sendWaveFeedback("less_track", track.id) }
+                                        runCatching { WaveSignalQueue.sendFeedback("less_track", track.id) }
                                     }
                                     PlayerController.skipNext(context)
                                 }
+                            }
+                            // ── Жанровые чипы: правят волну целым жанром. Жанр
+                            // резолвится ЛЕНИВО (по тапу): у wave-треков его нет в
+                            // ответе — добираем из /track/meta только когда
+                            // пользователь реально нажал (ноль лишних запросов). ──
+                            Spacer(Modifier.height(8.dp))
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                fun sendGenreFeedback(type: String) {
+                                    scope.launch(Dispatchers.IO) {
+                                        val genre = track.genre
+                                            ?: runCatching { IcmRepository.getTrackMeta(track.id)?.genre }.getOrNull()
+                                        if (genre.isNullOrBlank()) {
+                                            launch(Dispatchers.Main) {
+                                                android.widget.Toast.makeText(
+                                                    context, "Genre unknown for this track",
+                                                    android.widget.Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
+                                        } else {
+                                            runCatching { WaveSignalQueue.sendFeedback(type, genre) }
+                                        }
+                                    }
+                                }
+                                WaveFeedbackChip(
+                                    icon = Icons.Rounded.Whatshot,
+                                    label = "More genre",
+                                    tint = accent.copy(alpha = 0.85f)
+                                ) { sendGenreFeedback("more_genre") }
+                                WaveFeedbackChip(
+                                    icon = Icons.Rounded.ThumbDown,
+                                    label = "Less genre",
+                                    tint = Color.White.copy(alpha = 0.6f)
+                                ) { sendGenreFeedback("less_genre") }
                             }
                         }
 

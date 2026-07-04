@@ -115,7 +115,7 @@ import com.kyant.backdrop.shadow.InnerShadow
 import com.kyant.backdrop.shadow.Shadow
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.UiLogger
-import com.liquidmusicglass.api.icm.IcmRepository
+import com.liquidmusicglass.api.icm.WaveSignalQueue
 import com.liquidmusicglass.ui.glass.GlassKit
 import com.liquidmusicglass.ui.glass.GlassDialog
 import com.liquidmusicglass.ui.glass.GlassDialogButton
@@ -604,9 +604,9 @@ fun FullPlayer(
                                 currentTrackObj?.let { track ->
                                     waveFeedback = true
                                     scope.launch {
-                                        IcmRepository.sendWaveFeedback("more_track", track.id)
+                                        WaveSignalQueue.sendFeedback("more_track", track.id)
                                         track.artists.firstOrNull()?.id?.let {
-                                            IcmRepository.sendWaveFeedback("more_artist", it)
+                                            WaveSignalQueue.sendFeedback("more_artist", it)
                                         }
                                     }
                                 }
@@ -634,9 +634,9 @@ fun FullPlayer(
                                 currentTrackObj?.let { track ->
                                     waveFeedback = false
                                     scope.launch {
-                                        IcmRepository.sendWaveFeedback("less_track", track.id)
+                                        WaveSignalQueue.sendFeedback("less_track", track.id)
                                         track.artists.firstOrNull()?.id?.let {
-                                            IcmRepository.sendWaveFeedback("less_artist", it)
+                                            WaveSignalQueue.sendFeedback("less_artist", it)
                                         }
                                     }
                                 }

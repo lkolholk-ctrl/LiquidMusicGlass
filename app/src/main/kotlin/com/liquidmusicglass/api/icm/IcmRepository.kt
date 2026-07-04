@@ -146,6 +146,16 @@ object IcmRepository {
             ?: emptyList()
     }
 
+    // ── Кэш поиска: дока ICM рекомендует кешировать /search на 60с по ключу
+    // (query+region). Тап по чипу истории / повторный ввод того же запроса =
+    // мгновенная выдача без сети и без rate-limit-hit. LRU на 30 записей. ──
+    private class CachedSearch(val response: IcmSearchResponse, val at: Long)
+    private val searchCache = object : LinkedHashMap<String, CachedSearch>(32, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CachedSearch>) =
+            size > 30
+    }
+    private const val SEARCH_CACHE_TTL_MS = 60_000L
+
     /**
      * Search — all results (tracks + albums + artists).
      * @param query Search string
@@ -161,13 +171,25 @@ object IcmRepository {
     ): IcmSearchResponse? {
         val trimmed = query.trim()
         if (trimmed.length < 2) return null
+
+        val cacheKey = "${region ?: ""}|${source ?: ""}|${limit ?: 0}|${trimmed.lowercase()}"
+        synchronized(searchCache) {
+            searchCache[cacheKey]?.let {
+                if (System.currentTimeMillis() - it.at < SEARCH_CACHE_TTL_MS) return it.response
+            }
+        }
+
         val result = api.search(trimmed, region, source, limit)
         result.exceptionOrNull()?.let {
             _lastException = it as? Exception
             _lastError.value = it.message
             _lastApiException.value = it as? IcmApiException
         }
-        return result.getOrNull()
+        return result.getOrNull()?.also { resp ->
+            synchronized(searchCache) {
+                searchCache[cacheKey] = CachedSearch(resp, System.currentTimeMillis())
+            }
+        }
     }
 
     /**
@@ -733,6 +755,32 @@ object IcmRepository {
         }
         return result.getOrNull()?.ok == true
     }
+
+    // ── Доставка сигналов волны для оффлайн-очереди (WaveSignalQueue) ──
+    // DELIVERED — сервер ответил (сигнал учтён/проигнорирован — неважно);
+    // RETRY     — сеть/5xx/429/авторизация: сигнал стоит докинуть позже;
+    // REJECTED  — постоянная 4xx (битый запрос): копить бессмысленно.
+    enum class DeliveryResult { DELIVERED, RETRY, REJECTED }
+
+    private fun classifyDelivery(result: Result<*>): DeliveryResult {
+        if (result.isSuccess) return DeliveryResult.DELIVERED
+        val e = result.exceptionOrNull()
+        return if (e is IcmApiException &&
+            e.code in 400..499 && e.code !in setOf(401, 403, 408, 429)
+        ) DeliveryResult.REJECTED else DeliveryResult.RETRY
+    }
+
+    suspend fun deliverWaveFeedback(feedbackType: String, value: String): DeliveryResult =
+        classifyDelivery(api.sendWaveFeedback(feedbackType, value))
+
+    suspend fun deliverWavePlayback(
+        trackId: String,
+        playedSeconds: Double,
+        totalSeconds: Double?,
+        completed: Boolean?,
+        skipped: Boolean?
+    ): DeliveryResult =
+        classifyDelivery(api.logWavePlayback(trackId, playedSeconds, totalSeconds, completed, skipped))
 
     /**
      * Reset wave history and preferences.

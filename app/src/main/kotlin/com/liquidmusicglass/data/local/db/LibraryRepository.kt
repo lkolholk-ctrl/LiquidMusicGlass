@@ -197,12 +197,11 @@ class LibraryRepository private constructor(context: Context) {
                     if (success) {
                         db.markSynced(track.id)
                     }
-                    // Партнёрский API не умеет писать лайки (только читать), поэтому
-                    // персонализируем волну поддерживаемым способом: лайк = «больше
-                    // такого» (more_track + more_artist).
-                    IcmRepository.sendWaveFeedback("more_track", track.id)
+                    // Лайк = «больше такого» для волны (more_track + more_artist).
+                    // Через оффлайн-очередь: обрыв сети не теряет сигнал.
+                    com.liquidmusicglass.api.icm.WaveSignalQueue.sendFeedback("more_track", track.id)
                     track.artists.firstOrNull()?.id?.let {
-                        IcmRepository.sendWaveFeedback("more_artist", it)
+                        com.liquidmusicglass.api.icm.WaveSignalQueue.sendFeedback("more_artist", it)
                     }
                 } catch (_: Exception) {}
             }
@@ -233,8 +232,8 @@ class LibraryRepository private constructor(context: Context) {
                     if (success) {
                         db.deleteByTrackId(trackId)
                     }
-                    // Снятие лайка = «реже такого» в волне (поддерживаемый wave/feedback).
-                    IcmRepository.sendWaveFeedback("less_track", trackId)
+                    // Снятие лайка = «реже такого» в волне (через оффлайн-очередь).
+                    com.liquidmusicglass.api.icm.WaveSignalQueue.sendFeedback("less_track", trackId)
                 } catch (_: Exception) {}
             }
 

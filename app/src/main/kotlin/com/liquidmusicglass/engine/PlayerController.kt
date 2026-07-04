@@ -1025,7 +1025,8 @@ object PlayerController {
             }
         }
 
-        // Also log to ICM API wave playback.
+        // Also log to ICM API wave playback — через оффлайн-очередь: обрыв
+        // сети больше не теряет сигнал (дошлётся при восстановлении).
         // skipped=true — НЕГАТИВНЫЙ сигнал для волны. Шлём его ТОЛЬКО в контексте волны
         // (Global): пролистывание трека в альбоме/плейлисте — это осознанная навигация,
         // а не «меньше такого», и не должно портить персонализацию. Позитивный сигнал
@@ -1033,7 +1034,7 @@ object PlayerController {
         val isWaveContext = _playbackContext is PlaybackContext.Global
         ioScope.launch {
             try {
-                IcmRepository.logWavePlayback(
+                com.liquidmusicglass.api.icm.WaveSignalQueue.sendPlayback(
                     trackId = track.id,
                     playedSeconds = playedSec.toDouble(),
                     totalSeconds = durationSec.toDouble(),
@@ -1189,18 +1190,12 @@ object PlayerController {
                 com.liquidmusicglass.data.local.db.LibraryRepository.getInstance(it)
             } ?: return@launch
             val track = _currentTrack.value
-            val nowLiked = if (track != null && track.id == trackId) {
+            // Wave-фидбек (more_track/more_artist) шлёт сам LibraryRepository
+            // внутри likeTrack/unlikeTrack — здесь не дублируем.
+            if (track != null && track.id == trackId) {
                 repo.toggleFavorite(track)
             } else {
                 repo.toggleFavoriteById(trackId)
-            }
-            // Лайк — сильнейший позитивный сигнал волне (more_track, decay 30д
-            // на сервере). Снятие лайка фидбеком НЕ шлём: «разлюбил» ≠ «реже
-            // такое». Не залинкован — Result внутри вернёт 401, глотаем.
-            if (nowLiked) {
-                runCatching {
-                    com.liquidmusicglass.api.icm.IcmRepository.sendWaveFeedback("more_track", trackId)
-                }
             }
         }
     }

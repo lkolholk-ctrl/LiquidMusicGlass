@@ -76,7 +76,15 @@ class MainActivity : ComponentActivity() {
                 kotlinx.coroutines.delay(1500)
                 if (IcmAuthRepository.isLoggedIn.value) {
                     IcmAuthRepository.fetchUserData()
+                    // Сеть вернулась: подтянуть серверные лайки (кросс-девайс) —
+                    // синк раньше жил только на открытии вкладки Library.
+                    runCatching {
+                        com.liquidmusicglass.data.local.db.LibraryRepository
+                            .getInstance(applicationContext).syncWithCloud()
+                    }
                 }
+                // Дослать сигналы волны, скопившиеся за время без сети.
+                runCatching { com.liquidmusicglass.api.icm.WaveSignalQueue.drain() }
                 PlayerController.retryCurrentIfStalled(applicationContext)
             }
         }

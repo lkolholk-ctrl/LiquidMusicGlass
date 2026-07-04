@@ -94,6 +94,10 @@ class App : Application(), ImageLoaderFactory {
         // Initialize AppSettings (SharedPreferences) — лёгкая, можно на main
         AppSettings.init(this)
 
+        // Оффлайн-очередь сигналов волны (wave/feedback + wave/playback):
+        // недоставленное копится и досылается (drain — в фоне ниже).
+        com.liquidmusicglass.api.icm.WaveSignalQueue.init(this)
+
         // Haptic Music: тактильные удары в такт музыке (цикл живёт только пока
         // тумблер включён и музыка играет — иначе спит, батарею не тратит)
         com.liquidmusicglass.engine.automix.HapticMusicEngine.init(this)
@@ -141,6 +145,14 @@ class App : Application(), ImageLoaderFactory {
             if (!savedKey.isNullOrBlank() && savedKey.startsWith("pk_")) {
                 IcmRepository.init(savedKey, IcmAuthRepository.ensurePartnerUserId())
                 IcmAuthRepository.getSessionToken()?.let { IcmRepository.setSessionToken(it) }
+
+                // Дослать сигналы волны, не доставленные в прошлой сессии,
+                // и подтянуть серверные лайки в локальное избранное (синк
+                // раньше жил только на открытии вкладки Library).
+                runCatching { com.liquidmusicglass.api.icm.WaveSignalQueue.drain() }
+                if (IcmAuthRepository.isLoggedIn.value) {
+                    runCatching { LibraryRepository.getInstance(this@App).syncWithCloud() }
+                }
             }
         }
     }
