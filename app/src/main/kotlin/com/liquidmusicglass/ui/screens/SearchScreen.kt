@@ -328,7 +328,7 @@ fun SearchScreen(
                 ) {
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(bottom = 178.dp)
+                        contentPadding = PaddingValues(bottom = 120.dp)
                     ) {
                         if (categories.isNotEmpty()) {
                             item {
@@ -485,7 +485,7 @@ fun SearchScreen(
                                 LazyColumn(
                                     modifier = Modifier.fillMaxSize(),
                                     verticalArrangement = Arrangement.spacedBy(2.dp),
-                                    contentPadding = PaddingValues(bottom = 178.dp)
+                                    contentPadding = PaddingValues(bottom = 120.dp)
                                 ) {
                                     // Artists section
                                     if (artists.isNotEmpty()) {
