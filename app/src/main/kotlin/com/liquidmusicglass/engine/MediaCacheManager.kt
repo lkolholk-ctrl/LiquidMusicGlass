@@ -202,6 +202,51 @@ object MediaCacheManager {
     fun getCacheDataSourceFactory(): CacheDataSource.Factory? =
         if (isCacheEnabled()) cacheDataSourceFactory else null
 
+    // ── Предзагрузка аудио в кэш ──
+    @Volatile private var activePreCache: androidx.media3.datasource.cache.CacheWriter? = null
+    @Volatile private var activePreCacheKey: String? = null
+
+    /**
+     * Скачивает аудио трека в кэш ЦЕЛИКОМ (дока ICM: Range-запросы и полная
+     * загрузка поддерживаются из коробки). Ключ — "icm_<trackId>", тот же, что
+     * использует плеер: закэшированное играет мгновенно и без сети.
+     *
+     * Раньше «предзагрузка» только резолвила URL, не качая ни байта аудио —
+     * на переходе плеер начинал загрузку с нуля и стопорился.
+     *
+     * Блокирующий вызов — звать с Dispatchers.IO. Повторный вызов для уже
+     * закэшированного трека выходит быстро (CacheWriter пропускает готовые
+     * куски). Новый префетч отменяет предыдущий незавершённый.
+     */
+    fun preCacheTrack(trackId: String, url: android.net.Uri) {
+        val factory = getCacheDataSourceFactory() ?: return
+        val key = "icm_$trackId"
+        if (activePreCacheKey == key) return
+        try { activePreCache?.cancel() } catch (_: Throwable) {}
+
+        val spec = androidx.media3.datasource.DataSpec.Builder()
+            .setUri(url)
+            .setKey(key)
+            .build()
+        val writer = androidx.media3.datasource.cache.CacheWriter(
+            factory.createDataSourceForDownloading(), spec, null, null
+        )
+        activePreCache = writer
+        activePreCacheKey = key
+        try {
+            writer.cache()
+            android.util.Log.d("MediaCacheManager", "Pre-cached audio for $trackId")
+        } catch (e: Exception) {
+            // отмена/сеть — не страшно, докачается при воспроизведении
+            android.util.Log.d("MediaCacheManager", "Pre-cache stopped for $trackId: ${e.message}")
+        } finally {
+            if (activePreCacheKey == key) {
+                activePreCache = null
+                activePreCacheKey = null
+            }
+        }
+    }
+
     /** Реально занятый объём кэша в байтах (для строки «В данный момент: X МБ»). */
     suspend fun getCacheSizeBytes(): Long = withContext(Dispatchers.IO) {
         try {

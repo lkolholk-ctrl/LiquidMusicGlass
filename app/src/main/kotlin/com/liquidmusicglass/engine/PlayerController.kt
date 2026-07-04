@@ -128,6 +128,13 @@ object PlayerController {
         return null
     }
 
+    /**
+     * Последний известный стрим-URL БЕЗ проверки TTL. Оффлайн-фолбэк: когда
+     * аудио уже лежит в медиа-кэше (ключ = id трека), апстрим не открывается —
+     * протухшая подпись не мешает читать из кэша.
+     */
+    fun getStaleCachedUri(trackId: String): Uri? = streamUrlCache[trackId]?.uri
+
     // ── Playback logging state ──
     private var playbackStartTimeMs: Long = 0L
     private var totalPlayedMs: Long = 0L
@@ -293,9 +300,20 @@ object PlayerController {
     }
 
     /**
-     * Предзагружает (прогревает кэш) для следующих треков в очереди.
+     * Предзагружает следующие треки очереди.
+     *
+     * Без [cacheAudio] — только прогрев URL (быстрый скип). С [cacheAudio]
+     * (таймер «за N сек до конца») — ближайший следующий трек скачивается
+     * в медиа-кэш ЦЕЛИКОМ: переход мгновенный и не зависит от сети. Раньше
+     * «предзагрузка» не качала ни байта аудио — на переходе плеер грузил
+     * трек с нуля и стопорился.
      */
-    private fun prefetchAhead(context: Context, currentIndex: Int, depth: Int = 3) {
+    private fun prefetchAhead(
+        context: Context,
+        currentIndex: Int,
+        depth: Int = 3,
+        cacheAudio: Boolean = false
+    ) {
         val currentQueue = queue.toList()
         if (currentQueue.isEmpty()) return
 
@@ -306,10 +324,13 @@ object PlayerController {
             indicesToPrefetch.forEach { idx ->
                 val track = currentQueue.getOrNull(idx) ?: return@forEach
                 if (track.isOnlineTrack) {
-                    resolveStreamUrl(track.id)
+                    val result = resolveStreamUrl(track.id)
+                    if (cacheAudio && idx == currentIndex + 1 && result is StreamResult.Success) {
+                        MediaCacheManager.preCacheTrack(track.id, result.uri)
+                    }
                 }
             }
-            android.util.Log.d("PlayerController", "Pre-warmed caches for indices $indicesToPrefetch")
+            android.util.Log.d("PlayerController", "Pre-warmed caches for indices $indicesToPrefetch (audio=$cacheAudio)")
         }
     }
 
@@ -664,7 +685,8 @@ object PlayerController {
                 val leadMs = AppSettings.preloadLeadSeconds.value * 1000L
                 if (remaining in 1..leadMs) {
                     preloadDoneForIndex = currentIndex
-                    appContext?.let { prefetchAhead(it, currentIndex, depth = 2) }
+                    // cacheAudio: следующий трек — В КЭШ целиком, не только URL.
+                    appContext?.let { prefetchAhead(it, currentIndex, depth = 2, cacheAudio = true) }
                 }
             }
         }

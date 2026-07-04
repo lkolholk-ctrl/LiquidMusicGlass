@@ -64,8 +64,16 @@ class StreamingDataSource private constructor(
         val uri = dataSpec.uri
         currentUri = uri
 
+        val liquidTrackId =
+            if (uri.scheme == SCHEME_LIQUID) uri.getQueryParameter(PARAM_TRACK_ID) else null
         val resolvedUri = resolveUri(uri)
-        val resolvedSpec = dataSpec.withUri(resolvedUri)
+        // Ключ кэша = ID ТРЕКА, а не подписанный URL: подпись живёт 10 минут
+        // и меняется при каждом резолве — с ключом-URL кэш никогда не
+        // переиспользовался («мёртвый кэш», всё зависело от сети).
+        val resolvedSpec = dataSpec.buildUpon()
+            .setUri(resolvedUri)
+            .apply { if (liquidTrackId != null) setKey("icm_$liquidTrackId") }
+            .build()
 
         android.util.Log.d("StreamingDataSource", "open uri=$uri resolved=$resolvedUri scheme=${resolvedUri.scheme}")
 
@@ -113,6 +121,12 @@ class StreamingDataSource private constructor(
 
             val resolvedUrl = PlayerController.resolveStreamUrlSync(trackId)
             if (resolvedUrl != null) return resolvedUrl
+
+            // Сеть лежит, свежий URL не получить. Если аудио уже в кэше
+            // (ключ = id трека), апстрим не понадобится — отдаём последний
+            // известный URL, даже протухший: чтение пойдёт из кэша.
+            val stale = PlayerController.getStaleCachedUri(trackId)
+            if (stale != null) return stale
         }
 
         val url = uri.getQueryParameter(PARAM_URL)
