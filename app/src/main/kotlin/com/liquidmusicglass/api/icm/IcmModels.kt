@@ -359,7 +359,9 @@ data class IcmTrackMeta(
     val title: String = "",
     val artist: String = "",
     val cover: String = "",
-    val duration: Long = 0L
+    val duration: Long = 0L,
+    // Жанр — для ленивого резолва в жанровых чипах волны (more/less_genre).
+    @SerialName("genre") val genre: String? = null
 )
 
 // ─── Playlist ───
