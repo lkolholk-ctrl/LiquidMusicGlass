@@ -539,6 +539,7 @@ fun AppRoot() {
             onOpenSettings = { settingsOpen = true },
             onNavigateToArtist = { artistId ->
                 detailArtistId = artistId
+                animateCollapse()   // плеер рисуется ПОВЕРХ деталей — сворачиваем
             },
             onPublishLyrics = { track -> lrcPublishTrack = track },
             onEditTags = { track -> tagEditTrack = track }

@@ -522,12 +522,26 @@ fun FullPlayer(
                             overflow = TextOverflow.Ellipsis
                         )
                         Spacer(Modifier.height(4.dp))
+                        // Артист кликабелен: один — сразу на его страницу,
+                        // несколько (фиты) — шторка выбора (она уже была
+                        // построена, но её никто не открывал).
                         Text(
                             text = artistName,
                             color = Color.White.copy(alpha = 0.60f),
                             fontSize = 16.sp,
                             maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) {
+                                val withId = artists.filter { it.id != null }
+                                when {
+                                    withId.size > 1 -> showArtistSheet = true
+                                    withId.size == 1 -> onNavigateToArtist(withId.first().id!!)
+                                    else -> { /* локалка без artistId — некуда вести */ }
+                                }
+                            }
                         )
                     }
                     Spacer(Modifier.width(12.dp))
