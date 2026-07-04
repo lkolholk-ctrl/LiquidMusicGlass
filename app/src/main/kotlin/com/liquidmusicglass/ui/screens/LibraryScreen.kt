@@ -47,7 +47,13 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.Canvas
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -186,6 +192,7 @@ fun LibraryScreen(
                             badge = when {
                                 p.source?.contains("yandex", true) == true -> "Yandex"
                                 p.source?.contains("apple", true) == true -> "Apple"
+                                p.source?.contains("spotify", true) == true -> "Spotify"
                                 else -> "Cloud"
                             },
                             isImported = true
@@ -932,15 +939,12 @@ private fun PlaylistCell(
                 }
             }
             data.badge?.let { badge ->
-                Box(
+                SourceBadge(
+                    source = badge,
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(8.dp)
-                        .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(50))
-                        .padding(horizontal = 8.dp, vertical = 3.dp)
-                ) {
-                    Text(badge, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-                }
+                )
             }
         }
         Spacer(Modifier.height(7.dp))
@@ -968,6 +972,98 @@ private fun MosaicTile(url: String, modifier: Modifier) {
         contentScale = ContentScale.Crop,
         modifier = modifier.fillMaxHeight()
     )
+}
+
+/**
+ * Значок источника плейлиста в углу обложки: фирменный глиф сервиса, откуда
+ * приехал плейлист. Значки рисуются на Canvas (без растровых ассетов) —
+ * узнаваемо и легко без внешних файлов.
+ *  - Spotify → зелёный круг с тремя «волнами»;
+ *  - Apple   → красно-розовый градиентный квадрат с нотой;
+ *  - Yandex  → красный круг с play-треугольником;
+ *  - Cloud/прочее → тёмная пилюля с облачком (импорт без явного источника).
+ */
+@Composable
+private fun SourceBadge(source: String, modifier: Modifier = Modifier) {
+    val d = 22.dp
+    Box(
+        modifier = modifier
+            .size(d)
+            .clip(RoundedCornerShape(50))
+            .background(Color.Black.copy(alpha = 0.28f))   // мягкая подложка на любой обложке
+            .padding(2.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        when {
+            source.equals("Spotify", true) -> Canvas(Modifier.fillMaxSize()) {
+                val r = size.minDimension / 2f
+                val c = center
+                drawCircle(Color(0xFF1DB954), radius = r, center = c)
+                // три «волны» — дуги, вложенные снизу вверх
+                val white = Color.White
+                val sw = size.minDimension * 0.075f
+                listOf(0.62f to 0.30f, 0.46f to 0.18f, 0.30f to 0.08f).forEach { (span, yOff) ->
+                    val rad = size.minDimension * span / 2f
+                    drawArc(
+                        color = white,
+                        startAngle = 200f, sweepAngle = 140f, useCenter = false,
+                        topLeft = Offset(c.x - rad, c.y - rad - size.minDimension * yOff),
+                        size = androidx.compose.ui.geometry.Size(rad * 2, rad * 2),
+                        style = Stroke(width = sw, cap = StrokeCap.Round)
+                    )
+                }
+            }
+            source.equals("Apple", true) -> Canvas(Modifier.fillMaxSize()) {
+                val corner = size.minDimension * 0.28f
+                drawRoundRect(
+                    brush = Brush.verticalGradient(listOf(Color(0xFFFB5C74), Color(0xFFFA233B))),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(corner, corner)
+                )
+                // белая восьмая нота
+                val w = size.width; val h = size.height
+                val stemX = w * 0.62f
+                drawLine(
+                    Color.White, Offset(stemX, h * 0.28f), Offset(stemX, h * 0.66f),
+                    strokeWidth = w * 0.07f, cap = StrokeCap.Round
+                )
+                drawLine(
+                    Color.White, Offset(stemX, h * 0.30f), Offset(w * 0.74f, h * 0.24f),
+                    strokeWidth = w * 0.07f, cap = StrokeCap.Round
+                )
+                drawCircle(Color.White, radius = w * 0.11f, center = Offset(w * 0.50f, h * 0.68f))
+            }
+            source.equals("Yandex", true) -> Canvas(Modifier.fillMaxSize()) {
+                val r = size.minDimension / 2f
+                val c = center
+                drawCircle(Color(0xFFFC3F1D), radius = r, center = c)   // фирменный красный Яндекса
+                // белый play-треугольник
+                val tri = Path().apply {
+                    val s = size.minDimension
+                    moveTo(c.x - s * 0.11f, c.y - s * 0.17f)
+                    lineTo(c.x - s * 0.11f, c.y + s * 0.17f)
+                    lineTo(c.x + s * 0.20f, c.y)
+                    close()
+                }
+                drawPath(tri, Color.White)
+            }
+            else -> Canvas(Modifier.fillMaxSize()) {
+                val r = size.minDimension / 2f
+                val c = center
+                drawCircle(Color(0xFF3A3A3C), radius = r, center = c)
+                // простое облачко
+                val s = size.minDimension
+                drawCircle(Color.White, radius = s * 0.12f, center = Offset(c.x - s * 0.12f, c.y + s * 0.02f))
+                drawCircle(Color.White, radius = s * 0.16f, center = Offset(c.x + s * 0.02f, c.y - s * 0.04f))
+                drawCircle(Color.White, radius = s * 0.12f, center = Offset(c.x + s * 0.16f, c.y + s * 0.02f))
+                drawRoundRect(
+                    Color.White,
+                    topLeft = Offset(c.x - s * 0.24f, c.y + s * 0.02f),
+                    size = androidx.compose.ui.geometry.Size(s * 0.48f, s * 0.14f),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(s * 0.07f, s * 0.07f)
+                )
+            }
+        }
+    }
 }
 
 /**
