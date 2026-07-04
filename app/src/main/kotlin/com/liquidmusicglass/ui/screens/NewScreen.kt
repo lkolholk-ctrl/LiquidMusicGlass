@@ -1,6 +1,7 @@
 package com.liquidmusicglass.ui.screens
 
 import android.net.Uri
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -72,6 +73,8 @@ fun NewScreen(
     val recentlyPlayed by PlayerController.recentlyPlayed.collectAsState()
     val homeContent by viewModel.homeContent.collectAsState()
     val charts by viewModel.charts.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
+    val isLoadingCharts by viewModel.isLoadingCharts.collectAsState()
     val homeBlocks = remember(homeContent) {
         homeContent?.blocks?.filter { it.type != "charts" && it.items.isNotEmpty() } ?: emptyList()
     }
@@ -96,7 +99,7 @@ fun NewScreen(
     Box(modifier = Modifier.fillMaxSize().background(lc.settingsBackground)) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 110.dp)
+            contentPadding = PaddingValues(bottom = 178.dp)
         ) {
             item { Spacer(Modifier.windowInsetsTopHeight(WindowInsets.statusBars)) }
             item {
@@ -138,6 +141,16 @@ fun NewScreen(
                             )
                         }
                     }
+                    Spacer(Modifier.height(28.dp))
+                }
+            }
+
+            // ── Скелетоны на время первой загрузки: пока нет ни блоков, ни чартов
+            // (кэш пуст), вместо пустоты — пульсирующие плейсхолдеры секций,
+            // в том же стиле, что шиммер в поиске. ──
+            if (homeBlocks.isEmpty() && charts.isEmpty() && (isLoading || isLoadingCharts)) {
+                items(count = 2, key = { "skeleton_$it" }) {
+                    NewSectionSkeleton()
                     Spacer(Modifier.height(28.dp))
                 }
             }
@@ -290,6 +303,61 @@ fun NewScreen(
                     androidx.compose.material3.TextButton(onClick = { previewMood = null }) { Text("Close") }
                 }
             )
+        }
+    }
+}
+
+/** Пульсирующий плейсхолдер секции: плашка заголовка + ряд карточек 140dp. */
+@Composable
+private fun NewSectionSkeleton() {
+    val pulse by androidx.compose.animation.core.rememberInfiniteTransition(label = "newSkeleton")
+        .animateFloat(
+            initialValue = 0.45f,
+            targetValue = 1f,
+            animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+                animation = androidx.compose.animation.core.tween(650),
+                repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
+            ),
+            label = "newSkeletonPulse"
+        )
+    val base = if (LiquidTheme.colors.isDark) Color(0xFF1A1A1A) else Color(0xFFEAEAEF)
+    Column {
+        Box(
+            modifier = Modifier
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 12.dp)
+                .size(width = 130.dp, height = 20.dp)
+                .clip(RoundedCornerShape(50))
+                .background(base.copy(alpha = pulse))
+        )
+        Row(
+            modifier = Modifier.padding(horizontal = 20.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            repeat(3) {
+                Column {
+                    Box(
+                        modifier = Modifier
+                            .size(140.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(base.copy(alpha = pulse))
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .size(width = 96.dp, height = 12.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(base.copy(alpha = pulse))
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Box(
+                        modifier = Modifier
+                            .size(width = 64.dp, height = 11.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(base.copy(alpha = pulse))
+                    )
+                }
+            }
         }
     }
 }

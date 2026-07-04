@@ -117,6 +117,10 @@ object AppSettings {
     private val _isOnboardingCompleted = MutableStateFlow(false)
     val isOnboardingCompleted: StateFlow<Boolean> = _isOnboardingCompleted
 
+    // ── Правый тайм-лейбл плеера: false = «-осталось», true = общая длительность ──
+    private val _timeShowTotal = MutableStateFlow(false)
+    val timeShowTotal: StateFlow<Boolean> = _timeShowTotal
+
     private val _onboardingGenres = MutableStateFlow<List<String>>(emptyList())
     val onboardingGenres: StateFlow<List<String>> = _onboardingGenres
 
@@ -275,6 +279,11 @@ object AppSettings {
         safePrefs()?.edit()?.putBoolean("onboarding_completed", completed)?.apply()
     }
 
+    fun setTimeShowTotal(showTotal: Boolean) {
+        _timeShowTotal.value = showTotal
+        safePrefs()?.edit()?.putBoolean("time_show_total", showTotal)?.apply()
+    }
+
     fun setOnboardingData(genres: List<String>, artists: List<String>) {
         _onboardingGenres.value = genres
         _onboardingArtists.value = artists
@@ -430,6 +439,7 @@ object AppSettings {
         } catch (_: Exception) {}
 
         _isOnboardingCompleted.value = p.getBoolean("onboarding_completed", false)
+        _timeShowTotal.value = p.getBoolean("time_show_total", false)
         _onboardingGenres.value = p.getString("onboarding_genres", "")?.split(",")?.filter { it.isNotBlank() } ?: emptyList()
         _onboardingArtists.value = p.getString("onboarding_artists", "")?.split(",")?.filter { it.isNotBlank() } ?: emptyList()
     }

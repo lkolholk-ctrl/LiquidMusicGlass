@@ -1,9 +1,14 @@
 package com.liquidmusicglass.ui.player
 
 import android.net.Uri
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,15 +29,20 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
+import kotlin.math.abs
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
@@ -56,12 +66,49 @@ fun MiniPlayer(
     drawBackground: Boolean = true,
     onExpand: () -> Unit,
     onPlayPause: () -> Unit,
-    onSkipNext: () -> Unit = {}
+    onSkipNext: () -> Unit = {},
+    onSkipPrevious: () -> Unit = {}
 ) {
     val pillShape = RoundedCornerShape(100.dp)
     val artShape = RoundedCornerShape(10.dp)
 
     val lc = LiquidTheme.colors
+
+    // Свайп по пилюле: влево = следующий трек, вправо = предыдущий.
+    // Резинка с сопротивлением и упругий возврат — как у обложки на главной.
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val swipeThresholdPx = remember(density) { with(density) { 72.dp.toPx() } }
+    val maxSwipePx = remember(density) { with(density) { 120.dp.toPx() } }
+    val swipeOffset = remember { Animatable(0f) }
+    val swipeModifier = Modifier
+        .graphicsLayer {
+            translationX = swipeOffset.value
+            alpha = 1f - (abs(swipeOffset.value) / (maxSwipePx * 3f)).coerceAtMost(0.25f)
+        }
+        .draggable(
+            orientation = Orientation.Horizontal,
+            state = rememberDraggableState { delta ->
+                scope.launch {
+                    val next = (swipeOffset.value + delta * 0.8f)
+                        .coerceIn(-maxSwipePx, maxSwipePx)
+                    swipeOffset.snapTo(next)
+                }
+            },
+            onDragStopped = { velocity ->
+                val off = swipeOffset.value
+                when {
+                    off < -swipeThresholdPx || velocity < -2400f -> onSkipNext()
+                    off > swipeThresholdPx || velocity > 2400f -> onSkipPrevious()
+                }
+                scope.launch {
+                    swipeOffset.animateTo(
+                        0f,
+                        spring(dampingRatio = 0.8f, stiffness = 380f)
+                    )
+                }
+            }
+        )
 
     val degraded = com.liquidmusicglass.ui.PerfMonitor.degraded
     val playerModifier = if (drawBackground && degraded) {
@@ -134,7 +181,7 @@ fun MiniPlayer(
     }
 
     Row(
-        modifier = playerModifier,
+        modifier = swipeModifier.then(playerModifier),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(

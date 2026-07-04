@@ -464,8 +464,27 @@ fun AppRoot() {
                             waveHideFrac * 160.dp.toPx()   // автоскрытие на Wave
                         alpha = bottomBarAlpha
                     }
-                    .background(barBackground)
+                    .background(barBackground),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                // Мини-плеер на вкладках Поиск/Библиотека/New: на Wave он не нужен —
+                // там главный экран сам и есть плеер. Свайп влево/вправо = трек,
+                // тап = развернуть FullPlayer.
+                if (selectedIndex != 0 && currentTrack != null) {
+                    Spacer(Modifier.height(6.dp))
+                    MiniPlayer(
+                        trackTitle = trackTitle,
+                        artistName = artistName,
+                        isPlaying = isPlaying,
+                        albumArtUri = currentTrack?.displayArtUri,
+                        coverUrl = currentTrack?.coverUrl,
+                        backdrop = rootBackdrop,
+                        onExpand = { animateExpand() },
+                        onPlayPause = { PlayerController.togglePlayPause(context) },
+                        onSkipNext = { PlayerController.skipNext(context) },
+                        onSkipPrevious = { PlayerController.skipPrevious(context) }
+                    )
+                }
                 // Wave-контент всегда тёмный → на дымном фоне иконки бара тоже
                 // должны быть «тёмной темы» (белые), даже если тема приложения светлая.
                 val barContent: @Composable () -> Unit = {

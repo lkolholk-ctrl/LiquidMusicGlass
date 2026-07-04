@@ -77,6 +77,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.rememberModalBottomSheetState
 import com.liquidmusicglass.api.icm.IcmMiniArtist
 import com.liquidmusicglass.api.icm.IcmAuthRepository
+import com.liquidmusicglass.engine.AppSettings
 import com.liquidmusicglass.engine.AudioDownloadManager
 import com.liquidmusicglass.data.local.db.FavoriteTrackDatabase
 import androidx.compose.runtime.Composable
@@ -313,6 +314,15 @@ fun FullPlayer(
             val artCornerR = (16f * expandProgress.coerceIn(0f, 1f)).coerceIn(0f, 16f)
             val artShape = RoundedCornerShape(artCornerR.dp)
 
+            // Обложка «дышит»: на паузе ужимается (как в Apple Music), на плей —
+            // упруго распахивается. Буферизацию не считаем паузой — иначе обложка
+            // дёргалась бы при каждом скипе.
+            val artScale by animateFloatAsState(
+                targetValue = if (isPlaying || isBuffering) 1f else 0.86f,
+                animationSpec = spring(dampingRatio = 0.72f, stiffness = 220f),
+                label = "artBreath"
+            )
+
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -321,7 +331,10 @@ fun FullPlayer(
                     .aspectRatio(1f)
                     .graphicsLayer {
                         translationX = swipeOffsetX.value
-                        shadowElevation = 24f * expandProgress.coerceIn(0f, 1f)
+                        scaleX = artScale
+                        scaleY = artScale
+                        shadowElevation = (24f - 10f * (1f - artScale) / 0.14f) *
+                            expandProgress.coerceIn(0f, 1f)
                         alpha = artAlpha
                         clip = true
                         shape = artShape
@@ -717,12 +730,22 @@ fun FullPlayer(
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Medium
                     )
+                    // Тап по правому лейблу: «-осталось» ⇄ «всего». Выбор помнится.
+                    val showTotal by AppSettings.timeShowTotal.collectAsState()
                     val remaining = (durationMs - currentPositionMs).coerceAtLeast(0)
                     Text(
-                        "-${formatTime(remaining)}",
+                        if (showTotal) formatTime(durationMs.coerceAtLeast(0))
+                        else "-${formatTime(remaining)}",
                         color = Color.White.copy(alpha = 0.50f),
                         fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) { AppSettings.setTimeShowTotal(!showTotal) }
+                            .padding(horizontal = 4.dp)
                     )
                 }
 

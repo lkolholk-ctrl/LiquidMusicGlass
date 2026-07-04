@@ -264,7 +264,7 @@ fun LibraryScreen(
                     } else {
                         LazyColumn(
                             modifier = Modifier.weight(1f),
-                            contentPadding = PaddingValues(bottom = 120.dp)
+                            contentPadding = PaddingValues(bottom = 178.dp)
                         ) {
                             items(favorites, key = { it.trackId }) { track ->
                                 FavoriteTrackItem(
@@ -329,7 +329,7 @@ fun LibraryScreen(
                     } else {
                         LazyColumn(
                             modifier = Modifier.weight(1f),
-                            contentPadding = PaddingValues(bottom = 120.dp)
+                            contentPadding = PaddingValues(bottom = 178.dp)
                         ) {
                             items(downloadedTracks, key = { it.trackId }) { trackEntity ->
                                 DownloadedTrackItem(
