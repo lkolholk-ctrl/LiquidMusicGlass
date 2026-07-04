@@ -281,7 +281,8 @@ class IcmApi private constructor() {
                 val response = client.newCall(request).execute()
                 IcmRateGate.recordSuccess()   // ответ получен → хост жив, сбрасываем счётчик фейлов
 
-                extractRequestId(response)?.let { onRequestId?.invoke(it) }
+                val requestId = extractRequestId(response)
+                requestId?.let { onRequestId?.invoke(it) }
 
                 when {
                     response.code == 202 && endpoint.contains("/track") -> {
@@ -301,7 +302,14 @@ class IcmApi private constructor() {
                     }
                     else -> {
                         val errorText = response.body?.string() ?: "HTTP ${response.code}"
-                        IcmApiFileLogger.log("E", "IcmApi", "API error: ${response.code} on $endpoint, body: $errorText")
+                        // rid — X-Request-Id сервера: по нему саппорт ICM находит
+                        // конкретный запрос в своих логах за секунды.
+                        IcmApiFileLogger.log("E", "IcmApi", "API error: ${response.code} on $endpoint rid=${requestId ?: "-"}, body: $errorText")
+                        if (response.code != 429) {
+                            com.liquidmusicglass.debug.DebugLog.add(
+                                "ICM ${response.code} $endpoint rid=${requestId ?: "-"}"
+                            )
+                        }
                         val error = try {
                             json.decodeFromString<IcmErrorWrapper>(errorText).detail
                         } catch (_: Exception) {

@@ -527,39 +527,10 @@ class AudioService : MediaSessionService() {
             .setBufferDurationsMs(30_000, 60_000, 2_500, 5_000)
             .build()
 
-        // Renderers factory с двумя аудио-процессорами:
-        //  1) BassAudioProcessor — прозрачный анализ полос для реактивного свечения;
-        //  2) VolumeNormalizationProcessor — Sound Check (нормализация громкости),
-        //     активен только при включённом флаге, иначе прозрачный проброс.
-        // Порядок важен: нормализация ПОСЛЕ анализа, чтобы Bass видел чистый сигнал.
-        val renderersFactory = object : DefaultRenderersFactory(this) {
-            override fun buildAudioSink(
-                context: Context,
-                enableFloatOutput: Boolean,
-                enableAudioTrackPlaybackParameters: Boolean
-            ): AudioSink {
-                return DefaultAudioSink.Builder(context)
-                    .setAudioProcessors(arrayOf(BassAudioProcessor(), VolumeNormalizationProcessor()))
-                    .build()
-            }
-
-            // Audio-only app: build NO video renderers. The default factory would
-            // create a video MediaCodec renderer + FrameReleaseChoreographer + GPU
-            // threads at player build, contending with UI shader compilation on a
-            // cold first launch (interpreted code) and tripping the startup ANR.
-            override fun buildVideoRenderers(
-                context: Context,
-                extensionRendererMode: Int,
-                mediaCodecSelector: MediaCodecSelector,
-                enableDecoderFallback: Boolean,
-                eventHandler: android.os.Handler,
-                eventListener: VideoRendererEventListener,
-                allowedVideoJoiningTimeMs: Long,
-                out: ArrayList<Renderer>
-            ) {
-                // intentionally empty — no video renderers
-            }
-        }
+        // Единая цепочка (Bass-анализ → DJ FX перехода → нормализация) —
+        // PlayerAudioChain: та же фабрика у secondary-плеера AutoMix, чтобы
+        // после свапа плееров цепочка не терялась.
+        val renderersFactory = PlayerAudioChain.renderersFactory(this)
 
         return ExoPlayer.Builder(this)
             .setRenderersFactory(renderersFactory)

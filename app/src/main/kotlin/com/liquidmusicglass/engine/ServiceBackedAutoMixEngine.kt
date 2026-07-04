@@ -230,13 +230,20 @@ class ServiceBackedAutoMixEngine(
     }
 
     private fun buildSecondaryPlayer(): ExoPlayer {
-        return ExoPlayer.Builder(appContext).build().apply {
-            val attrs = AudioAttributes.Builder()
-                .setUsage(C.USAGE_MEDIA)
-                .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
-                .build()
-            setAudioAttributes(attrs, false)
-        }
+        // ВАЖНО: та же аудио-цепочка, что у основного плеера (PlayerAudioChain).
+        // Голый Builder оставлял secondary без процессоров: после свапа плееров
+        // реактивное свечение/нормализация умирали, а DJ FX не переживали
+        // второй переход.
+        return ExoPlayer.Builder(appContext)
+            .setRenderersFactory(PlayerAudioChain.renderersFactory(appContext))
+            .build()
+            .apply {
+                val attrs = AudioAttributes.Builder()
+                    .setUsage(C.USAGE_MEDIA)
+                    .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                    .build()
+                setAudioAttributes(attrs, false)
+            }
     }
 
     private suspend fun awaitPlayerReady(player: ExoPlayer, timeoutMs: Long) {

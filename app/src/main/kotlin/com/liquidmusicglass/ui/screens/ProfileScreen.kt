@@ -53,6 +53,7 @@ import com.liquidmusicglass.api.icm.IcmAuthRepository
 import com.liquidmusicglass.data.local.LocalAuthManager
 import com.liquidmusicglass.ui.theme.AppFontFamily
 import com.liquidmusicglass.ui.theme.LiquidTheme
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -83,6 +84,30 @@ fun ProfileScreen(
 
     LaunchedEffect(isLoggedIn) {
         if (isLoggedIn) IcmAuthRepository.fetchUserData()
+    }
+
+    // ── Подписки на артистов + регион (всё про подписку живёт в профиле) ──
+    var followedArtists by remember {
+        mutableStateOf<List<com.liquidmusicglass.api.icm.IcmLibraryArtist>>(emptyList())
+    }
+    var regionInfo by remember {
+        mutableStateOf<com.liquidmusicglass.api.icm.IcmRegionResponse?>(null)
+    }
+    var regionExpanded by remember { mutableStateOf(false) }
+    var regionBusy by remember { mutableStateOf(false) }
+    LaunchedEffect(isLoggedIn) {
+        if (isLoggedIn) {
+            followedArtists = runCatching {
+                com.liquidmusicglass.api.icm.IcmRepository
+                    .getLibrarySubscriptions(limit = 50)?.items
+            }.getOrNull() ?: emptyList()
+            regionInfo = runCatching {
+                com.liquidmusicglass.api.icm.IcmRepository.getUserRegion()
+            }.getOrNull()
+        } else {
+            followedArtists = emptyList()
+            regionInfo = null
+        }
     }
 
     val displayName = when {
@@ -229,6 +254,199 @@ fun ProfileScreen(
             }
 
             item { Spacer(modifier = Modifier.height(24.dp)) }
+
+            // ═══════════════════════════════════════════════════════════
+            //  2. ARTISTS YOU FOLLOW — подписки ICM (/library/subscriptions)
+            // ═══════════════════════════════════════════════════════════
+            if (isLoggedIn && followedArtists.isNotEmpty()) {
+                item {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp)
+                            .clip(RoundedCornerShape(28.dp))
+                            .background(if (lc.isDark) SurfaceDark else Color(0xFFF2F2F7))
+                            .padding(vertical = 16.dp)
+                    ) {
+                        Text(
+                            text = "ARTISTS YOU FOLLOW",
+                            fontFamily = AppFontFamily,
+                            color = lc.textSecondary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.5.sp,
+                            modifier = Modifier.padding(horizontal = 16.dp)
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        androidx.compose.foundation.lazy.LazyRow(
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            items(followedArtists.size) { i ->
+                                val artist = followedArtists[i]
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier
+                                        .width(76.dp)
+                                        .clickable(
+                                            interactionSource = remember { MutableInteractionSource() },
+                                            indication = null
+                                        ) {
+                                            // Тап = радио по артисту (мгновенный старт).
+                                            com.liquidmusicglass.engine.PlayerController
+                                                .startArtistWave(context, artist.id, artist.displayName)
+                                        }
+                                ) {
+                                    val img = artist.image ?: artist.cover
+                                    Box(
+                                        modifier = Modifier
+                                            .size(64.dp)
+                                            .clip(androidx.compose.foundation.shape.CircleShape)
+                                            .background(if (lc.isDark) SurfaceElevated else Color.White),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (!img.isNullOrBlank()) {
+                                            AsyncImage(
+                                                model = img,
+                                                contentDescription = null,
+                                                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                                modifier = Modifier.fillMaxSize()
+                                            )
+                                        } else {
+                                            Icon(
+                                                Icons.Rounded.Person, null,
+                                                tint = lc.iconMuted,
+                                                modifier = Modifier.size(28.dp)
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = artist.displayName,
+                                        fontFamily = AppFontFamily,
+                                        color = lc.textPrimary,
+                                        fontSize = 11.sp,
+                                        maxLines = 1,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                item { Spacer(modifier = Modifier.height(16.dp)) }
+            }
+
+            // ═══════════════════════════════════════════════════════════
+            //  3. REGION — текущий + выбор из доступных (/me/region)
+            // ═══════════════════════════════════════════════════════════
+            if (isLoggedIn && regionInfo != null) {
+                item {
+                    val ri = regionInfo!!
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp)
+                            .clip(RoundedCornerShape(28.dp))
+                            .background(if (lc.isDark) SurfaceDark else Color(0xFFF2F2F7))
+                            .padding(vertical = 4.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(56.dp)
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null
+                                ) { regionExpanded = !regionExpanded }
+                                .padding(horizontal = 20.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Region",
+                                    fontFamily = AppFontFamily,
+                                    color = lc.textPrimary,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Text(
+                                    text = ri.available.firstOrNull { it.code == ri.current }?.name
+                                        ?: ri.current.uppercase(),
+                                    fontFamily = AppFontFamily,
+                                    color = lc.textSecondary,
+                                    fontSize = 12.sp
+                                )
+                            }
+                            if (regionBusy) {
+                                Text("…", color = lc.textSecondary, fontSize = 15.sp)
+                            } else {
+                                Icon(
+                                    Icons.AutoMirrored.Rounded.KeyboardArrowRight, null,
+                                    tint = lc.iconMuted,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                        if (regionExpanded) {
+                            for (r in ri.available) {
+                                val selected = r.code == ri.current
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(44.dp)
+                                        .clickable(
+                                            interactionSource = remember { MutableInteractionSource() },
+                                            indication = null,
+                                            enabled = !regionBusy && !selected
+                                        ) {
+                                            regionBusy = true
+                                            scope.launch {
+                                                val ok = runCatching {
+                                                    com.liquidmusicglass.api.icm.IcmRepository
+                                                        .updateUserRegion(r.code)
+                                                }.getOrNull() != null
+                                                if (ok) {
+                                                    regionInfo = runCatching {
+                                                        com.liquidmusicglass.api.icm.IcmRepository.getUserRegion()
+                                                    }.getOrNull() ?: regionInfo
+                                                    IcmAuthRepository.fetchUserData()
+                                                } else {
+                                                    android.widget.Toast.makeText(
+                                                        context, "Couldn't switch region",
+                                                        android.widget.Toast.LENGTH_SHORT
+                                                    ).show()
+                                                }
+                                                regionBusy = false
+                                                regionExpanded = false
+                                            }
+                                        }
+                                        .padding(horizontal = 20.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = r.name + if (r.free) " • free" else "",
+                                        fontFamily = AppFontFamily,
+                                        color = if (selected) AppleRed else lc.textPrimary,
+                                        fontSize = 14.sp,
+                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    if (selected) {
+                                        Icon(
+                                            Icons.Rounded.Star, null,
+                                            tint = AppleRed,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                    }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+                    }
+                }
+                item { Spacer(modifier = Modifier.height(16.dp)) }
+            }
 
             // ═══════════════════════════════════════════════════════════
             //  4. ACCOUNT — единственная карточка-подложка (28dp, как в
