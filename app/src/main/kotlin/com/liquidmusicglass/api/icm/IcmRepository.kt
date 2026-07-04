@@ -1107,15 +1107,17 @@ object IcmRepository {
 
         if (exception is IcmAsyncPendingException) {
             val ready = pollAsyncJobFull(exception.pending, maxPollAttempts, pollIntervalMs)
-            return ready?.let {
+            // Поля async-модели опциональные (pending-ответы их не содержат);
+            // сюда доходит только ready с url — но маппим null-безопасно.
+            return ready?.takeIf { it.url != null }?.let {
                 IcmTrackResponse(
-                    trackId = it.trackId,
-                    fileId = it.fileId,
-                    source = it.source,
-                    quality = it.quality,
+                    trackId = it.trackId ?: trackId,
+                    fileId = it.fileId ?: "",
+                    source = it.source ?: "",
+                    quality = it.quality ?: "",
                     artistId = it.artistId,
-                    url = it.url,
-                    expiresAt = it.expiresAt
+                    url = it.url!!,
+                    expiresAt = it.expiresAt ?: (System.currentTimeMillis() / 1000 + 540)
                 )
             }
         }
