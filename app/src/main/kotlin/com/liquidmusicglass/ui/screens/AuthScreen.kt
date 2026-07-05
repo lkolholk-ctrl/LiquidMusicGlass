@@ -170,18 +170,18 @@ fun AuthScreen(
 
                         // Build link URL via IcmApi (handles URL-encoding)
                         // Docs: /partner/<partner_id>/link?partner_user_id=...&redirect_uri=...&state=...&app_name=...
-                        // redirect_uri — https-мост на Cloudflare Worker
-                        // (liquid.glassfiles.ru УЖЕ в whitelist ICM). Кастомная
-                        // app-схема в whitelist не прошла ни как …/oauth/icm, ни
-                        // как голый oauth — вернулись на проверенный https-домен.
-                        // Воркер (backend/telegram-redirect-worker.js) принимает
-                        // callback и 302-редиректит в liquidmusicglass://oauth/icm;
-                        // MainActivity ловит любой путь под host=oauth.
+                        // redirect_uri — кастомная app-схema НАПРЯМУЮ. ICM внёс
+                        // liquidmusicglass://oauth/icm в whitelist (менеджер
+                        // прислал пример-ссылку) — промежуточный https-мост
+                        // (Cloudflare Worker) БОЛЬШЕ НЕ НУЖЕН: ICM редиректит
+                        // прямо в приложение. MainActivity ловит любой путь под
+                        // host=oauth. Воркер оставлен задеплоенным как запасной
+                        // (откат = вернуть https://liquid.glassfiles.ru/auth/telegram).
                         val telegramAuthUrl = com.liquidmusicglass.api.icm.IcmApi.getInstance()
                             .buildAccountLinkUrl(
                                 partnerId = "msng",
                                 partnerUserId = partnerUserId,
-                                redirectUri = "https://liquid.glassfiles.ru/auth/telegram",
+                                redirectUri = "liquidmusicglass://oauth/icm",
                                 state = state,
                                 appName = "Liquid Music Glass"
                             )
