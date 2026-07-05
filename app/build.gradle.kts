@@ -9,16 +9,20 @@ plugins {
 // Короткий git-хэш текущего коммита + дата сборки — впечатываются в versionName,
 // чтобы по строке версии в Профиле можно было ОДНОЗНАЧНО понять, какой это билд
 // (раньше versionName был статичной строкой и не отличал сборки друг от друга).
-val gitSha: String = try {
-    val p = ProcessBuilder("git", "rev-parse", "--short=7", "HEAD")
-        .directory(rootDir)
-        .redirectErrorStream(true)
-        .start()
-    val out = p.inputStream.bufferedReader().readText().trim()
-    p.waitFor()
-    out.ifBlank { "nogit" }
-} catch (e: Exception) {
-    "nogit"
+// БЕЗ запуска процессов на этапе конфигурации Gradle (это ломало CI): в CI
+// берём GITHUB_SHA, локально — читаем .git/HEAD файлом.
+val gitSha: String = run {
+    val ci = System.getenv("GITHUB_SHA")
+    if (ci != null && ci.length >= 7) return@run ci.substring(0, 7)
+    try {
+        val head = rootProject.file(".git/HEAD").readText().trim()
+        val sha = if (head.startsWith("ref:")) {
+            rootProject.file(".git/" + head.substringAfter("ref:").trim()).readText().trim()
+        } else head
+        if (sha.length >= 7) sha.substring(0, 7) else "nogit"
+    } catch (e: Exception) {
+        "nogit"
+    }
 }
 val buildDate: String =
     java.text.SimpleDateFormat("dd.MM.yyyy").format(java.util.Date())
@@ -183,6 +187,10 @@ dependencies {
     implementation("androidx.compose.material:material-ripple")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.material3:material3")
+
+    // Навигация (батч 15): пер-таб бэкстек + сохранение состояния + транзишены.
+    // 2.8.x совместима с Compose 1.7.x из BOM 2024.12.01.
+    implementation("androidx.navigation:navigation-compose:2.8.5")
 
     implementation("io.github.kyant0:backdrop:2.0.0-alpha03")
     implementation("io.github.kyant0:shapes:1.2.0")
