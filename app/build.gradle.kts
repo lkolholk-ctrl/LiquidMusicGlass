@@ -6,6 +6,23 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+// Короткий git-хэш текущего коммита + дата сборки — впечатываются в versionName,
+// чтобы по строке версии в Профиле можно было ОДНОЗНАЧНО понять, какой это билд
+// (раньше versionName был статичной строкой и не отличал сборки друг от друга).
+val gitSha: String = try {
+    val p = ProcessBuilder("git", "rev-parse", "--short=7", "HEAD")
+        .directory(rootDir)
+        .redirectErrorStream(true)
+        .start()
+    val out = p.inputStream.bufferedReader().readText().trim()
+    p.waitFor()
+    out.ifBlank { "nogit" }
+} catch (e: Exception) {
+    "nogit"
+}
+val buildDate: String =
+    java.text.SimpleDateFormat("dd.MM.yyyy").format(java.util.Date())
+
 android {
     namespace = "com.liquidmusicglass"
 
@@ -20,7 +37,8 @@ android {
         // меньший versionCode Android считает даунгрейдом и отклоняет установку
         // поверх с ошибкой «пакет недействителен».
         versionCode = 20260703
-        versionName = "03.07.2026 juce-oboe-compat"
+        // Формат: «<дата сборки> · <git-хэш>» — видно в Профиле внизу.
+        versionName = "$buildDate · $gitSha"
 
         // Build native libs only for arm64-v8a (faster builds, smaller APK).
         // Note: won't run on 32-bit (armeabi-v7a) or x86/x86_64 emulators.

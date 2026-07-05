@@ -39,8 +39,9 @@ object LiquidMotion {
         stiffness = Spring.StiffnessMedium
     )
 
-    /** Дефолтные степени сжатия под тип элемента (для [liquidClickable]/pressScale). */
-    const val PressCard = 0.97f    // крупные карточки/строки списка — деликатно
-    const val PressButton = 0.93f  // кнопки/пилюли/чипы
-    const val PressIcon = 0.88f    // мелкие иконки-кнопки — заметнее
+    /** Дефолтные степени сжатия под тип элемента (для [liquidClickable]/pressScale).
+     *  Углублены (v2) — прежние 0.97/0.93/0.88 были почти незаметны на глаз. */
+    const val PressCard = 0.95f    // крупные карточки/строки списка
+    const val PressButton = 0.90f  // кнопки/пилюли/чипы
+    const val PressIcon = 0.84f    // мелкие иконки-кнопки — заметнее всего
 }
