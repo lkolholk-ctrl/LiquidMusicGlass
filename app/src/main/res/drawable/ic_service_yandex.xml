@@ -1,37 +1,13 @@
-<!--
-  Yandex Music brand mark (hand-authored approximation): yellow→red disc +
-  white note. Real logo asset can be dropped in over this file 1:1
-  (same name) without touching call sites.
--->
+<!-- Yandex Music brand mark — ported verbatim from official SVG (icons8). Dark disc + yellow star-note. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
-    android:viewportWidth="24"
-    android:viewportHeight="24">
-    <path android:pathData="M12,2 C6.48,2 2,6.48 2,12 C2,17.52 6.48,22 12,22 C17.52,22 22,17.52 22,12 C22,6.48 17.52,2 12,2 Z">
-        <aapt:attr xmlns:aapt="http://schemas.android.com/aapt"
-            name="android:fillColor">
-            <gradient
-                android:startColor="#FFCC00"
-                android:endColor="#FC3F1D"
-                android:startX="4" android:startY="4"
-                android:endX="20" android:endY="20"
-                android:type="linear"/>
-        </aapt:attr>
-    </path>
+    android:viewportWidth="48"
+    android:viewportHeight="48">
     <path
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="1.7"
-        android:strokeLineCap="round"
-        android:fillColor="#00000000"
-        android:pathData="M14.5,7 L14.5,14.5"/>
+        android:fillColor="#212121"
+        android:pathData="M24.001,44.001c11.045,0,20-8.955,20-20s-8.955-20-20-20 c-11.045,0-20,8.955-20,20S12.956,44.001,24.001,44.001z"/>
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M8.4,14.6 a2.1,2.1 0 1,0 4.2,0 a2.1,2.1 0 1,0 -4.2,0"/>
-    <path
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="1.7"
-        android:strokeLineCap="round"
-        android:fillColor="#00000000"
-        android:pathData="M14.5,7 C14.5,7 16.4,7.4 17.2,9.2"/>
+        android:fillColor="#FCBE2D"
+        android:pathData="M39.2,20.019l-0.129-0.607l-5.097-0.892l2.968-4.021 L36.6,14.104l-4.364,2.104l0.552-5.573l-0.447-0.261l-2.655,4.52l-2.971-6.728h-0.524l0.709,6.491l-7.492-6.019l-0.631,0.184 l5.757,7.281l-11.407-3.812l-0.527,0.58L22.8,18.705L8.739,19.887l-0.157,0.868l14.612,1.601L10.999,32.504l0.527,0.708 l14.508-7.937l-2.864,13.984h0.868l5.569-13.168L33,36.392l0.603-0.473L32.212,25.46l5.28,6.019l0.341-0.555l-4.045-7.463 l5.649,2.103l0.053-0.631l-5.072-3.76L39.2,20.019z"/>
 </vector>
