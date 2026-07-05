@@ -84,12 +84,17 @@ class PlaylistImportRepository(
         onState?.invoke(ImportState.Loading(0, 0, LoadingPhase.RESOLVING))
 
         // Step 1: Resolve Yandex URL to raw tracks — прямо с устройства.
+        // withTimeout — страховка поверх OkHttp callTimeout (45с): фаза резолва
+        // НИКОГДА не висит бесконечно (полевой баг: импорт «висел 2 часа» —
+        // старая сборка стучалась на умерший сервер и не отваливалась).
         val rawTracks = try {
             logger?.log("I", "ImportRepo", "Fetching playlist from Yandex (on-device)...")
-            YandexPlaylistFetcher.resolve(url)
+            withTimeout(60_000L) { YandexPlaylistFetcher.resolve(url) }
         } catch (e: Exception) {
             logger?.log("E", "ImportRepo", "Resolver failed: ${e.message}")
             val errorMsg = when (e) {
+                is TimeoutCancellationException ->
+                    "Yandex didn't respond in time. If you're on VPN, try disabling it and retry."
                 is YandexResolveException -> e.message ?: "Failed to resolve Yandex playlist."
                 is SocketTimeoutException -> "Network timeout while fetching playlist. Please check your connection."
                 is UnknownHostException -> "Cannot reach Yandex Music. Check your connection."

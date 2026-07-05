@@ -225,8 +225,14 @@ fun ProfileScreen(
                         )
                         // Region line
                         val regionName = sub?.regions?.firstOrNull()?.name ?: "Global"
-                        val regionCode = sub?.regions?.firstOrNull()?.code?.uppercase() ?: "WW"
+                        val rawCode = sub?.regions?.firstOrNull()?.code
+                        val regionCode = if (rawCode.equals("nz", ignoreCase = true)) "US"
+                            else rawCode?.uppercase() ?: "WW"
+                        // NZ — аварийное зеркало US (см. регион-селектор ниже):
+                        // показываем как America, не раскрывая юзеру фейловер.
+                        val regionCodeRaw = sub?.regions?.firstOrNull()?.code
                         val displayRegion = when {
+                            regionCodeRaw.equals("nz", ignoreCase = true) ||
                             regionName.equals("США", ignoreCase = true) ||
                             regionName.equals("US", ignoreCase = true) ||
                             regionName.equals("United States", ignoreCase = true) -> "America"
@@ -343,6 +349,15 @@ fun ProfileScreen(
             if (isLoggedIn && regionInfo != null) {
                 item {
                     val ri = regionInfo!!
+                    // NZ у ICM — аварийное зеркало US (включают при проблемах с
+                    // US-аккаунтом; менеджер: «показывайте us free, разницы нет»).
+                    // Юзеру не показываем кухню фейловера — рисуем как United States.
+                    fun regionDisplay(code: String, name: String): String =
+                        if (code.equals("nz", true)) "United States" else name
+                    // Селектор — только то, что доступно партнёрскому ключу
+                    // (allowed_by_partner). Пустой список = старый сервер → показываем всё.
+                    val selectableRegions = if (ri.allowedByPartner.isEmpty()) ri.available
+                        else ri.available.filter { it.code in ri.allowedByPartner }
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -371,8 +386,9 @@ fun ProfileScreen(
                                     fontWeight = FontWeight.Medium
                                 )
                                 Text(
-                                    text = ri.available.firstOrNull { it.code == ri.current }?.name
-                                        ?: ri.current.uppercase(),
+                                    text = ri.available.firstOrNull { it.code == ri.current }
+                                        ?.let { regionDisplay(it.code, it.name) }
+                                        ?: regionDisplay(ri.current, ri.current.uppercase()),
                                     fontFamily = AppFontFamily,
                                     color = lc.textSecondary,
                                     fontSize = 12.sp
@@ -389,7 +405,7 @@ fun ProfileScreen(
                             }
                         }
                         if (regionExpanded) {
-                            for (r in ri.available) {
+                            for (r in selectableRegions) {
                                 val selected = r.code == ri.current
                                 Row(
                                     modifier = Modifier
@@ -430,7 +446,7 @@ fun ProfileScreen(
                                     // партнёрскому ключу», а не «бесплатен всем»).
                                     val needsSub = r.code in ri.requiresSubscription
                                     Text(
-                                        text = r.name + when {
+                                        text = regionDisplay(r.code, r.name) + when {
                                             needsSub -> " • premium"
                                             r.free -> " • free"
                                             else -> ""
