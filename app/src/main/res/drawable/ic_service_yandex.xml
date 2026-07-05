@@ -1,4 +1,5 @@
-<!-- Yandex Music brand mark — ported verbatim from official SVG (icons8). Dark disc + yellow star-note. -->
+<!-- Yandex Music brand mark — ported verbatim from official SVG (icons8). Dark disc + yellow star-note.
+     Added a light-gray ring so the near-black disc doesn't disappear on the dark import card. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
@@ -6,6 +7,8 @@
     android:viewportHeight="48">
     <path
         android:fillColor="#212121"
+        android:strokeColor="#8E8E93"
+        android:strokeWidth="1.8"
         android:pathData="M24.001,44.001c11.045,0,20-8.955,20-20s-8.955-20-20-20 c-11.045,0-20,8.955-20,20S12.956,44.001,24.001,44.001z"/>
     <path
         android:fillColor="#FCBE2D"
