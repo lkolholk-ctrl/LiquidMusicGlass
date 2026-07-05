@@ -54,6 +54,38 @@ object AudioQuirks {
         return NORMAL
     }
 
+    /**
+     * Режимы вывода, заведомо НЕ работающие на этом вендоре (полевые
+     * подтверждения). Селектор Audio Output помечает их «глухо на этом
+     * устройстве» — юзер видит, что дело в железе, а не в приложении, и не
+     * гадает. Выбрать их всё равно можно (для отладки), но с предупреждением.
+     * Только ПОДТВЕРЖДЁННОЕ полем — не гадаем на удачу.
+     */
+    private val modelBadModes: List<Pair<String, Set<Int>>> = listOf(
+        // vivo Y35: оба AAudio-пути (float И i16) портят звук — рабочий только AudioTrack.
+        "v2205" to setOf(0, 1, 2, 3, 4),
+    )
+
+    private val familyBadModes: List<Pair<String, Set<Int>>> = listOf(
+        "vivo" to setOf(0, 2),      // AAudio MMAP-пути ненадёжны
+        "iqoo" to setOf(0, 2),
+        "xiaomi" to setOf(2),       // exclusive-MMAP = шум (подтверждено)
+        "redmi" to setOf(2),
+        "poco" to setOf(2),
+        // Honor/Huawei: Shared+None = тишина (подтверждено). Режимы 1 и 4 оба
+        // идут по None-пути (float/i16) → оба глухие; формат не спасает.
+        "honor" to setOf(1, 4),
+        "huawei" to setOf(1, 4),
+    )
+
+    /** Множество заведомо битых режимов для текущего устройства (может быть пустым). */
+    fun knownBadModes(): Set<Int> {
+        val model = (Build.MODEL + " " + Build.DEVICE).lowercase()
+        modelBadModes.firstOrNull { (sub, _) -> sub in model }?.let { return it.second }
+        val family = (Build.MANUFACTURER + " " + Build.BRAND).lowercase()
+        return familyBadModes.firstOrNull { (sub, _) -> sub in family }?.second ?: emptySet()
+    }
+
     /** Строка для диагностики: что за устройство и какой дефолт ему выпал. */
     fun describe(): String =
         "${Build.MANUFACTURER}/${Build.BRAND} ${Build.MODEL} (${Build.DEVICE}) " +

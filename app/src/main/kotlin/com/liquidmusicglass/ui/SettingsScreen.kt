@@ -252,19 +252,39 @@ fun SettingsScreen(
                         fontWeight = FontWeight.Medium,
                         modifier = Modifier.padding(horizontal = 16.dp)
                     )
+                    // Битые для этого вендора режимы — помечаем в селекторе.
+                    // Compat = mode 4 (SAFE_I16): float deep-buffer (был mode 1)
+                    // глух на Honor и капризен на vivo/Xiaomi; i16-вариант шире.
+                    val audioBadModes = remember { com.liquidmusicglass.engine.automix.AudioQuirks.knownBadModes() }
+                    val audioOutCtx = LocalContext.current
+                    val badKeys = remember(audioBadModes) {
+                        buildSet {
+                            if (0 in audioBadModes) add("fast")
+                            if (4 in audioBadModes) add("compat")
+                            if (6 in audioBadModes) add("track")
+                        }
+                    }
                     AudioOutputSelector(
                         selectedKey = when {
                             audioCompatAuto -> "auto"
                             audioCompatMode == 0 -> "fast"
-                            audioCompatMode == 1 -> "compat"
+                            audioCompatMode == 1 || audioCompatMode == 4 -> "compat"
                             audioCompatMode == 6 -> "track"
                             else -> "custom"
                         },
+                        badKeys = badKeys,
                         onSelect = { key ->
+                            if (key in badKeys) {
+                                android.widget.Toast.makeText(
+                                    audioOutCtx,
+                                    "На этом устройстве этот путь известен как нерабочий. Если тишина/шум — вернись на Auto.",
+                                    android.widget.Toast.LENGTH_LONG
+                                ).show()
+                            }
                             when (key) {
                                 "auto" -> AppSettings.setAudioCompatModeAuto()
                                 "fast" -> AppSettings.setAudioCompatMode(0)
-                                "compat" -> AppSettings.setAudioCompatMode(1)
+                                "compat" -> AppSettings.setAudioCompatMode(4)
                                 "track" -> AppSettings.setAudioCompatMode(6)
                             }
                         }
@@ -818,6 +838,7 @@ private fun PlainDivider() {
 @Composable
 private fun AudioOutputSelector(
     selectedKey: String,
+    badKeys: Set<String> = emptySet(),
     onSelect: (String) -> Unit
 ) {
     val options = listOf("auto" to "Auto", "fast" to "Fast", "compat" to "Compat", "track" to "Track")
@@ -829,9 +850,12 @@ private fun AudioOutputSelector(
     ) {
         options.forEach { (key, label) ->
             val isSelected = selectedKey == key
+            val isBad = key in badKeys
             val isDark = LiquidTheme.colors.isDark
             val itemBg = if (isSelected) Accent else (if (isDark) Color(0xFF1C1C1E) else Color(0xFFE5E5EA))
-            val unselectedTextColor = if (isDark) Color.White.copy(alpha = 0.45f) else Color.Black.copy(alpha = 0.45f)
+            // Битый режим — сильно приглушаем (юзер видит: путь есть, но глухой).
+            val baseAlpha = if (isBad) 0.25f else 0.45f
+            val unselectedTextColor = if (isDark) Color.White.copy(alpha = baseAlpha) else Color.Black.copy(alpha = baseAlpha)
 
             Box(
                 modifier = Modifier
@@ -852,7 +876,8 @@ private fun AudioOutputSelector(
                     label = "audioOutText"
                 )
                 Text(
-                    text = label,
+                    // Битый режим помечаем крестиком-подсказкой.
+                    text = if (isBad) "$label ✕" else label,
                     color = textColor,
                     fontSize = 13.sp,
                     fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
