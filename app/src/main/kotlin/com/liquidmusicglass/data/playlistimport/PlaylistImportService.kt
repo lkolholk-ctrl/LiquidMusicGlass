@@ -108,6 +108,24 @@ class PlaylistImportService : Service() {
 
         val repository = PlaylistImportModule.providePlaylistImportRepository()
 
+        // Само-троттлинг scrape-источников (Яндекс/Spotify): пауза + дневной
+        // лимит, чтобы не дёргать чужой сервис часто и не словить блок по
+        // velocity. Apple (официальный ICM) не троттлим.
+        val source = repository.detectSourceType(url)
+        val throttleKey = when (source) {
+            PlaylistSourceType.YANDEX -> "yandex"
+            PlaylistSourceType.SPOTIFY -> "spotify"
+            else -> null
+        }
+        if (throttleKey != null) {
+            val blockMsg = ImportRateGate.check(this, throttleKey)
+            if (blockMsg != null) {
+                logger.log("W", "Service", "Import throttled ($throttleKey): $blockMsg")
+                showErrorNotification(blockMsg)
+                return
+            }
+        }
+
         try {
             // Phase 1: Resolving
             updateNotification(
@@ -117,6 +135,10 @@ class PlaylistImportService : Service() {
                 max = 0,
                 indeterminate = true
             )
+
+            // Отмечаем факт импорта ДО резолва — даже неудачная попытка дёрнула
+            // источник, поэтому в счётчик частоты она должна попасть.
+            throttleKey?.let { ImportRateGate.record(this, it) }
 
             val result = repository.importPlaylist(
                 url = url,

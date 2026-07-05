@@ -406,7 +406,7 @@ class PlaylistImportRepository(
         return result.matchedTracks.map { it.icmTrackId }
     }
 
-    private fun detectSourceType(url: String): PlaylistSourceType {
+    fun detectSourceType(url: String): PlaylistSourceType {
         val lower = url.lowercase()
         return when {
             lower.contains("music.yandex") -> PlaylistSourceType.YANDEX
