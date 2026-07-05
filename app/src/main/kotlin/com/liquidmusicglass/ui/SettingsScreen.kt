@@ -43,7 +43,9 @@ import com.liquidmusicglass.engine.MediaCacheManager
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.PlayerSettings
 import com.liquidmusicglass.api.icm.IcmRepository
+import com.liquidmusicglass.ui.glass.liquidClickable
 import com.liquidmusicglass.ui.liquid.LiquidToggle
+import com.liquidmusicglass.ui.theme.LiquidMotion
 import com.liquidmusicglass.ui.theme.LiquidTheme
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
@@ -93,10 +95,7 @@ fun SettingsScreen(
                             .size(40.dp)
                             .clip(CircleShape)
                             .background(if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null
-                            ) { onBack() },
+                            .liquidClickable(pressedScale = LiquidMotion.PressIcon) { onBack() },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
@@ -160,10 +159,7 @@ fun SettingsScreen(
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(28.dp))
                         .background(if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null
-                        ) { onOpenProfile() }
+                        .liquidClickable { onOpenProfile() }
                         .padding(16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -414,11 +410,7 @@ fun SettingsScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null,
-                                    enabled = isAvailable
-                                ) {
+                                .liquidClickable(enabled = isAvailable) {
                                     selectedQuality = quality
                                     context.getSharedPreferences("icm", Context.MODE_PRIVATE)
                                         .edit().putString("stream_quality", quality).apply()
@@ -541,9 +533,8 @@ fun SettingsScreen(
                                     RoundedCornerShape(50)
                                 )
                                 .clip(RoundedCornerShape(50))
-                                .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null,
+                                .liquidClickable(
+                                    pressedScale = LiquidMotion.PressButton,
                                     onClick = { PlayerController.setThemeMode(index) }
                                 ),
                             contentAlignment = Alignment.Center
@@ -633,10 +624,7 @@ fun SettingsScreen(
                             fontWeight = FontWeight.SemiBold,
                             modifier = Modifier
                                 .clip(RoundedCornerShape(50))
-                                .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null
-                                ) {
+                                .liquidClickable(pressedScale = LiquidMotion.PressButton) {
                                     scope.launch {
                                         MediaCacheManager.clearCache()
                                         delay(300)
@@ -712,9 +700,8 @@ private fun CacheSizeSelector(
                             .height(36.dp)
                             .background(itemBg, RoundedCornerShape(50))
                             .clip(RoundedCornerShape(50))
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null,
+                            .liquidClickable(
+                                pressedScale = LiquidMotion.PressButton,
                                 onClick = { onSelect(bytes) }
                             ),
                         contentAlignment = Alignment.Center
@@ -863,9 +850,8 @@ private fun AudioOutputSelector(
                     .height(36.dp)
                     .background(itemBg, RoundedCornerShape(50))
                     .clip(RoundedCornerShape(50))
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
+                    .liquidClickable(
+                        pressedScale = LiquidMotion.PressButton,
                         onClick = { onSelect(key) }
                     ),
                 contentAlignment = Alignment.Center
@@ -913,9 +899,8 @@ private fun HapticStrengthSelector(
                     .height(36.dp)
                     .background(itemBg, RoundedCornerShape(50))
                     .clip(RoundedCornerShape(50))
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
+                    .liquidClickable(
+                        pressedScale = LiquidMotion.PressButton,
                         onClick = { onSelect(key) }
                     ),
                 contentAlignment = Alignment.Center
@@ -947,10 +932,7 @@ private fun SettingsToggleItem(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) { onSelect(!selected) }
+            .liquidClickable { onSelect(!selected) }
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -981,10 +963,7 @@ private fun SettingsActionItem(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) { onClick() }
+            .liquidClickable { onClick() }
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -1034,9 +1013,8 @@ private fun PreloadSelector(
                     .height(36.dp)
                     .background(itemBg, RoundedCornerShape(50))
                     .clip(RoundedCornerShape(50))
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
+                    .liquidClickable(
+                        pressedScale = LiquidMotion.PressButton,
                         onClick = { onSelect(sec) }
                     ),
                 contentAlignment = Alignment.Center
@@ -1084,9 +1062,8 @@ private fun SleepTimerSelector(
                         RoundedCornerShape(50)
                     )
                     .clip(RoundedCornerShape(50))
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
+                    .liquidClickable(
+                        pressedScale = LiquidMotion.PressButton,
                         onClick = { onSelect(minutes) }
                     ),
                 contentAlignment = Alignment.Center

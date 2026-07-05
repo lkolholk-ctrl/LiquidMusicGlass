@@ -47,6 +47,8 @@ import com.kyant.backdrop.shadow.InnerShadow
 import com.kyant.backdrop.shadow.Shadow
 import com.kyant.shapes.Capsule
 import com.liquidmusicglass.engine.AppUpdater
+import com.liquidmusicglass.ui.glass.liquidClickable
+import com.liquidmusicglass.ui.theme.LiquidMotion
 import com.liquidmusicglass.ui.theme.LiquidTheme
 
 private val AppleRed = Color(0xFFFC3C44)
@@ -143,7 +145,7 @@ fun UpdateDialog(backdrop: LayerBackdrop) {
                                     if (lc.isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.05f),
                                     RoundedCornerShape(23.dp)
                                 )
-                                .clickable(remember { MutableInteractionSource() }, null) {
+                                .liquidClickable(pressedScale = LiquidMotion.PressButton) {
                                     AppUpdater.dismiss()
                                 },
                             contentAlignment = Alignment.Center
@@ -169,7 +171,7 @@ fun UpdateDialog(backdrop: LayerBackdrop) {
                                     onDrawSurface = { drawRect(AppleRed) }
                                 )
                                 .clip(RoundedCornerShape(50))
-                                .clickable(remember { MutableInteractionSource() }, null) {
+                                .liquidClickable(pressedScale = LiquidMotion.PressButton) {
                                     if (progress < 0) {
                                         AppUpdater.downloadAndInstall(context)
                                     }

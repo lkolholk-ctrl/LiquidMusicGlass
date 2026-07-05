@@ -37,6 +37,8 @@ import com.liquidmusicglass.data.playlistimport.ImportRateGate
 import com.liquidmusicglass.data.playlistimport.ImportState
 import com.liquidmusicglass.data.playlistimport.LoadingPhase
 import com.liquidmusicglass.data.playlistimport.PlaylistImportManager
+import com.liquidmusicglass.ui.glass.liquidClickable
+import com.liquidmusicglass.ui.theme.LiquidMotion
 import com.liquidmusicglass.ui.theme.LiquidTheme
 
 /**
@@ -175,7 +177,7 @@ fun ImportServicesSheet(
                         .size(32.dp)
                         .clip(RoundedCornerShape(16.dp))
                         .background(if (isDark) Color.White.copy(alpha = 0.06f) else Color.Black.copy(alpha = 0.05f))
-                        .clickable(remember { MutableInteractionSource() }, null) {
+                        .liquidClickable(pressedScale = LiquidMotion.PressIcon) {
                             focusManager.clearFocus()
                             onDismiss()
                         },
@@ -258,7 +260,7 @@ private fun ImportServiceCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable(remember { MutableInteractionSource() }, null) { onToggle() }
+                .liquidClickable { onToggle() }
                 .padding(14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -338,7 +340,7 @@ private fun ImportServiceCard(
                             .size(46.dp)
                             .clip(RoundedCornerShape(12.dp))
                             .background(inputBg)
-                            .clickable(remember { MutableInteractionSource() }, null) {
+                            .liquidClickable(pressedScale = LiquidMotion.PressButton) {
                                 clipboard.getText()?.text?.let { url = it.trim(); localError = null }
                             },
                         contentAlignment = Alignment.Center
@@ -372,14 +374,10 @@ private fun ImportServiceCard(
                         .height(46.dp)
                         .clip(RoundedCornerShape(23.dp))
                         .background(if (canImport) svc.accent else svc.accent.copy(alpha = 0.4f))
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            enabled = canImport
-                        ) {
+                        .liquidClickable(enabled = canImport, pressedScale = LiquidMotion.PressButton) {
                             if (!urlMatchesService(url, svc.key)) {
                                 localError = "This doesn't look like a ${svc.name} link"
-                                return@clickable
+                                return@liquidClickable
                             }
                             onImport(url.trim())
                         },

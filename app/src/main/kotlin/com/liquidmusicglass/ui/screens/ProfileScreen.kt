@@ -1,8 +1,6 @@
 package com.liquidmusicglass.ui.screens
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -51,6 +49,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.liquidmusicglass.api.icm.IcmAuthRepository
 import com.liquidmusicglass.data.local.LocalAuthManager
+import com.liquidmusicglass.ui.glass.liquidClickable
 import com.liquidmusicglass.ui.theme.AppFontFamily
 import com.liquidmusicglass.ui.theme.LiquidTheme
 import kotlinx.coroutines.launch
@@ -294,10 +293,7 @@ fun ProfileScreen(
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     modifier = Modifier
                                         .width(76.dp)
-                                        .clickable(
-                                            interactionSource = remember { MutableInteractionSource() },
-                                            indication = null
-                                        ) {
+                                        .liquidClickable {
                                             // Тап = радио по артисту (мгновенный старт).
                                             com.liquidmusicglass.engine.PlayerController
                                                 .startArtistWave(context, artist.id, artist.displayName)
@@ -370,10 +366,7 @@ fun ProfileScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(56.dp)
-                                .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null
-                                ) { regionExpanded = !regionExpanded }
+                                .liquidClickable { regionExpanded = !regionExpanded }
                                 .padding(horizontal = 20.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -411,11 +404,7 @@ fun ProfileScreen(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .height(44.dp)
-                                        .clickable(
-                                            interactionSource = remember { MutableInteractionSource() },
-                                            indication = null,
-                                            enabled = !regionBusy && !selected
-                                        ) {
+                                        .liquidClickable(enabled = !regionBusy && !selected) {
                                             regionBusy = true
                                             scope.launch {
                                                 val ok = runCatching {
@@ -559,11 +548,7 @@ private fun SettingRowNavigable(
         modifier = Modifier
             .fillMaxWidth()
             .height(56.dp)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onClick
-            )
+            .liquidClickable(onClick = onClick)
             .padding(horizontal = 20.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -614,11 +599,7 @@ private fun SettingRowAction(
         modifier = Modifier
             .fillMaxWidth()
             .height(if (subtitle != null) 64.dp else 56.dp)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onClick
-            )
+            .liquidClickable(onClick = onClick)
             .padding(horizontal = 20.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
