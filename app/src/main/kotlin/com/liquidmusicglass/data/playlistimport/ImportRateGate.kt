@@ -43,6 +43,27 @@ object ImportRateGate {
         return null
     }
 
+    /** Сколько импортов осталось на сегодня для источника (для UI). */
+    fun remainingToday(ctx: Context, source: String): Int {
+        val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val now = System.currentTimeMillis()
+        val windowStart = p.getLong("window_$source", 0L)
+        val used = if (now - windowStart >= DAY_MS) 0 else p.getInt("count_$source", 0)
+        return (DAILY_CAP - used).coerceAtLeast(0)
+    }
+
+    /** Дневной потолок (для строки «X из N»). */
+    fun dailyCap(): Int = DAILY_CAP
+
+    /** Секунд до конца текущей паузы (0 — можно импортировать). Для UI. */
+    fun cooldownRemainingSec(ctx: Context, source: String): Int {
+        val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val last = p.getLong("last_$source", 0L)
+        if (last <= 0L) return 0
+        val left = COOLDOWN_MS - (System.currentTimeMillis() - last)
+        return if (left <= 0L) 0 else ((left / 1000L) + 1).toInt()
+    }
+
     /** Отметить факт импорта (после прохождения [check]). */
     fun record(ctx: Context, source: String) {
         val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
