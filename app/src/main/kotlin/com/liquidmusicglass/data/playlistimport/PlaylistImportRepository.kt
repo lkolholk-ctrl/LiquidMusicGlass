@@ -173,6 +173,85 @@ class PlaylistImportRepository(
         )
     }
 
+    // ── Перенос по логину Яндекса (фича batch 13) ──
+
+    /** Список плейлистов пользователя по логину (для экрана выбора). */
+    suspend fun listYandexPlaylists(login: String): List<YandexPlaylistInfo> =
+        withContext(Dispatchers.IO) { YandexPlaylistFetcher.listPlaylists(login) }
+
+    /**
+     * Импорт ОДНОГО плейлиста пользователя по логину+kind. У Яндекса нет
+     * приватности — библиотека публична, API принимает логин. Дальше — тот
+     * же матчинг по каталогу ICM, что и для импорта по ссылке.
+     */
+    suspend fun importYandexByLogin(
+        login: String,
+        kind: Int,
+        onState: ((ImportState) -> Unit)? = null,
+        logger: ImportFileLogger? = null
+    ): PlaylistImportResult = withContext(Dispatchers.IO) {
+        onState?.invoke(ImportState.Loading(0, 0, LoadingPhase.RESOLVING))
+        val rawTracks = try {
+            withTimeout(60_000L) { YandexPlaylistFetcher.resolveByLogin(login, kind) }
+        } catch (e: Exception) {
+            val msg = when (e) {
+                is TimeoutCancellationException ->
+                    "Yandex didn't respond in time. If you're on VPN, try disabling it and retry."
+                is YandexResolveException -> e.message ?: "Failed to load playlist."
+                else -> "Failed to load playlist: ${e.message}"
+            }
+            onState?.invoke(ImportState.Error(msg))
+            throw PlaylistImportException(msg, e)
+        }
+        matchRawTracks(rawTracks, "yandex://login/$login/$kind", onState, logger)
+    }
+
+    /** Общий этап: сырые треки → матчинг по ICM → результат. */
+    private suspend fun matchRawTracks(
+        rawTracks: List<YandexRawTrack>,
+        sourceUrl: String,
+        onState: ((ImportState) -> Unit)?,
+        logger: ImportFileLogger?
+    ): PlaylistImportResult = coroutineScope {
+        if (rawTracks.isEmpty()) {
+            onState?.invoke(ImportState.Success(0, "", ""))
+            return@coroutineScope PlaylistImportResult(
+                sourceUrl = sourceUrl, sourceType = PlaylistSourceType.YANDEX,
+                totalTracks = 0, matchedTracks = emptyList(),
+                failedTracks = emptyList(), errorTracks = emptyList()
+            )
+        }
+        val importedTracks = rawTracks.map { ImportedTrack(title = it.title, artist = it.artist) }
+        onState?.invoke(ImportState.Loading(0, importedTracks.size, LoadingPhase.MATCHING))
+
+        val semaphore = Semaphore(DEFAULT_CONCURRENCY)
+        val results = mutableListOf<TrackMatchResult>()
+        var matchedCount = 0
+        var failedCount = 0
+        importedTracks.chunked(BATCH_SIZE).forEach { batch ->
+            val batchResults = batch.map { track ->
+                async { semaphore.withPermit { searchIcmForTrack(track, logger) } }
+            }.awaitAll()
+            results.addAll(batchResults)
+            batchResults.forEach { r ->
+                when (r) {
+                    is TrackMatchResult.Matched -> matchedCount++
+                    else -> failedCount++
+                }
+            }
+            onState?.invoke(
+                ImportState.Loading(matchedCount + failedCount, importedTracks.size, LoadingPhase.MATCHING)
+            )
+        }
+        PlaylistImportResult(
+            sourceUrl = sourceUrl, sourceType = PlaylistSourceType.YANDEX,
+            totalTracks = importedTracks.size,
+            matchedTracks = results.filterIsInstance<TrackMatchResult.Matched>(),
+            failedTracks = results.filterIsInstance<TrackMatchResult.NotFound>(),
+            errorTracks = results.filterIsInstance<TrackMatchResult.Error>()
+        )
+    }
+
     /**
      * Apple import flow: delegate to native ICM import API.
      */

@@ -10,6 +10,13 @@ import java.util.concurrent.TimeUnit
 /** Трек, извлечённый из публичного плейлиста Яндекс Музыки. */
 data class YandexRawTrack(val title: String, val artist: String)
 
+/** Плейлист пользователя (для переноса по логину): kind — id для API. */
+data class YandexPlaylistInfo(
+    val kind: Int,
+    val title: String,
+    val trackCount: Int
+)
+
 /** Ошибка резолва с человекочитаемым сообщением для UI импорта. */
 class YandexResolveException(message: String, cause: Throwable? = null) :
     Exception(message, cause)
@@ -169,6 +176,86 @@ object YandexPlaylistFetcher {
             }
             return sb.toString()
         }
+    }
+
+    // ── Перенос по логину: список плейлистов + треки без разбора ссылок ──
+    // У Яндекса приватности нет — библиотека публична, а API принимает логин
+    // как идентификатор пользователя (не только числовой uid). Это устойчивее
+    // импорта по ссылке: смена ВИЗУАЛА ссылки (редизайн 'lk.<uuid>') на
+    // API-контракт users/<login>/... не влияет.
+
+    /** Все плейлисты пользователя по логину. Блокирующий — звать с IO. */
+    fun listPlaylists(login: String): List<YandexPlaylistInfo> {
+        val user = android.net.Uri.encode(login.trim())
+        val request = Request.Builder()
+            .url("$YANDEX_API/users/$user/playlists/list")
+            .header("User-Agent", UA)
+            .header("Accept", "application/json")
+            .header("Accept-Language", "ru-RU,ru;q=0.9")
+            .header("Referer", "https://music.yandex.ru/")
+            .build()
+        val response = try {
+            client.newCall(request).execute()
+        } catch (e: Exception) {
+            throw YandexResolveException("Cannot reach Yandex Music. Check your connection.", e)
+        }
+        response.use { resp ->
+            when (resp.code) {
+                200 -> {}
+                403, 451 -> throw YandexResolveException(
+                    "Yandex blocked the request. If you're on VPN, try disabling it and retry."
+                )
+                404 -> throw YandexResolveException("User \"$login\" not found on Yandex Music.")
+                else -> throw YandexResolveException("Yandex returned HTTP ${resp.code}.")
+            }
+            val stream = resp.body?.charStream()
+                ?: throw YandexResolveException("Yandex returned an empty body.")
+            return try {
+                JsonReader(stream).use { parsePlaylistList(it) }
+            } catch (e: YandexResolveException) {
+                throw e
+            } catch (e: Exception) {
+                throw YandexResolveException("Failed to parse Yandex playlists.", e)
+            }
+        }
+    }
+
+    /** Треки конкретного плейлиста пользователя по логину+kind. Звать с IO. */
+    fun resolveByLogin(login: String, kind: Int): List<YandexRawTrack> =
+        fetchViaApi(android.net.Uri.encode(login.trim()), kind.toString())
+
+    /** result[].{kind,title,trackCount} — потоково. */
+    private fun parsePlaylistList(reader: JsonReader): List<YandexPlaylistInfo> {
+        val out = ArrayList<YandexPlaylistInfo>()
+        reader.beginObject()
+        while (reader.hasNext()) {
+            if (reader.nextName() == "result" && reader.peek() == JsonToken.BEGIN_ARRAY) {
+                reader.beginArray()
+                while (reader.hasNext()) {
+                    if (reader.peek() != JsonToken.BEGIN_OBJECT) { reader.skipValue(); continue }
+                    var kind = -1
+                    var title: String? = null
+                    var count = 0
+                    reader.beginObject()
+                    while (reader.hasNext()) {
+                        when (reader.nextName()) {
+                            "kind" -> kind = if (reader.peek() == JsonToken.NUMBER) reader.nextInt()
+                                else { reader.skipValue(); -1 }
+                            "title" -> title = readStringOrNull(reader)
+                            "trackCount" -> count = if (reader.peek() == JsonToken.NUMBER) reader.nextInt()
+                                else { reader.skipValue(); 0 }
+                            else -> reader.skipValue()
+                        }
+                    }
+                    reader.endObject()
+                    if (kind >= 0 && !title.isNullOrBlank())
+                        out.add(YandexPlaylistInfo(kind, title!!, count))
+                }
+                reader.endArray()
+            } else reader.skipValue()
+        }
+        reader.endObject()
+        return out
     }
 
     // ── Шаг 2а: новая ссылка → официальное API ──

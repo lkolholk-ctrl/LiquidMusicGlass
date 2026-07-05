@@ -17,6 +17,11 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -35,6 +40,7 @@ import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.MusicNote
@@ -121,6 +127,7 @@ fun LibraryScreen(
     var importedPlaylists by remember { mutableStateOf<List<com.liquidmusicglass.api.icm.IcmUserPlaylist>>(emptyList()) }
     var isPlaylistsLoading by remember { mutableStateOf(false) }
     var showImportDialog by remember { mutableStateOf(false) }
+    var showYandexLoginDialog by remember { mutableStateOf(false) }
 
     // Load cloud playlists when entering the Imported view or when logged in
     fun loadImportedPlaylists() {
@@ -632,6 +639,10 @@ fun LibraryScreen(
                                 IconButton(onClick = { loadImportedPlaylists() }) {
                                     Icon(Icons.Filled.Refresh, null, tint = lc.iconMuted, modifier = Modifier.size(20.dp))
                                 }
+                                // Перенос из Яндекса по логину (вся библиотека сразу).
+                                IconButton(onClick = { showYandexLoginDialog = true }) {
+                                    Icon(Icons.Rounded.Person, null, tint = lc.iconMuted, modifier = Modifier.size(22.dp))
+                                }
                                 IconButton(onClick = { showImportDialog = true }) {
                                     Icon(Icons.Rounded.Add, null, tint = AppleRed, modifier = Modifier.size(24.dp))
                                 }
@@ -779,6 +790,14 @@ fun LibraryScreen(
                     com.liquidmusicglass.data.playlistimport.PlaylistImportManager
                         .importPlaylist(url, context)
                 }
+            )
+        }
+
+        // Перенос из Яндекса по логину — вся библиотека сразу.
+        if (showYandexLoginDialog) {
+            YandexLoginImportDialog(
+                onDismiss = { showYandexLoginDialog = false },
+                onDone = { loadImportedPlaylists() }
             )
         }
 
@@ -972,6 +991,199 @@ private fun MosaicTile(url: String, modifier: Modifier) {
         contentScale = ContentScale.Crop,
         modifier = modifier.fillMaxHeight()
     )
+}
+
+/**
+ * Перенос из Яндекс Музыки ПО ЛОГИНУ. У Яндекса нет приватности —
+ * библиотека публична, API принимает логин. Юзер вводит только логин →
+ * видит все свои плейлисты галочками → отмечает → переносит. Устойчивее
+ * импорта по ссылке (смена визуала ссылки на API-контракт не влияет).
+ */
+@Composable
+private fun YandexLoginImportDialog(
+    onDismiss: () -> Unit,
+    onDone: () -> Unit
+) {
+    val lc = LiquidTheme.colors
+    val scope = rememberCoroutineScope()
+    val repo = remember {
+        com.liquidmusicglass.data.playlistimport.PlaylistImportModule.providePlaylistImportRepository()
+    }
+    val dialogBg = if (lc.isDark) Color(0xFF1C1C1E) else Color.White
+    val focusManager = LocalFocusManager.current
+
+    var login by remember { mutableStateOf("") }
+    var loadingList by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var playlists by remember {
+        mutableStateOf<List<com.liquidmusicglass.data.playlistimport.YandexPlaylistInfo>?>(null)
+    }
+    val selected = remember { mutableStateListOf<Int>() }
+    var importing by remember { mutableStateOf(false) }
+    var progress by remember { mutableStateOf<String?>(null) }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.6f))
+            .clickable(remember { MutableInteractionSource() }, null) {
+                if (!importing) { focusManager.clearFocus(); onDismiss() }
+            }
+            .navigationBarsPadding()
+            .imePadding(),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 28.dp)
+                .clip(RoundedCornerShape(28.dp))
+                .background(dialogBg)
+                .padding(24.dp)
+                .clickable(remember { MutableInteractionSource() }, null) { }
+        ) {
+            Text("Transfer from Yandex Music", color = lc.textPrimary, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Enter your Yandex login — we'll list all your playlists. No password needed.",
+                color = lc.textSecondary, fontSize = 12.sp, lineHeight = 16.sp
+            )
+            Spacer(Modifier.height(16.dp))
+
+            // Login field
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(lc.glassTint, RoundedCornerShape(12.dp))
+                    .padding(horizontal = 14.dp, vertical = 13.dp)
+            ) {
+                if (login.isEmpty()) Text("yandex login", color = lc.textTertiary, fontSize = 15.sp)
+                BasicTextField(
+                    value = login,
+                    onValueChange = { login = it.trim() },
+                    singleLine = true,
+                    enabled = !importing,
+                    textStyle = androidx.compose.ui.text.TextStyle(color = lc.textPrimary, fontSize = 15.sp),
+                    cursorBrush = androidx.compose.ui.graphics.SolidColor(AppleRed),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            error?.let {
+                Spacer(Modifier.height(10.dp))
+                Text(it, color = Color(0xFFFF5252), fontSize = 13.sp, lineHeight = 17.sp)
+            }
+
+            // Playlist list with checkboxes
+            playlists?.let { pls ->
+                Spacer(Modifier.height(14.dp))
+                if (pls.isEmpty()) {
+                    Text("No playlists found for this login.", color = lc.textSecondary, fontSize = 13.sp)
+                } else {
+                    Text("${selected.size} of ${pls.size} selected", color = lc.textSecondary, fontSize = 12.sp)
+                    Spacer(Modifier.height(6.dp))
+                    Box(modifier = Modifier.heightIn(max = 260.dp)) {
+                        LazyColumn {
+                            items(pls, key = { it.kind }) { pl ->
+                                val checked = pl.kind in selected
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .clickable(enabled = !importing) {
+                                            if (checked) selected.remove(pl.kind) else selected.add(pl.kind)
+                                        }
+                                        .padding(vertical = 10.dp, horizontal = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        if (checked) Icons.Filled.Favorite else Icons.AutoMirrored.Rounded.PlaylistPlay,
+                                        null,
+                                        tint = if (checked) AppleRed else lc.iconMuted,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(Modifier.width(10.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(pl.title, color = lc.textPrimary, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        if (pl.trackCount > 0)
+                                            Text("${pl.trackCount} tracks", color = lc.textTertiary, fontSize = 11.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            progress?.let {
+                Spacer(Modifier.height(10.dp))
+                Text(it, color = lc.textSecondary, fontSize = 13.sp)
+            }
+
+            Spacer(Modifier.height(18.dp))
+
+            // Action button: Load list, or Import selected
+            val listLoaded = playlists != null
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(46.dp)
+                    .background(AppleRed, RoundedCornerShape(50))
+                    .clip(RoundedCornerShape(50))
+                    .clickable(enabled = !loadingList && !importing) {
+                        focusManager.clearFocus()
+                        if (!listLoaded) {
+                            if (login.isBlank()) return@clickable
+                            scope.launch {
+                                loadingList = true; error = null
+                                try {
+                                    val list = repo.listYandexPlaylists(login)
+                                    // Гарантируем «Мне нравится» (kind=3), если API её не вернул.
+                                    val withLiked = if (list.none { it.kind == 3 })
+                                        listOf(com.liquidmusicglass.data.playlistimport.YandexPlaylistInfo(3, "Мне нравится", 0)) + list
+                                    else list
+                                    playlists = withLiked
+                                    selected.clear(); selected.addAll(withLiked.map { it.kind })
+                                } catch (e: Exception) {
+                                    error = (e as? com.liquidmusicglass.data.playlistimport.YandexResolveException)?.message
+                                        ?: "Couldn't load playlists: ${e.message}"
+                                }
+                                loadingList = false
+                            }
+                        } else if (selected.isNotEmpty()) {
+                            val pls = playlists ?: return@clickable
+                            scope.launch {
+                                importing = true; error = null
+                                val toImport = pls.filter { it.kind in selected }
+                                var done = 0
+                                for (pl in toImport) {
+                                    progress = "Importing ${done + 1}/${toImport.size}: ${pl.title}"
+                                    try {
+                                        val result = repo.importYandexByLogin(login, pl.kind)
+                                        repo.saveToLocalPlaylist(result, pl.title)
+                                    } catch (_: Exception) { /* один сбой не рушит остальные */ }
+                                    done++
+                                }
+                                progress = "Done — imported $done playlist(s)."
+                                importing = false
+                                onDone()
+                            }
+                        }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    when {
+                        loadingList -> "Loading…"
+                        importing -> "Transferring…"
+                        !listLoaded -> "Load my playlists"
+                        else -> "Transfer selected (${selected.size})"
+                    },
+                    color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp
+                )
+            }
+        }
+    }
 }
 
 /**
