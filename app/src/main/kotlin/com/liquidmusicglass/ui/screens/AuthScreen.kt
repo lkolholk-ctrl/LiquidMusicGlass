@@ -172,12 +172,13 @@ fun AuthScreen(
                         // Docs: /partner/<partner_id>/link?partner_user_id=...&redirect_uri=...&state=...&app_name=...
                         // redirect_uri — custom-scheme deep link напрямую (ICM
                         // добавил его в whitelist): промежуточный сервер больше
-                        // не нужен. MainActivity ловит liquidmusicglass://oauth/icm.
+                        // не нужен. MainActivity ловит любой путь под
+                        // liquidmusicglass://oauth (redirect сверяется по netloc).
                         val telegramAuthUrl = com.liquidmusicglass.api.icm.IcmApi.getInstance()
                             .buildAccountLinkUrl(
                                 partnerId = "msng",
                                 partnerUserId = partnerUserId,
-                                redirectUri = "liquidmusicglass://oauth/icm",
+                                redirectUri = "liquidmusicglass://oauth",
                                 state = state,
                                 appName = "Liquid Music Glass"
                             )

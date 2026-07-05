@@ -61,9 +61,11 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
+                <!-- Ловим ЛЮБОЙ путь под oauth (…/icm и голый oauth): ICM
+                     whitelist сверяет redirect_uri по scheme://netloc, путь не
+                     важен — приложение должно принять callback при любом. -->
                 <data android:scheme="liquidmusicglass"
-                      android:host="oauth"
-                      android:path="/icm" />
+                      android:host="oauth" />
             </intent-filter>
         </activity>
 

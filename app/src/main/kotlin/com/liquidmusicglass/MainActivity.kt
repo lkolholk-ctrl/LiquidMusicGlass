@@ -398,8 +398,10 @@ class MainActivity : ComponentActivity() {
     private fun handleTelegramAuth(intent: Intent?) {
         val data = intent?.data ?: return
         
-        // Handle ICM Telegram link redirect (liquidmusicglass://oauth/icm)
-        if (data.scheme == "liquidmusicglass" && data.host == "oauth" && data.path == "/icm") {
+        // Handle ICM Telegram link redirect. Принимаем ЛЮБОЙ путь под host=oauth
+        // (…/icm и голый liquidmusicglass://oauth): ICM whitelist сверяет
+        // redirect_uri по scheme://netloc, поэтому итоговый путь может отличаться.
+        if (data.scheme == "liquidmusicglass" && data.host == "oauth") {
             val linkedParam = data.getQueryParameter("linked")
             val linked = linkedParam == "1" || linkedParam.equals("true", ignoreCase = true)
             val icmUserId = data.getQueryParameter("icm_user_id")
