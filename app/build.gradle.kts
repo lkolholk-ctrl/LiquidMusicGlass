@@ -23,7 +23,7 @@ android {
         // Метка билда (видно в Профиле внизу). Бампается вручную на заметных
         // сборках, чтобы можно было отличить, какой билд стоит. Динамический
         // git-хэш убран — он ломал конфигурацию Gradle в CI.
-        versionName = "05.07 nav15-base"
+        versionName = "05.07 nav15-migration"
 
         // Build native libs only for arm64-v8a (faster builds, smaller APK).
         // Note: won't run on 32-bit (armeabi-v7a) or x86/x86_64 emulators.
