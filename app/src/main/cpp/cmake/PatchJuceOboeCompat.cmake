@@ -41,6 +41,7 @@ function(lmg_patch_juce_oboe juceOboeFile)
 extern "C" int  lmg_oboeSharingModeInt();
 extern "C" int  lmg_oboePerformanceModeInt();
 extern "C" int  lmg_oboeBufferCapacityMinFrames();
+extern "C" int  lmg_oboeAdjustBufferSize (int requested, int burst, int capacity);
 extern "C" int  lmg_oboeForceI16();
 extern "C" int  lmg_oboeAudioApiInt();
 extern "C" void lmg_onOboeStreamOpen (int direction, int openResult, int usesAAudio,
@@ -120,8 +121,11 @@ template <typename OboeDataFormat>  struct OboeAudioIODeviceBufferHelpers {};]=]
             }]=])
     set(openReport [=[            if (stream != nullptr && newBufferSize != 0)
             {
-                JUCE_OBOE_LOG ("Setting the bufferSizeInFrames to " + String (newBufferSize));
-                stream->setBufferSizeInFrames (newBufferSize);
+                const int lmgBuf = lmg_oboeAdjustBufferSize (newBufferSize,
+                                                             (int) stream->getFramesPerBurst(),
+                                                             (int) stream->getBufferCapacityInFrames());
+                JUCE_OBOE_LOG ("Setting the bufferSizeInFrames to " + String (lmgBuf));
+                stream->setBufferSizeInFrames (lmgBuf);
             }
 
             lmg_onOboeStreamOpen ((int) direction,

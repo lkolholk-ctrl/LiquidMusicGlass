@@ -111,6 +111,16 @@ class AudioService : MediaSessionService() {
     private var focusRequest: AudioFocusRequest? = null
     private var audioManager: AudioManager? = null
 
+    // ── Запись экрана: авто-переход JUCE с MMAP на capturable-путь ──
+    // Fast/Exclusive идут через AAudio MMAP — МИМО системного микшера, поэтому
+    // рекордер экрана (AudioPlaybackCapture) их не слышит («видео без звука»).
+    // Пока активна запись с REMOTE_SUBMIX, временно уводим локальный JUCE-выход
+    // на AudioTrack-sink (режим 6, через микшер — захватывается). Стриминг
+    // (ExoPlayer) и так через микшер, его не трогаем.
+    private var recordingCallback: android.media.AudioManager.AudioRecordingCallback? = null
+    @Volatile private var captureActive = false
+    @Volatile private var modeBeforeCapture = -1
+
     /** WakeLock to prevent CPU sleep during active playback */
     private var wakeLock: PowerManager.WakeLock? = null
 
@@ -385,6 +395,9 @@ class AudioService : MediaSessionService() {
             )
         }
 
+        // Запись экрана → capturable-путь для локального JUCE (см. поля выше).
+        registerScreenRecordingWatcher()
+
         // WakeLock initialization
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(
@@ -569,12 +582,69 @@ class AudioService : MediaSessionService() {
         return session
     }
 
+    /**
+     * Следим за активными записями звука. Если появляется REMOTE_SUBMIX
+     * (запись экрана со звуком / AudioPlaybackCapture) и локально играет JUCE
+     * в MMAP-режиме (Fast=0 / Exclusive=2) — временно уводим выход на
+     * AudioTrack-sink (режим 6), чтобы рекордер услышал звук. Когда запись
+     * прекращается — возвращаем прежний режим. Всё best-effort, в runCatching:
+     * фича не должна ронять воспроизведение.
+     */
+    private fun registerScreenRecordingWatcher() {
+        if (android.os.Build.VERSION.SDK_INT < 29) return   // AudioPlaybackCapture с API 29
+        val am = audioManager ?: return
+        val cb = object : android.media.AudioManager.AudioRecordingCallback() {
+            override fun onRecordingConfigChanged(
+                configs: MutableList<android.media.AudioRecordingConfiguration>?
+            ) {
+                // REMOTE_SUBMIX (=8) — @SystemApi, из обычного SDK недоступна,
+                // поэтому сверяем по значению. Это источник записи экрана со
+                // звуком / AudioPlaybackCapture.
+                val active = configs?.any { it.clientAudioSource == 8 } == true
+                onCaptureStateChanged(active)
+            }
+        }
+        recordingCallback = cb
+        runCatching { am.registerAudioRecordingCallback(cb, android.os.Handler(mainLooper)) }
+    }
+
+    private fun onCaptureStateChanged(active: Boolean) {
+        if (active == captureActive) return
+        captureActive = active
+        runCatching {
+            val juceActive =
+                PlayerController.playbackBackend.value == PlaybackBackend.JUCE_LOCAL
+            if (active) {
+                // Уводим на AudioTrack-sink только если реально играет локальный
+                // JUCE в MMAP-режиме — иначе трогать нечего (стриминг капчурится сам).
+                val mode = AppSettings.audioCompatMode.value
+                if (juceActive && (mode == 0 || mode == 2)) {
+                    modeBeforeCapture = mode
+                    com.liquidmusicglass.engine.automix.AutoMixNativeEngine.setOboeCompatMode(6)
+                    com.liquidmusicglass.debug.DebugLog.add(
+                        "CAPTURE on → JUCE mode $mode → 6 (AudioTrack, capturable)"
+                    )
+                }
+            } else if (modeBeforeCapture >= 0) {
+                // Запись кончилась — возвращаем прежний MMAP-режим.
+                val restore = modeBeforeCapture
+                modeBeforeCapture = -1
+                com.liquidmusicglass.engine.automix.AutoMixNativeEngine.setOboeCompatMode(restore)
+                com.liquidmusicglass.debug.DebugLog.add("CAPTURE off → JUCE mode → $restore")
+            }
+        }
+    }
+
     override fun onDestroy() {
         PlayerController.logFinalPlayback()
         positionJob?.cancel()
         cancelCrossfadeFade(resetVolume = false)
         abandonAudioFocus()
         runCatching { unregisterReceiver(becomingNoisyReceiver) }
+        recordingCallback?.let { cb ->
+            runCatching { audioManager?.unregisterAudioRecordingCallback(cb) }
+        }
+        recordingCallback = null
 
         // Release WakeLock
         if (wakeLock?.isHeld == true) {

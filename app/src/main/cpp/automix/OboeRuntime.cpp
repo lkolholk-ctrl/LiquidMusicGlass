@@ -375,6 +375,37 @@ extern "C" int lmg_oboePerformanceModeInt()
                                                       : oboe::PerformanceMode::LowLatency);
 }
 
+extern "C" int lmg_oboeAdjustBufferSize (int requested, int burst, int capacity)
+{
+    // Запас против микро-подёргиваний. JUCE ставит буфер в ~2 burst — на
+    // low-latency MMAP (Fast/Exclusive) это ~8 мс, и системные пики (анимации,
+    // шторка, вибро) не дают колбэку успеть к дедлайну → слышимые заикания
+    // «при взаимодействии с системой» (полевой репорт, Honor). Для музыки
+    // задержка некритична, поэтому даём щедрый запас: Fast/Exclusive — до
+    // 5 burst (~20 мс), остальные режимы — 3 burst. Никогда ниже запроса JUCE,
+    // никогда выше ёмкости минус один burst.
+    if (burst <= 0)
+        return requested;
+
+    const int mode = automix::getOboeCompatMode();
+    const bool lowLatency = (mode == 0 || mode == 2);   // Fast / Exclusive
+    const int targetBursts = lowLatency ? 5 : 3;
+
+    int target = burst * targetBursts;
+    if (target < requested)
+        target = requested;
+
+    if (capacity > burst)
+    {
+        const int ceiling = capacity - burst;
+        if (target > ceiling)
+            target = ceiling;
+    }
+    if (target < burst)
+        target = burst;
+    return target;
+}
+
 extern "C" int lmg_oboeForceI16()
 {
     // Режимы 3/4/5: пропустить float-сессию JUCE → штатная int16-ветка. Для HAL,
