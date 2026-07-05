@@ -121,10 +121,20 @@ class PlaylistImportService : Service() {
             val blockMsg = ImportRateGate.check(this, throttleKey)
             if (blockMsg != null) {
                 logger.log("W", "Service", "Import throttled ($throttleKey): $blockMsg")
+                PlaylistImportManager.publishState(ImportState.Error(blockMsg))
                 showErrorNotification(blockMsg)
                 return
             }
         }
+
+        // UI: подсветить карточку сервиса, в который сейчас идёт импорт.
+        // Apple (официальный ICM) тоже показываем, но source-строку берём из типа.
+        PlaylistImportManager.setImportingSource(
+            throttleKey ?: when (source) {
+                PlaylistSourceType.APPLE -> "apple"
+                else -> null
+            }
+        )
 
         try {
             // Phase 1: Resolving
@@ -143,6 +153,9 @@ class PlaylistImportService : Service() {
             val result = repository.importPlaylist(
                 url = url,
                 onState = { state ->
+                    // Пушим в менеджер — чтобы UI в приложении показывал прогресс
+                    // (X из Y смэтчено) прямо на карточке сервиса, не только в шторке.
+                    PlaylistImportManager.publishState(state)
                     when (state) {
                         is ImportState.Loading -> {
                             val phaseText = when (state.phase) {
@@ -178,6 +191,14 @@ class PlaylistImportService : Service() {
                 ?: "Imported Playlist"
 
             logger.log("I", "Service", "Import complete: ${result.matchedTracks.size} tracks saved to $savedPlaylistName")
+
+            PlaylistImportManager.publishState(
+                ImportState.Success(
+                    insertedCount = result.matchedTracks.size,
+                    playlistId = localPlaylistId,
+                    playlistName = savedPlaylistName
+                )
+            )
 
             // Final success notification (non-ongoing, dismissible)
             showCompletionNotification(

@@ -770,12 +770,24 @@ fun LibraryScreen(
         // Uses global singleton manager — survives tab switches.
         // The progress overlay is shown at the root level (AppRoot).
 
-        // URL Input Dialog
+        // Import screen (#74): per-service cards with real brand icons, daily
+        // remaining count, and in-app progress. Stays open during import so the
+        // user watches "X of Y matched" right on the card.
         if (showImportDialog) {
-            ImportUrlBottomSheet(
-                onDismiss = { showImportDialog = false },
-                onImport = { url ->
+            ImportServicesSheet(
+                onDismiss = {
                     showImportDialog = false
+                    // Сбросить осевший финальный статус, чтобы при следующем
+                    // открытии карточка не показывала старый Success/Error.
+                    val st = com.liquidmusicglass.data.playlistimport.PlaylistImportManager
+                        .importState.value
+                    if (st is com.liquidmusicglass.data.playlistimport.ImportState.Success ||
+                        st is com.liquidmusicglass.data.playlistimport.ImportState.Error
+                    ) {
+                        com.liquidmusicglass.data.playlistimport.PlaylistImportManager.dismiss()
+                    }
+                },
+                onImport = { url ->
                     com.liquidmusicglass.data.playlistimport.PlaylistImportManager
                         .importPlaylist(url, context)
                 }
