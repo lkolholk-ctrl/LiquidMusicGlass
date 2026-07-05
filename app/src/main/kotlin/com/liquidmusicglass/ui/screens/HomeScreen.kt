@@ -4,7 +4,6 @@ import android.content.Context
 import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
@@ -47,6 +46,7 @@ import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.Track
 import com.liquidmusicglass.ui.glass.AlbumArtImage
 import com.liquidmusicglass.ui.glass.liquidClickable
+import com.liquidmusicglass.ui.theme.LiquidMotion
 import com.liquidmusicglass.ui.glass.rememberAlbumColors
 import com.liquidmusicglass.ui.player.AuraBackground
 import com.liquidmusicglass.ui.theme.LiquidTheme
@@ -759,7 +759,7 @@ private fun BannerCard(
             .width(320.dp)
             .height(180.dp)
             .clip(RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick)
+            .liquidClickable(onClick = onClick)
     ) {
         // Background image
         AsyncImage(
@@ -813,7 +813,7 @@ private fun BannerCard(
                 .size(36.dp)
                 .clip(RoundedCornerShape(50))
                 .background(AppleRed)
-                .clickable(onClick = onClick),
+                .liquidClickable(pressedScale = LiquidMotion.PressIcon, onClick = onClick),
             contentAlignment = Alignment.Center
         ) {
             Icon(
@@ -834,7 +834,7 @@ private fun AlbumCard(
     Column(
         modifier = Modifier
             .width(140.dp)
-            .clickable(onClick = onClick)
+            .liquidClickable(onClick = onClick)
     ) {
         AsyncImage(
             model = ImageRequest.Builder(LocalContext.current)
@@ -875,7 +875,7 @@ private fun ChartTrackRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .liquidClickable(onClick = onClick)
             .padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -930,7 +930,7 @@ private fun ChartCard(
     Column(
         modifier = Modifier
             .width(160.dp)
-            .clickable(onClick = onClick)
+            .liquidClickable(onClick = onClick)
     ) {
         Box(
             modifier = Modifier
@@ -992,7 +992,7 @@ private fun RecommendationCard(
     Column(
         modifier = Modifier
             .width(160.dp)
-            .clickable(onClick = onClick)
+            .liquidClickable(onClick = onClick)
     ) {
         AsyncImage(
             model = ImageRequest.Builder(LocalContext.current)
@@ -1207,7 +1207,7 @@ private fun RecentTrackCard(
     Column(
         modifier = Modifier
             .width(140.dp)
-            .clickable(onClick = onClick)
+            .liquidClickable(onClick = onClick)
     ) {
         AlbumArtImage(
             uri = track.displayArtUri,
