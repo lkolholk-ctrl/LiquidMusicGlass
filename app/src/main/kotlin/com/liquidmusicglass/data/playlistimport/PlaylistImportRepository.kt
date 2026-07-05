@@ -59,6 +59,7 @@ class PlaylistImportRepository(
 
         when (sourceType) {
             PlaylistSourceType.YANDEX -> importFromYandex(url, onState, logger)
+            PlaylistSourceType.SPOTIFY -> importFromSpotify(url, onState, logger)
             PlaylistSourceType.APPLE -> importFromApple(url, onState, logger)
             PlaylistSourceType.UNKNOWN -> throw IllegalArgumentException(
                 "Unsupported playlist URL: $url"
@@ -166,6 +167,66 @@ class PlaylistImportRepository(
         PlaylistImportResult(
             sourceUrl = url,
             sourceType = PlaylistSourceType.YANDEX,
+            totalTracks = importedTracks.size,
+            matchedTracks = results.filterIsInstance<TrackMatchResult.Matched>(),
+            failedTracks = results.filterIsInstance<TrackMatchResult.NotFound>(),
+            errorTracks = results.filterIsInstance<TrackMatchResult.Error>()
+        )
+    }
+
+    /**
+     * Spotify import flow (batch 13): scrape embed-страницы БЕЗ токена.
+     * open.spotify.com/embed/playlist/<id> → __NEXT_DATA__ → trackList →
+     * матчинг по каталогу ICM (тот же конвейер, что у Яндекса).
+     */
+    private suspend fun importFromSpotify(
+        url: String,
+        onState: ((ImportState) -> Unit)?,
+        logger: ImportFileLogger?
+    ): PlaylistImportResult = coroutineScope {
+        onState?.invoke(ImportState.Loading(0, 0, LoadingPhase.RESOLVING))
+        val rawTracks = try {
+            logger?.log("I", "ImportRepo", "Fetching playlist from Spotify (on-device)...")
+            withTimeout(60_000L) { SpotifyPlaylistFetcher.resolve(url) }
+        } catch (e: Exception) {
+            val errorMsg = when (e) {
+                is TimeoutCancellationException -> "Spotify didn't respond in time. Check your connection."
+                is YandexResolveException -> e.message ?: "Failed to load Spotify playlist."
+                else -> "Failed to load Spotify playlist: ${e.message}"
+            }
+            onState?.invoke(ImportState.Error(errorMsg))
+            throw PlaylistImportException(errorMsg, e)
+        }
+        logger?.log("I", "ImportRepo", "Resolved ${rawTracks.size} tracks from Spotify")
+
+        if (rawTracks.isEmpty()) {
+            onState?.invoke(ImportState.Success(0, "", ""))
+            return@coroutineScope PlaylistImportResult(
+                sourceUrl = url, sourceType = PlaylistSourceType.SPOTIFY,
+                totalTracks = 0, matchedTracks = emptyList(),
+                failedTracks = emptyList(), errorTracks = emptyList()
+            )
+        }
+
+        val importedTracks = rawTracks.map { ImportedTrack(title = it.title, artist = it.artist) }
+        onState?.invoke(ImportState.Loading(0, importedTracks.size, LoadingPhase.MATCHING))
+
+        val semaphore = Semaphore(DEFAULT_CONCURRENCY)
+        val results = mutableListOf<TrackMatchResult>()
+        var matchedCount = 0
+        var failedCount = 0
+        importedTracks.chunked(BATCH_SIZE).forEach { batch ->
+            val batchResults = batch.map { track ->
+                async { semaphore.withPermit { searchIcmForTrack(track, logger) } }
+            }.awaitAll()
+            results.addAll(batchResults)
+            batchResults.forEach { r -> if (r is TrackMatchResult.Matched) matchedCount++ else failedCount++ }
+            onState?.invoke(ImportState.Loading(matchedCount + failedCount, importedTracks.size, LoadingPhase.MATCHING))
+        }
+        logger?.log("I", "ImportRepo", "=== Spotify import: $matchedCount matched, $failedCount failed / ${importedTracks.size} ===")
+
+        PlaylistImportResult(
+            sourceUrl = url, sourceType = PlaylistSourceType.SPOTIFY,
             totalTracks = importedTracks.size,
             matchedTracks = results.filterIsInstance<TrackMatchResult.Matched>(),
             failedTracks = results.filterIsInstance<TrackMatchResult.NotFound>(),
@@ -327,6 +388,7 @@ class PlaylistImportRepository(
         val sourceName = when (result.sourceType) {
             PlaylistSourceType.YANDEX -> "Yandex Music"
             PlaylistSourceType.APPLE -> "Apple Music"
+            PlaylistSourceType.SPOTIFY -> "Spotify"
             else -> "Imported"
         }
         val playlistName = originalName ?: "$sourceName Playlist"
@@ -348,6 +410,7 @@ class PlaylistImportRepository(
         val lower = url.lowercase()
         return when {
             lower.contains("music.yandex") -> PlaylistSourceType.YANDEX
+            lower.contains("spotify.com") || lower.startsWith("spotify:") -> PlaylistSourceType.SPOTIFY
             lower.contains("apple.com") || lower.contains("music.apple") -> PlaylistSourceType.APPLE
             else -> PlaylistSourceType.UNKNOWN
         }

@@ -51,8 +51,9 @@ fun ImportUrlBottomSheet(
         return when {
             lower.contains("music.yandex") -> true
             lower.contains("apple.com") || lower.contains("music.apple") -> true
+            lower.contains("spotify.com") || lower.startsWith("spotify:") -> true
             input.isBlank() -> { urlError = null; false }
-            else -> { urlError = "Only Yandex Music and Apple Music URLs are supported"; false }
+            else -> { urlError = "Only Yandex Music, Apple Music and Spotify URLs are supported"; false }
         }
     }
 
