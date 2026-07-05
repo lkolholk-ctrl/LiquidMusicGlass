@@ -87,9 +87,11 @@ import com.liquidmusicglass.engine.PlaybackBackend
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.Track
 import com.liquidmusicglass.ui.glass.AlbumArtImage
+import com.liquidmusicglass.ui.glass.liquidClickable
 import com.liquidmusicglass.ui.glass.rememberAlbumColors
 import com.liquidmusicglass.ui.player.AuraBackground
 import com.liquidmusicglass.ui.theme.AppFontFamily
+import com.liquidmusicglass.ui.theme.LiquidMotion
 import com.liquidmusicglass.ui.viewmodel.HomeViewModel
 import java.util.Calendar
 import kotlin.math.PI
@@ -627,7 +629,7 @@ private fun WaveTrackCard(
     Column(
         modifier = Modifier
             .width(140.dp)
-            .clickable(onClick = onClick)
+            .liquidClickable { onClick() }
     ) {
         if (uri != null) {
             AlbumArtImage(
@@ -680,7 +682,7 @@ private fun WaveChartCard(
     Column(
         modifier = Modifier
             .width(160.dp)
-            .clickable(onClick = onClick)
+            .liquidClickable { onClick() }
     ) {
         Box(
             modifier = Modifier
@@ -738,7 +740,7 @@ private fun FlatCircleButton(onClick: () -> Unit, content: @Composable () -> Uni
             .size(56.dp)
             .clip(CircleShape)
             .background(Color.White.copy(alpha = 0.12f))
-            .clickable { onClick() },
+            .liquidClickable(pressedScale = LiquidMotion.PressButton) { onClick() },
         contentAlignment = Alignment.Center
     ) {
         content()
@@ -771,7 +773,7 @@ private fun WaveStationIndicator(name: String, onClear: () -> Unit) {
             modifier = Modifier
                 .size(24.dp)
                 .clip(androidx.compose.foundation.shape.CircleShape)
-                .clickable { onClear() },
+                .liquidClickable(pressedScale = LiquidMotion.PressIcon) { onClear() },
             contentAlignment = Alignment.Center
         ) {
             Icon(
@@ -802,7 +804,7 @@ private fun WaveTopBar(onSearch: () -> Unit, onOpenProfile: () -> Unit) {
                 .size(40.dp)
                 .clip(androidx.compose.foundation.shape.CircleShape)
                 .background(Color.White.copy(alpha = 0.12f))
-                .clickable { onOpenProfile() },
+                .liquidClickable(pressedScale = LiquidMotion.PressIcon) { onOpenProfile() },
             contentAlignment = Alignment.Center
         ) {
             if (!avatarUrl.isNullOrBlank()) {
@@ -838,7 +840,7 @@ private fun WaveTopBar(onSearch: () -> Unit, onOpenProfile: () -> Unit) {
             modifier = Modifier
                 .align(Alignment.CenterEnd)
                 .size(26.dp)
-                .clickable { onSearch() }
+                .liquidClickable(pressedScale = LiquidMotion.PressIcon) { onSearch() }
         )
     }
 }
@@ -848,7 +850,7 @@ private fun BigPlayButton(loading: Boolean, accent: Color = WaveAccent, onClick:
     Box(
         modifier = Modifier
             .size(132.dp)
-            .clickable(enabled = !loading) { onClick() },
+            .liquidClickable(enabled = !loading, pressedScale = LiquidMotion.PressButton) { onClick() },
         contentAlignment = Alignment.Center
     ) {
         if (loading) {
@@ -987,7 +989,7 @@ private fun WaveFeedbackChip(
         modifier = Modifier
             .clip(CircleShape)
             .background(Color.White.copy(alpha = if (pressedOnce) 0.22f else 0.12f))
-            .clickable {
+            .liquidClickable(pressedScale = LiquidMotion.PressButton) {
                 pressedOnce = true
                 onClick()
             }
@@ -1035,7 +1037,7 @@ private fun UpNextRow(upNext: List<Pair<Int, Track>>, onPlay: (Int) -> Unit) {
                 modifier = Modifier
                     .size(44.dp)
                     .clip(RoundedCornerShape(10.dp))
-                    .clickable { onPlay(index) }
+                    .liquidClickable(pressedScale = LiquidMotion.PressButton) { onPlay(index) }
             )
         }
     }

@@ -10,7 +10,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -70,6 +69,8 @@ import com.liquidmusicglass.engine.Track
 import com.liquidmusicglass.ui.components.TrackActionsSheet
 import com.liquidmusicglass.ui.components.WrapRow
 import com.liquidmusicglass.ui.glass.AlbumArtImage
+import com.liquidmusicglass.ui.glass.liquidClickable
+import com.liquidmusicglass.ui.theme.LiquidMotion
 import com.liquidmusicglass.ui.theme.LiquidTheme
 import com.liquidmusicglass.ui.viewmodel.SearchViewModel
 import kotlinx.coroutines.launch
@@ -273,14 +274,10 @@ fun SearchScreen(
                             .size(24.dp)
                             .clip(CircleShape)
                             .background(if (isDark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.10f))
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null,
-                                onClick = {
-                                    viewModel.clearQuery()
-                                    hideKeyboard()
-                                }
-                            ),
+                            .liquidClickable(pressedScale = LiquidMotion.PressIcon) {
+                                viewModel.clearQuery()
+                                hideKeyboard()
+                            },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
@@ -302,10 +299,7 @@ fun SearchScreen(
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier
                         .padding(start = 12.dp)
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null
-                        ) {
+                        .liquidClickable(pressedScale = LiquidMotion.PressButton) {
                             viewModel.clearQuery()
                             hideKeyboard()
                         }
@@ -346,7 +340,7 @@ fun SearchScreen(
                                 key = { index, pair -> "cat_${index}_${pair.first().id}" }
                             ) { _, pair ->
                                 Row(
-                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                                    modifier = Modifier.animateItem().fillMaxWidth().padding(horizontal = 20.dp),
                                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
                                     pair.forEach { category ->
@@ -387,11 +381,7 @@ fun SearchScreen(
                                         color = AppleRed,
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.Medium,
-                                        modifier = Modifier.clickable(
-                                            interactionSource = remember { MutableInteractionSource() },
-                                            indication = null,
-                                            onClick = { clearHistory() }
-                                        )
+                                        modifier = Modifier.liquidClickable(pressedScale = LiquidMotion.PressButton) { clearHistory() }
                                     )
                                 }
                             }
@@ -472,10 +462,7 @@ fun SearchScreen(
                                             modifier = Modifier
                                                 .clip(RoundedCornerShape(50))
                                                 .background(AppleRed)
-                                                .clickable(
-                                                    interactionSource = remember { MutableInteractionSource() },
-                                                    indication = null
-                                                ) { viewModel.searchNow() }
+                                                .liquidClickable(pressedScale = LiquidMotion.PressButton) { viewModel.searchNow() }
                                                 .padding(horizontal = 24.dp, vertical = 10.dp)
                                         )
                                     }
@@ -649,7 +636,7 @@ private fun CategoryCard(
             .height(100.dp)
             .clip(RoundedCornerShape(24.dp))   // большой радиус, в тон карточкам
             .background(Brush.linearGradient(gradientColors))
-            .clickable(onClick = onClick)
+            .liquidClickable { onClick() }
             .padding(16.dp)
     ) {
         // Artist image (small, bottom-right)
@@ -689,7 +676,7 @@ private fun ArtistChip(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
             .width(80.dp)
-            .clickable(onClick = onClick)
+            .liquidClickable { onClick() }
     ) {
         if (artist.cover != null) {
             AsyncImage(
@@ -741,7 +728,7 @@ private fun AlbumCard(
     Column(
         modifier = Modifier
             .width(140.dp)
-            .clickable(onClick = onClick)
+            .liquidClickable { onClick() }
     ) {
         AsyncImage(
             model = ImageRequest.Builder(LocalContext.current)
@@ -784,11 +771,7 @@ private fun HistoryChip(
         modifier = Modifier
             .clip(RoundedCornerShape(50))
             .background(if (LiquidTheme.colors.isDark) Color(0xFF1A1A1A) else Color(0xFFF2F2F7))
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onClick
-            )
+            .liquidClickable(pressedScale = LiquidMotion.PressButton) { onClick() }
             .padding(horizontal = 14.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -952,11 +935,7 @@ private fun SourceSegment(
             .height(32.dp)
             .clip(RoundedCornerShape(50))
             .background(bg)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onClick
-            ),
+            .liquidClickable(pressedScale = LiquidMotion.PressButton) { onClick() },
         contentAlignment = Alignment.Center
     ) {
         Text(

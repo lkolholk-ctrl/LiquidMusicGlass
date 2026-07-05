@@ -1,8 +1,6 @@
 package com.liquidmusicglass.ui.screens
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -47,6 +45,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.liquidmusicglass.ui.glass.GlassKit
+import com.liquidmusicglass.ui.glass.liquidClickable
+import com.liquidmusicglass.ui.theme.LiquidMotion
 import com.liquidmusicglass.ui.theme.LiquidTheme
 import com.liquidmusicglass.api.icm.IcmAlbumResponse
 import com.liquidmusicglass.api.icm.IcmRepository
@@ -148,11 +148,7 @@ fun AlbumDetailScreen(
                                     .size(40.dp)
                                     .clip(CircleShape)
                                     .background(if (LiquidTheme.colors.isDark) Color(0xFF1A1A1A) else Color(0xFFF2F2F7))
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null,
-                                        onClick = onBack
-                                    ),
+                                    .liquidClickable(pressedScale = LiquidMotion.PressIcon) { onBack() },
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
@@ -167,22 +163,18 @@ fun AlbumDetailScreen(
                                     .size(40.dp)
                                     .clip(CircleShape)
                                     .background(if (LiquidTheme.colors.isDark) Color(0xFF1A1A1A) else Color(0xFFF2F2F7))
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null,
-                                        onClick = {
-                                            album?.let { a ->
-                                                val shareText = "${a.album.title} by ${a.album.artist} on Liquid Music Glass\n\nhttps://music.apple.com/album/${a.album.id}"
-                                                val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                                                    type = "text/plain"
-                                                    putExtra(android.content.Intent.EXTRA_TEXT, shareText)
-                                                }
-                                                val chooser = android.content.Intent.createChooser(intent, "Share Album")
-                                                chooser.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                                context.startActivity(chooser)
+                                    .liquidClickable(pressedScale = LiquidMotion.PressIcon) {
+                                        album?.let { a ->
+                                            val shareText = "${a.album.title} by ${a.album.artist} on Liquid Music Glass\n\nhttps://music.apple.com/album/${a.album.id}"
+                                            val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                                type = "text/plain"
+                                                putExtra(android.content.Intent.EXTRA_TEXT, shareText)
                                             }
+                                            val chooser = android.content.Intent.createChooser(intent, "Share Album")
+                                            chooser.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                            context.startActivity(chooser)
                                         }
-                                    ),
+                                    },
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
@@ -261,22 +253,18 @@ fun AlbumDetailScreen(
                                     .height(44.dp)
                                     .clip(RoundedCornerShape(50))
                                     .background(AppleRed)
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null,
-                                        onClick = {
-                                            if (albumTracks.isNotEmpty()) {
-                                                PlayerController.playFromList(
-                                                    context = context,
-                                                    tracks = albumTracks,
-                                                    startIndex = 0,
-                                                    autoRefillType = "album",
-                                                    autoRefillId = albumId,
-                                                    autoRefillName = albumName
-                                                )
-                                            }
+                                    .liquidClickable(pressedScale = LiquidMotion.PressButton) {
+                                        if (albumTracks.isNotEmpty()) {
+                                            PlayerController.playFromList(
+                                                context = context,
+                                                tracks = albumTracks,
+                                                startIndex = 0,
+                                                autoRefillType = "album",
+                                                autoRefillId = albumId,
+                                                autoRefillName = albumName
+                                            )
                                         }
-                                    ),
+                                    },
                                 contentAlignment = Alignment.Center
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -297,26 +285,22 @@ fun AlbumDetailScreen(
                                     .height(44.dp)
                                     .clip(RoundedCornerShape(50))
                                     .background(if (LiquidTheme.colors.isDark) Color(0xFF1A1A1A) else Color(0xFFF2F2F7))
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null,
-                                        onClick = {
-                                            if (albumTracks.isNotEmpty()) {
-                                                val shuffled = albumTracks.shuffled()
-                                                PlayerController.playFromList(
-                                                    context = context,
-                                                    tracks = shuffled,
-                                                    startIndex = 0,
-                                                    autoRefillType = "album",
-                                                    autoRefillId = albumId,
-                                                    autoRefillName = albumName
-                                                )
-                                                if (!PlayerController.shuffleEnabled.value) {
-                                                    PlayerController.toggleShuffle()
-                                                }
+                                    .liquidClickable(pressedScale = LiquidMotion.PressButton) {
+                                        if (albumTracks.isNotEmpty()) {
+                                            val shuffled = albumTracks.shuffled()
+                                            PlayerController.playFromList(
+                                                context = context,
+                                                tracks = shuffled,
+                                                startIndex = 0,
+                                                autoRefillType = "album",
+                                                autoRefillId = albumId,
+                                                autoRefillName = albumName
+                                            )
+                                            if (!PlayerController.shuffleEnabled.value) {
+                                                PlayerController.toggleShuffle()
                                             }
                                         }
-                                    ),
+                                    },
                                 contentAlignment = Alignment.Center
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -338,24 +322,21 @@ fun AlbumDetailScreen(
                     itemsIndexed(albumTracks, key = { _, t -> t.id }) { index, track ->
                         Row(
                             modifier = Modifier
+                                .animateItem()
                                 .fillMaxWidth()
                                 .height(52.dp)
-                                .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null,
-                                    onClick = {
-                                        // Load the entire album as the queue so the player
-                                        // continues to the next track after this one ends.
-                                        PlayerController.playFromList(
-                                            context = context,
-                                            tracks = albumTracks,
-                                            startIndex = index,
-                                            autoRefillType = "album",
-                                            autoRefillId = albumId,
-                                            autoRefillName = albumName
-                                        )
-                                    }
-                                )
+                                .liquidClickable {
+                                    // Load the entire album as the queue so the player
+                                    // continues to the next track after this one ends.
+                                    PlayerController.playFromList(
+                                        context = context,
+                                        tracks = albumTracks,
+                                        startIndex = index,
+                                        autoRefillType = "album",
+                                        autoRefillId = albumId,
+                                        autoRefillName = albumName
+                                    )
+                                }
                                 .padding(horizontal = 24.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
