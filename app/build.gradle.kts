@@ -6,27 +6,6 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
-// Короткий git-хэш текущего коммита + дата сборки — впечатываются в versionName,
-// чтобы по строке версии в Профиле можно было ОДНОЗНАЧНО понять, какой это билд
-// (раньше versionName был статичной строкой и не отличал сборки друг от друга).
-// БЕЗ запуска процессов на этапе конфигурации Gradle (это ломало CI): в CI
-// берём GITHUB_SHA, локально — читаем .git/HEAD файлом.
-val gitSha: String = run {
-    val ci = System.getenv("GITHUB_SHA")
-    if (ci != null && ci.length >= 7) return@run ci.substring(0, 7)
-    try {
-        val head = rootProject.file(".git/HEAD").readText().trim()
-        val sha = if (head.startsWith("ref:")) {
-            rootProject.file(".git/" + head.substringAfter("ref:").trim()).readText().trim()
-        } else head
-        if (sha.length >= 7) sha.substring(0, 7) else "nogit"
-    } catch (e: Exception) {
-        "nogit"
-    }
-}
-val buildDate: String =
-    java.text.SimpleDateFormat("dd.MM.yyyy").format(java.util.Date())
-
 android {
     namespace = "com.liquidmusicglass"
 
@@ -41,8 +20,10 @@ android {
         // меньший versionCode Android считает даунгрейдом и отклоняет установку
         // поверх с ошибкой «пакет недействителен».
         versionCode = 20260703
-        // Формат: «<дата сборки> · <git-хэш>» — видно в Профиле внизу.
-        versionName = "$buildDate · $gitSha"
+        // Метка билда (видно в Профиле внизу). Бампается вручную на заметных
+        // сборках, чтобы можно было отличить, какой билд стоит. Динамический
+        // git-хэш убран — он ломал конфигурацию Gradle в CI.
+        versionName = "05.07 nav15-base"
 
         // Build native libs only for arm64-v8a (faster builds, smaller APK).
         // Note: won't run on 32-bit (armeabi-v7a) or x86/x86_64 emulators.
