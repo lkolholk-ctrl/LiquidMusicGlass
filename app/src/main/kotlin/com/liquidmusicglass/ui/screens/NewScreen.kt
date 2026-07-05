@@ -222,6 +222,7 @@ fun NewScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .animateItem()
                             .clickable {
                                 PlayerController.playFromList(
                                     context,

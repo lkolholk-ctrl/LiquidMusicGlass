@@ -79,6 +79,8 @@ import com.liquidmusicglass.engine.Track
 import com.liquidmusicglass.ui.glass.GlassDialog
 import com.liquidmusicglass.ui.glass.GlassDialogButton
 import com.liquidmusicglass.ui.glass.GlassKit
+import com.liquidmusicglass.ui.glass.liquidClickable
+import com.liquidmusicglass.ui.theme.LiquidMotion
 import com.liquidmusicglass.ui.theme.LiquidTheme
 import com.liquidmusicglass.ui.viewmodel.LibraryViewModel
 import kotlinx.coroutines.delay
@@ -278,7 +280,7 @@ fun LibraryScreen(
                                     .size(36.dp)
                                     .background(Color(0xFF30D158).copy(alpha = 0.14f), CircleShape)
                                     .clip(CircleShape)
-                                    .clickable(remember { MutableInteractionSource() }, null) {
+                                    .liquidClickable(pressedScale = LiquidMotion.PressIcon) {
                                         showImportDialog = true
                                     },
                                 contentAlignment = Alignment.Center
@@ -822,7 +824,7 @@ private fun MenuCard(
         modifier = Modifier
             .fillMaxWidth()
             .height(72.dp)
-            .clickable(remember { MutableInteractionSource() }, null, onClick = onClick)
+            .liquidClickable(onClick = onClick)
             .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -1206,7 +1208,7 @@ private fun LocalTrackRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .clickable(remember { MutableInteractionSource() }, null, onClick = onClick)
+            .liquidClickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -1253,7 +1255,7 @@ private fun SubHeader(
                 .size(40.dp)
                 .background(lc.glassTint, CircleShape)
                 .clip(CircleShape)
-                .clickable(remember { MutableInteractionSource() }, null, onClick = onBack),
+                .liquidClickable(pressedScale = LiquidMotion.PressIcon, onClick = onBack),
             contentAlignment = Alignment.Center
         ) {
             Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, tint = lc.textPrimary, modifier = Modifier.size(20.dp))
@@ -1323,7 +1325,7 @@ private fun ImportedPlaylistRow(
             .fillMaxWidth()
             .clip(shape)
             .background(lc.cardSurface)   // серая подложка как в настройках
-            .clickable(remember { MutableInteractionSource() }, null, onClick = onClick)
+            .liquidClickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -1402,7 +1404,7 @@ private fun LocalPlaylistRow(
             .fillMaxWidth()
             .clip(shape)
             .background(lc.cardSurface)   // серая подложка как в настройках
-            .clickable(remember { MutableInteractionSource() }, null, onClick = onClick)
+            .liquidClickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

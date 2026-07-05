@@ -6,7 +6,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -47,6 +46,7 @@ import com.liquidmusicglass.data.local.WaveRepository
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.Track
 import com.liquidmusicglass.ui.glass.AlbumArtImage
+import com.liquidmusicglass.ui.glass.liquidClickable
 import com.liquidmusicglass.ui.glass.rememberAlbumColors
 import com.liquidmusicglass.ui.player.AuraBackground
 import com.liquidmusicglass.ui.theme.LiquidTheme
@@ -1171,11 +1171,7 @@ private fun MoodCard(
                     }
                 }
             }
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onClick
-            )
+            .liquidClickable(onClick = onClick)
             .padding(16.dp)
     ) {
         if (isLoading) {

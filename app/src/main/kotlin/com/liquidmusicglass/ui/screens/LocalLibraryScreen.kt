@@ -5,7 +5,6 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -60,7 +59,9 @@ import com.liquidmusicglass.data.local.db.AlbumAgg
 import com.liquidmusicglass.data.local.db.AppDatabase
 import com.liquidmusicglass.data.local.db.ArtistAgg
 import com.liquidmusicglass.data.local.db.LocalTrackEntity
+import com.liquidmusicglass.ui.glass.liquidClickable
 import com.liquidmusicglass.ui.theme.LiquidColors
+import com.liquidmusicglass.ui.theme.LiquidMotion
 import com.liquidmusicglass.ui.theme.LiquidTheme
 import kotlinx.coroutines.delay
 
@@ -167,7 +168,7 @@ fun LocalLibraryScreen(
                 Text("Выбрано: ${selected.size}", color = lc.textSecondary, fontSize = 14.sp, modifier = Modifier.weight(1f))
                 Row(
                     Modifier.clip(CircleShape).background(lc.accent)
-                        .clickable(remember { MutableInteractionSource() }, null) { bulkOpen = true }
+                        .liquidClickable(pressedScale = LiquidMotion.PressButton) { bulkOpen = true }
                         .padding(horizontal = 16.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -204,7 +205,7 @@ private fun SelectionHeader(count: Int, lc: LiquidColors, onClose: () -> Unit) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(
             Modifier.size(40.dp).background(if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7), CircleShape)
-                .clip(CircleShape).clickable(remember { MutableInteractionSource() }, null, onClick = onClose),
+                .clip(CircleShape).liquidClickable(pressedScale = LiquidMotion.PressIcon, onClick = onClose),
             contentAlignment = Alignment.Center
         ) { Icon(Icons.Rounded.Close, null, tint = lc.iconDefault, modifier = Modifier.size(22.dp)) }
         Spacer(Modifier.width(14.dp))
@@ -402,7 +403,7 @@ fun LocalArtistDetailScreen(artistName: String, onBack: () -> Unit, onOpenAlbum:
                     SectionLabel("Альбомы", lc)
                     LazyRow(contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         items(albums, key = { it.albumId }) { al ->
-                            Box(Modifier.width(140.dp)) { AlbumCard(al, lc) { onOpenAlbum(al.albumId, al.name) } }
+                            Box(Modifier.width(140.dp).animateItem()) { AlbumCard(al, lc) { onOpenAlbum(al.albumId, al.name) } }
                         }
                     }
                     Spacer(Modifier.height(12.dp))
@@ -468,7 +469,7 @@ fun LocalAlbumDetailScreen(albumId: Long, albumName: String, onBack: () -> Unit)
 private fun ArtistRow(a: ArtistAgg, lc: LiquidColors, onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-            .clickable(remember { MutableInteractionSource() }, null, onClick = onClick)
+            .liquidClickable(onClick = onClick)
             .padding(horizontal = 8.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -486,7 +487,7 @@ private fun ArtistRow(a: ArtistAgg, lc: LiquidColors, onClick: () -> Unit) {
 private fun AlbumRow(al: AlbumAgg, lc: LiquidColors, onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-            .clickable(remember { MutableInteractionSource() }, null, onClick = onClick)
+            .liquidClickable(onClick = onClick)
             .padding(horizontal = 8.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -504,7 +505,7 @@ private fun AlbumRow(al: AlbumAgg, lc: LiquidColors, onClick: () -> Unit) {
 private fun AlbumCard(al: AlbumAgg, lc: LiquidColors, onClick: () -> Unit) {
     Column(
         Modifier.clip(RoundedCornerShape(12.dp))
-            .clickable(remember { MutableInteractionSource() }, null, onClick = onClick).padding(4.dp)
+            .liquidClickable(onClick = onClick).padding(4.dp)
     ) {
         ArtBox(albumArt(al.albumId), null, 12.dp, lc, Icons.Rounded.Album, Modifier.fillMaxWidth().aspectRatio(1f))
         Spacer(Modifier.height(6.dp))
@@ -518,7 +519,7 @@ private fun AlbumCard(al: AlbumAgg, lc: LiquidColors, onClick: () -> Unit) {
 private fun TrackRow(e: LocalTrackEntity, lc: LiquidColors, paddingH: Dp = 8.dp, onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-            .clickable(remember { MutableInteractionSource() }, null, onClick = onClick)
+            .liquidClickable(onClick = onClick)
             .padding(horizontal = paddingH, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -537,7 +538,7 @@ private fun TrackRow(e: LocalTrackEntity, lc: LiquidColors, paddingH: Dp = 8.dp,
 private fun AlbumTrackRow(e: LocalTrackEntity, num: Int, lc: LiquidColors, onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-            .clickable(remember { MutableInteractionSource() }, null, onClick = onClick)
+            .liquidClickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -577,7 +578,7 @@ private fun Segments(selected: Int, lc: LiquidColors, onSelect: (Int) -> Unit) {
             Box(
                 Modifier.weight(1f).clip(CircleShape)
                     .background(if (selected == i) lc.accent else lc.cardSurface)
-                    .clickable(remember { MutableInteractionSource() }, null) { onSelect(i) }
+                    .liquidClickable(pressedScale = LiquidMotion.PressButton) { onSelect(i) }
                     .padding(vertical = 9.dp),
                 contentAlignment = Alignment.Center
             ) {
@@ -592,7 +593,7 @@ private fun Segments(selected: Int, lc: LiquidColors, onSelect: (Int) -> Unit) {
 private fun SortChip(text: String, selected: Boolean, lc: LiquidColors, onClick: () -> Unit) {
     Box(
         Modifier.clip(CircleShape).background(if (selected) lc.accent else lc.cardSurface)
-            .clickable(remember { MutableInteractionSource() }, null, onClick = onClick)
+            .liquidClickable(pressedScale = LiquidMotion.PressButton, onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -622,7 +623,7 @@ private fun SearchField(query: String, lc: LiquidColors, onChange: (String) -> U
         )
         if (query.isNotEmpty()) {
             Icon(Icons.Rounded.Close, null, tint = lc.iconMuted,
-                modifier = Modifier.size(20.dp).clickable(remember { MutableInteractionSource() }, null, onClick = onClear))
+                modifier = Modifier.size(20.dp).liquidClickable(pressedScale = LiquidMotion.PressIcon, onClick = onClear))
         }
     }
 }
@@ -631,7 +632,7 @@ private fun SearchField(query: String, lc: LiquidColors, onChange: (String) -> U
 private fun PlayAllButton(lc: LiquidColors, onClick: () -> Unit) {
     Box(
         Modifier.size(40.dp).clip(CircleShape).background(lc.accent)
-            .clickable(remember { MutableInteractionSource() }, null, onClick = onClick),
+            .liquidClickable(pressedScale = LiquidMotion.PressIcon, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
         Icon(Icons.Rounded.PlayArrow, null, tint = Color.White, modifier = Modifier.size(24.dp))
@@ -642,7 +643,7 @@ private fun PlayAllButton(lc: LiquidColors, onClick: () -> Unit) {
 private fun CircleBack(lc: LiquidColors, onClick: () -> Unit) {
     Box(
         Modifier.size(40.dp).background(if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7), CircleShape)
-            .clip(CircleShape).clickable(remember { MutableInteractionSource() }, null, onClick = onClick),
+            .clip(CircleShape).liquidClickable(pressedScale = LiquidMotion.PressIcon, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
         Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, tint = lc.iconDefault, modifier = Modifier.size(22.dp))
