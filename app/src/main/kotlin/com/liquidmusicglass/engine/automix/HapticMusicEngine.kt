@@ -41,6 +41,16 @@ object HapticMusicEngine {
     private const val POLL_MS = 15L   // быстрее опрос — тап ближе к биту
     private const val BEAT_COOLDOWN_MS = 120L
 
+    // ── Бит-грид v2 (#77): PLL по онсетам → тап на КАЖДЫЙ предсказанный бит ──
+    // Друг просил «докрутить, чтоб под каждый бит»: онсет-детектор точный, но на
+    // слабых/тихих битах тап дрожит/пропадает. Решение — по онсетам оценить темп
+    // и фазу, и при устойчивом бите («лок») ставить тапы ПО СЕТКЕ, а не по факту
+    // удара. Без лока (трек без чёткого бита / пауза) — деградируем в старый
+    // онсет-режим. Всё на Kotlin, натив-детектор не трогаем.
+    private const val GRID_MIN_PERIOD = 300f   // мс = 200 BPM
+    private const val GRID_MAX_PERIOD = 1000f  // мс = 60 BPM
+    private const val GRID_LOCK_COUNT = 4      // столько онсетов «в сетку» → лок
+
     @Volatile private var vibrator: Vibrator? = null
     @Volatile private var hasAmplitude = false
 
@@ -58,6 +68,16 @@ object HapticMusicEngine {
     private var streamFloor = 0f
     private var lastBeatAtMs = 0L
     private var lastBassTapAtMs = 0L
+
+    // Состояние бит-грида (только поток опроса).
+    private var gridPeriod = 0f            // мс между битами; 0 = ещё не оценён
+    private var gridNextBeat = 0L          // время следующего предсказанного бита
+    private var gridConfidence = 0         // 0..8; >=GRID_LOCK_COUNT → locked
+    private var gridLocked = false
+    private var lastOnsetMs = 0L
+    private var gridBeatStrength = 0.4f    // сглаженная сила для грид-тапа
+    private val recentIoi = ArrayDeque<Float>()  // последние интер-онсет-интервалы
+    private var gridBeatsFired = 0L
 
     // Диагностика (LOG/LCAT): сколько ударов увидели и сколько тапов реально
     // отдали системе — разводит «детектор молчит» и «система глотает вибро».
@@ -98,6 +118,14 @@ object HapticMusicEngine {
         streamEnv = 0f
         streamCeil = 0f
         streamFloor = 0f
+        gridPeriod = 0f
+        gridNextBeat = 0L
+        gridConfidence = 0
+        gridLocked = false
+        lastOnsetMs = 0L
+        gridBeatStrength = 0.4f
+        recentIoi.clear()
+        gridBeatsFired = 0L
         beatsSeen = 0L
         tapsSent = 0L
         lastStatAtMs = android.os.SystemClock.elapsedRealtime()
@@ -126,8 +154,10 @@ object HapticMusicEngine {
             val now = android.os.SystemClock.elapsedRealtime()
             if (now - lastStatAtMs >= 10_000L) {
                 lastStatAtMs = now
+                val bpm = if (gridPeriod > 0f) (60000f / gridPeriod).toInt() else 0
                 DebugLog.add(
-                    "HAPTIC: beats=$beatsSeen taps=$tapsSent env=%.3f".format(
+                    "HAPTIC: beats=$beatsSeen taps=$tapsSent grid=%s bpm=%d fired=%d env=%.3f".format(
+                        if (gridLocked) "LOCK" else "free", bpm, gridBeatsFired,
                         AutoMixNativeEngine.hapticEnv()
                     )
                 )
@@ -137,6 +167,7 @@ object HapticMusicEngine {
     }
 
     private fun pollOnce() {
+        val now = android.os.SystemClock.elapsedRealtime()
         val juceActive = PlayerController.playbackBackend.value == PlaybackBackend.JUCE_LOCAL
         if (juceActive) {
             // Нативный детектор: удар = рост счётчика, сила уже посчитана.
@@ -145,7 +176,11 @@ object HapticMusicEngine {
             if (beats > lastNativeBeats) {
                 beatsSeen += beats - lastNativeBeats
                 lastNativeBeats = beats
-                tap(AutoMixNativeEngine.hapticBeatStrength())
+                val strength = AutoMixNativeEngine.hapticBeatStrength()
+                onOnset(now, strength)
+                // Под локом басовый тап отдаёт СЕТКА (maybeFireGridBeat) — сырой
+                // онсет только кормит PLL, иначе задвоение.
+                if (!gridLocked) tap(strength)
             }
             // Средняя полоса (снейр/клэп) — лёгкие тики поверх басовых тапов.
             val midBeats = AutoMixNativeEngine.hapticMidBeatCount()
@@ -172,7 +207,6 @@ object HapticMusicEngine {
             val dyn = (streamCeil - streamFloor) / maxOf(streamCeil, 0.05f)
             val dynK = ((dyn - 0.15f) / 0.45f).coerceIn(0f, 1f)
             val trigMul = 1.15f + (1.45f - 1.15f) * dynK
-            val now = android.os.SystemClock.elapsedRealtime()
             if (now - lastBeatAtMs >= BEAT_COOLDOWN_MS &&
                 level > prevEnv * trigMul + 0.02f
             ) {
@@ -181,9 +215,86 @@ object HapticMusicEngine {
                 // Та же шкала силы, что у нативного детектора: отношение к
                 // среднему качу -> ровный бит лёгкий, акценты в полную силу.
                 val ratio = level / maxOf(prevEnv, 0.05f)
-                tap(((ratio - trigMul) / 3f).coerceIn(0f, 1f))
+                val strength = ((ratio - trigMul) / 3f).coerceIn(0f, 1f)
+                onOnset(now, strength)
+                if (!gridLocked) tap(strength)
             }
         }
+        // Под локом — тап на КАЖДЫЙ предсказанный бит (даже если онсета не было).
+        maybeFireGridBeat(now)
+    }
+
+    // ── Бит-грид v2: оценка темпа/фазы по онсетам + отдача тапов по сетке ──
+
+    /** Онсет (удар от детектора) кормит PLL: копит IOI, оценивает период,
+     *  подтягивает фазу; растит/роняет уверенность → лок. */
+    private fun onOnset(now: Long, strength: Float) {
+        gridBeatStrength += 0.3f * (strength.coerceIn(0f, 1f) - gridBeatStrength)
+
+        if (lastOnsetMs > 0L) {
+            var ioi = (now - lastOnsetMs).toFloat()
+            // Складка октав в темп-диапазон: восьмые/половинки → к доле.
+            if (ioi in 120f..1400f) {
+                while (ioi < GRID_MIN_PERIOD) ioi *= 2f
+                while (ioi > GRID_MAX_PERIOD) ioi /= 2f
+                recentIoi.addLast(ioi)
+                while (recentIoi.size > 8) recentIoi.removeFirst()
+            }
+        }
+        lastOnsetMs = now
+
+        if (recentIoi.size >= 4) {
+            val est = medianPeriod()
+            if (gridPeriod <= 0f) {
+                gridPeriod = est
+                gridNextBeat = now + est.toLong()
+            } else {
+                gridPeriod += 0.1f * (est - gridPeriod)   // мягкая адаптация темпа
+            }
+        }
+
+        if (gridPeriod > 0f && gridNextBeat > 0L) {
+            val err = phaseError(now)                     // now − ближайший бит, [−P/2, P/2]
+            if (kotlin.math.abs(err) < gridPeriod * 0.22f) {
+                gridNextBeat += (0.25f * err).toLong()     // подтягиваем фазу к онсету
+                gridConfidence = (gridConfidence + 1).coerceAtMost(8)
+            } else {
+                gridConfidence = (gridConfidence - 1).coerceAtLeast(0)
+            }
+            gridLocked = gridConfidence >= GRID_LOCK_COUNT
+        }
+    }
+
+    /** Если залочены и подошло время предсказанного бита — выдать тап. */
+    private fun maybeFireGridBeat(now: Long) {
+        // Долго нет онсетов (пауза / трек без бита) → сбросить лок, вернуться
+        // в онсет-режим, чтобы не молотить по тишине.
+        if (gridLocked && gridPeriod > 0f && now - lastOnsetMs > gridPeriod * 4f) {
+            gridLocked = false
+            gridConfidence = 0
+        }
+        if (!gridLocked || gridPeriod <= 0f) return
+        if (now >= gridNextBeat) {
+            // Пол силы, чтобы слабый бит тоже чувствовался (в этом весь смысл).
+            tap(gridBeatStrength.coerceIn(0.28f, 1f))
+            gridBeatsFired++
+            gridNextBeat += gridPeriod.toLong()
+            // Если отстали (лаг опроса) — досинхронизировать, без залпа догоняющих.
+            if (now - gridNextBeat > gridPeriod) gridNextBeat = now + gridPeriod.toLong()
+        }
+    }
+
+    private fun medianPeriod(): Float {
+        val s = recentIoi.sorted()
+        return s[s.size / 2]
+    }
+
+    /** Ошибка фазы: now минус ближайший предсказанный бит, в диапазоне [−P/2, P/2]. */
+    private fun phaseError(now: Long): Float {
+        val p = gridPeriod
+        val k = Math.round((now - gridNextBeat) / p.toDouble())
+        val nearest = gridNextBeat + (k * p).toLong()
+        return (now - nearest).toFloat()
     }
 
     /**
