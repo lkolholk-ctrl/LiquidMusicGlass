@@ -77,7 +77,14 @@ class LibraryRepository private constructor(context: Context) {
                     limit = limit,
                     offset = offset
                 )
-                val items = response?.items ?: break
+                // ОШИБКА сети/API посреди пагинации → ОБРЫВАЕМ ВЕСЬ синк.
+                // Раньше break с частичным списком: шаг 3 («удалить локальные,
+                // которых нет в облаке») сносил лайки, которые на сервере ЕСТЬ,
+                // просто не докачались — потеря данных на рваной сети.
+                    ?: return@withContext Result.failure(
+                        Exception("likes page fetch failed at offset=$offset")
+                    )
+                val items = response.items
                 if (items.isEmpty()) break
                 cloudLikes.addAll(items)
                 if (items.size < limit) break
@@ -197,12 +204,11 @@ class LibraryRepository private constructor(context: Context) {
                     if (success) {
                         db.markSynced(track.id)
                     }
-                    // Партнёрский API не умеет писать лайки (только читать), поэтому
-                    // персонализируем волну поддерживаемым способом: лайк = «больше
-                    // такого» (more_track + more_artist).
-                    IcmRepository.sendWaveFeedback("more_track", track.id)
+                    // Лайк = «больше такого» для волны (more_track + more_artist).
+                    // Через оффлайн-очередь: обрыв сети не теряет сигнал.
+                    com.liquidmusicglass.api.icm.WaveSignalQueue.sendFeedback("more_track", track.id)
                     track.artists.firstOrNull()?.id?.let {
-                        IcmRepository.sendWaveFeedback("more_artist", it)
+                        com.liquidmusicglass.api.icm.WaveSignalQueue.sendFeedback("more_artist", it)
                     }
                 } catch (_: Exception) {}
             }
@@ -233,8 +239,8 @@ class LibraryRepository private constructor(context: Context) {
                     if (success) {
                         db.deleteByTrackId(trackId)
                     }
-                    // Снятие лайка = «реже такого» в волне (поддерживаемый wave/feedback).
-                    IcmRepository.sendWaveFeedback("less_track", trackId)
+                    // Снятие лайка = «реже такого» в волне (через оффлайн-очередь).
+                    com.liquidmusicglass.api.icm.WaveSignalQueue.sendFeedback("less_track", trackId)
                 } catch (_: Exception) {}
             }
 
@@ -301,7 +307,11 @@ class LibraryRepository private constructor(context: Context) {
             durationMs = durationMs,
             albumId = collectionId?.hashCode()?.toLong() ?: trackId.hashCode().toLong(),
             coverUrl = imageUrl,
-            artists = emptyList(),
+            // artistId хранится в БД — прокидываем, чтобы тап по артисту
+            // в FullPlayer работал и для лайкнутых треков.
+            artists = artistId?.let {
+                listOf(com.liquidmusicglass.api.icm.IcmMiniArtist(id = it, name = artistName))
+            } ?: emptyList(),
             isExplicit = isExplicit,
             source = source,
             genre = genre

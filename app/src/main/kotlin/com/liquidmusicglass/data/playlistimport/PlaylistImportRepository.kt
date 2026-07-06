@@ -12,26 +12,31 @@ import java.net.UnknownHostException
  * into the local player via ICM catalog matching.
  *
  * Architecture:
- *   - Yandex URLs: Resolved via private FastAPI (bypasses geo-blocks),
- *     then matched against ICM catalog track-by-track.
+ *   - Yandex URLs: разбираются НА УСТРОЙСТВЕ ([YandexPlaylistFetcher] —
+ *     запрос к Яндексу идёт с жилого IP юзера; ICM Яндексом заблокирован,
+ *     личный сервер-резолвер умер вместе с хостингом), потом матчинг
+ *     по каталогу ICM трек-за-треком.
  *   - Apple URLs: Delegated to native ICM import API (server-side matching).
  *
  * All operations run on Dispatchers.IO. No UI blocking.
  */
 class PlaylistImportRepository(
-    private val yandexResolver: YandexResolverApi,
     private val icmSearch: IcmSearchApi
 ) {
 
     companion object {
-        /** Max concurrent ICM search requests to avoid rate limiting. */
-        private const val DEFAULT_CONCURRENCY = 3
+        /** Max concurrent ICM search requests. Поднято 3→6: матчинг 50 треков
+         *  шёл ~15с (полевой фидбек). 6 параллельных поисков — всё ещё
+         *  безопасно для search-эндпоинта, но вдвое быстрее. */
+        private const val DEFAULT_CONCURRENCY = 6
 
         /** Batch size for progress reporting. */
         private const val BATCH_SIZE = 25
 
-        /** Delay between individual requests in ms. */
-        private const val REQUEST_DELAY_MS = 300L
+        /** Delay between individual requests in ms. Снижено 300→150: семафор уже
+         *  ограничивает число одновременных запросов, лишняя задержка только
+         *  копила латентность. */
+        private const val REQUEST_DELAY_MS = 150L
 
         /** ICM search region for track matching. */
         private const val SEARCH_REGION = "us"
@@ -58,6 +63,7 @@ class PlaylistImportRepository(
 
         when (sourceType) {
             PlaylistSourceType.YANDEX -> importFromYandex(url, onState, logger)
+            PlaylistSourceType.SPOTIFY -> importFromSpotify(url, onState, logger)
             PlaylistSourceType.APPLE -> importFromApple(url, onState, logger)
             PlaylistSourceType.UNKNOWN -> throw IllegalArgumentException(
                 "Unsupported playlist URL: $url"
@@ -67,7 +73,7 @@ class PlaylistImportRepository(
 
     /**
      * Yandex import flow:
-     *   1. Resolve URL via FastAPI → [{title, artist}]
+     *   1. Resolve URL on-device ([YandexPlaylistFetcher]) → [{title, artist}]
      *   2. Match each track against ICM catalog (concurrent, limited)
      *   3. Collect results and save to local playlist
      */
@@ -82,15 +88,21 @@ class PlaylistImportRepository(
 
         onState?.invoke(ImportState.Loading(0, 0, LoadingPhase.RESOLVING))
 
-        // Step 1: Resolve Yandex URL to raw tracks
+        // Step 1: Resolve Yandex URL to raw tracks — прямо с устройства.
+        // withTimeout — страховка поверх OkHttp callTimeout (45с): фаза резолва
+        // НИКОГДА не висит бесконечно (полевой баг: импорт «висел 2 часа» —
+        // старая сборка стучалась на умерший сервер и не отваливалась).
         val rawTracks = try {
-            logger?.log("I", "ImportRepo", "Fetching playlist from Yandex...")
-            yandexResolver.resolvePlaylist(url)
+            logger?.log("I", "ImportRepo", "Fetching playlist from Yandex (on-device)...")
+            withTimeout(60_000L) { YandexPlaylistFetcher.resolve(url) }
         } catch (e: Exception) {
             logger?.log("E", "ImportRepo", "Resolver failed: ${e.message}")
             val errorMsg = when (e) {
+                is TimeoutCancellationException ->
+                    "Yandex didn't respond in time. If you're on VPN, try disabling it and retry."
+                is YandexResolveException -> e.message ?: "Failed to resolve Yandex playlist."
                 is SocketTimeoutException -> "Network timeout while fetching playlist. Please check your connection."
-                is UnknownHostException -> "Cannot reach Yandex resolver. Is the server running?"
+                is UnknownHostException -> "Cannot reach Yandex Music. Check your connection."
                 else -> "Failed to resolve Yandex playlist: ${e.message}"
             }
             onState?.invoke(ImportState.Error(errorMsg))
@@ -159,6 +171,66 @@ class PlaylistImportRepository(
         PlaylistImportResult(
             sourceUrl = url,
             sourceType = PlaylistSourceType.YANDEX,
+            totalTracks = importedTracks.size,
+            matchedTracks = results.filterIsInstance<TrackMatchResult.Matched>(),
+            failedTracks = results.filterIsInstance<TrackMatchResult.NotFound>(),
+            errorTracks = results.filterIsInstance<TrackMatchResult.Error>()
+        )
+    }
+
+    /**
+     * Spotify import flow (batch 13): scrape embed-страницы БЕЗ токена.
+     * open.spotify.com/embed/playlist/<id> → __NEXT_DATA__ → trackList →
+     * матчинг по каталогу ICM (тот же конвейер, что у Яндекса).
+     */
+    private suspend fun importFromSpotify(
+        url: String,
+        onState: ((ImportState) -> Unit)?,
+        logger: ImportFileLogger?
+    ): PlaylistImportResult = coroutineScope {
+        onState?.invoke(ImportState.Loading(0, 0, LoadingPhase.RESOLVING))
+        val rawTracks = try {
+            logger?.log("I", "ImportRepo", "Fetching playlist from Spotify (on-device)...")
+            withTimeout(60_000L) { SpotifyPlaylistFetcher.resolve(url) }
+        } catch (e: Exception) {
+            val errorMsg = when (e) {
+                is TimeoutCancellationException -> "Spotify didn't respond in time. Check your connection."
+                is YandexResolveException -> e.message ?: "Failed to load Spotify playlist."
+                else -> "Failed to load Spotify playlist: ${e.message}"
+            }
+            onState?.invoke(ImportState.Error(errorMsg))
+            throw PlaylistImportException(errorMsg, e)
+        }
+        logger?.log("I", "ImportRepo", "Resolved ${rawTracks.size} tracks from Spotify")
+
+        if (rawTracks.isEmpty()) {
+            onState?.invoke(ImportState.Success(0, "", ""))
+            return@coroutineScope PlaylistImportResult(
+                sourceUrl = url, sourceType = PlaylistSourceType.SPOTIFY,
+                totalTracks = 0, matchedTracks = emptyList(),
+                failedTracks = emptyList(), errorTracks = emptyList()
+            )
+        }
+
+        val importedTracks = rawTracks.map { ImportedTrack(title = it.title, artist = it.artist) }
+        onState?.invoke(ImportState.Loading(0, importedTracks.size, LoadingPhase.MATCHING))
+
+        val semaphore = Semaphore(DEFAULT_CONCURRENCY)
+        val results = mutableListOf<TrackMatchResult>()
+        var matchedCount = 0
+        var failedCount = 0
+        importedTracks.chunked(BATCH_SIZE).forEach { batch ->
+            val batchResults = batch.map { track ->
+                async { semaphore.withPermit { searchIcmForTrack(track, logger) } }
+            }.awaitAll()
+            results.addAll(batchResults)
+            batchResults.forEach { r -> if (r is TrackMatchResult.Matched) matchedCount++ else failedCount++ }
+            onState?.invoke(ImportState.Loading(matchedCount + failedCount, importedTracks.size, LoadingPhase.MATCHING))
+        }
+        logger?.log("I", "ImportRepo", "=== Spotify import: $matchedCount matched, $failedCount failed / ${importedTracks.size} ===")
+
+        PlaylistImportResult(
+            sourceUrl = url, sourceType = PlaylistSourceType.SPOTIFY,
             totalTracks = importedTracks.size,
             matchedTracks = results.filterIsInstance<TrackMatchResult.Matched>(),
             failedTracks = results.filterIsInstance<TrackMatchResult.NotFound>(),
@@ -320,6 +392,7 @@ class PlaylistImportRepository(
         val sourceName = when (result.sourceType) {
             PlaylistSourceType.YANDEX -> "Yandex Music"
             PlaylistSourceType.APPLE -> "Apple Music"
+            PlaylistSourceType.SPOTIFY -> "Spotify"
             else -> "Imported"
         }
         val playlistName = originalName ?: "$sourceName Playlist"
@@ -337,10 +410,11 @@ class PlaylistImportRepository(
         return result.matchedTracks.map { it.icmTrackId }
     }
 
-    private fun detectSourceType(url: String): PlaylistSourceType {
+    fun detectSourceType(url: String): PlaylistSourceType {
         val lower = url.lowercase()
         return when {
             lower.contains("music.yandex") -> PlaylistSourceType.YANDEX
+            lower.contains("spotify.com") || lower.startsWith("spotify:") -> PlaylistSourceType.SPOTIFY
             lower.contains("apple.com") || lower.contains("music.apple") -> PlaylistSourceType.APPLE
             else -> PlaylistSourceType.UNKNOWN
         }

@@ -17,6 +17,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -26,6 +27,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.liquidmusicglass.debug.DebugLog
+import com.liquidmusicglass.engine.automix.AutoMixNativeEngine
 
 /**
  * ВРЕМЕННЫЙ оверлей on-screen логгера. Полупрозрачная панель сверху со скроллом
@@ -34,7 +36,20 @@ import com.liquidmusicglass.debug.DebugLog
  */
 @Composable
 fun DebugOverlay() {
+    // Мастер-гейт: отладочный UI (панель, LOG-чип, LCAT) существует только
+    // когда включён жестом — 5 быстрых тапов по заголовку «Settings».
+    val uiEnabled by com.liquidmusicglass.engine.AppSettings.debugUiEnabled
+        .collectAsState()
+    if (!uiEnabled) return
+
     val visible by DebugLog.visible
+    val logcatOpen by LogcatReader.viewerOpen
+
+    // Полноэкранный logcat поверх всего (открывается кнопкой LCAT).
+    if (logcatOpen) {
+        LogcatScreen(onClose = { LogcatReader.viewerOpen.value = false })
+        return
+    }
 
     Box(modifier = Modifier.fillMaxWidth()) {
         if (visible) {
@@ -51,6 +66,42 @@ fun DebugOverlay() {
                     Spacer(Modifier.width(12.dp))
                     Text("CLEAR", color = Color(0xFF4FC3F7), fontSize = 11.sp, fontFamily = FontFamily.Monospace,
                         modifier = Modifier.clickable { DebugLog.clear() }.padding(4.dp))
+                    Spacer(Modifier.width(8.dp))
+                    // Дамп фактических параметров Oboe-потоков (API/sharing/perf/
+                    // format/rate/burst) — чтобы с проблемного устройства сразу
+                    // видеть, каким путём пошёл звук.
+                    Text("OBOE", color = Color(0xFF4FC3F7), fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.clickable {
+                            DebugLog.add("OBOE ${AutoMixNativeEngine.audioDiagnostics()}")
+                        }.padding(4.dp))
+                    Spacer(Modifier.width(8.dp))
+                    // Перебор выходов на лету (0 normal → 1 safe → 2 exclusive →
+                    // 3 normal-i16 → 4 safe-i16 → 5 opensl-i16 → 6 AUDIOTRACK):
+                    // A/B прямо на играющей музыке. Режим 6 — Java AudioTrack-sink,
+                    // третий вход в систему (путь ExoPlayer), минуя AAudio и OpenSL.
+                    Text("MODE", color = Color(0xFFFF8A65), fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.clickable {
+                            val next = (com.liquidmusicglass.engine.AppSettings.audioCompatMode.value + 1) % 7
+                            com.liquidmusicglass.engine.AppSettings.setAudioCompatMode(next)
+                            DebugLog.add("OBOE mode -> ${when (next) {
+                                1 -> "SAFE(shared+none)"
+                                2 -> "EXCLUSIVE(stock)"
+                                3 -> "NORMAL_I16(shared+lowlat+i16)"
+                                4 -> "SAFE_I16(shared+none+i16)"
+                                5 -> "OPENSLES_I16(opensl+none+i16)"
+                                6 -> "AUDIOTRACK(java sink)"
+                                else -> "NORMAL(shared+lowlat)"
+                            }}")
+                        }.padding(4.dp))
+                    Spacer(Modifier.width(8.dp))
+                    // Полноценный logcat своего процесса (без рута/ПК) + экспорт
+                    // одним файлом в «Поделиться» — для полевых репортов.
+                    Text("LCAT", color = Color(0xFF9CFF9C), fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.clickable { LogcatReader.viewerOpen.value = true }.padding(4.dp))
+                    Spacer(Modifier.width(8.dp))
+                    val ctx = androidx.compose.ui.platform.LocalContext.current
+                    Text("EXP", color = Color(0xFF9CFF9C), fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.clickable { LogcatReader.exportLogs(ctx) }.padding(4.dp))
                     Spacer(Modifier.width(8.dp))
                     Text("HIDE", color = Color(0xFF4FC3F7), fontSize = 11.sp, fontFamily = FontFamily.Monospace,
                         modifier = Modifier.clickable { DebugLog.visible.value = false }.padding(4.dp))

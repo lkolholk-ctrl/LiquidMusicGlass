@@ -43,6 +43,35 @@ target_link_libraries(icmkey ${log-lib})
 # ---------------------------------------------------------------------------
 include(FetchContent)
 
+# ---------------------------------------------------------------------------
+# lmg_resolve — нативные резолверы плейлистов (батч 16, защита #82).
+# Логика скрейпа (URL/заголовки/парсинг) уходит из Kotlin в .so; секретные
+# строки XOR-зашифрованы. Парсинг JSON — через nlohmann/json (корректный
+# разэкран \uXXXX для кириллицы/эмодзи). Header-only, отдельный target, чтобы
+# не влиять на аудио-движок.
+# ---------------------------------------------------------------------------
+FetchContent_Declare(
+    nlohmann_json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG v3.11.3
+    GIT_SHALLOW TRUE
+)
+set(JSON_BuildTests OFF CACHE INTERNAL "")
+set(JSON_Install OFF CACHE INTERNAL "")
+FetchContent_MakeAvailable(nlohmann_json)
+
+add_library(lmg_resolve SHARED resolve.cpp)
+target_compile_features(lmg_resolve PRIVATE cxx_std_17)
+target_compile_options(lmg_resolve PRIVATE
+    -fexceptions          # nlohmann/json бросает при парсинге — ловим catch(...)
+    -fvisibility=hidden
+    -fomit-frame-pointer
+    -fdata-sections
+    -ffunction-sections
+    -Oz
+)
+target_link_libraries(lmg_resolve android log nlohmann_json::nlohmann_json)
+
 # Fetch the JUCE SOURCES only — deliberately NOT FetchContent_MakeAvailable /
 # add_subdirectory(JUCE). JUCE's own CMake builds a host helper tool "juceaide"
 # that compiles juce_gui_basics for the host and needs X11/freetype dev headers
@@ -75,11 +104,36 @@ if(NOT signalsmithstretch_POPULATED)
     FetchContent_Populate(SignalsmithStretch)
 endif()
 
-set(JUCE_MODULES_DIR ${juce_SOURCE_DIR}/modules)
-set(OBOE_DIR ${JUCE_MODULES_DIR}/juce_audio_devices/native/oboe)
+# Свежий Oboe вместо вендоренного в JUCE 7.0.12 (там 1.8.0): 1.9.3 несёт более
+# полный QuirksManager с воркараундами под проблемные устройства. Безопасность
+# апгрейда: JUCE 8 использует тот же (почти неизменённый) juce_Oboe_android.cpp
+# с Oboe 1.9.x. Компилируем исходники Oboe так же напрямую в нашу либу.
+FetchContent_Declare(
+    Oboe
+    GIT_REPOSITORY https://github.com/google/oboe.git
+    GIT_TAG 1.9.3
+    GIT_SHALLOW TRUE
+)
+FetchContent_GetProperties(Oboe)
+if(NOT oboe_POPULATED)
+    FetchContent_Populate(Oboe)
+endif()
 
-# JUCE vendors a full copy of Oboe (not a submodule), so the shallow clone has
-# it. Compile it straight into our lib; JUCE's juce_android_Oboe.cpp uses it.
+set(JUCE_MODULES_DIR ${juce_SOURCE_DIR}/modules)
+set(OBOE_DIR ${oboe_SOURCE_DIR})
+
+# Девайс-совместимость: JUCE жёстко открывает Oboe-поток Exclusive+LowLatency
+# (AAudio MMAP-exclusive) — на части прошивок (Xiaomi/MIUI и др.) этот путь
+# отдаёт белый шум вместо звука. Правим juce_Oboe_android.cpp в FetchContent-
+# дереве: sharing/performance mode берутся из runtime-хуков (automix/OboeRuntime.cpp),
+# каждое открытие потока репортится для он-девайс диагностики.
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/PatchJuceOboeCompat.cmake)
+lmg_patch_juce_oboe("${JUCE_MODULES_DIR}/juce_audio_devices/native/juce_Oboe_android.cpp")
+
+# Их предшественник — жёсткая string-replace замена Exclusive→Shared /
+# LowLatency→None из ветки greeting — заменён runtime-хуками выше: дефолт тот же
+# полевой проверенный Shared+None (SAFE в OboeRuntime), но режим переключается
+# без пересборки, и каждое открытие потока диагностируется.
 file(GLOB_RECURSE OBOE_SOURCES CONFIGURE_DEPENDS ${OBOE_DIR}/src/*.cpp)
 
 # JUCE's Android path includes <cpu-features.h> (android_getCpuFamily etc.). That
@@ -98,6 +152,7 @@ add_library(
     automix/AutoMixJni.cpp
     automix/MediaCodecDecoder.cpp
     automix/MediaCodecAudioSource.cpp
+    automix/OboeRuntime.cpp
     automix/TimeStretch.cpp
     # JUCE module unity builds, compiled directly (no juceaide). Order doesn't
     # matter for a single static-link target; deps resolved via the
@@ -113,6 +168,12 @@ add_library(
 )
 
 target_compile_features(automix_juce PRIVATE cxx_std_17)
+
+# Аудио-движок ВСЕГДА с оптимизацией: debug-вариант AGP собирает нативку с -O0,
+# и JUCE DSP/ресемплер/FLAC-декод становятся в 5-10 раз медленнее — underrun'ы
+# и заикания ровно в тех сборках, на которых идёт отладка. -O2 не мешает
+# отладке Kotlin-части. -fno-math-errno разрешает векторизацию sin/cos/sqrt.
+target_compile_options(automix_juce PRIVATE -O2 -fno-math-errno)
 
 target_include_directories(automix_juce PRIVATE
     ${JUCE_MODULES_DIR}

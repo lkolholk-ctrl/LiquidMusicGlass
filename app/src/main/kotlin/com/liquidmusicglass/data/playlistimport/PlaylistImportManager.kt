@@ -20,6 +20,24 @@ object PlaylistImportManager {
     private val _importState = MutableStateFlow<ImportState>(ImportState.Idle)
     val importState: StateFlow<ImportState> = _importState.asStateFlow()
 
+    /** Источник переносимого плейлиста (для UI: показать иконку/прогресс на
+     *  нужной карточке сервиса). yandex/spotify/apple или null. */
+    private val _importingSource = MutableStateFlow<String?>(null)
+    val importingSource: StateFlow<String?> = _importingSource.asStateFlow()
+
+    /** Сервис пушит сюда прогресс/финал — UI наблюдает в приложении, не только
+     *  в системной шторке. Зовётся из PlaylistImportService. */
+    fun publishState(state: ImportState) {
+        _importState.value = state
+        if (state is ImportState.Success || state is ImportState.Error) {
+            _importingSource.value = null
+        }
+    }
+
+    fun setImportingSource(source: String?) {
+        _importingSource.value = source
+    }
+
     /**
      * Start importing a playlist from URL.
      * Launches a Foreground Service — the import runs independently of the UI.

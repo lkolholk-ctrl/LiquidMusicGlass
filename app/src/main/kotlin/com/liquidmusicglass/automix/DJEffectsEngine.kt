@@ -104,24 +104,27 @@ object DJEffectsEngine {
     }
 
     /**
-     * FILTER_SWEEP — имитация low-pass фильтра.
-     * A уходит экспоненциально, B нарастает экспоненциально.
+     * FILTER_SWEEP — сам муффл делает реальный LP в [DjFxAudioProcessor].
+     * Громкость уходящего держится почти в полный рост до середины (съезд
+     * фильтра ДОЛЖЕН быть слышен) и гаснет к концу — как в JUCE-версии.
      */
     private fun filterSweepCurve(p: Float): Pair<Float, Float> {
-        val fadeOut = (1f - p).let { it * it }
-        val fadeIn = p * p
-        return fadeOut to fadeIn
+        val outPhase = ((p - 0.45f) / 0.55f).coerceIn(0f, 1f)
+            .let { it * it * (3f - 2f * it) }
+        val fadeOut = cos(outPhase * PI.toFloat() / 2f)
+        val fadeIn = sin((p * p * (3f - 2f * p)) * PI.toFloat() / 2f)
+        return fadeOut.coerceIn(0f, 1f) to fadeIn.coerceIn(0f, 1f)
     }
 
     /**
-     * ECHO_OUT — трек A затухает с пульсацией (имитация delay/echo).
+     * ECHO_OUT — реальные повторы делает [DjFxAudioProcessor]; сухой уходящий
+     * гаснет раньше обычного, его место занимают эхо (не тишина).
      */
     private fun echoOutCurve(p: Float): Pair<Float, Float> {
-        val envelope = (1f - p)
-        val pulse = 1f + 0.1f * sin(p * 8f * PI.toFloat()) * envelope
-        val fadeOut = (envelope * pulse).coerceIn(0f, 1f)
-        val fadeIn = sin(p * PI.toFloat() / 2f)
-        return fadeOut to fadeIn
+        val outPhase = (p * 1.4f).coerceIn(0f, 1f).let { it * it * (3f - 2f * it) }
+        val fadeOut = cos(outPhase * PI.toFloat() / 2f)
+        val fadeIn = sin((p * p * (3f - 2f * p)) * PI.toFloat() / 2f)
+        return fadeOut.coerceIn(0f, 1f) to fadeIn.coerceIn(0f, 1f)
     }
 
     /**
@@ -149,23 +152,47 @@ object DJEffectsEngine {
         toPlayer.volume = 0f
         toPlayer.play()
 
-        for (step in 0..steps) {
-            val progress = (step.toFloat() / steps.toFloat()).coerceIn(0f, 1f)
+        // Реальный DSP перехода (LP-свип / эхо) — DjFxAudioProcessor в цепочке
+        // уходящего плеера читает прогресс/громкость из DjStreamFx.
+        com.liquidmusicglass.engine.DjStreamFx.begin(transitionType)
+        try {
+            for (step in 0..steps) {
+                val progress = (step.toFloat() / steps.toFloat()).coerceIn(0f, 1f)
 
-            val (rawFadeOut, fadeIn) = getCrossfadeCurve(progress, transitionType)
+                val (rawFadeOut, fadeIn) = getCrossfadeCurve(progress, transitionType)
 
-            // Выходящий трек дополнительно притушивается:
-            // pow с показателем >1 ускоряет затухание, не ломая монотонность.
-            val fadeOut = rawFadeOut.coerceIn(0f, 1f).pow(bias)
+                // Выходящий трек дополнительно притушивается:
+                // pow с показателем >1 ускоряет затухание, не ломая монотонность.
+                // Для 4/5 bias не применяем: их кривые уже согласованы с DSP
+                // (свип должен быть слышен, эхо кормится от сухого сигнала).
+                val fadeOut = if (transitionType == 4 || transitionType == 5)
+                    rawFadeOut.coerceIn(0f, 1f)
+                else
+                    rawFadeOut.coerceIn(0f, 1f).pow(bias)
 
-            fromPlayer.volume = (fadeOut * masterVolume).coerceIn(0f, 1f)
-            toPlayer.volume = (fadeIn * masterVolume).coerceIn(0f, 1f)
+                val outVol = (fadeOut * masterVolume).coerceIn(0f, 1f)
+                fromPlayer.volume = outVol
+                toPlayer.volume = (fadeIn * masterVolume).coerceIn(0f, 1f)
+                com.liquidmusicglass.engine.DjStreamFx.update(progress, outVol)
 
-            delay(stepMs)
+                delay(stepMs)
+            }
+
+            toPlayer.volume = masterVolume
+
+            if (transitionType == 5) {
+                // ECHO_OUT: хвост повторов дозвучивает поверх нового трека.
+                // Dry уходящего глушит сам процессор (MODE_ECHO_TAIL), поэтому
+                // плеер держим на громкости — звенят только эхо, ~2.2с.
+                com.liquidmusicglass.engine.DjStreamFx.beginTail()
+                fromPlayer.volume = (0.9f * masterVolume).coerceIn(0f, 1f)
+                delay(2400)
+            }
+            fromPlayer.volume = 0f
+        } finally {
+            // Любой исход (в т.ч. отмена ручным скипом) — эффекты выключены.
+            com.liquidmusicglass.engine.DjStreamFx.stop()
         }
-
-        fromPlayer.volume = 0f
-        toPlayer.volume = masterVolume
     }
 
     /**

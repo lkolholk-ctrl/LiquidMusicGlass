@@ -146,6 +146,21 @@ object IcmRepository {
             ?: emptyList()
     }
 
+    // ── Кэш поиска: дока ICM рекомендует кешировать /search на 60с по ключу
+    // (query+region). Тап по чипу истории / повторный ввод того же запроса =
+    // мгновенная выдача без сети и без rate-limit-hit. LRU на 30 записей. ──
+    private class CachedSearch(val response: IcmSearchResponse, val at: Long)
+    private val searchCache = object : LinkedHashMap<String, CachedSearch>(32, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CachedSearch>) =
+            size > 30
+    }
+    private const val SEARCH_CACHE_TTL_MS = 60_000L
+
+    /** Сброс кэша поиска — нужен при смене hide_explicit: старая выдача нефильтрованная. */
+    fun clearSearchCache() {
+        synchronized(searchCache) { searchCache.clear() }
+    }
+
     /**
      * Search — all results (tracks + albums + artists).
      * @param query Search string
@@ -161,13 +176,25 @@ object IcmRepository {
     ): IcmSearchResponse? {
         val trimmed = query.trim()
         if (trimmed.length < 2) return null
+
+        val cacheKey = "${region ?: ""}|${source ?: ""}|${limit ?: 0}|${trimmed.lowercase()}"
+        synchronized(searchCache) {
+            searchCache[cacheKey]?.let {
+                if (System.currentTimeMillis() - it.at < SEARCH_CACHE_TTL_MS) return it.response
+            }
+        }
+
         val result = api.search(trimmed, region, source, limit)
         result.exceptionOrNull()?.let {
             _lastException = it as? Exception
             _lastError.value = it.message
             _lastApiException.value = it as? IcmApiException
         }
-        return result.getOrNull()
+        return result.getOrNull()?.also { resp ->
+            synchronized(searchCache) {
+                searchCache[cacheKey] = CachedSearch(resp, System.currentTimeMillis())
+            }
+        }
     }
 
     /**
@@ -678,7 +705,11 @@ object IcmRepository {
             android.util.Log.w("IcmRepository", "Failed to read Room exclude list: ${e.message}")
             emptyList()
         }
-        val mergedExclude = ((exclude ?: emptyList()) + roomExclude).distinct()
+        // Кап 150 id: roomExclude (до 200) сводил на нет кап 80 у вызывающего и
+        // раздувал query-string до ~6КБ (риск 414/обрезки на прокси). distinct
+        // держит порядок → приоритет у caller-списка (свежие эксклюды очереди),
+        // room-история добивает остаток.
+        val mergedExclude = ((exclude ?: emptyList()) + roomExclude).distinct().take(150)
 
         val result = api.getWaveNext(
             seedTrackId,
@@ -731,8 +762,35 @@ object IcmRepository {
             _lastException = it as? Exception
             _lastError.value = it.message
         }
-        return result.getOrNull()?.ok == true
+        // Успех = HTTP 2xx. Поле `ok` в доке не описано — не завязываемся.
+        return result.isSuccess
     }
+
+    // ── Доставка сигналов волны для оффлайн-очереди (WaveSignalQueue) ──
+    // DELIVERED — сервер ответил (сигнал учтён/проигнорирован — неважно);
+    // RETRY     — сеть/5xx/429/авторизация: сигнал стоит докинуть позже;
+    // REJECTED  — постоянная 4xx (битый запрос): копить бессмысленно.
+    enum class DeliveryResult { DELIVERED, RETRY, REJECTED }
+
+    private fun classifyDelivery(result: Result<*>): DeliveryResult {
+        if (result.isSuccess) return DeliveryResult.DELIVERED
+        val e = result.exceptionOrNull()
+        return if (e is IcmApiException &&
+            e.code in 400..499 && e.code !in setOf(401, 403, 408, 429)
+        ) DeliveryResult.REJECTED else DeliveryResult.RETRY
+    }
+
+    suspend fun deliverWaveFeedback(feedbackType: String, value: String): DeliveryResult =
+        classifyDelivery(api.sendWaveFeedback(feedbackType, value))
+
+    suspend fun deliverWavePlayback(
+        trackId: String,
+        playedSeconds: Double,
+        totalSeconds: Double?,
+        completed: Boolean?,
+        skipped: Boolean?
+    ): DeliveryResult =
+        classifyDelivery(api.logWavePlayback(trackId, playedSeconds, totalSeconds, completed, skipped))
 
     /**
      * Reset wave history and preferences.
@@ -810,27 +868,11 @@ object IcmRepository {
      * Get user's preferred stream quality.
      * Requires linked user with active subscription.
      */
-    suspend fun getUserQuality(): IcmUserQualityResponse? {
-        val result = api.getUserQuality()
-        result.exceptionOrNull()?.let {
-            _lastException = it as? Exception
-            _lastError.value = it.message
-        }
-        return result.getOrNull()
-    }
 
     /**
      * Set user's preferred stream quality.
      * Requires linked user with active subscription.
      */
-    suspend fun setUserQuality(quality: String): IcmUserQualityResponse? {
-        val result = api.setUserQuality(quality)
-        result.exceptionOrNull()?.let {
-            _lastException = it as? Exception
-            _lastError.value = it.message
-        }
-        return result.getOrNull()
-    }
 
     /**
      * Get current user preferences (quality, region, hide_explicit, source).
@@ -1065,15 +1107,17 @@ object IcmRepository {
 
         if (exception is IcmAsyncPendingException) {
             val ready = pollAsyncJobFull(exception.pending, maxPollAttempts, pollIntervalMs)
-            return ready?.let {
+            // Поля async-модели опциональные (pending-ответы их не содержат);
+            // сюда доходит только ready с url — но маппим null-безопасно.
+            return ready?.takeIf { it.url != null }?.let {
                 IcmTrackResponse(
-                    trackId = it.trackId,
-                    fileId = it.fileId,
-                    source = it.source,
-                    quality = it.quality,
+                    trackId = it.trackId ?: trackId,
+                    fileId = it.fileId ?: "",
+                    source = it.source ?: "",
+                    quality = it.quality ?: "",
                     artistId = it.artistId,
-                    url = it.url,
-                    expiresAt = it.expiresAt
+                    url = it.url!!,
+                    expiresAt = it.expiresAt ?: (System.currentTimeMillis() / 1000 + 540)
                 )
             }
         }
@@ -1091,18 +1135,27 @@ object IcmRepository {
         intervalMs: Long
     ): String? {
         var attempts = 0
+        var consecutiveErrors = 0
         while (attempts < maxAttempts) {
             if (IcmRateGate.isBanned()) return null
             delay(pending.pollAfterSeconds.coerceAtLeast(1) * 1000L)
             val pollResult = api.pollAsyncJob(pending.jobId)
             pollResult.getOrNull()?.let { ready ->
-                if (ready.status == "ready") {
+                consecutiveErrors = 0
+                if (ready.status == "ready" && ready.url != null) {
                     return ready.url
                 }
+                // status=pending → просто ждём следующий полл (раньше
+                // обязательные поля модели роняли парсер на pending-ответе,
+                // и «холодные» треки (202) не стартовали вообще).
             }
             pollResult.exceptionOrNull()?.let {
-                _lastError.value = "Poll failed: ${it.message}"
-                return null
+                // Единичная ошибка полла — НЕ фатал (сеть моргнула): ретраим,
+                // фатал только после 3 подряд.
+                if (++consecutiveErrors >= 3) {
+                    _lastError.value = "Poll failed: ${it.message}"
+                    return null
+                }
             }
             attempts++
         }
@@ -1116,18 +1169,23 @@ object IcmRepository {
         intervalMs: Long
     ): IcmAsyncTrackReady? {
         var attempts = 0
+        var consecutiveErrors = 0
         while (attempts < maxAttempts) {
             if (IcmRateGate.isBanned()) return null
             delay(pending.pollAfterSeconds.coerceAtLeast(1) * 1000L)
             val pollResult = api.pollAsyncJob(pending.jobId)
             pollResult.getOrNull()?.let { ready ->
-                if (ready.status == "ready") {
+                consecutiveErrors = 0
+                if (ready.status == "ready" && ready.url != null) {
                     return ready
                 }
+                // pending → ждём дальше
             }
             pollResult.exceptionOrNull()?.let {
-                _lastError.value = "Poll failed: ${it.message}"
-                return null
+                if (++consecutiveErrors >= 3) {
+                    _lastError.value = "Poll failed: ${it.message}"
+                    return null
+                }
             }
             attempts++
         }
@@ -1147,9 +1205,10 @@ object IcmRepository {
         partnerId: String,
         partnerUserId: String,
         redirectUri: String,
-        state: String
+        state: String,
+        appName: String? = null
     ): String {
-        return api.buildAccountLinkUrl(partnerId, partnerUserId, redirectUri, state)
+        return api.buildAccountLinkUrl(partnerId, partnerUserId, redirectUri, state, appName)
     }
 
     /**

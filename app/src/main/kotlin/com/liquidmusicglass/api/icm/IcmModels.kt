@@ -74,7 +74,8 @@ data class IcmRateLimits(
     val search: IcmRateLimit? = null,
     val stream: IcmRateLimit? = null,
     @SerialName("session_issue") val sessionIssue: IcmRateLimit? = null,
-    val default: IcmRateLimit? = null
+    val default: IcmRateLimit? = null,
+    @SerialName("playlists") val playlists: IcmRateLimit? = null
 )
 
 @Serializable
@@ -152,10 +153,7 @@ data class IcmSearchItem(
 
     /** VK returns duration in seconds, Apple in milliseconds. Normalized to ms. */
     val durationMs: Long
-        get() {
-            val d = duration ?: return 0L
-            return if (d < 1000L) d * 1000L else d
-        }
+        get() = normalizeDurationMs(duration, source)
 
     val isTrack: Boolean
         get() = !isArtist && !isAlbum
@@ -230,10 +228,7 @@ data class IcmAlbumTrack(
     val source: String? = null
 ) {
     val durationMs: Long
-        get() {
-            val d = duration ?: return 0L
-            return if (d < 1000L) d * 1000L else d
-        }
+        get() = normalizeDurationMs(duration, source)
 }
 
 // ─── Artist ───
@@ -289,10 +284,7 @@ data class IcmArtistSong(
 
     /** VK returns duration in seconds, Apple in milliseconds. Normalized to ms. */
     val durationMs: Long
-        get() {
-            val d = duration ?: return 0L
-            return if (d < 1000L) d * 1000L else d
-        }
+        get() = normalizeDurationMs(duration, source)
 }
 
 @Serializable
@@ -359,8 +351,14 @@ data class IcmTrackMeta(
     val title: String = "",
     val artist: String = "",
     val cover: String = "",
-    val duration: Long = 0L
-)
+    val duration: Long = 0L,
+    // Жанр — для ленивого резолва в жанровых чипах волны (more/less_genre).
+    @SerialName("genre") val genre: String? = null
+) {
+    /** Apple шлёт мс, VK — секунды (у модели нет source — фолбэк по величине). */
+    val durationMs: Long
+        get() = normalizeDurationMs(duration, null)
+}
 
 // ─── Playlist ───
 
@@ -393,8 +391,9 @@ data class IcmPlaylistTrack(
     @SerialName("is_explicit") val isExplicit: Boolean = false,
     @SerialName("isCustom") val isCustom: Boolean = false
 ) {
+    // У модели нет поля source — нормализация по величине (фолбэк).
     val durationMs: Long
-        get() = if (duration < 1000L) duration * 1000L else duration
+        get() = normalizeDurationMs(duration, null)
 }
 
 // ─── Cover Sign ───
@@ -464,12 +463,9 @@ data class IcmBatchTrackMetaItem(
     val isError: Boolean
         get() = error != null
 
-    /** VK/secondary tracks return duration in seconds, Apple in ms. Normalized to ms. */
+    /** У модели нет поля source — нормализация по величине (фолбэк). */
     val durationMs: Long
-        get() {
-            val d = duration ?: return 0L
-            return if (d < 1000L) d * 1000L else d
-        }
+        get() = normalizeDurationMs(duration, null)
 }
 
 // ─── Async Track ───
@@ -479,20 +475,28 @@ data class IcmAsyncTrackPending(
     @SerialName("job_id") val jobId: String,
     val status: String = "pending",
     @SerialName("poll_url") val pollUrl: String? = null,
-    @SerialName("poll_after_seconds") val pollAfterSeconds: Int = 3
+    // Дока: поле называется poll_after (раньше стояло poll_after_seconds —
+    // никогда не биндилось, интервал молча падал в дефолт).
+    @SerialName("poll_after") val pollAfterSeconds: Int = 3
 )
 
+/**
+ * Ответ полла /track/job/{id}. ВСЕ поля опциональные: pending-ответ содержит
+ * только status (+job_id), ready-ответ — «как обычный /track» БЕЗ job_id
+ * (дока). Раньше обязательные поля роняли парсер на первом же pending-полле,
+ * цикл считал это фаталом — «холодные» треки (202) не стартовали вообще.
+ */
 @Serializable
 data class IcmAsyncTrackReady(
-    @SerialName("job_id") val jobId: String,
-    val status: String = "ready",
-    @SerialName("track_id") val trackId: String,
-    @SerialName("file_id") val fileId: String,
-    val source: String,
-    val quality: String,
+    @SerialName("job_id") val jobId: String? = null,
+    val status: String = "pending",
+    @SerialName("track_id") val trackId: String? = null,
+    @SerialName("file_id") val fileId: String? = null,
+    val source: String? = null,
+    val quality: String? = null,
     @SerialName("artist_id") val artistId: String? = null,
-    val url: String,
-    @SerialName("expires_at") val expiresAt: Long
+    val url: String? = null,
+    @SerialName("expires_at") val expiresAt: Long? = null
 )
 
 // ─── Account Linking ───
@@ -525,7 +529,11 @@ fun IcmSearchItem.toTrack(uri: String? = null): com.liquidmusicglass.engine.Trac
         durationMs = durationMs,
         albumId = collectionId?.hashCode()?.toLong() ?: id.hashCode().toLong(),
         coverUrl = cover?.replace("1000x1000", "600x600") ?: cover,
-        artists = artists,
+        // Сервер часто шлёт artistId скаляром при ПУСТОМ списке artists —
+        // без фолбэка артист в плеере был некликабелен для треков из поиска.
+        artists = artists.ifEmpty {
+            artistId?.let { listOf(IcmMiniArtist(id = it, name = displayArtist)) } ?: emptyList()
+        },
         isExplicit = isExplicit,
         isCustom = isCustom,
         source = source
@@ -542,7 +550,10 @@ fun IcmAlbumTrack.toTrack(): com.liquidmusicglass.engine.Track {
         durationMs = durationMs,
         albumId = collectionId?.hashCode()?.toLong() ?: id.hashCode().toLong(),
         coverUrl = cover.replace("1000x1000", "600x600"),
-        artists = emptyList(),
+        // artistId есть в модели — прокидываем, чтобы артист был кликабелен
+        artists = if (artistId != null)
+            listOf(IcmMiniArtist(id = artistId, name = artist))
+        else emptyList(),
         isExplicit = isExplicit,
         isCustom = isCustom,
         source = source
@@ -582,6 +593,26 @@ fun IcmPlaylistTrack.toTrack(): com.liquidmusicglass.engine.Track {
     )
 }
 
+
+/**
+ * Нормализация длительности в мс. По доке: Apple шлёт МИЛЛИСЕКУНДЫ,
+ * VK/secondary — СЕКУНДЫ. Старая эвристика «< 1000 значит секунды» ломала
+ * длинные VK-треки (≥ 1000с ≈ 16.7 мин трактовались как миллисекунды —
+ * «трек длиной одну секунду»). Порог 30 000 у VK: любой сет короче 8+ часов
+ * в секундах, а в мс это было бы < 30-секундным треком.
+ */
+internal fun normalizeDurationMs(raw: Long?, source: String?): Long {
+    val d = raw ?: return 0L
+    val s = source?.lowercase()
+    val vkLike = s != null && (s.startsWith("vk") || s.startsWith("secondary"))
+    return when {
+        vkLike && d < 30_000L -> d * 1000L
+        vkLike -> d
+        d < 1000L -> d * 1000L   // фолбэк для неизвестного источника
+        else -> d
+    }
+}
+
 // ─── Error Codes ───
 
 object IcmErrorCodes {
@@ -601,6 +632,17 @@ object IcmErrorCodes {
     const val EARLY_ACCESS = "early_access"
     const val SUBSCRIPTION_REQUIRED = "subscription_required"
     const val USER_NOT_LINKED = "user_not_linked"
+    // Дополнено по доке (аудит): auth/regions/email-link
+    const val S2S_ONLY = "s2s_only"
+    const val TOKEN_REVOKED = "token_revoked"
+    const val PARTNER_USER_REQUIRED = "partner_user_required"
+    const val INVALID_API_KEY_FORMAT = "invalid_api_key_format"
+    const val INVALID_REGION = "invalid_region"
+    const val REGION_NOT_ALLOWED_BY_PARTNER = "region_not_allowed_by_partner"
+    const val INVALID_NONCE = "invalid_nonce"
+    const val INVALID_OTP = "invalid_otp"
+    const val NONCE_LOCKED = "nonce_locked"
+    const val NONCE_BELONGS_TO_ANOTHER_PARTNER = "nonce_belongs_to_another_partner"
 }
 
 // ─── Search Source ───
@@ -626,17 +668,6 @@ object IcmStreamQuality {
 
 // ─── Personal Cabinet (/me/*) ───
 
-@Serializable
-data class IcmUserQualityRequest(
-    @SerialName("quality") val quality: String
-)
-
-@Serializable
-data class IcmUserQualityResponse(
-    @SerialName("quality") val quality: String,
-    @SerialName("max_allowed") val maxAllowed: String? = null,
-    @SerialName("source") val source: String? = null
-)
 
 @Serializable
 data class IcmUserPreferences(
@@ -683,10 +714,7 @@ data class IcmWaveTrack(
     val source: String? = null
 ) {
     val durationMs: Long
-        get() {
-            val d = duration ?: return 0L
-            return if (d < 1000L) d * 1000L else d
-        }
+        get() = normalizeDurationMs(duration, source)
 
     fun toTrack(): com.liquidmusicglass.engine.Track {
         return com.liquidmusicglass.engine.Track(
@@ -698,6 +726,11 @@ data class IcmWaveTrack(
             durationMs = durationMs,
             albumId = collectionId?.hashCode()?.toLong() ?: id.hashCode().toLong(),
             coverUrl = cover?.replace("1000x1000", "600x600"),
+            // artistId сервер отдаёт — без него артист в FullPlayer был
+            // некликабельным для ВСЕХ треков волны (главный сценарий).
+            artists = if (artistId != null)
+                listOf(IcmMiniArtist(id = artistId, name = artist))
+            else emptyList(),
             isExplicit = isExplicit,
             isCustom = isCustom,
             source = source
@@ -756,10 +789,7 @@ data class IcmLibraryTrack(
 ) {
     /** VK/secondary return duration in seconds, Apple in milliseconds. Normalized to ms. */
     val durationMs: Long
-        get() {
-            val d = duration ?: return 0L
-            return if (d < 1000L) d * 1000L else d
-        }
+        get() = normalizeDurationMs(duration, source)
 }
 
 @Serializable
@@ -956,15 +986,12 @@ data class IcmHomeItem(
 
     /** VK returns duration in seconds, Apple in milliseconds. Normalized to ms. */
     val durationMs: Long
-        get() {
-            val d = duration ?: return 0L
-            return if (d < 1000) d * 1000L else d
-        }
+        get() = normalizeDurationMs(duration, source)
 }
 
 /**
  * Full home screen response — a list of content blocks.
- * This is what the backend returns for GET /api/partner/home (if available)
+ * This is what синтетический home-контент: собирается КЛИЕНТОМ из /search-запросов (эндпоинта /home в партнёрском API нет)
  * or what we construct from multiple API calls.
  */
 @Serializable

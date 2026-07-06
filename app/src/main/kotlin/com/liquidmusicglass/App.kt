@@ -44,6 +44,9 @@ class App : Application(), ImageLoaderFactory {
             // первом экране не выходим пачкой в TLS-handshake (в ANR-дампе обложки
             // висели именно там). maxRequestsPerHost=4 — на один CDN.
             .dispatcher(Dispatcher().apply { maxRequests = 6; maxRequestsPerHost = 4 })
+            // Короткий keep-alive: долгоживущие сокеты тихо умирают при
+            // пересоздании маршрута — не держим их дольше минуты.
+            .connectionPool(okhttp3.ConnectionPool(4, 60, TimeUnit.SECONDS))
             .build()
     }
 
@@ -53,6 +56,51 @@ class App : Application(), ImageLoaderFactory {
             coverHttpClient.dispatcher.cancelAll()
             coverHttpClient.connectionPool.evictAll()
         } catch (_: Throwable) {}
+    }
+
+    private var netReconnectJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * Application-level колбэк дефолтной сети: живёт весь срок процесса
+     * (в отличие от Activity). Смена сети → NetworkVitality оживляет пулы;
+     * затем с дебаунсом 1.5с один ресинк: профиль, лайки, очередь сигналов
+     * волны, ретрай застрявшего плеера.
+     */
+    private fun registerAppNetworkCallback() {
+        val cm = getSystemService(android.net.ConnectivityManager::class.java) ?: return
+        try {
+            cm.registerDefaultNetworkCallback(object : android.net.ConnectivityManager.NetworkCallback() {
+                private var currentNetwork: android.net.Network? = null
+
+                override fun onAvailable(network: android.net.Network) {
+                    val isNew = currentNetwork != network
+                    currentNetwork = network
+                    if (isNew) {
+                        com.liquidmusicglass.engine.NetworkVitality.onDefaultNetworkChanged()
+                    }
+                    // Debounce: флапающая сеть шлёт onAvailable пачками — ждём
+                    // 1.5с стабильности и делаем ОДИН ресинк, а не залп.
+                    netReconnectJob?.cancel()
+                    netReconnectJob = appScope.launch {
+                        kotlinx.coroutines.delay(1500)
+                        if (IcmAuthRepository.isLoggedIn.value) {
+                            runCatching { IcmAuthRepository.fetchUserData() }
+                            runCatching {
+                                LibraryRepository.getInstance(this@App).syncWithCloud()
+                            }
+                        }
+                        runCatching { com.liquidmusicglass.api.icm.WaveSignalQueue.drain() }
+                        PlayerController.retryCurrentIfStalled(this@App)
+                    }
+                }
+
+                override fun onLost(network: android.net.Network) {
+                    if (currentNetwork == network) currentNetwork = null
+                }
+            })
+        } catch (_: Exception) {
+            // отдельные прошивки кидают исключение на лимит колбэков — не падаем
+        }
     }
 
     override fun newImageLoader(): ImageLoader {
@@ -82,12 +130,30 @@ class App : Application(), ImageLoaderFactory {
         val logDir = File(filesDir, "crash_logs").apply { mkdirs() }
         Fishnet.init(this, logDir.absolutePath) // Native/ANR крэши
 
+        // Ловушка зависаний UI: Fishnet-дампы ANR приходят БЕЗ стека main —
+        // вачдог сам пишет полный Java-дамп в crash_logs/ui_freeze_*.txt,
+        // когда main-лупер молчит > 6с (полевой кейс: тап по поиску).
+        com.liquidmusicglass.debug.UiWatchdog.start(this)
+
         // Initialize file logger for IcmApi (works even when system logcat is encrypted)
         IcmApiFileLogger.init(this)
         IcmApiFileLogger.log("I", "App", "App started, IcmApiFileLogger initialized at ${IcmApiFileLogger.getLogPath()}")
 
+        // Удалённая карта аудио-причуд — ДО AppSettings: auto-режим выхода должен
+        // резолвиться уже с учётом кэша карты (сетевое обновление уйдёт в фон само).
+        com.liquidmusicglass.engine.automix.RemoteQuirks.preload(this)
+        com.liquidmusicglass.engine.automix.AudioTelemetry.init(this)
+
         // Initialize AppSettings (SharedPreferences) — лёгкая, можно на main
         AppSettings.init(this)
+
+        // Оффлайн-очередь сигналов волны (wave/feedback + wave/playback):
+        // недоставленное копится и досылается (drain — в фоне ниже).
+        com.liquidmusicglass.api.icm.WaveSignalQueue.init(this)
+
+        // Haptic Music: тактильные удары в такт музыке (цикл живёт только пока
+        // тумблер включён и музыка играет — иначе спит, батарею не тратит)
+        com.liquidmusicglass.engine.automix.HapticMusicEngine.init(this)
 
         // Player settings (DataStore) — лёгкая инициализация
         com.liquidmusicglass.engine.PlayerSettings.init(this)
@@ -104,8 +170,31 @@ class App : Application(), ImageLoaderFactory {
         // Реактивный детектор энергосбережения (упрощает эффекты, не выключает)
         com.liquidmusicglass.ui.PowerSaveMonitor.init(this)
 
+        // Классификация железа: на слабых устройствах AGSL-эффекты работают в
+        // облегчённом режиме (меньше октав дыма, 30 Гц клоки)
+        com.liquidmusicglass.ui.DeviceTier.init(this)
+
         // Initialize PlayerController — просто сохраняет context
         PlayerController.init(this)
+
+        // ── Сетевая живучесть ────────────────────────────────────────────
+        // Оживители: принудительный evict пулов ВСЕХ HTTP-клиентов. Дёргаются
+        // при смене дефолтной сети и при fail-streak (NetworkVitality).
+        com.liquidmusicglass.engine.NetworkVitality.registerReviver("icm") {
+            com.liquidmusicglass.api.icm.IcmApi.getInstance().evictConnections()
+        }
+        com.liquidmusicglass.engine.NetworkVitality.registerReviver("covers") {
+            evictImageConnections()
+        }
+        com.liquidmusicglass.engine.NetworkVitality.registerReviver("auth") {
+            IcmAuthRepository.evictConnections()
+        }
+
+        // Колбэк дефолтной сети — на уровне ПРИЛОЖЕНИЯ (раньше жил в
+        // MainActivity и умирал вместе с ней: слушаешь с погашенным экраном —
+        // эвикта и ресинка нет). Транспорт-агностичен: реагирует на смену
+        // дефолтной сети, чем бы она ни была — тип транспорта не спрашиваем.
+        registerAppNetworkCallback()
 
         // Всё тяжёлое — в IO корутину
         appScope.launch {
@@ -128,7 +217,28 @@ class App : Application(), ImageLoaderFactory {
             if (!savedKey.isNullOrBlank() && savedKey.startsWith("pk_")) {
                 IcmRepository.init(savedKey, IcmAuthRepository.ensurePartnerUserId())
                 IcmAuthRepository.getSessionToken()?.let { IcmRepository.setSessionToken(it) }
+
+                // Дослать сигналы волны, не доставленные в прошлой сессии,
+                // и подтянуть серверные лайки в локальное избранное (синк
+                // раньше жил только на открытии вкладки Library).
+                runCatching { com.liquidmusicglass.api.icm.WaveSignalQueue.drain() }
+                if (IcmAuthRepository.isLoggedIn.value) {
+                    runCatching { LibraryRepository.getInstance(this@App).syncWithCloud() }
+                }
             }
+        }
+    }
+
+    /**
+     * Давление на память: сбрасываем крупные in-memory кэши (обложки Coil —
+     * до 30% heap, кэш лирики), чтобы LMK не выбивал процесс с играющей
+     * музыкой из фона. Диск-кэши не трогаем — обложки перечитаются с диска.
+     */
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= TRIM_MEMORY_UI_HIDDEN) {
+            runCatching { coil.Coil.imageLoader(this).memoryCache?.clear() }
+            runCatching { com.liquidmusicglass.engine.LyricsParser.trimCache() }
         }
     }
 }

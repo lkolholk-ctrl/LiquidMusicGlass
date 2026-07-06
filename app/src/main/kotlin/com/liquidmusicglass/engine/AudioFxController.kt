@@ -107,6 +107,21 @@ object AudioFxController {
     private val _stereoWidth = MutableStateFlow(1f)         // 0..2 (1 = норма)
     val stereoWidth: StateFlow<Float> = _stereoWidth
 
+    // ── Warm Sound: «звук как на Track» для быстрых выходов ────────────────
+    // Полевое наблюдение: на Track (системный AudioTrack) звук «басистее и
+    // объёмнее» — это вендорская DSP (Honor Sound / тюнинг динамиков), которая
+    // живёт в системном тракте; быстрые пути (AAudio/OpenSL) летят мимо неё.
+    // Warm — наш аналог ПОВЕРХ пользовательских настроек: bass-shelf +6 дБ на
+    // 160 Гц (панч-зона, которую ДИНАМИКИ телефона реально воспроизводят —
+    // шельф на 90 Гц в динамиках не слышен вообще, «сухие верхушки»),
+    // ширина x1.25 и тонкомпенсация (loudness) как у вендоров. На режиме
+    // Track (6) отключается сам — иначе бас двоился бы с вендорской DSP.
+    private val _warmEnabled = MutableStateFlow(false)
+    val warmEnabled: StateFlow<Boolean> = _warmEnabled
+    private const val WARM_BASS_DB = 6.0f
+    private const val WARM_BASS_FREQ = 160f
+    private const val WARM_WIDTH_MULT = 1.25f
+
     private val _compEnabled = MutableStateFlow(false)
     val compEnabled: StateFlow<Boolean> = _compEnabled
     private val _compPreset = MutableStateFlow(1)           // Medium
@@ -147,6 +162,7 @@ object AudioFxController {
     private val K_LIM_ON = booleanPreferencesKey("lim_on")
     private val K_LIM_THRESH = floatPreferencesKey("lim_thresh")
     private val K_LIM_RELEASE = floatPreferencesKey("lim_release")
+    private val K_WARM = booleanPreferencesKey("warm_on")
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var dataStore: DataStore<Preferences>? = null
@@ -162,6 +178,11 @@ object AudioFxController {
             runCatching { apply(ds.data.first()) }
             applyToEngine()
             refreshSystemVolume()
+        }
+        // Warm зависит от режима выхода (на Track отключается сам) — при смене
+        // режима переотправляем бас/ширину с учётом нового состояния.
+        scope.launch {
+            AppSettings.audioCompatMode.collect { pushBass(); pushWidth(); pushLoudness() }
         }
         // Следим за системной громкостью (для loudness-компенсации).
         runCatching {
@@ -193,6 +214,7 @@ object AudioFxController {
         _limEnabled.value = p[K_LIM_ON] ?: true
         _limThreshold.value = (p[K_LIM_THRESH] ?: -1f).coerceIn(LIM_THRESH_MIN_DB, LIM_THRESH_MAX_DB)
         _limRelease.value = (p[K_LIM_RELEASE] ?: 50f).coerceIn(LIM_RELEASE_MIN_MS, LIM_RELEASE_MAX_MS)
+        _warmEnabled.value = p[K_WARM] ?: false
     }
 
     private fun parseGains(csv: String?): List<Float> {
@@ -213,11 +235,45 @@ object AudioFxController {
         e.fxSetPreampGainDb(preampDb())
         e.setEqEnabled(_eqEnabled.value)
         e.setEqBands(_eqGains.value.toFloatArray())
-        e.fxSetBassBoost(_bassEnabled.value, _bassFreq.value, _bassGain.value)
-        e.fxSetLoudnessEnabled(_loudnessEnabled.value)
-        e.fxSetStereoWidth(_stereoWidth.value)
+        pushBass()
+        pushLoudness()
+        pushWidth()
         e.fxSetCompressor(_compEnabled.value, _compThreshold.value, _compRatio.value, _compAttack.value, _compRelease.value)
         e.fxSetLimiter(_limEnabled.value, _limThreshold.value, _limRelease.value)
+    }
+
+    // ── Warm-оверлей: эффективные бас/ширина = пользовательские + Warm ──────
+    private fun warmActive(): Boolean =
+        _warmEnabled.value && AppSettings.audioCompatMode.value != 6   // не на Track
+
+    private fun pushBass() {
+        val warm = warmActive()
+        val on = _bassEnabled.value || warm
+        val freq = if (_bassEnabled.value) _bassFreq.value else WARM_BASS_FREQ
+        val gain = ((if (_bassEnabled.value) _bassGain.value else 0f) +
+            (if (warm) WARM_BASS_DB else 0f)).coerceAtMost(12f)
+        AutoMixNativeEngine.fxSetBassBoost(on, freq, gain)
+    }
+
+    private fun pushWidth() {
+        val w = if (warmActive()) _stereoWidth.value * WARM_WIDTH_MULT else _stereoWidth.value
+        AutoMixNativeEngine.fxSetStereoWidth(w.coerceIn(0f, 2f))
+    }
+
+    private fun pushLoudness() {
+        // Warm включает тонкомпенсацию (низ+верх по громкости) — часть
+        // вендорского «насыщенного» характера на обычном тракте.
+        val on = _loudnessEnabled.value || warmActive()
+        AutoMixNativeEngine.fxSetLoudnessEnabled(on)
+        if (on) refreshSystemVolume()
+    }
+
+    fun setWarmEnabled(on: Boolean) {
+        _warmEnabled.value = on
+        pushBass()
+        pushWidth()
+        pushLoudness()
+        persist { it[K_WARM] = on }
     }
 
     private fun preampDb(): Float = PREAMP_MIN_DB + (PREAMP_MAX_DB - PREAMP_MIN_DB) * _preamp01.value
@@ -275,35 +331,34 @@ object AudioFxController {
 
     fun setBassEnabled(on: Boolean) {
         _bassEnabled.value = on
-        AutoMixNativeEngine.fxSetBassBoost(on, _bassFreq.value, _bassGain.value)
+        pushBass()
         persist { it[K_BASS_ON] = on }
     }
 
     fun setBassFreq(hz: Float) {
         val v = hz.coerceIn(BASS_FREQ_MIN, BASS_FREQ_MAX)
         _bassFreq.value = v
-        AutoMixNativeEngine.fxSetBassBoost(_bassEnabled.value, v, _bassGain.value)
+        pushBass()
         persist { it[K_BASS_FREQ] = v }
     }
 
     fun setBassGain(db: Float) {
         val v = db.coerceIn(0f, 12f)
         _bassGain.value = v
-        AutoMixNativeEngine.fxSetBassBoost(_bassEnabled.value, _bassFreq.value, v)
+        pushBass()
         persist { it[K_BASS_GAIN] = v }
     }
 
     fun setLoudnessEnabled(on: Boolean) {
         _loudnessEnabled.value = on
-        AutoMixNativeEngine.fxSetLoudnessEnabled(on)
-        if (on) refreshSystemVolume()
+        pushLoudness()
         persist { it[K_LOUD_ON] = on }
     }
 
     fun setStereoWidth(w: Float) {
         val v = w.coerceIn(0f, 2f)
         _stereoWidth.value = v
-        AutoMixNativeEngine.fxSetStereoWidth(v)
+        pushWidth()
         persist { it[K_WIDTH] = v }
     }
 

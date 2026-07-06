@@ -80,11 +80,25 @@ object IcmAuthRepository {
     private var prefs: SharedPreferences? = null
     private var appContext: Context? = null
 
+    /** Вычистить пул соединений (смена сети/fail-streak — см. NetworkVitality).
+     *  Только evict, БЕЗ cancelAll: обрывать выпуск токена на полпути нельзя. */
+    fun evictConnections() {
+        try {
+            httpClient.connectionPool.evictAll()
+        } catch (_: Throwable) {}
+    }
+
     private val httpClient by lazy {
         OkHttpClient.Builder()
             .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
             .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
             .writeTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+            // Потолок всего вызова: 3 ретрая интерсептора с бэкоффом не должны
+            // держать выпуск токена дольше 45с при мёртвой сети.
+            .callTimeout(45, java.util.concurrent.TimeUnit.SECONDS)
+            // Короткий keep-alive: долгоживущие сокеты тихо умирают при
+            // пересоздании маршрута — не держим их дольше минуты.
+            .connectionPool(okhttp3.ConnectionPool(3, 60, java.util.concurrent.TimeUnit.SECONDS))
             // Единая политика ретраев — только наш интерсептор (без двойных повторов).
             .retryOnConnectionFailure(false)
             .addInterceptor { chain ->
@@ -165,8 +179,30 @@ object IcmAuthRepository {
         val api = IcmApi.getInstance()
         api.partnerUserId = _partnerUserId.value
         api.sessionToken = getSessionToken()
+        // Авто-рефреш на 401: токен живёт ~1ч, без этого через час слушания
+        // юзерские вызовы (волна/лайки) молча дохли до перезапуска приложения.
+        api.sessionRefresher = { reissueSessionToken() }
         IcmRepository.setPartnerUserId(_partnerUserId.value)
         IcmRepository.setSessionToken(getSessionToken())
+    }
+
+    /**
+     * ФОРСИРОВАННЫЙ перевыпуск session-токена (для авто-рефреша на 401):
+     * локальная валидность не важна — сервер токен уже отверг. Ключ и юзер
+     * берутся из собственного состояния. null = перевыпуск невозможен
+     * (нет ключа/юзера или сеть легла).
+     */
+    suspend fun reissueSessionToken(): String? = withContext(Dispatchers.IO) {
+        val key = getPartnerKey().takeIf { it.isNotBlank() } ?: return@withContext null
+        val userId = _partnerUserId.value ?: return@withContext null
+        val tokenData = issueSessionToken(userId, key).getOrNull() ?: return@withContext null
+        prefs?.edit()?.apply {
+            putString(KEY_TOKEN, tokenData.token)
+            putLong(KEY_TOKEN_EXPIRES, tokenData.expiresAt)
+            apply()
+        }
+        IcmRepository.setSessionToken(tokenData.token)
+        tokenData.token
     }
 
     /**
@@ -256,7 +292,10 @@ object IcmAuthRepository {
     private fun issueSessionToken(
         partnerUserId: String,
         apiKey: String,
-        hideExplicit: Boolean = false
+        // hide_explicit — флаг СЕССИИ (per-user настройка на сервере ICM):
+        // сервер фильтрует поиск/треки. Дефолт читает тумблер из настроек —
+        // так флаг уходит при ЛЮБОМ выпуске токена (логин, рестарт, 401-рефреш).
+        hideExplicit: Boolean = com.liquidmusicglass.engine.AppSettings.hideExplicit.value
     ): Result<TokenData> {
         val jsonBody = JSONObject().apply {
             put("partner_user_id", partnerUserId)
@@ -415,7 +454,10 @@ object IcmAuthRepository {
      * Issue session token after Telegram auth.
      * Must be called after setTelegramAuth with valid API key.
      */
-    suspend fun issueSessionAfterTelegramAuth(apiKey: String, hideExplicit: Boolean = false): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun issueSessionAfterTelegramAuth(
+        apiKey: String,
+        hideExplicit: Boolean = com.liquidmusicglass.engine.AppSettings.hideExplicit.value
+    ): Result<String> = withContext(Dispatchers.IO) {
         val userId = _partnerUserId.value ?: return@withContext Result.failure(IOException("No partner_user_id set"))
         val tokenResult = issueSessionToken(userId, apiKey, hideExplicit)
 

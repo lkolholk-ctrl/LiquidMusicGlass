@@ -1,15 +1,18 @@
 package com.liquidmusicglass.ui.player
 
 import android.net.Uri
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -19,32 +22,37 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.kyant.backdrop.backdrops.LayerBackdrop
-import com.kyant.backdrop.drawBackdrop
-import com.kyant.backdrop.effects.blur
-import com.kyant.backdrop.effects.lens
-import com.kyant.backdrop.effects.vibrancy
-import com.kyant.backdrop.highlight.Highlight
-import com.kyant.backdrop.shadow.InnerShadow
-import com.kyant.backdrop.shadow.Shadow
+import com.liquidmusicglass.ui.components.LikeBurstHeart
 import com.liquidmusicglass.ui.glass.AlbumArtImage
 import com.liquidmusicglass.ui.glass.pressScale
-import com.liquidmusicglass.ui.theme.LiquidTheme
+import kotlinx.coroutines.launch
+import kotlin.math.abs
 
+/**
+ * Мини-плеер (референс — Яндекс.Музыка): плоская тёмная карточка, чуть
+ * подкрашенная палитрой обложки. Без стекла/блюра — по GPU почти бесплатно.
+ *
+ * Слева обложка, по центру название+артист, справа сердечко и play/pause.
+ * Тап по карточке — развернуть полный плеер; свайп влево/вправо — трек.
+ * Показывается только на вкладках, где включают музыку (не на Wave-главной).
+ */
 @Composable
 fun MiniPlayer(
     trackTitle: String,
@@ -52,148 +60,121 @@ fun MiniPlayer(
     isPlaying: Boolean,
     albumArtUri: Uri?,
     coverUrl: String? = null,
-    backdrop: LayerBackdrop,
-    drawBackground: Boolean = true,
+    tint: Color = Color(0xFF221C1E),
+    isLiked: Boolean = false,
+    onToggleLike: () -> Unit = {},
     onExpand: () -> Unit,
     onPlayPause: () -> Unit,
-    onSkipNext: () -> Unit = {}
+    onSkipNext: () -> Unit = {},
+    onSkipPrevious: () -> Unit = {}
 ) {
-    val pillShape = RoundedCornerShape(100.dp)
-    val artShape = RoundedCornerShape(10.dp)
+    val cardShape = RoundedCornerShape(18.dp)
+    val artShape = RoundedCornerShape(12.dp)
+    // Карточка темнее подкраса: подкрас — оттенок, не заливка цветом обложки.
+    val cardColor = lerp(tint, Color.Black, 0.45f)
 
-    val lc = LiquidTheme.colors
-
-    val degraded = com.liquidmusicglass.ui.PerfMonitor.degraded
-    val playerModifier = if (drawBackground && degraded) {
-        // degraded: плоская полупрозрачная пилюля без drawBackdrop/blur/lens.
-        Modifier
-            .fillMaxWidth(0.92f)
-            .height(52.dp)
-            .clip(pillShape)
-            .background(Color.White.copy(alpha = 0.10f))
-            .background(lc.miniPlayerTint)
-            .border(0.8.dp, lc.miniPlayerBorder, pillShape)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) { onExpand() }
-            .padding(horizontal = 10.dp)
-    } else if (drawBackground) {
-        Modifier
-            .fillMaxWidth(0.92f)
-            .height(52.dp)
-            .drawBackdrop(
-                backdrop = backdrop,
-                shape = { pillShape },
-                effects = {
-                    vibrancy()
-                    blur(4.dp.toPx())
-                    lens(
-                        refractionHeight = 24.dp.toPx(),
-                        refractionAmount = 40.dp.toPx(),
-                        chromaticAberration = true
-                    )
-                },
-                highlight = {
-                    Highlight.Ambient
-                },
-                shadow = {
-                    Shadow(
-                        radius = 10.dp,
-                        color = Color.Black.copy(alpha = 0.25f)
-                    )
-                },
-                innerShadow = {
-                    InnerShadow(
-                        radius = 6.dp,
-                        alpha = 0.35f
-                    )
-                },
-                onDrawSurface = {
-                    drawRect(lc.miniPlayerTint)
-                    drawRect(
-                        color = lc.miniPlayerBorder,
-                        style = Stroke(width = 0.8.dp.toPx())
-                    )
-                }
-            )
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) { onExpand() }
-            .padding(horizontal = 10.dp)
-    } else {
-        Modifier
-            .fillMaxWidth()
-            .height(52.dp)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) { onExpand() }
-            .padding(horizontal = 14.dp)
-    }
+    // Свайп по карточке: влево = следующий, вправо = предыдущий.
+    // Резинка с сопротивлением и упругий возврат — как у обложки на главной.
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val swipeThresholdPx = remember(density) { with(density) { 72.dp.toPx() } }
+    val maxSwipePx = remember(density) { with(density) { 120.dp.toPx() } }
+    val swipeOffset = remember { Animatable(0f) }
 
     Row(
-        modifier = playerModifier,
+        modifier = Modifier
+            .graphicsLayer {
+                translationX = swipeOffset.value
+                alpha = 1f - (abs(swipeOffset.value) / (maxSwipePx * 3f)).coerceAtMost(0.25f)
+            }
+            .draggable(
+                orientation = Orientation.Horizontal,
+                state = rememberDraggableState { delta ->
+                    scope.launch {
+                        val next = (swipeOffset.value + delta * 0.8f)
+                            .coerceIn(-maxSwipePx, maxSwipePx)
+                        swipeOffset.snapTo(next)
+                    }
+                },
+                onDragStopped = { velocity ->
+                    val off = swipeOffset.value
+                    when {
+                        off < -swipeThresholdPx || velocity < -2400f -> onSkipNext()
+                        off > swipeThresholdPx || velocity > 2400f -> onSkipPrevious()
+                    }
+                    scope.launch {
+                        swipeOffset.animateTo(
+                            0f,
+                            spring(dampingRatio = 0.8f, stiffness = 380f)
+                        )
+                    }
+                }
+            )
+            .fillMaxWidth(0.94f)
+            .height(64.dp)
+            .clip(cardShape)
+            .background(cardColor)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) { onExpand() }
+            .padding(start = 8.dp, end = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
             modifier = Modifier
-                .size(38.dp)
+                .size(48.dp)
                 .clip(artShape)
         ) {
             AlbumArtImage(
                 uri = albumArtUri,
                 coverUrl = coverUrl,
-                modifier = Modifier.fillMaxWidth().fillMaxHeight(),
+                modifier = Modifier.size(48.dp),
                 contentScale = ContentScale.Crop
             )
         }
 
-        Spacer(modifier = Modifier.width(10.dp))
+        Spacer(modifier = Modifier.width(12.dp))
 
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = trackTitle,
-                color = LiquidTheme.colors.textPrimary,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 13.sp,
-                maxLines = 1
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                fontSize = 15.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = artistName,
-                color = LiquidTheme.colors.textSecondary,
-                fontSize = 11.sp,
-                maxLines = 1
+                color = Color.White.copy(alpha = 0.55f),
+                fontSize = 13.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
 
+        Spacer(modifier = Modifier.width(8.dp))
+
+        LikeBurstHeart(
+            isLiked = isLiked,
+            modifier = Modifier.size(44.dp),
+            iconSize = 24.dp,
+            onToggle = onToggleLike
+        )
+
         Box(
             modifier = Modifier
-                .size(36.dp)
+                .size(44.dp)
                 .pressScale { onPlayPause() },
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                contentDescription = null,
-                modifier = Modifier.size(22.dp),
-                tint = LiquidTheme.colors.iconDefault
-            )
-        }
-
-        Box(
-            modifier = Modifier
-                .size(36.dp)
-                .pressScale { onSkipNext() },
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.SkipNext,
-                contentDescription = null,
-                modifier = Modifier.size(20.dp),
-                tint = LiquidTheme.colors.iconDefault
+                contentDescription = if (isPlaying) "Pause" else "Play",
+                modifier = Modifier.size(28.dp),
+                tint = Color.White
             )
         }
     }

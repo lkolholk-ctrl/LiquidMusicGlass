@@ -111,23 +111,67 @@ class AudioService : MediaSessionService() {
     private var focusRequest: AudioFocusRequest? = null
     private var audioManager: AudioManager? = null
 
+    // ── Запись экрана: авто-переход JUCE с MMAP на capturable-путь ──
+    // Fast/Exclusive идут через AAudio MMAP — МИМО системного микшера, поэтому
+    // рекордер экрана (AudioPlaybackCapture) их не слышит («видео без звука»).
+    // Пока активна запись с REMOTE_SUBMIX, временно уводим локальный JUCE-выход
+    // на AudioTrack-sink (режим 6, через микшер — захватывается). Стриминг
+    // (ExoPlayer) и так через микшер, его не трогаем.
+    private var recordingCallback: android.media.AudioManager.AudioRecordingCallback? = null
+    @Volatile private var captureActive = false
+    @Volatile private var modeBeforeCapture = -1
+
     /** WakeLock to prevent CPU sleep during active playback */
     private var wakeLock: PowerManager.WakeLock? = null
 
     private var errorRetryCount = 0
     private var lastErrorTrackId: String? = null
 
+    // Пауза, поставленная НАМИ на временной потере фокуса (звонок/ассистент) —
+    // только такую можно автоматически снимать на AUDIOFOCUS_GAIN. Пользовательскую
+    // паузу не трогаем (флаг сбрасывается при USER_REQUEST в onPlayWhenReadyChanged).
+    @Volatile private var pausedByTransientFocusLoss = false
+
     private val focusChangeListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
         when (focusChange) {
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> requestDuck(true)
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
-                // Не паузим на временной потере — воспроизведение продолжается.
+                // Звонок/ассистент: пауза с авто-резюме на GAIN — поведение всех
+                // плееров. Флаг ставим ТОЛЬКО если реально играли, иначе GAIN
+                // «воскресил» бы паузу пользователя.
+                duckHandler.removeCallbacksAndMessages(null)
+                if (runCatching { activePlayer().isPlaying }.getOrDefault(false)) {
+                    pausedByTransientFocusLoss = true
+                    runCatching { activePlayer().pause() }
+                }
             }
-            AudioManager.AUDIOFOCUS_GAIN -> requestDuck(false)
+            AudioManager.AUDIOFOCUS_GAIN -> {
+                requestDuck(false)
+                if (pausedByTransientFocusLoss) {
+                    pausedByTransientFocusLoss = false
+                    runCatching { activePlayer().play() }
+                }
+            }
             AudioManager.AUDIOFOCUS_LOSS -> {
                 // Перманентная потеря — паузим сразу (без дебаунса), снимаем отложенный дак.
                 duckHandler.removeCallbacksAndMessages(null)
+                pausedByTransientFocusLoss = false
                 setDucked(false)
+                runCatching { activePlayer().pause() }
+            }
+        }
+    }
+
+    // ── Выдернули наушники (BECOMING_NOISY) ──────────────────────────────────
+    // ExoPlayer-путь обрабатывает это сам (setHandleAudioBecomingNoisy), а
+    // JUCE-путь (SimpleBasePlayer) события не видит: без ресивера выдёргивание
+    // наушников продолжало бы играть из динамика на весь автобус.
+    private val becomingNoisyReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: android.content.Intent?) {
+            if (intent?.action != AudioManager.ACTION_AUDIO_BECOMING_NOISY) return
+            pausedByTransientFocusLoss = false   // это пауза «навсегда», не авто-резюмим
+            if (runCatching { activePlayer().isPlaying }.getOrDefault(false)) {
+                android.util.Log.d("VOIDPIXEL_MEDIA", "[PAUSE_TRIGGER] BECOMING_NOISY (receiver)")
                 runCatching { activePlayer().pause() }
             }
         }
@@ -183,8 +227,11 @@ class AudioService : MediaSessionService() {
                     android.util.Log.d("VOIDPIXEL_MEDIA", "[PAUSE_TRIGGER] Reason: REMOTE (notification/bluetooth)")
                 Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM ->
                     android.util.Log.d("VOIDPIXEL_MEDIA", "[PAUSE_TRIGGER] Reason: END_OF_MEDIA_ITEM")
-                Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST ->
+                Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST -> {
                     android.util.Log.d("VOIDPIXEL_MEDIA", "[PAUSE_TRIGGER] Reason: USER_REQUEST")
+                    // Явное действие пользователя отменяет наш авто-резюме после звонка.
+                    pausedByTransientFocusLoss = false
+                }
                 else ->
                     android.util.Log.d("VOIDPIXEL_MEDIA", "[PAUSE_TRIGGER] Reason: UNKNOWN/other ($reason)")
             }
@@ -336,6 +383,21 @@ class AudioService : MediaSessionService() {
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         requestAudioFocus()
 
+        // Наушники выдернули → пауза (для JUCE-пути; Exo обрабатывает сам).
+        // ContextCompat + NOT_EXPORTED: системные бродкасты доходят, а требование
+        // флага экспорта (targetSdk 34+) соблюдено.
+        runCatching {
+            androidx.core.content.ContextCompat.registerReceiver(
+                this,
+                becomingNoisyReceiver,
+                android.content.IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY),
+                androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED
+            )
+        }
+
+        // Запись экрана → capturable-путь для локального JUCE (см. поля выше).
+        registerScreenRecordingWatcher()
+
         // WakeLock initialization
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(
@@ -356,10 +418,12 @@ class AudioService : MediaSessionService() {
 
         PlayerController.audioServiceRef = this
 
-        // Stage 7b/7c: координатор JUCE-свода в реальном потоке. Бездействует,
-        // пока выключен флаг juceAutoMixEnabled — обычное воспроизведение не
-        // затрагивается. JUCE поднимается лениво только у точки свода.
-        com.liquidmusicglass.engine.automix.AutoMixCoordinator.start(this)
+        // AutoMix ТОЛЬКО для локального аудио (JUCE в JuceLocalPlayer). Раньше
+        // здесь запускался AutoMixCoordinator — он вёл AutoMix-свод на СТРИМИНГЕ
+        // (ExoPlayer): анализировал пару моделью ("AutoMix LOADED ok" в логе) и
+        // сам переключал/сводил треки в потоковом воспроизведении. Стриминг не
+        // должен трогаться AutoMix'ом — координатор больше НЕ стартуем.
+        // com.liquidmusicglass.engine.automix.AutoMixCoordinator.start(this)
 
         // ── Одна сессия, созданная один раз ──
         val sessionActivityIntent = android.content.Intent(this, com.liquidmusicglass.MainActivity::class.java).apply {
@@ -459,8 +523,11 @@ class AudioService : MediaSessionService() {
     private fun buildPlayer(): ExoPlayer {
         val httpFactory = DefaultHttpDataSource.Factory()
             .setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(30_000)
-            .setReadTimeoutMs(30_000)
+            // 30с на мёртвом маршруте = полминуты «висим» до ошибки и ретрая.
+            // 12/15с: живой CDN укладывается с запасом (буфер сглаживает),
+            // мёртвый детектится быстро → авто-ретрай/скип, музыка не встаёт.
+            .setConnectTimeoutMs(12_000)
+            .setReadTimeoutMs(15_000)
             .setDefaultRequestProperties(mapOf(
                 "User-Agent" to "LiquidMusicGlass/1.0"
             ))
@@ -476,39 +543,10 @@ class AudioService : MediaSessionService() {
             .setBufferDurationsMs(30_000, 60_000, 2_500, 5_000)
             .build()
 
-        // Renderers factory с двумя аудио-процессорами:
-        //  1) BassAudioProcessor — прозрачный анализ полос для реактивного свечения;
-        //  2) VolumeNormalizationProcessor — Sound Check (нормализация громкости),
-        //     активен только при включённом флаге, иначе прозрачный проброс.
-        // Порядок важен: нормализация ПОСЛЕ анализа, чтобы Bass видел чистый сигнал.
-        val renderersFactory = object : DefaultRenderersFactory(this) {
-            override fun buildAudioSink(
-                context: Context,
-                enableFloatOutput: Boolean,
-                enableAudioTrackPlaybackParameters: Boolean
-            ): AudioSink {
-                return DefaultAudioSink.Builder(context)
-                    .setAudioProcessors(arrayOf(BassAudioProcessor(), VolumeNormalizationProcessor()))
-                    .build()
-            }
-
-            // Audio-only app: build NO video renderers. The default factory would
-            // create a video MediaCodec renderer + FrameReleaseChoreographer + GPU
-            // threads at player build, contending with UI shader compilation on a
-            // cold first launch (interpreted code) and tripping the startup ANR.
-            override fun buildVideoRenderers(
-                context: Context,
-                extensionRendererMode: Int,
-                mediaCodecSelector: MediaCodecSelector,
-                enableDecoderFallback: Boolean,
-                eventHandler: android.os.Handler,
-                eventListener: VideoRendererEventListener,
-                allowedVideoJoiningTimeMs: Long,
-                out: ArrayList<Renderer>
-            ) {
-                // intentionally empty — no video renderers
-            }
-        }
+        // Единая цепочка (Bass-анализ → DJ FX перехода → нормализация) —
+        // PlayerAudioChain: та же фабрика у secondary-плеера AutoMix, чтобы
+        // после свапа плееров цепочка не терялась.
+        val renderersFactory = PlayerAudioChain.renderersFactory(this)
 
         return ExoPlayer.Builder(this)
             .setRenderersFactory(renderersFactory)
@@ -523,7 +561,10 @@ class AudioService : MediaSessionService() {
 
                 setAudioAttributes(audioAttributes, false)
                 setHandleAudioBecomingNoisy(true)
-                setWakeMode(C.WAKE_MODE_LOCAL) // Media3 native wake mode
+                // NETWORK: Exo у нас — стриминговый бэкенд; держит wake+wifi lock
+                // на время воспроизведения. С LOCAL WiFi засыпал в фоне/Doze →
+                // сеть отваливалась → буфер осушался → лаги/ребуферинг в фоне.
+                setWakeMode(C.WAKE_MODE_NETWORK)
                 // ── Audio Becoming Noisy Guard ──
                 // Do NOT aggressively pause on minor BT/routing changes.
                 // ExoPlayer's built-in handler is sufficient; we soften by
@@ -541,11 +582,69 @@ class AudioService : MediaSessionService() {
         return session
     }
 
+    /**
+     * Следим за активными записями звука. Если появляется REMOTE_SUBMIX
+     * (запись экрана со звуком / AudioPlaybackCapture) и локально играет JUCE
+     * в MMAP-режиме (Fast=0 / Exclusive=2) — временно уводим выход на
+     * AudioTrack-sink (режим 6), чтобы рекордер услышал звук. Когда запись
+     * прекращается — возвращаем прежний режим. Всё best-effort, в runCatching:
+     * фича не должна ронять воспроизведение.
+     */
+    private fun registerScreenRecordingWatcher() {
+        if (android.os.Build.VERSION.SDK_INT < 29) return   // AudioPlaybackCapture с API 29
+        val am = audioManager ?: return
+        val cb = object : android.media.AudioManager.AudioRecordingCallback() {
+            override fun onRecordingConfigChanged(
+                configs: MutableList<android.media.AudioRecordingConfiguration>?
+            ) {
+                // REMOTE_SUBMIX (=8) — @SystemApi, из обычного SDK недоступна,
+                // поэтому сверяем по значению. Это источник записи экрана со
+                // звуком / AudioPlaybackCapture.
+                val active = configs?.any { it.clientAudioSource == 8 } == true
+                onCaptureStateChanged(active)
+            }
+        }
+        recordingCallback = cb
+        runCatching { am.registerAudioRecordingCallback(cb, android.os.Handler(mainLooper)) }
+    }
+
+    private fun onCaptureStateChanged(active: Boolean) {
+        if (active == captureActive) return
+        captureActive = active
+        runCatching {
+            val juceActive =
+                PlayerController.playbackBackend.value == PlaybackBackend.JUCE_LOCAL
+            if (active) {
+                // Уводим на AudioTrack-sink только если реально играет локальный
+                // JUCE в MMAP-режиме — иначе трогать нечего (стриминг капчурится сам).
+                val mode = AppSettings.audioCompatMode.value
+                if (juceActive && (mode == 0 || mode == 2)) {
+                    modeBeforeCapture = mode
+                    com.liquidmusicglass.engine.automix.AutoMixNativeEngine.setOboeCompatMode(6)
+                    com.liquidmusicglass.debug.DebugLog.add(
+                        "CAPTURE on → JUCE mode $mode → 6 (AudioTrack, capturable)"
+                    )
+                }
+            } else if (modeBeforeCapture >= 0) {
+                // Запись кончилась — возвращаем прежний MMAP-режим.
+                val restore = modeBeforeCapture
+                modeBeforeCapture = -1
+                com.liquidmusicglass.engine.automix.AutoMixNativeEngine.setOboeCompatMode(restore)
+                com.liquidmusicglass.debug.DebugLog.add("CAPTURE off → JUCE mode → $restore")
+            }
+        }
+    }
+
     override fun onDestroy() {
         PlayerController.logFinalPlayback()
         positionJob?.cancel()
         cancelCrossfadeFade(resetVolume = false)
         abandonAudioFocus()
+        runCatching { unregisterReceiver(becomingNoisyReceiver) }
+        recordingCallback?.let { cb ->
+            runCatching { audioManager?.unregisterAudioRecordingCallback(cb) }
+        }
+        recordingCallback = null
 
         // Release WakeLock
         if (wakeLock?.isHeld == true) {
@@ -561,6 +660,12 @@ class AudioService : MediaSessionService() {
             juceLocalPlayer?.release()
         }
         juceLocalPlayer = null
+
+        // Явно гасим AudioTrack-sink (режим 6): его реалтайм-поток с живым
+        // AudioTrack иначе пережил бы смерть сервиса и вечно писал тишину
+        // 50 раз/с (батарея). release() движка тоже его останавливает, но тот
+        // идёт асинхронно на умирающем loadThread — здесь страховка в лоб.
+        runCatching { com.liquidmusicglass.engine.automix.AudioTrackSink.stop() }
 
         session?.release()
         session = null
@@ -588,6 +693,14 @@ class AudioService : MediaSessionService() {
                         PlayerController.durationMs.value.coerceAtLeast(0L)
                     }
                     PlayerController.updatePosition(position, effectiveDuration)
+
+                    // ── КРИТИЧНО для фона: wakelock взят с таймаутом 10 мин и
+                    // раньше «обновлялся» только событиями смены состояния. При
+                    // непрерывном воспроизведении событий НЕТ → через 10 минут
+                    // фона lock истекал, CPU уходил в дрёму, декод отставал →
+                    // микролаги/«цикличка», а затем процесс выбивало из памяти.
+                    // manageWakeLock() перезахватывает истёкший lock, пока играем.
+                    manageWakeLock()
                 } catch (e: Exception) {
                     android.util.Log.e("AudioService", "Position polling error", e)
                 }

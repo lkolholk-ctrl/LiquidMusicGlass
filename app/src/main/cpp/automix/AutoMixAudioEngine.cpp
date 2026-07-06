@@ -1,6 +1,7 @@
 #include "AutoMixAudioEngine.h"
 #include "MediaCodecDecoder.h"
 #include "MediaCodecAudioSource.h"
+#include "OboeRuntime.h"
 #include "TimeStretch.h"
 
 #include <cmath>
@@ -40,6 +41,20 @@ namespace
         return style >= 0 && style <= 5 ? style : 0;
     }
 
+    // ── DJ FX: параметры реального DSP переходов ────────────────────────────
+    // FILTER_SWEEP: экспоненциальный съезд среза LP (муффл «уходим в подвал»).
+    constexpr float kDjSweepHiHz = 16000.0f;
+    constexpr float kDjSweepLoHz = 150.0f;
+    // ECHO_OUT: делэй ~375мс (≈ dotted-eighth на 120 BPM — универсально
+    // музыкально), умеренный feedback, хвост дозвучивает ~2.2с после перехода.
+    constexpr double kDjEchoDelaySec  = 0.375;
+    // Умеренные send/feedback: геометрическая сумма повторов ~0.95x пика
+    // уходящей деки — не жарче обычного сложения двух дек в кроссфейде.
+    constexpr float  kDjEchoSend      = 0.55f;
+    constexpr float  kDjEchoFeedback  = 0.42f;
+    constexpr double kDjEchoTailSec   = 2.2;
+    constexpr double kDjEchoTailFade  = 0.25;  // фейд последних 0.25с хвоста
+
     TransitionGains transitionGainsForStyle (float progress, int style)
     {
         const float p = clamp01 (progress);
@@ -67,15 +82,18 @@ namespace
                 const float inPhase  = smoothstep01 (p / 0.60f);
                 return { equalPowerOut (outPhase), equalPowerIn (inPhase) };
             }
-            case 4: // FILTER_SWEEP volume bed: outgoing ducks faster, incoming opens gradually.
+            case 4: // FILTER_SWEEP: сам муффл делает реальный LP в микс-лупе.
             {
-                const float outPhase = smoothstep01 (p * 1.12f);
+                // Громкость уходящей держится почти в полный рост до середины —
+                // съезд фильтра ДОЛЖЕН быть слышен, — и гаснет к концу.
+                const float outPhase = smoothstep01 ((p - 0.45f) / 0.55f);
                 const float inPhase  = smoothstep01 (p);
-                return { (1.0f - outPhase) * (1.0f - outPhase), inPhase * inPhase };
+                return { equalPowerOut (outPhase), equalPowerIn (inPhase) };
             }
-            case 5: // ECHO_OUT bed: keep the tail audible briefly, then hand over cleanly.
+            case 5: // ECHO_OUT: сухая уходящая гаснет раньше — её место занимают
+                    // повторы из делэя (реальное эхо в микс-лупе), не тишина.
             {
-                const float outPhase = smoothstep01 (p * 0.75f) * 0.35f + smoothstep01 (p) * 0.65f;
+                const float outPhase = smoothstep01 (p * 1.4f);
                 const float inPhase  = smoothstep01 (p);
                 return { equalPowerOut (outPhase), equalPowerIn (inPhase) };
             }
@@ -137,6 +155,15 @@ namespace
         if (lastGood.getNumChannels() < channels || lastGood.getNumSamples() < samples)
             return;
 
+        // Не запоминаем блок с NaN/Inf как «последний хороший»: иначе он
+        // повторялся бы при следующем промахе лока (NaN×gain остаётся NaN).
+        for (int c = 0; c < channels; ++c)
+        {
+            const float* s = src.getReadPointer (c);
+            for (int i = 0; i < samples; ++i)
+                if (! std::isfinite (s[i])) return;
+        }
+
         for (int c = 0; c < channels; ++c)
             lastGood.copyFrom (c, 0, src, c, 0, samples);
         repeatCounter.store (0, std::memory_order_release);
@@ -149,12 +176,13 @@ AutoMixAudioEngine::AutoMixAudioEngine()
     formatManager.registerBasicFormats();
     // По одному read-ahead потоку на дек (см. заголовок: общий поток starve'ил
     // играющий дек при загрузке incoming во время свода).
-    // Высокий приоритет: при переключении приложений система кратко тротлит
-    // фоновые потоки. Если поток предчтения декодирует mp3 на обычном приоритете,
-    // он отстаёт → буфер транспорта осушается → ~2с заикания. High держит декод
-    // впереди под нагрузкой (но НИЖЕ realtime-потока Oboe — аудио-колбэк не голодает).
-    readAheadThreadA.startThread (juce::Thread::Priority::high);
-    readAheadThreadB.startThread (juce::Thread::Priority::high);
+    // Максимальный НЕ-realtime приоритет: при шторке/переключении приложений
+    // система кратко тротлит фоновые потоки. Если поток предчтения декодирует
+    // mp3 на меньшем приоритете, он отстаёт → буфер транспорта осушается →
+    // микро-заикания вплоть до «циклички». highest держит декод впереди под
+    // нагрузкой (но НИЖЕ realtime-потока Oboe — аудио-колбэк не голодает).
+    readAheadThreadA.startThread (juce::Thread::Priority::highest);
+    readAheadThreadB.startThread (juce::Thread::Priority::highest);
 }
 
 AutoMixAudioEngine::~AutoMixAudioEngine()
@@ -172,6 +200,8 @@ AutoMixAudioEngine::~AutoMixAudioEngine()
 
 bool AutoMixAudioEngine::init()
 {
+    const std::lock_guard<std::mutex> deviceLock (deviceControlMutex);
+
     if (initialised.load())
         return true;
 
@@ -187,7 +217,7 @@ bool AutoMixAudioEngine::init()
     // тянет). Детали — в applyBufferForRoute. На старте устройство уже открыто
     // initialiseWithDefaultDevices, поэтому реопен не форсируем.
     initialised.store (true);
-    applyBufferForRoute (routeIsBluetooth.load(), /*forceReopen=*/false);
+    applyBufferForRouteUnlocked (routeIsBluetooth.load(), /*forceReopen=*/false);
     routeEverApplied.store (true);
 
     deviceManager.addAudioCallback (this);
@@ -201,7 +231,22 @@ bool AutoMixAudioEngine::init()
 // транспорты не сбрасываются, releaseResources/prepareToPlay не трогают позицию.
 void AutoMixAudioEngine::applyBufferForRoute (bool isBluetooth, bool forceReopen)
 {
+    const std::lock_guard<std::mutex> deviceLock (deviceControlMutex);
+    applyBufferForRouteUnlocked (isBluetooth, forceReopen);
+}
+
+void AutoMixAudioEngine::applyBufferForRouteUnlocked (bool isBluetooth, bool forceReopen)
+{
     if (! initialised.load())
+        return;
+
+    // AudioTrack-sink активен → Oboe-девайс закрыт НАМЕРЕННО. Любой реопен здесь
+    // (смена BT-маршрута, эскалация буфера, power-save) воскресил бы Oboe
+    // ПАРАЛЛЕЛЬНО sink'у: два потребителя одного движка = двойная скорость/каша.
+    // AudioTrack сам следует за системным роутингом (как ExoPlayer) — при смене
+    // маршрута делать ничего не нужно. Выход из sink-режима реопенит явно
+    // (nativeSinkStop), минуя этот гвард.
+    if (automix::isSinkActive())
         return;
 
     auto setup = deviceManager.getAudioDeviceSetup();
@@ -224,9 +269,15 @@ void AutoMixAudioEngine::applyBufferForRoute (bool isBluetooth, bool forceReopen
             // 2×burst (~8-10 мс на многих телефонах) слишком хрупок для JUCE +
             // MediaCodec + FX: при шторке/переключении приложений read-ahead и mixer
             // получают короткий CPU stall, и fast-path уходит в underrun. Для музыки
-            // 20-30 мс системной задержки не критичны, зато Oboe перестаёт щёлкать.
-            target = (burst > 0) ? juce::jmax (burst * 4, 1024)
-                                 : (sizes.isEmpty() ? 1024 : sizes.getFirst());
+            // 30-40 мс системной задержки не критичны, зато Oboe перестаёт щёлкать.
+            // Множитель адаптивный: базово 6×burst, телеметрия xrun'ов может
+            // поднять до 8× (escalateBufferForUnderruns); в энергосбережении —
+            // сразу максимум (система тротлит CPU жёстче обычного).
+            int mult = bufferBurstMultiplier.load();
+            if (powerSaveBuffer.load())
+                mult = juce::jmax (mult, 8);
+            target = (burst > 0) ? juce::jmax (burst * mult, 1536)
+                                 : (sizes.isEmpty() ? 1536 : sizes.getFirst());
         }
         if (! sizes.isEmpty())
             target = juce::jmax (target, sizes.getFirst());        // не ниже минимума устройства
@@ -258,6 +309,16 @@ void AutoMixAudioEngine::onOutputRouteChanged (bool isBluetooth)
     applyBufferForRoute (isBluetooth, /*forceReopen=*/true);
 }
 
+// Переоткрыть Oboe-поток на текущем маршруте, чтобы применился новый compat-режим
+// (sharing/performance mode читаются из OboeRuntime при каждом открытии потока).
+// Транспорты не сбрасываются — позиция воспроизведения сохраняется.
+void AutoMixAudioEngine::reopenAudioDevice()
+{
+    if (! initialised.load())
+        return;                                   // применится при init()
+    applyBufferForRoute (routeIsBluetooth.load(), /*forceReopen=*/true);
+}
+
 void AutoMixAudioEngine::release()
 {
     toneOn.store (false);
@@ -271,6 +332,7 @@ void AutoMixAudioEngine::release()
         deckB.transport.stop();
     }
 
+    const std::lock_guard<std::mutex> deviceLock (deviceControlMutex);
     if (initialised.load())
     {
         deviceManager.removeAudioCallback (this);
@@ -339,8 +401,9 @@ bool AutoMixAudioEngine::loadDeck (Deck& deck, const juce::String& path)
         clearDeckUnlocked (deck);
         deck.sourceSampleRate = sourceRate;
         deck.readerSource = std::move (readerSource);
-        // ~3с предчтения (переживает кратковременный тротлинг при уходе в фон).
-        deck.transport.setSource (deck.readerSource.get(), (int) (sourceRate * 3.0),
+        // ~5с предчтения (переживает затяжной тротлинг фоновых потоков при
+        // погашенном экране / энергосбережении).
+        deck.transport.setSource (deck.readerSource.get(), (int) (sourceRate * 5.0),
                                   &threadForDeck (deck), sourceRate, 2);
         deck.transport.setPosition (0.0);
         deck.path = path;
@@ -358,10 +421,11 @@ bool AutoMixAudioEngine::loadDeck (Deck& deck, const juce::String& path)
         clearDeckUnlocked (deck);
         deck.sourceSampleRate = sourceRate;
         deck.mediaCodecSource = std::move (streaming);
-        // ~5с предчтения (декод mp3 тяжелее, чем чтение wav): при переключении
-        // приложений система тротлит CPU на ~2с — большой буфер не даёт транспорту
-        // осушиться, поэтому звук не заикается. ~1.9 МБ/дек @48k stereo float.
-        deck.transport.setSource (deck.mediaCodecSource.get(), (int) (sourceRate * 5.0),
+        // ~8с предчтения (декод mp3 тяжелее, чем чтение wav): при переключении
+        // приложений и в фоне с погашенным экраном система тротлит CPU — большой
+        // буфер не даёт транспорту осушиться, звук не заикается и не уходит в
+        // «цикличку». ~3 МБ/дек @48k stereo float — приемлемо.
+        deck.transport.setSource (deck.mediaCodecSource.get(), (int) (sourceRate * 8.0),
                                   &threadForDeck (deck), sourceRate, 2);
         deck.transport.setPosition (0.0);
         deck.path = path;
@@ -381,18 +445,36 @@ bool AutoMixAudioEngine::decodeFullPCM (const juce::String& path, juce::AudioBuf
     if (! file.existsAsFile())
         return false;
 
+    // Кап длины: оффлайн-стретч держит в памяти до трёх полных float-копий
+    // трека (src + stretched + decodedBuffer деки). 10-мин трек ≈ 700 МБ пика
+    // → на слабом устройстве OOM-kill прямо на переходе. Режем на 12 минутах
+    // (по частоте деки; для стретча этого более чем достаточно).
+    const auto capSamples = [] (double sr) -> juce::int64
+    {
+        const double effSr = (sr > 0.0) ? sr : 48000.0;
+        return (juce::int64) (effSr * 12.0 * 60.0);
+    };
+
     if (std::unique_ptr<juce::AudioFormatReader> reader { formatManager.createReaderFor (file) })
     {
-        const int len = (int) reader->lengthInSamples;
-        if (len <= 0)
+        const juce::int64 cap = capSamples (reader->sampleRate);
+        const juce::int64 len64 = juce::jmin ((juce::int64) reader->lengthInSamples, cap);
+        if (len64 <= 0)
             return false;
+        const int len = (int) len64;   // ≤ 12 мин — в int влезает с запасом
         out.setSize (2, len);
         reader->read (&out, 0, len, 0, true, true);
         rate = reader->sampleRate;
         return true;
     }
 
-    return automix::decodeWithMediaCodec (path, out, rate);
+    if (! automix::decodeWithMediaCodec (path, out, rate))
+        return false;
+    // MediaCodec-путь декодит целиком — подрезаем постфактум.
+    const juce::int64 cap = capSamples (rate);
+    if ((juce::int64) out.getNumSamples() > cap)
+        out.setSize (out.getNumChannels(), (int) cap, true, false, true);
+    return true;
 }
 
 bool AutoMixAudioEngine::prepareStretchB (double bpmA, double bpmB)
@@ -469,7 +551,7 @@ bool AutoMixAudioEngine::loadDeckFd (Deck& deck, int fd, long long offset, long 
     clearDeckUnlocked (deck);
     deck.sourceSampleRate = sourceRate;
     deck.mediaCodecSource = std::move (streaming);
-    deck.transport.setSource (deck.mediaCodecSource.get(), (int) (sourceRate * 5.0),
+    deck.transport.setSource (deck.mediaCodecSource.get(), (int) (sourceRate * 8.0),
                               &threadForDeck (deck), sourceRate, 2);
     deck.transport.setPosition (0.0);
     deck.path = {};
@@ -523,6 +605,11 @@ void AutoMixAudioEngine::silenceOutput()
     outputMuted.store (true, std::memory_order_release);
     invalidateAllHolds();
     fxResetRequested.store (true, std::memory_order_release);
+}
+
+void AutoMixAudioEngine::setPlaybackVolume (float v01)
+{
+    masterVolumeTarget.store (juce::jlimit (0.0f, 1.0f, v01), std::memory_order_relaxed);
 }
 
 void AutoMixAudioEngine::startCrossfade (double durationMs, int transitionType)
@@ -700,14 +787,54 @@ double AutoMixAudioEngine::lengthMsA()
     return reportedLenMs[0].load (std::memory_order_relaxed);
 }
 
+int AutoMixAudioEngine::xRunCount()
+{
+    // try_lock: во время переоткрытия устройства (init / смена маршрута) не
+    // блокируем вызывающего (тикер на main) — просто вернём «неизвестно».
+    std::unique_lock<std::mutex> lock (deviceControlMutex, std::try_to_lock);
+    if (! lock.owns_lock() || ! initialised.load())
+        return -1;
+    if (auto* dev = deviceManager.getCurrentAudioDevice())
+        return dev->getXRunCount();
+    return -1;
+}
+
+void AutoMixAudioEngine::setPowerSaveMode (bool on)
+{
+    if (powerSaveBuffer.exchange (on) == on)
+        return;                                    // состояние не изменилось
+    if (! initialised.load())
+        return;                                    // применится при init()
+    if (! routeIsBluetooth.load())
+        applyBufferForRoute (false, /*forceReopen=*/true);
+}
+
+void AutoMixAudioEngine::escalateBufferForUnderruns()
+{
+    // Кап 8×burst: дальше расти бессмысленно — латентность заметна, а причина
+    // уже точно не в размере буфера.
+    int cur = bufferBurstMultiplier.load();
+    if (cur >= 8)
+        return;
+    bufferBurstMultiplier.store (cur + 2);
+    // BT-маршрут и так на крупном буфере — эскалация касается динамика/провода.
+    if (! routeIsBluetooth.load())
+        applyBufferForRoute (false, /*forceReopen=*/true);
+}
+
 //==============================================================================
 void AutoMixAudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
 {
-    if (device != nullptr)
-    {
-        currentSampleRate = device->getCurrentSampleRate();
-        currentBlockSize  = device->getCurrentBufferSizeSamples();
-    }
+    prepareInternal (device != nullptr ? device->getCurrentSampleRate() : 0.0,
+                     device != nullptr ? device->getCurrentBufferSizeSamples() : 0);
+}
+
+// Общая подготовка рендера: зовётся и Oboe-девайсом (audioDeviceAboutToStart),
+// и AudioTrack-sink'ом (enterSinkMode) — один и тот же код, разные источники тика.
+void AutoMixAudioEngine::prepareInternal (double sampleRate, int blockSize)
+{
+    if (sampleRate > 0.0) currentSampleRate = sampleRate;
+    if (blockSize  > 0)   currentBlockSize  = blockSize;
 
     if (currentSampleRate <= 0.0) currentSampleRate = 44100.0;
     if (currentBlockSize  <= 0)   currentBlockSize  = 512;
@@ -739,8 +866,37 @@ void AutoMixAudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
     for (auto& f : lowpassA) { f.coefficients = bassCoeffs; f.reset(); }
     for (auto& f : lowpassB) { f.coefficients = bassCoeffs; f.reset(); }
 
+    // DJ FX: кольцевой буфер ECHO_OUT — аллокация здесь, НЕ на аудио-потоке.
+    djEchoLen = juce::jmax (1, (int) (currentSampleRate * kDjEchoDelaySec));
+    djEchoBuf.setSize (2, djEchoLen, false, true, false);
+    djEchoBuf.clear();
+    djEchoPos = 0;
+    djEchoTail = 0;
+    djSweepLp[0] = djSweepLp[1] = 0.0f;
+
     // Профессиональная FX-цепочка готовится на стерео-выход.
     audioFx.prepare (currentSampleRate, currentBlockSize, 2);
+}
+
+// ── AudioTrack-выход (Java-sink) ─────────────────────────────────────────────
+// Третий вход в аудио-систему для устройств, где кривые оба нативных пути
+// (vivo Y35: AAudio Float шипит, deep-путь молчит). Oboe-девайс закрывается,
+// движок жив, блоки тянет Java-поток AudioTrackSink — путь ExoPlayer/стриминга,
+// заведомо рабочий на этих устройствах.
+void AutoMixAudioEngine::enterSinkMode (double sampleRate, int blockSize)
+{
+    if (initialised.load())
+    {
+        std::lock_guard<std::mutex> lock (deviceControlMutex);
+        deviceManager.closeAudioDevice();   // Oboe-колбэки останавливаются, движок жив
+    }
+    prepareInternal (sampleRate, blockSize);
+}
+
+void AutoMixAudioEngine::renderSinkBlock (float* left, float* right, int numSamples)
+{
+    float* outs[2] = { left, right };
+    audioDeviceIOCallbackWithContext (nullptr, 0, outs, 2, numSamples, {});
 }
 
 void AutoMixAudioEngine::audioDeviceStopped()
@@ -763,12 +919,31 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
     if (numOutputChannels <= 0)
         return;
 
+    // Пульс для диагностики: «крутится ли колбэк вообще» видно из OBOE-дампа.
+    automix::noteAudioCallback (numSamples);
+
     juce::ScopedNoDenormals noDenormals; // flush IIR (bass-swap + EQ) denormals
 
     juce::AudioBuffer<float> output (outputChannelData, numOutputChannels, numSamples);
 
     if (fxResetRequested.exchange (false, std::memory_order_acq_rel))
+    {
         audioFx.reset();
+        // Пауза/стоп/скип: гасим и хвост DJ-эха, иначе после возобновления
+        // из буфера вылезут повторы прошлого трека.
+        djEchoTail = 0;
+        if (djEchoLen > 0) djEchoBuf.clear();
+        djSweepLp[0] = djSweepLp[1] = 0.0f;
+        // ЛЕЧЕНИЕ NaN: bass-swap IIR (lowpassA/B) сбрасывались только на старте
+        // перехода — а один NaN из деки отравлял их состояние, и `av -= cutA*la`
+        // выдавал NaN каждый блок (0*NaN=NaN) до конца перехода → тишина после
+        // скраба. Плюс инвалидируем hold-буферы: rememberLastGoodBlock мог
+        // захватить NaN-блок и повторять его. Теперь fxReset чинит ВСЁ.
+        for (auto& f : lowpassA) f.reset();
+        for (auto& f : lowpassB) f.reset();
+        holdValid[0].store (false, std::memory_order_release);
+        holdValid[1].store (false, std::memory_order_release);
+    }
 
     if (outputMuted.load (std::memory_order_acquire))
     {
@@ -811,6 +986,17 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
     if (crossfadeStart.exchange (false))
     {
         crossfadePos = 0;
+        // Bass-swap фильтры считаются ТОЛЬКО во время перехода (вне его их вклад
+        // всё равно нулевой — cut=0). Сбрасываем состояние на старте: вес свопа
+        // поднимается от нуля лишь к середине перехода, к этому моменту фильтры
+        // давно прогреты, щелчков нет.
+        for (auto& f : lowpassA) f.reset();
+        for (auto& f : lowpassB) f.reset();
+        // DJ FX: чистый старт — свип с нуля, делэй без остатков прошлого эха.
+        djSweepLp[0] = djSweepLp[1] = 0.0f;
+        djEchoBuf.clear();
+        djEchoPos = 0;
+        djEchoTail = 0;
         crossfadeActive.store (true);
     }
 
@@ -820,6 +1006,10 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
     const float  bgB     = baseGainB.load();
     const int    fOut    = fadeOutDeck.load(); // which physical deck fades OUT
     const int    style   = transitionStyle.load (std::memory_order_acquire);
+    const bool   bassOn  = bassSwapEnabled.load();
+    // Гоняем bass-swap биквады только когда они реально влияют на звук: в
+    // стационарном режиме (без перехода) это экономит 4 IIR на каждый сэмпл.
+    const bool   bassSwapActive = active && bassOn && total > 0.0;
 
     const int ch = juce::jmin (numOutputChannels, 8);
     if (numSamples > scratchA.getNumSamples() || numSamples > scratchB.getNumSamples()
@@ -896,11 +1086,36 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
         b[c] = scratchB.getReadPointer (c);
     }
 
+    // ── DJ FX: пред-расчёт на блок ───────────────────────────────────────────
+    // FILTER_SWEEP: срез LP уезжает экспоненциально по прогрессу перехода;
+    // коэффициент обновляем раз на блок (5-20мс) — для one-pole этого более чем
+    // достаточно, ступеней не слышно.
+    const bool sweepOn = active && total > 0.0 && style == 4;
+    float sweepAlpha = 0.0f;
+    if (sweepOn)
+    {
+        double t0 = (double) crossfadePos / total;
+        if (t0 > 1.0) t0 = 1.0;
+        const float cutoff = kDjSweepHiHz * std::pow (kDjSweepLoHz / kDjSweepHiHz, (float) t0);
+        sweepAlpha = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * cutoff
+                                      / (float) currentSampleRate);
+    }
+    // ECHO_OUT: активная фаза (переход идёт) или дозвучка хвоста после него.
+    const bool  echoActive = active && total > 0.0 && style == 5 && djEchoLen > 0;
+    const float tailFadeSamples = juce::jmax (1.0f, (float) (kDjEchoTailFade * currentSampleRate));
+    float* echoPtr[2] = { nullptr, nullptr };
+    if (djEchoLen > 0)
+    {
+        echoPtr[0] = djEchoBuf.getWritePointer (0);
+        echoPtr[1] = djEchoBuf.getWritePointer (1);
+    }
+
     for (int i = 0; i < numSamples; ++i)
     {
         float ga, gb;            // volume envelope (equal power)
         float bassA = 1.0f;      // per-deck bass amount (1 = full low end, 0 = cut)
         float bassB = 1.0f;
+        float echoSend = 0.0f;   // уровень посыла уходящей деки в делэй
 
         if (active && total > 0.0)
         {
@@ -910,10 +1125,15 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
             const float gOut = gains.out; // outgoing always fades down
             const float gIn  = gains.in;  // incoming always fades up
 
+            // ECHO_OUT: посыл нарастает по ходу перехода — сначала эха почти
+            // нет, к концу сухой звук ушёл фейдером, остаются повторы.
+            if (echoActive)
+                echoSend = smoothstep01 ((float) t) * kDjEchoSend;
+
             // Bass swap (Stage 5), only when enabled. Complementary: incoming
             // gains its low end while the outgoing deck gives up its own.
             float bassOut = 1.0f, bassIn = 1.0f;
-            if (bassSwapEnabled.load())
+            if (bassOn)
             {
                 const float w = 0.5f; // swap over the middle 50% of the transition
                 float u = ((float) t - (0.5f - w * 0.5f)) / w;
@@ -936,22 +1156,63 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
         const float cutA = 1.0f - bassA; // how much low band to remove from A
         const float cutB = 1.0f - bassB;
 
+        // Эхо живёт и ПОСЛЕ конца перехода (djEchoTail > 0): повторы
+        // дозвучивают поверх нового трека и плавно гаснут к концу хвоста.
+        // Wet дакается ростом громкости входящего трека — эхо уступает место
+        // (и не суммируется с ним в клиппинг на жирном материале).
+        const bool  echoNow = djEchoLen > 0 && (echoActive || djEchoTail > 0);
+        const float gInNow  = (fOut == 0) ? gb : ga;   // громкость входящей деки
+        const float echoWet = ! echoNow ? 0.0f
+            : (echoActive ? 1.0f - 0.45f * gInNow
+                          : 0.55f * juce::jmin (1.0f, (float) djEchoTail / tailFadeSamples));
+
         for (int c = 0; c < ch; ++c)
         {
             float av = a[c][i];
             float bv = b[c][i];
 
-            // Keep the low-pass state warm every sample (c < 2 = L/R have filters);
-            // subtract the scaled low band to attenuate that deck's bass.
-            if (c < 2)
+            // Низкочастотные фильтры работают только пока идёт переход с
+            // bass-swap (состояние сброшено на его старте); вне перехода
+            // cutA/cutB = 0 и вычитать нечего — фильтры пропускаем.
+            if (c < 2 && bassSwapActive)
             {
+                // Санитизация входа фильтра: один NaN из деки иначе навсегда
+                // отравляет состояние IIR (и весь остаток перехода = NaN).
+                if (! std::isfinite (av)) av = 0.0f;
+                if (! std::isfinite (bv)) bv = 0.0f;
                 const float la = lowpassA[(size_t) c].processSample (av);
                 const float lb = lowpassB[(size_t) c].processSample (bv);
                 av -= cutA * la;
                 bv -= cutB * lb;
             }
 
-            o[c][i] = av * ga + bv * gb;
+            // FILTER_SWEEP: реальный муффл уходящей деки (LP, а не громкость).
+            if (c < 2 && sweepOn)
+            {
+                float& x = (fOut == 0) ? av : bv;
+                djSweepLp[c] += sweepAlpha * (x - djSweepLp[c]);
+                x = djSweepLp[c];
+            }
+
+            float mixed = av * ga + bv * gb;
+
+            // ECHO_OUT: pre-fader send уходящей деки → делэй; возврат — в микс.
+            if (c < 2 && echoNow)
+            {
+                float* eb = echoPtr[c];
+                const float y = eb[djEchoPos];
+                const float send = echoActive ? ((fOut == 0 ? av : bv) * echoSend) : 0.0f;
+                eb[djEchoPos] = send + y * kDjEchoFeedback;
+                mixed += y * echoWet;
+            }
+
+            o[c][i] = mixed;
+        }
+
+        if (echoNow)
+        {
+            if (++djEchoPos >= djEchoLen) djEchoPos = 0;
+            if (! echoActive && djEchoTail > 0) --djEchoTail;
         }
     }
 
@@ -960,6 +1221,79 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
     // AutoMix-кроссфейд). Сама пропускает выключенные стадии (лёгкий путь).
     // o[0..ch) — указатели выхода; обрабатываем до 2 каналов (стерео).
     audioFx.process (o, ch, numSamples);
+
+    // Мастер-громкость (дак при уведомлениях/навигаторе, фейды сервиса). Линейный
+    // рамп ~20мс на полный ход — смена громкости без щелчков. Оба на 1.0 → пропуск.
+    {
+        const float target = masterVolumeTarget.load (std::memory_order_relaxed);
+        if (target != 1.0f || masterVolumeSmoothed != 1.0f)
+        {
+            const float step = 1.0f / (0.02f * (float) currentSampleRate);
+            for (int i = 0; i < numSamples; ++i)
+            {
+                if (masterVolumeSmoothed < target)
+                    masterVolumeSmoothed = juce::jmin (target, masterVolumeSmoothed + step);
+                else if (masterVolumeSmoothed > target)
+                    masterVolumeSmoothed = juce::jmax (target, masterVolumeSmoothed - step);
+                for (int c = 0; c < ch && c < 2; ++c)
+                    o[c][i] *= masterVolumeSmoothed;
+            }
+        }
+    }
+
+    // NaN-ловушка: не-конечный сэмпл (NaN/Inf) отравляет рекурсивные IIR/лимитер
+    // навсегда и на выходе слышен как постоянный шум. Вычищаем и СЧИТАЕМ
+    // (nanScrubbed в OBOE-дампе): ненулевой счётчик = цепочка отравляется,
+    // это отдельный баг с точным индикатором. Заодно (бесплатно, тот же проход)
+    // меряем уровень выхода: level>0 в дампе при тишине из динамика = звук
+    // чистый на выходе движка, его портит система.
+    {
+        int scrubbed = 0;
+        float sumAbs = 0.0f;
+        // Haptic Music: тот же проход по ch0 — LP ~110 Гц (бас) + полоса
+        // ~200..1800 Гц (LP1800 - LP200, середина: снейр/клэп). Alpha под
+        // 44.1-48к; точность срезов для тактильности некритична.
+        float hapticLp = hapticLpState;
+        float midLo = hapticLpMidLo;
+        float midHi = hapticLpMidHi;
+        float bassSum = 0.0f;
+        float midSum = 0.0f;
+        for (int c = 0; c < ch && c < 2; ++c)
+        {
+            float* p = o[c];
+            for (int i = 0; i < numSamples; ++i)
+            {
+                if (! std::isfinite (p[i]))
+                {
+                    p[i] = 0.0f;
+                    ++scrubbed;
+                }
+                else if (c == 0)
+                {
+                    sumAbs += std::abs (p[i]);
+                    hapticLp += 0.014f * (p[i] - hapticLp);
+                    bassSum += std::abs (hapticLp);
+                    midLo += 0.026f * (p[i] - midLo);   // LP ~200 Гц
+                    midHi += 0.21f  * (p[i] - midHi);   // LP ~1800 Гц
+                    midSum += std::abs (midHi - midLo);
+                }
+            }
+        }
+        hapticLpState = hapticLp;
+        hapticLpMidLo = midLo;
+        hapticLpMidHi = midHi;
+        if (numSamples > 0)
+        {
+            automix::noteAudioLevel (sumAbs / (float) numSamples);
+            automix::noteBassLevel (bassSum / (float) numSamples,
+                                    midSum / (float) numSamples, numSamples);
+        }
+        if (scrubbed > 0)
+        {
+            automix::addNanScrubbed (scrubbed);
+            fxResetRequested.store (true, std::memory_order_release); // вылечить цепочку
+        }
+    }
 
     // Clear any channels beyond the 8 we mixed (phones are stereo; just in case).
     for (int c = ch; c < numOutputChannels; ++c)
@@ -972,6 +1306,10 @@ void AutoMixAudioEngine::audioDeviceIOCallbackWithContext (const float* const* /
         if ((double) crossfadePos >= total)
         {
             crossfadeActive.store (false);
+            // ECHO_OUT: переход закончился, но повторы дозвучивают поверх
+            // нового трека и плавно гаснут (классический DJ echo-out).
+            if (style == 5 && djEchoLen > 0)
+                djEchoTail = (long long) (kDjEchoTailSec * currentSampleRate);
             const int out = fOut;                      // deck that faded out
             currentDeck.store (1 - out);               // incoming is now current
             baseGainA.store (out == 0 ? 0.0f : 1.0f);  // outgoing -> 0, incoming -> 1

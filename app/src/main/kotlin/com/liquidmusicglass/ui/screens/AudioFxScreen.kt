@@ -2,10 +2,8 @@ package com.liquidmusicglass.ui.screens
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -19,7 +17,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,6 +33,8 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.graphics.Brush
 import com.liquidmusicglass.engine.AudioFxController
+import com.liquidmusicglass.ui.glass.liquidClickable
+import com.liquidmusicglass.ui.theme.LiquidMotion
 import com.liquidmusicglass.ui.liquid.LiquidSlider
 import com.liquidmusicglass.ui.liquid.LiquidToggle
 import com.liquidmusicglass.ui.theme.LiquidColors
@@ -320,8 +319,8 @@ private fun LimiterSection(lc: LiquidColors, master: Boolean) {
 @Composable
 private fun ResetButton(lc: LiquidColors, enabled: Boolean) {
     Box(
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(lc.cardSurface)
-            .clickable(enabled = enabled) { AudioFxController.resetAll() }
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(lc.cardSurface)
+            .liquidClickable(enabled = enabled, pressedScale = LiquidMotion.PressButton) { AudioFxController.resetAll() }
             .padding(vertical = 14.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -334,7 +333,7 @@ private fun ResetButton(lc: LiquidColors, enabled: Boolean) {
 @Composable
 private fun Section(title: String, lc: LiquidColors, valueText: String? = null, content: @Composable () -> Unit) {
     Column(
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp))
             .background(lc.cardSurface).padding(16.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -353,7 +352,7 @@ private fun SectionWithToggle(
     onCheckedChange: (Boolean) -> Unit, master: Boolean, content: @Composable () -> Unit
 ) {
     Column(
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp))
             .background(lc.cardSurface).padding(16.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -409,7 +408,7 @@ private fun FxSwitch(checked: Boolean, enabled: Boolean = true, onCheckedChange:
 private fun Chip(label: String, selected: Boolean, lc: LiquidColors, enabled: Boolean, onClick: () -> Unit) {
     Box(
         modifier = Modifier.clip(CircleShape).background(if (selected) lc.accent else lc.settingsBackground)
-            .clickable(remember { MutableInteractionSource() }, null, enabled = enabled, onClick = onClick)
+            .liquidClickable(enabled = enabled, pressedScale = LiquidMotion.PressButton, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -424,7 +423,7 @@ private fun CircleButton(lc: LiquidColors, onClick: () -> Unit) {
         modifier = Modifier.size(40.dp)
             .background(if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7), CircleShape)
             .clip(CircleShape)
-            .clickable(remember { MutableInteractionSource() }, null, onClick = onClick),
+            .liquidClickable(pressedScale = LiquidMotion.PressIcon, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
         Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, tint = lc.iconDefault, modifier = Modifier.size(22.dp))

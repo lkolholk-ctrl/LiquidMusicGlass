@@ -4,13 +4,10 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
- * Sealed class representing the two music camps (providers) in LiquidMusicGlass.
+ * Sealed class representing the music camps (providers) in LiquidMusicGlass.
  *
- * ICM     — Paid subscription-based camp (Apple Music / VK / Custom sources via partner API).
- *           Requires active subscription for downloads and HD streaming.
- *
- * YOUTUBE — Free camp via YouTube Music InnerTube API.
- *           Always allows downloads (cache) and streams at 128K Opus.
+ * ICM — Paid subscription-based camp (Apple Music / VK / Custom sources via partner API).
+ *       Requires active subscription for downloads and HD streaming.
  */
 @Serializable
 sealed class MusicCamp(
@@ -28,17 +25,6 @@ sealed class MusicCamp(
         id = "icm",
         displayName = "ICM Music",
         description = "Premium catalog with Hi-Res streaming"
-    )
-
-    /**
-     * YouTube Music Camp — Free, ad-free via InnerTube API.
-     */
-    @Serializable
-    @SerialName("youtube")
-    data object Youtube : MusicCamp(
-        id = "youtube",
-        displayName = "YouTube Music",
-        description = "Free unlimited music via YouTube"
     )
 
     companion object {
@@ -109,19 +95,6 @@ data class CampCapabilities(
             isFree = false
         )
 
-        /**
-         * YouTube Music capabilities — always free, 128K Opus.
-         */
-        val YOUTUBE_DEFAULT = CampCapabilities(
-            canDownload = true,       // always true — free cache
-            maxBitrate = "128K",
-            streamQualityLabel = "Opus 128K",
-            canCreatePlaylists = true,
-            hasRadio = true,
-            hasLyrics = true,
-            hasCrossfade = false,     // YT streams have variable gaps
-            isFree = true
-        )
     }
 }
 
@@ -130,5 +103,4 @@ data class CampCapabilities(
  */
 fun MusicCamp.capabilities(): CampCapabilities = when (this) {
     is MusicCamp.Icm -> CampCapabilities.ICM_DEFAULT
-    is MusicCamp.Youtube -> CampCapabilities.YOUTUBE_DEFAULT
 }

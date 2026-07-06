@@ -1,10 +1,13 @@
 #include <jni.h>
+#include <cstring>
 #include <memory>
 #include <mutex>
+#include <vector>
 
 #include <juce_core/juce_core.h>
 
 #include "AutoMixAudioEngine.h"
+#include "OboeRuntime.h"
 
 // JUCE's intended Android init is the Java method com.rmsl.juce.Java.initialiseJUCE,
 // whose registered native does TWO things in order:
@@ -25,24 +28,35 @@ namespace juce
 }
 
 // Single process-wide engine instance for the Stage 1 test tone.
-static std::unique_ptr<AutoMixAudioEngine> gEngine;
+static std::shared_ptr<AutoMixAudioEngine> gEngine;
 static std::mutex gEngineMutex;
+
+// Мьютекс держим ТОЛЬКО на копирование указателя; сам вызов движка идёт без
+// него. Раньше мьютекс жил на весь вызов, и тяжёлые операции (загрузка дека,
+// offline-стретч на секунды) блокировали pause/silenceOutput и геттеры позиции,
+// которые Media3 дёргает с main каждые ~100мс → фризы UI и «не нажимается
+// пауза» во время загрузки. Движок внутри сам потокобезопасен (atomics +
+// пер-дековые локи), сериализация JNI-уровня ему не нужна; shared_ptr держит
+// объект живым, даже если nativeRelease случится посреди чужого вызова.
+static std::shared_ptr<AutoMixAudioEngine> engineSnapshot()
+{
+    std::lock_guard<std::mutex> lock (gEngineMutex);
+    return gEngine;
+}
 
 template <typename Fn, typename R>
 static R withEngine (R fallback, Fn&& fn)
 {
-    std::lock_guard<std::mutex> lock (gEngineMutex);
-    if (gEngine == nullptr)
-        return fallback;
-    return fn (*gEngine);
+    if (const auto engine = engineSnapshot())
+        return fn (*engine);
+    return fallback;
 }
 
 template <typename Fn>
 static void withEngineVoid (Fn&& fn)
 {
-    std::lock_guard<std::mutex> lock (gEngineMutex);
-    if (gEngine != nullptr)
-        fn (*gEngine);
+    if (const auto engine = engineSnapshot())
+        fn (*engine);
 }
 
 // Shared helper: jstring -> juce::String, invoke a deck loader. Templates can't
@@ -71,22 +85,28 @@ JNIEXPORT jboolean JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeInit(
         JNIEnv* env, jobject /*thiz*/, jobject context)
 {
-    std::lock_guard<std::mutex> lock (gEngineMutex);
-
-    // Bring JUCE up exactly like its own Java entry point: cache JNI class refs
-    // first, then hand JUCE the env + Context. Process-global, so do it once.
-    static bool juceInitialised = false;
-    if (! juceInitialised)
+    std::shared_ptr<AutoMixAudioEngine> engine;
     {
-        juce::JNIClassBase::initialiseAllClasses (env, context);
-        juce::Thread::initialiseJUCE (env, context);
-        juceInitialised = true;
+        std::lock_guard<std::mutex> lock (gEngineMutex);
+
+        // Bring JUCE up exactly like its own Java entry point: cache JNI class refs
+        // first, then hand JUCE the env + Context. Process-global, so do it once.
+        static bool juceInitialised = false;
+        if (! juceInitialised)
+        {
+            juce::JNIClassBase::initialiseAllClasses (env, context);
+            juce::Thread::initialiseJUCE (env, context);
+            juceInitialised = true;
+        }
+
+        if (gEngine == nullptr)
+            gEngine = std::make_shared<AutoMixAudioEngine>();
+        engine = gEngine;
     }
 
-    if (gEngine == nullptr)
-        gEngine = std::make_unique<AutoMixAudioEngine>();
-
-    return gEngine->init() ? JNI_TRUE : JNI_FALSE;
+    // init() открывает аудио-устройство (может занять сотни мс) — уже без
+    // мьютекса, чтобы не блокировать снапшоты из других потоков.
+    return engine->init() ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jboolean JNICALL
@@ -355,6 +375,27 @@ Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeLengthMsA(
     return withEngine ((jdouble) 0.0, [] (AutoMixAudioEngine& engine) { return (jdouble) engine.lengthMsA(); });
 }
 
+JNIEXPORT jint JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeXRunCount(
+        JNIEnv* /*env*/, jobject /*thiz*/)
+{
+    return withEngine ((jint) -1, [] (AutoMixAudioEngine& engine) { return (jint) engine.xRunCount(); });
+}
+
+JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeEscalateBufferForUnderruns(
+        JNIEnv* /*env*/, jobject /*thiz*/)
+{
+    withEngineVoid ([] (AutoMixAudioEngine& engine) { engine.escalateBufferForUnderruns(); });
+}
+
+JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeSetPowerSaveMode(
+        JNIEnv* /*env*/, jobject /*thiz*/, jboolean on)
+{
+    withEngineVoid ([&] (AutoMixAudioEngine& engine) { engine.setPowerSaveMode (on == JNI_TRUE); });
+}
+
 JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativePlay(
         JNIEnv* /*env*/, jobject /*thiz*/)
@@ -404,16 +445,158 @@ Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeSetOutputRout
     withEngineVoid ([&] (AutoMixAudioEngine& engine) { engine.onOutputRouteChanged (isBluetooth == JNI_TRUE); });
 }
 
+// ── Девайс-совместимость Oboe (см. OboeRuntime.h) ───────────────────────────
+
+// Не требует живого движка: до init() просто запоминает режим (первое открытие
+// потока его подхватит); на живом движке — переоткрывает поток с новым режимом.
+JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeSetOboeCompatMode(
+        JNIEnv* /*env*/, jobject /*thiz*/, jint mode)
+{
+    if (! automix::setOboeCompatMode ((int) mode))
+        return;                                   // не изменился — устройство не трогаем
+    withEngineVoid ([] (AutoMixAudioEngine& engine) { engine.reopenAudioDevice(); });
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeGetAudioDiagnostics(
+        JNIEnv* env, jobject /*thiz*/)
+{
+    return env->NewStringUTF (automix::getAudioDiagnostics().c_str());
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeCallbackCount(
+        JNIEnv* /*env*/, jobject /*thiz*/)
+{
+    return (jlong) automix::getCallbackCount();
+}
+
+// ── Haptic Music: бас-огибающая/удары для тактильного движка (опрос ~40 Гц) ──
+
+JNIEXPORT jfloat JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeHapticEnv(
+        JNIEnv* /*env*/, jobject /*thiz*/)
+{
+    return (jfloat) automix::getHapticEnv();
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeHapticBeatCount(
+        JNIEnv* /*env*/, jobject /*thiz*/)
+{
+    return (jlong) automix::getHapticBeatCount();
+}
+
+JNIEXPORT jfloat JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeHapticBeatStrength(
+        JNIEnv* /*env*/, jobject /*thiz*/)
+{
+    return (jfloat) automix::getHapticBeatStrength();
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeHapticMidBeatCount(
+        JNIEnv* /*env*/, jobject /*thiz*/)
+{
+    return (jlong) automix::getHapticMidBeatCount();
+}
+
+JNIEXPORT jfloat JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeHapticMidBeatStrength(
+        JNIEnv* /*env*/, jobject /*thiz*/)
+{
+    return (jfloat) automix::getHapticMidBeatStrength();
+}
+
+JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeSetPlaybackVolume(
+        JNIEnv* /*env*/, jobject /*thiz*/, jfloat v01)
+{
+    withEngineVoid ([&] (AutoMixAudioEngine& engine) { engine.setPlaybackVolume ((float) v01); });
+}
+
+// ── AudioTrack-выход (Java-sink, режим 6) ───────────────────────────────────
+// Oboe-девайс закрывается, движок остаётся жив; блоки тянет Java-поток
+// AudioTrackSink через nativeSinkRender. Путь ExoPlayer — работает на девайсах,
+// где кривые оба нативных входа (vivo).
+
+JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeSinkStart(
+        JNIEnv* /*env*/, jobject /*thiz*/, jint sampleRate, jint blockFrames)
+{
+    // Флаг ДО закрытия девайса: с этого момента гвард в applyBufferForRouteUnlocked
+    // не даст ничему (BT-монитор, эскалация буфера) воскресить Oboe параллельно sink'у.
+    automix::setSinkActive (true);
+    withEngineVoid ([&] (AutoMixAudioEngine& engine) {
+        engine.enterSinkMode ((double) sampleRate, (int) blockFrames);
+    });
+}
+
+JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeSinkRender(
+        JNIEnv* env, jobject /*thiz*/, jshortArray out, jint frames)
+{
+    if (out == nullptr || frames <= 0)
+        return;
+
+    // Локальные буферы потока sink'а (единственный вызывающий) — без аллокаций
+    // после первого вызова.
+    static thread_local std::vector<float> lbuf, rbuf;
+    if ((int) lbuf.size() < frames) { lbuf.resize ((size_t) frames); rbuf.resize ((size_t) frames); }
+
+    bool rendered = false;
+    withEngineVoid ([&] (AutoMixAudioEngine& engine) {
+        engine.renderSinkBlock (lbuf.data(), rbuf.data(), (int) frames);
+        rendered = true;
+    });
+
+    jshort* dst = (jshort*) env->GetPrimitiveArrayCritical (out, nullptr);
+    if (dst == nullptr)
+        return;
+    if (rendered)
+    {
+        for (int i = 0; i < (int) frames; ++i)
+        {
+            const float l = juce::jlimit (-1.0f, 1.0f, lbuf[(size_t) i]);
+            const float r = juce::jlimit (-1.0f, 1.0f, rbuf[(size_t) i]);
+            dst[i * 2 + 0] = (jshort) juce::roundToInt (l * 32767.0f);
+            dst[i * 2 + 1] = (jshort) juce::roundToInt (r * 32767.0f);
+        }
+    }
+    else
+    {
+        std::memset (dst, 0, (size_t) frames * 2 * sizeof (jshort));
+    }
+    env->ReleasePrimitiveArrayCritical (out, dst, 0);
+}
+
+JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeSinkStop(
+        JNIEnv* /*env*/, jobject /*thiz*/)
+{
+    automix::setSinkActive (false);
+    // Всегда возвращаем Oboe-девайс: последующий nativeSetOboeCompatMode может
+    // оказаться no-op (тот же нативный режим), и без реопена здесь остались бы
+    // без выхода вообще. Двойной реопен при смене режима — безвреден.
+    withEngineVoid ([] (AutoMixAudioEngine& engine) { engine.reopenAudioDevice(); });
+}
+
 JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeRelease(
         JNIEnv* /*env*/, jobject /*thiz*/)
 {
-    std::lock_guard<std::mutex> lock (gEngineMutex);
-    if (gEngine != nullptr)
+    // Указатель забираем под коротким мьютексом, release() зовём уже без него.
+    // In-flight вызовы на других потоках держат свой shared_ptr — объект умрёт,
+    // когда завершится последний из них.
+    std::shared_ptr<AutoMixAudioEngine> engine;
     {
-        gEngine->release();
+        std::lock_guard<std::mutex> lock (gEngineMutex);
+        engine = std::move (gEngine);
         gEngine.reset();
     }
+    if (engine != nullptr)
+        engine->release();
 }
 
 } // extern "C"

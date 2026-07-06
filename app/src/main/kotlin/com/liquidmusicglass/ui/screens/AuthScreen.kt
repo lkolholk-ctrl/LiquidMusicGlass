@@ -99,41 +99,51 @@ fun AuthScreen(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // Logo
-            Text(
-                text = "Liquid Music",
-                color = lc.textPrimary,
-                fontSize = 32.sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center
-            )
-            Text(
-                text = "Glass",
-                color = AppleRed,
-                fontSize = 32.sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center
-            )
+            // Карточка-логотип — стиль настроек (серая подложка, полевой фидбек)
+            val cardBg = if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(cardBg)
+                    .padding(vertical = 28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "Liquid Music",
+                    color = lc.textPrimary,
+                    fontSize = 32.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center
+                )
+                Text(
+                    text = "Glass",
+                    color = AppleRed,
+                    fontSize = 32.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center
+                )
 
-            Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
-            Text(
-                text = "Welcome",
-                color = lc.textSecondary,
-                fontSize = 15.sp,
-                textAlign = TextAlign.Center
-            )
+                Text(
+                    text = "Welcome",
+                    color = lc.textSecondary,
+                    fontSize = 15.sp,
+                    textAlign = TextAlign.Center
+                )
 
-            Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(4.dp))
 
-            Text(
-                text = "powered by ICM Music",
-                color = lc.textTertiary,
-                fontSize = 12.sp,
-                textAlign = TextAlign.Center
-            )
+                Text(
+                    text = "powered by ICM Music",
+                    color = lc.textTertiary,
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.Center
+                )
+            }
 
-            Spacer(modifier = Modifier.height(40.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
             // Telegram auth via ICM API
             val prefs = context.getSharedPreferences("icm_auth", android.content.Context.MODE_PRIVATE)
@@ -159,14 +169,21 @@ fun AuthScreen(
                         prefs.edit().putString("oauth_state", state).apply()
 
                         // Build link URL via IcmApi (handles URL-encoding)
-                        // Docs: /partner/<partner_id>/link?partner_user_id=...&redirect_uri=...&state=...
-                        // Server (liquid.glassfiles.ru) is whitelisted and will redirect to app
+                        // Docs: /partner/<partner_id>/link?partner_user_id=...&redirect_uri=...&state=...&app_name=...
+                        // redirect_uri — кастомная app-схema НАПРЯМУЮ. ICM внёс
+                        // liquidmusicglass://oauth/icm в whitelist (менеджер
+                        // прислал пример-ссылку) — промежуточный https-мост
+                        // (Cloudflare Worker) БОЛЬШЕ НЕ НУЖЕН: ICM редиректит
+                        // прямо в приложение. MainActivity ловит любой путь под
+                        // host=oauth. Воркер оставлен задеплоенным как запасной
+                        // (откат = вернуть https://liquid.glassfiles.ru/auth/telegram).
                         val telegramAuthUrl = com.liquidmusicglass.api.icm.IcmApi.getInstance()
                             .buildAccountLinkUrl(
                                 partnerId = "msng",
                                 partnerUserId = partnerUserId,
-                                redirectUri = "https://liquid.glassfiles.ru/auth/telegram",
-                                state = state
+                                redirectUri = "liquidmusicglass://oauth/icm",
+                                state = state,
+                                appName = "Liquid Music Glass"
                             )
 
                         // Use Chrome Custom Tabs for proper Telegram widget support

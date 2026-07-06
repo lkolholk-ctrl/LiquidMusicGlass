@@ -26,7 +26,10 @@ class EndlessPlaybackEngine(
 ) {
 
     companion object {
-        const val REFILL_THRESHOLD = 3
+        // Порог 8 (было 3): очередь держится «сытой» — в Up Next всегда
+        // ~8-18 треков, а не «3 и обрыв» (полевой фидбек: «чтоб не было
+        // пусто»). Частота запросов та же: батч 10 на каждые ~10 сыгранных.
+        const val REFILL_THRESHOLD = 8
         const val REFILL_BATCH_SIZE = 10
         const val MIN_REFILL_INTERVAL_MS = 8000L
     }
@@ -37,6 +40,7 @@ class EndlessPlaybackEngine(
     private val playedIds = mutableSetOf<String>()
     private val isRefilling = AtomicBoolean(false)
     private val lastRefillTime = AtomicLong(0L)
+    private var refillCounter = 0
 
     data class RefillContext(
         val type: Type,
@@ -44,9 +48,13 @@ class EndlessPlaybackEngine(
         val name: String? = null,
         val seedTrackId: String? = null,
         val genre: String? = null,
-        val mood: String? = null
+        val mood: String? = null,
+        // Пул якорных сидов (артист-волна: топ-треки артиста). Ротация seed
+        // идёт по нему, а не по хвосту очереди — станция «притягивается»
+        // обратно к артисту вместо транзитивного дрейфа в соседей-соседей.
+        val seedPool: List<String> = emptyList()
     ) {
-        enum class Type { WAVE, ARTIST, ALBUM, SEARCH, GENRE, PLAYLIST, LIBRARY, YOUTUBE_RADIO }
+        enum class Type { WAVE, ARTIST, ALBUM, SEARCH, GENRE, PLAYLIST, LIBRARY }
     }
 
     fun setRefillContext(context: RefillContext?) {
@@ -58,6 +66,7 @@ class EndlessPlaybackEngine(
         playedIds.clear()
         isRefilling.set(false)
         lastRefillTime.set(0L)
+        refillCounter = 0
         _refillContext.value = null
         android.util.Log.d("EndlessEngine", "Reset complete")
     }
@@ -80,20 +89,14 @@ class EndlessPlaybackEngine(
      * @return true, если дозагрузка была успешно выполнена.
      */
     suspend fun checkAndRefillIfNeeded(remainingCount: Int = -1): Boolean {
-        // ── AutoMix toggle (DataStore, единый источник правды) ──
-        // Выключен → не дозаправляем очередь: трек доигрывает и плеер возвращается
-        // к обычному Media3-поведению (конец очереди = остановка). Движок читает
-        // актуальное значение Flow на каждой проверке → реакция мгновенная.
-        if (!PlayerSettings.autoMix.value) {
-            android.util.Log.d("EndlessEngine", "Refill blocked: AutoMix is off")
-            return false
-        }
-
-        // ── BOUNDARY LOCK: refill is strictly allowed in Global (Wave) context ──
-        if (PlayerController.playbackContext !is PlaybackContext.Global) {
-            android.util.Log.d("EndlessEngine", "Refill blocked: active context is ${PlayerController.playbackContext}")
-            return false
-        }
+        // Дозаправка работает ВЕЗДЕ (полевой фидбек: «одно и то же по кругу —
+        // не по кайфу»):
+        //  - волна (Global) — продолжаем волну: личную или станцию по seed;
+        //  - альбом/плейлист/поиск/артист — когда свой материал кончается,
+        //    бесшовно переходим в станцию по хвосту очереди (как у Яндекса).
+        // Прежние гейты (AutoMix-тумблер и boundary-lock на Global) убраны:
+        // тумблер AutoMix управляет кроссфейдами, а не бесконечностью, и
+        // именно эта связка оставляла очередь «ходить по кругу».
 
         if (isRefilling.get()) {
             android.util.Log.d("EndlessEngine", "Already refilling in background, skip")
@@ -128,32 +131,78 @@ class EndlessPlaybackEngine(
                 val ctx = PlayerController.context
                 if (ctx != null) {
                     val refillCtx = _refillContext.value
-                    when (refillCtx?.type) {
-                        RefillContext.Type.YOUTUBE_RADIO -> {
-                            // YouTube radio refill
-                            val seedId = refillCtx.seedTrackId ?: return@withContext emptyList()
-                            val result = com.liquidmusicglass.api.youtube.YouTubeMusicRepository.getInstance()
-                                .getRadioQueue(seedId)
-                            if (result.isSuccess) {
-                                val ytTracks = result.getOrThrow()
-                                ytTracks.map { ytTrack ->
-                                    ytTrack.toEngineTrack()
-                                }
-                            } else emptyList()
+                    val isGlobal = PlayerController.playbackContext is PlaybackContext.Global
+                    val queueIds = PlayerController.getCurrentQueue().map { it.id }
+                    // Волна: seed из контекста (мудовая/трековая станция) или null
+                    // (личная волна). Не-волна: станция по ПОСЛЕДНЕМУ треку
+                    // очереди — альбом кончился, продолжаем «по мотивам».
+                    val baseSeed = if (isGlobal) refillCtx?.seedTrackId else queueIds.lastOrNull()
+                    // Ротация seed — станция как у Яндекса (пул 500+): похожих
+                    // ИМЕННО на исходный трек у сервера обычно немного, зато
+                    // соседей-соседей — сотни. Чередуем: нечётный рефилл строит
+                    // от исходного seed (ДНК станции держится), чётный — от
+                    // случайного из последних треков станции (пул расширяется
+                    // транзитивно, волна блуждает по окрестностям, не по кругу).
+                    // Контекстный seed при этом НЕ трогаем — исходный трек
+                    // остаётся якорем станции.
+                    // Артист-волна (seedPool не пуст): чётный рефилл берёт seed
+                    // из пула топ-треков артиста, а не из хвоста очереди —
+                    // станция постоянно «притягивается» обратно к артисту
+                    // вместо транзитивного уползания в соседей-соседей.
+                    val seedPool = refillCtx?.seedPool.orEmpty()
+                    val seed = if (isGlobal && baseSeed != null) {
+                        refillCounter++
+                        when {
+                            refillCounter % 2 == 1 -> baseSeed
+                            seedPool.isNotEmpty() ->
+                                seedPool.randomOrNull() ?: baseSeed
+                            else -> queueIds.takeLast(5).randomOrNull() ?: baseSeed
                         }
-                        else -> {
-                            // ICM wave refill. seedTrackId != null → продолжаем мудовую станцию
-                            // тем же жанром; null → персональная волна.
-                            // Anti-repeat: исключаем ВСЁ, что уже было в этой волне (playedIds —
-                            // и стартовая очередь, и прошлые дозаправки), чтобы треки не повторялись.
-                            val waveRepo = com.liquidmusicglass.data.local.WaveRepository.getInstance(ctx)
-                            waveRepo.buildWaveQueue(
+                    } else baseSeed
+                    // Anti-repeat: playedIds (вся история этой сессии волны) +
+                    // текущая очередь (в не-Global контекстах playedIds пуст).
+                    val exclude = (playedIds + queueIds).toList()
+                    val waveRepo = com.liquidmusicglass.data.local.WaveRepository.getInstance(ctx)
+                    var tracks = waveRepo.buildWaveQueue(
+                        count = REFILL_BATCH_SIZE,
+                        seedTrackId = seed,
+                        exclude = exclude
+                    )
+                    // Станция пересохла (похожие на seed кончились) → ДРЕЙФ,
+                    // как у Яндекса: строим станцию вокруг последнего трека
+                    // очереди (похожие-на-похожие — пул расширяется транзитивно,
+                    // «подобных очень много»). Seed в контексте обновляем, чтобы
+                    // следующие рефиллы не молотили сухую станцию.
+                    if (tracks.isEmpty() && seed != null) {
+                        val driftSeed = queueIds.lastOrNull()?.takeIf { it != seed }
+                        if (driftSeed != null) {
+                            android.util.Log.w("EndlessEngine", "Station dried up (seed=$seed) — drifting to seed=$driftSeed")
+                            tracks = waveRepo.buildWaveQueue(
                                 count = REFILL_BATCH_SIZE,
-                                seedTrackId = refillCtx?.seedTrackId,
-                                exclude = playedIds.toList()
+                                seedTrackId = driftSeed,
+                                exclude = exclude
                             )
+                            if (tracks.isNotEmpty() && isGlobal && refillCtx != null) {
+                                _refillContext.value = refillCtx.copy(seedTrackId = driftSeed)
+                                com.liquidmusicglass.debug.DebugLog.add("WAVE drift seed -> $driftSeed")
+                            }
                         }
                     }
+                    // Дрейфовать некуда/нечем → личная волна: музыка не должна
+                    // останавливаться и идти по кругу.
+                    if (tracks.isEmpty() && seed != null) {
+                        android.util.Log.w("EndlessEngine", "Drift dried up too — falling back to personal wave")
+                        tracks = waveRepo.buildWaveQueue(
+                            count = REFILL_BATCH_SIZE,
+                            seedTrackId = null,
+                            exclude = exclude
+                        )
+                        if (tracks.isNotEmpty() && isGlobal && refillCtx?.seedTrackId != null) {
+                            _refillContext.value = refillCtx.copy(seedTrackId = null)
+                            com.liquidmusicglass.debug.DebugLog.add("WAVE station -> personal (dried up)")
+                        }
+                    }
+                    tracks
                 } else {
                     android.util.Log.e("EndlessEngine", "Context is null, unable to fetch wave repository")
                     emptyList()

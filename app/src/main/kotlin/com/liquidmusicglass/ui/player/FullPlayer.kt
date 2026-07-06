@@ -77,6 +77,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.rememberModalBottomSheetState
 import com.liquidmusicglass.api.icm.IcmMiniArtist
 import com.liquidmusicglass.api.icm.IcmAuthRepository
+import com.liquidmusicglass.engine.AppSettings
 import com.liquidmusicglass.engine.AudioDownloadManager
 import com.liquidmusicglass.data.local.db.FavoriteTrackDatabase
 import androidx.compose.runtime.Composable
@@ -115,7 +116,7 @@ import com.kyant.backdrop.shadow.InnerShadow
 import com.kyant.backdrop.shadow.Shadow
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.UiLogger
-import com.liquidmusicglass.api.icm.IcmRepository
+import com.liquidmusicglass.api.icm.WaveSignalQueue
 import com.liquidmusicglass.ui.glass.GlassKit
 import com.liquidmusicglass.ui.glass.GlassDialog
 import com.liquidmusicglass.ui.glass.GlassDialogButton
@@ -194,6 +195,7 @@ fun FullPlayer(
 
     val shuffleEnabled by PlayerController.shuffleEnabled.collectAsState()
     val repeatMode by PlayerController.repeatMode.collectAsState()
+    val isBuffering by PlayerController.isBuffering.collectAsState()
     // currentTrackObj is declared above for Room reactive favorite state
 
     // isFavorite is now reactive from Room DB via LibraryRepository Flow
@@ -312,6 +314,15 @@ fun FullPlayer(
             val artCornerR = (16f * expandProgress.coerceIn(0f, 1f)).coerceIn(0f, 16f)
             val artShape = RoundedCornerShape(artCornerR.dp)
 
+            // Обложка «дышит»: на паузе ужимается (как в Apple Music), на плей —
+            // упруго распахивается. Буферизацию не считаем паузой — иначе обложка
+            // дёргалась бы при каждом скипе.
+            val artScale by animateFloatAsState(
+                targetValue = if (isPlaying || isBuffering) 1f else 0.86f,
+                animationSpec = spring(dampingRatio = 0.72f, stiffness = 220f),
+                label = "artBreath"
+            )
+
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -320,21 +331,32 @@ fun FullPlayer(
                     .aspectRatio(1f)
                     .graphicsLayer {
                         translationX = swipeOffsetX.value
-                        shadowElevation = 24f * expandProgress.coerceIn(0f, 1f)
+                        scaleX = artScale
+                        scaleY = artScale
+                        shadowElevation = (24f - 10f * (1f - artScale) / 0.14f) *
+                            expandProgress.coerceIn(0f, 1f)
                         alpha = artAlpha
                         clip = true
                         shape = artShape
                     }
             ) {
-                AlbumArtImage(
-                    uri = albumArtUri,
-                    coverUrl = coverUrl,
-                    audioFileUri = audioFileUri,
-                    albumId = albumId,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
+                // Кроссфейд обложек: при смене трека (авто или скип) старая
+                // растворяется, новая проявляется — вместо мгновенной подмены.
+                androidx.compose.animation.Crossfade(
+                    targetState = ArtCrossfadeKey(albumArtUri, coverUrl, audioFileUri, albumId),
+                    animationSpec = tween(450),
+                    label = "artCrossfade"
+                ) { art ->
+                    AlbumArtImage(
+                        uri = art.uri,
+                        coverUrl = art.coverUrl,
+                        audioFileUri = art.audioFileUri,
+                        albumId = art.albumId,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
             }
         }
 
@@ -521,35 +543,67 @@ fun FullPlayer(
                             overflow = TextOverflow.Ellipsis
                         )
                         Spacer(Modifier.height(4.dp))
+                        // Артист кликабелен: один — сразу на его страницу,
+                        // несколько (фиты) — шторка выбора (она уже была
+                        // построена, но её никто не открывал).
                         Text(
                             text = artistName,
                             color = Color.White.copy(alpha = 0.60f),
                             fontSize = 16.sp,
                             maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) {
+                                val withId = artists.filter { it.id != null }
+                                when {
+                                    withId.size > 1 -> showArtistSheet = true
+                                    withId.size == 1 -> onNavigateToArtist(withId.first().id!!)
+                                    else -> {
+                                        // Метаданные без artistId (старый лайк, VK,
+                                        // локалка) — резолвим по ИМЕНИ через поиск:
+                                        // тап работает везде, где артист существует.
+                                        val name = artistName
+                                        if (name.isNotBlank() && name != "Unknown Artist" && name != "—") {
+                                            scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                                val resolved = try {
+                                                    com.liquidmusicglass.api.icm.IcmRepository
+                                                        .searchAll(name, limit = 5)?.items
+                                                        ?.firstOrNull { it.isArtist }
+                                                        ?.let { it.artistId ?: it.id }
+                                                } catch (_: Exception) { null }
+                                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                                    if (resolved != null) {
+                                                        onNavigateToArtist(resolved)
+                                                    } else {
+                                                        Toast.makeText(
+                                                            context,
+                                                            "Artist page unavailable",
+                                                            Toast.LENGTH_SHORT
+                                                        ).show()
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         )
                     }
                     Spacer(Modifier.width(12.dp))
-                    Box(
-                        modifier = Modifier
-                            .size(44.dp)
-                            .pressScale {
-                                currentTrackObj?.let { track ->
-                                    scope.launch {
-                                        libraryRepo.toggleFavorite(track)
-                                    }
+                    com.liquidmusicglass.ui.components.LikeBurstHeart(
+                        isLiked = isFavorite,
+                        modifier = Modifier.size(44.dp),
+                        iconSize = 26.dp,
+                        onToggle = {
+                            currentTrackObj?.let { track ->
+                                scope.launch {
+                                    libraryRepo.toggleFavorite(track)
                                 }
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            if (isFavorite) Icons.Rounded.Favorite
-                            else Icons.Rounded.FavoriteBorder, null,
-                            tint = if (isFavorite) Color(0xFFFC3C44)
-                            else Color.White.copy(alpha = 0.70f),
-                            modifier = Modifier.size(26.dp)
-                        )
-                    }
+                            }
+                        }
+                    )
                     Box(
                         modifier = Modifier
                             .size(44.dp)
@@ -603,9 +657,9 @@ fun FullPlayer(
                                 currentTrackObj?.let { track ->
                                     waveFeedback = true
                                     scope.launch {
-                                        IcmRepository.sendWaveFeedback("more_track", track.id)
+                                        WaveSignalQueue.sendFeedback("more_track", track.id)
                                         track.artists.firstOrNull()?.id?.let {
-                                            IcmRepository.sendWaveFeedback("more_artist", it)
+                                            WaveSignalQueue.sendFeedback("more_artist", it)
                                         }
                                     }
                                 }
@@ -633,9 +687,9 @@ fun FullPlayer(
                                 currentTrackObj?.let { track ->
                                     waveFeedback = false
                                     scope.launch {
-                                        IcmRepository.sendWaveFeedback("less_track", track.id)
+                                        WaveSignalQueue.sendFeedback("less_track", track.id)
                                         track.artists.firstOrNull()?.id?.let {
-                                            IcmRepository.sendWaveFeedback("less_artist", it)
+                                            WaveSignalQueue.sendFeedback("less_artist", it)
                                         }
                                     }
                                 }
@@ -702,12 +756,22 @@ fun FullPlayer(
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Medium
                     )
+                    // Тап по правому лейблу: «-осталось» ⇄ «всего». Выбор помнится.
+                    val showTotal by AppSettings.timeShowTotal.collectAsState()
                     val remaining = (durationMs - currentPositionMs).coerceAtLeast(0)
                     Text(
-                        "-${formatTime(remaining)}",
+                        if (showTotal) formatTime(durationMs.coerceAtLeast(0))
+                        else "-${formatTime(remaining)}",
                         color = Color.White.copy(alpha = 0.50f),
                         fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) { AppSettings.setTimeShowTotal(!showTotal) }
+                            .padding(horizontal = 4.dp)
                     )
                 }
 
@@ -741,12 +805,23 @@ fun FullPlayer(
                         iconSize = 50.dp,
                         onClick = onSkipPrevious
                     )
-                    AnimatedTransportButton(
-                        icon = if (isPlaying) Icons.Rounded.Pause
-                               else Icons.Rounded.PlayArrow,
-                        iconSize = 66.dp,
-                        onClick = onPlayPause
-                    )
+                    // Пока трек буферизуется после скипа — вокруг play/pause крутится
+                    // кольцо: видно, что плеер грузит трек, а не завис.
+                    Box(contentAlignment = Alignment.Center) {
+                        AnimatedTransportButton(
+                            icon = if (isPlaying) Icons.Rounded.Pause
+                                   else Icons.Rounded.PlayArrow,
+                            iconSize = 66.dp,
+                            onClick = onPlayPause
+                        )
+                        if (isBuffering) {
+                            CircularProgressIndicator(
+                                color = Color.White.copy(alpha = 0.85f),
+                                strokeWidth = 2.5.dp,
+                                modifier = Modifier.size(72.dp)
+                            )
+                        }
+                    }
                     AnimatedTransportButton(
                         icon = Icons.Rounded.FastForward,
                         iconSize = 50.dp,
@@ -1375,3 +1450,11 @@ private fun DebugPanel(onDismiss: () -> Unit) {
         }
     }
 }
+
+/** Ключ кроссфейда обложки: все параметры арта одного трека одним значением. */
+private data class ArtCrossfadeKey(
+    val uri: Uri?,
+    val coverUrl: String?,
+    val audioFileUri: Uri?,
+    val albumId: Long
+)

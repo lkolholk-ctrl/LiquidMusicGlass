@@ -2,8 +2,6 @@ package com.liquidmusicglass.ui.screens
 
 import android.net.Uri
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -44,6 +42,8 @@ import com.liquidmusicglass.data.local.db.ListenHistoryEntity
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.Track
 import com.liquidmusicglass.ui.glass.AlbumArtImage
+import com.liquidmusicglass.ui.glass.liquidClickable
+import com.liquidmusicglass.ui.theme.LiquidMotion
 import com.liquidmusicglass.ui.theme.LiquidTheme
 import kotlinx.coroutines.launch
 
@@ -82,10 +82,7 @@ fun HistoryScreen(
                             .size(40.dp)
                             .clip(CircleShape)
                             .background(if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null
-                            ) { onBack() },
+                            .liquidClickable(pressedScale = LiquidMotion.PressIcon) { onBack() },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
@@ -112,10 +109,7 @@ fun HistoryScreen(
                         fontWeight = FontWeight.SemiBold,
                         modifier = Modifier
                             .clip(RoundedCornerShape(50))
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null
-                            ) { scope.launch { dao.clear() } }
+                            .liquidClickable(pressedScale = LiquidMotion.PressButton) { scope.launch { dao.clear() } }
                             .padding(horizontal = 10.dp, vertical = 6.dp)
                     )
                 }
@@ -170,11 +164,7 @@ private fun HistoryRow(entry: ListenHistoryEntity, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onClick
-            )
+            .liquidClickable(onClick = onClick)
             .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

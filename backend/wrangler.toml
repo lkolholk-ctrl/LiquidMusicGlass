@@ -1,0 +1,13 @@
+# Cloudflare Worker config для моста Telegram-авторизации.
+# Деплой:  wrangler deploy
+# Затем в дашборде Cloudflare привяжи свой домен (Workers → Routes),
+# и попроси менеджера ICM добавить этот домен в белый список redirect_uri.
+
+name = "lmg-telegram-redirect"
+main = "telegram-redirect-worker.js"
+compatibility_date = "2025-01-01"
+
+# После привязки домена раскомментируй и подставь свой:
+# routes = [
+#   { pattern = "auth.ТВОЙ-ДОМЕН.ru/auth/telegram", zone_name = "ТВОЙ-ДОМЕН.ru" }
+# ]

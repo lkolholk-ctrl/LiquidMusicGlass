@@ -1,8 +1,6 @@
 package com.liquidmusicglass.ui.screens
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -56,6 +54,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.liquidmusicglass.ui.glass.GlassKit
+import com.liquidmusicglass.ui.glass.liquidClickable
+import com.liquidmusicglass.ui.theme.LiquidMotion
 import com.liquidmusicglass.ui.theme.LiquidTheme
 import com.liquidmusicglass.api.icm.IcmArtistResponse
 import com.liquidmusicglass.api.icm.IcmRepository
@@ -232,14 +232,10 @@ fun ArtistDetailScreen(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(50))
                                 .background(AppleRed)
-                                .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null,
-                                    onClick = {
-                                        isLoading = true
-                                        error = null
-                                    }
-                                )
+                                .liquidClickable(pressedScale = LiquidMotion.PressButton) {
+                                    isLoading = true
+                                    error = null
+                                }
                                 .padding(horizontal = 24.dp, vertical = 10.dp),
                             contentAlignment = Alignment.Center
                         ) {
@@ -266,11 +262,7 @@ fun ArtistDetailScreen(
                                     .size(40.dp)
                                     .clip(CircleShape)
                                     .background(if (LiquidTheme.colors.isDark) Color(0xFF1A1A1A) else Color(0xFFF2F2F7))
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null,
-                                        onClick = onBack
-                                    ),
+                                    .liquidClickable(pressedScale = LiquidMotion.PressIcon) { onBack() },
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
@@ -287,17 +279,13 @@ fun ArtistDetailScreen(
                                         .size(40.dp)
                                         .clip(CircleShape)
                                         .background(if (LiquidTheme.colors.isDark) Color(0xFF1A1A1A) else Color(0xFFF2F2F7))
-                                        .clickable(
-                                            interactionSource = remember { MutableInteractionSource() },
-                                            indication = null,
-                                            onClick = {
-                                                artist?.url?.let { url ->
-                                                    val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
-                                                    intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                                    context.startActivity(intent)
-                                                }
+                                        .liquidClickable(pressedScale = LiquidMotion.PressIcon) {
+                                            artist?.url?.let { url ->
+                                                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                                                intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                context.startActivity(intent)
                                             }
-                                        ),
+                                        },
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
@@ -313,22 +301,18 @@ fun ArtistDetailScreen(
                                         .size(40.dp)
                                         .clip(CircleShape)
                                         .background(if (LiquidTheme.colors.isDark) Color(0xFF1A1A1A) else Color(0xFFF2F2F7))
-                                        .clickable(
-                                            interactionSource = remember { MutableInteractionSource() },
-                                            indication = null,
-                                            onClick = {
-                                                artist?.let { a ->
-                                                    val shareText = "${a.name} on Liquid Music Glass\n\nhttps://music.apple.com/artist/${a.id}"
-                                                    val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                                                        type = "text/plain"
-                                                        putExtra(android.content.Intent.EXTRA_TEXT, shareText)
-                                                    }
-                                                    val chooser = android.content.Intent.createChooser(intent, "Share Artist")
-                                                    chooser.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                                    context.startActivity(chooser)
+                                        .liquidClickable(pressedScale = LiquidMotion.PressIcon) {
+                                            artist?.let { a ->
+                                                val shareText = "${a.name} on Liquid Music Glass\n\nhttps://music.apple.com/artist/${a.id}"
+                                                val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                                    type = "text/plain"
+                                                    putExtra(android.content.Intent.EXTRA_TEXT, shareText)
                                                 }
+                                                val chooser = android.content.Intent.createChooser(intent, "Share Artist")
+                                                chooser.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                context.startActivity(chooser)
                                             }
-                                        ),
+                                        },
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
@@ -424,22 +408,18 @@ fun ArtistDetailScreen(
                                     .height(44.dp)
                                     .clip(RoundedCornerShape(50))
                                     .background(AppleRed)
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null,
-                                        onClick = {
-                                            if (artistTracks.isNotEmpty()) {
-                                                PlayerController.playFromList(
-                                                    context = context,
-                                                    tracks = artistTracks,
-                                                    startIndex = 0,
-                                                    autoRefillType = "artist",
-                                                    autoRefillId = artistId,
-                                                    autoRefillName = artist?.name
-                                                )
-                                            }
+                                    .liquidClickable(pressedScale = LiquidMotion.PressButton) {
+                                        if (artistTracks.isNotEmpty()) {
+                                            PlayerController.playFromList(
+                                                context = context,
+                                                tracks = artistTracks,
+                                                startIndex = 0,
+                                                autoRefillType = "artist",
+                                                autoRefillId = artistId,
+                                                autoRefillName = artist?.name
+                                            )
                                         }
-                                    ),
+                                    },
                                 contentAlignment = Alignment.Center
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -454,26 +434,22 @@ fun ArtistDetailScreen(
                                     .height(44.dp)
                                     .clip(RoundedCornerShape(50))
                                     .background(if (LiquidTheme.colors.isDark) Color(0xFF1A1A1A) else Color(0xFFF2F2F7))
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null,
-                                        onClick = {
-                                            if (artistTracks.isNotEmpty()) {
-                                                val shuffled = artistTracks.shuffled()
-                                                PlayerController.playFromList(
-                                                    context = context,
-                                                    tracks = shuffled,
-                                                    startIndex = 0,
-                                                    autoRefillType = "artist",
-                                                    autoRefillId = artistId,
-                                                    autoRefillName = artist?.name
-                                                )
-                                                if (!PlayerController.shuffleEnabled.value) {
-                                                    PlayerController.toggleShuffle()
-                                                }
+                                    .liquidClickable(pressedScale = LiquidMotion.PressButton) {
+                                        if (artistTracks.isNotEmpty()) {
+                                            val shuffled = artistTracks.shuffled()
+                                            PlayerController.playFromList(
+                                                context = context,
+                                                tracks = shuffled,
+                                                startIndex = 0,
+                                                autoRefillType = "artist",
+                                                autoRefillId = artistId,
+                                                autoRefillName = artist?.name
+                                            )
+                                            if (!PlayerController.shuffleEnabled.value) {
+                                                PlayerController.toggleShuffle()
                                             }
                                         }
-                                    ),
+                                    },
                                 contentAlignment = Alignment.Center
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -494,13 +470,9 @@ fun ArtistDetailScreen(
                                 .height(44.dp)
                                 .clip(RoundedCornerShape(50))
                                 .background(if (LiquidTheme.colors.isDark) Color(0xFF1A1A1A) else Color(0xFFF2F2F7))
-                                .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null,
-                                    onClick = {
-                                        PlayerController.startArtistWave(context, artistId, artist?.name)
-                                    }
-                                ),
+                                .liquidClickable(pressedScale = LiquidMotion.PressButton) {
+                                    PlayerController.startArtistWave(context, artistId, artist?.name)
+                                },
                             contentAlignment = Alignment.Center
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -531,12 +503,9 @@ fun ArtistDetailScreen(
                                 items(similar, key = { it.id }) { sim ->
                                     Column(
                                         modifier = Modifier
+                                            .animateItem()
                                             .width(100.dp)
-                                            .clickable(
-                                                interactionSource = remember { MutableInteractionSource() },
-                                                indication = null,
-                                                onClick = { onNavigateToArtist(sim.id) }
-                                            ),
+                                            .liquidClickable { onNavigateToArtist(sim.id) },
                                         horizontalAlignment = Alignment.CenterHorizontally
                                     ) {
                                         Box(
@@ -587,12 +556,9 @@ fun ArtistDetailScreen(
                                 items(albums, key = { it.id }) { album ->
                                     Column(
                                         modifier = Modifier
+                                            .animateItem()
                                             .width(130.dp)
-                                            .clickable(
-                                                interactionSource = remember { MutableInteractionSource() },
-                                                indication = null,
-                                                onClick = { onNavigateToAlbum(album.id) }
-                                            )
+                                            .liquidClickable { onNavigateToAlbum(album.id) }
                                     ) {
                                         Box(
                                             modifier = Modifier
@@ -640,12 +606,9 @@ fun ArtistDetailScreen(
                                 items(playlists, key = { it.id }) { playlist ->
                                     Column(
                                         modifier = Modifier
+                                            .animateItem()
                                             .width(130.dp)
-                                            .clickable(
-                                                interactionSource = remember { MutableInteractionSource() },
-                                                indication = null,
-                                                onClick = { onNavigateToAlbum(playlist.id) }
-                                            )
+                                            .liquidClickable { onNavigateToAlbum(playlist.id) }
                                     ) {
                                         Box(
                                             modifier = Modifier
@@ -707,28 +670,25 @@ fun ArtistDetailScreen(
                     items(artistTracks, key = { it.id }) { track ->
                         Row(
                             modifier = Modifier
+                                .animateItem()
                                 .fillMaxWidth()
                                 .padding(horizontal = 16.dp)
                                 .height(58.dp)
                                 .clip(RoundedCornerShape(12.dp))
-                                .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null,
-                                    onClick = {
-                                        // Load all artist tracks as the queue so the player
-                                        // continues to the next song after this one ends.
-                                        val startIdx = artistTracks.indexOfFirst { it.id == track.id }
-                                            .coerceAtLeast(0)
-                                        PlayerController.playFromList(
-                                            context = context,
-                                            tracks = artistTracks,
-                                            startIndex = startIdx,
-                                            autoRefillType = "artist",
-                                            autoRefillId = artistId,
-                                            autoRefillName = artist?.name
-                                        )
-                                    }
-                                )
+                                .liquidClickable {
+                                    // Load all artist tracks as the queue so the player
+                                    // continues to the next song after this one ends.
+                                    val startIdx = artistTracks.indexOfFirst { it.id == track.id }
+                                        .coerceAtLeast(0)
+                                    PlayerController.playFromList(
+                                        context = context,
+                                        tracks = artistTracks,
+                                        startIndex = startIdx,
+                                        autoRefillType = "artist",
+                                        autoRefillId = artistId,
+                                        autoRefillName = artist?.name
+                                    )
+                                }
                                 .padding(horizontal = 12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {

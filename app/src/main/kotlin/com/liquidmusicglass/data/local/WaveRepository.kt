@@ -173,6 +173,29 @@ class WaveRepository(context: Context) {
      * 
      * Uses random favorite seeds, applies ban filters and skipRatio filters, and heuristic genre tagging.
      */
+    /**
+     * Мгновенный старт волны: ПЕРВЫЙ трек отдаётся как только пришёл (музыка
+     * стартует через ОДИН сетевой запрос), остальная пачка добирается следом
+     * и доклеивается в очередь. Вместо прежнего «строим волну 5×RTT молча».
+     */
+    suspend fun buildWaveQueueFast(
+        seedTrackId: String? = null,
+        exclude: Collection<String> = emptyList(),
+        topUpCount: Int = 5,
+        onFirst: suspend (List<Track>) -> Unit,
+        onTopUp: suspend (List<Track>) -> Unit
+    ) {
+        val first = buildWaveQueue(count = 1, seedTrackId = seedTrackId, exclude = exclude)
+        onFirst(first)
+        if (first.isEmpty()) return
+        val rest = buildWaveQueue(
+            count = topUpCount,
+            seedTrackId = seedTrackId,
+            exclude = exclude + first.map { it.id }
+        )
+        if (rest.isNotEmpty()) onTopUp(rest)
+    }
+
     suspend fun buildWaveQueue(
         count: Int = 5,
         seedTrackId: String? = null,
@@ -199,6 +222,8 @@ class WaveRepository(context: Context) {
 
         var attempts = 0
         val maxAttempts = count * 6 // Fail-safe boundary limit
+        var nullStreak = 0          // подряд «нет ответа» → сеть лежит, не молотим
+        var knownStreak = 0         // подряд УЖЕ ИЗВЕСТНЫХ треков → станция пересохла
 
         while (queue.size < count && attempts < maxAttempts) {
             attempts++
@@ -220,9 +245,14 @@ class WaveRepository(context: Context) {
                 // лайки / completion / skip-streak). Иначе — станция вокруг seed-трека (мудовая плитка).
                 val recentSkipsVal = com.liquidmusicglass.engine.PlayerController.consecutiveSkips
 
+                // exclude капим ПОСЛЕДНИМИ 80 id (LinkedHashSet держит порядок
+                // вставки → свежие в конце): на длинной сессии полный набор
+                // (до 550 id) раздувал GET-запрос до километрового query-string
+                // с риском 414. Сервер и так ведёт свою playback_history по
+                // нашим wave/playback-событиям — древние эксклюды избыточны.
                 var response = IcmRepository.getWaveNext(
                     seedTrackId = seedTrackId,
-                    exclude = excludeIds.toList().takeIf { it.isNotEmpty() },
+                    exclude = excludeIds.toList().takeLast(80).takeIf { it.isNotEmpty() },
                     recentSkips = recentSkipsVal,
                     genre = null
                 )
@@ -241,9 +271,16 @@ class WaveRepository(context: Context) {
                     }
                     // Пустая станция (нет кандидатов) — прекращаем, чтоб не крутить вхолостую.
                     if (response?.status == "empty") break
+                    // 3 «нет ответа» подряд = сеть лежит (оффлайн/обрыв): выходим,
+                    // иначе каждая дозаправка молотила бы до 60 холостых запросов.
+                    if (response == null && ++nullStreak >= 3) {
+                        Log.w(TAG, "No response 3x in a row — network looks down, aborting wave build.")
+                        break
+                    }
                     Log.w(TAG, "Wave response status: ${response?.status ?: "null"}")
                     continue
                 }
+                nullStreak = 0
 
                 val waveTrack = response.track ?: run {
                     Log.w(TAG, "Wave track is null")
@@ -251,6 +288,23 @@ class WaveRepository(context: Context) {
                 }
 
                 val trackId = waveTrack.id
+
+                // Клиентский анти-повтор: сервер МОЖЕТ вернуть трек из нашего
+                // exclude (пул похожих у seed-станции выжат — сервер начинает
+                // ходить по кругу). Раньше такой трек молча добавлялся в очередь
+                // → «15 песен и поехало по кругу». Теперь: дубль пропускаем, а
+                // 5 знакомых подряд = станция пересохла → обрываем сборку, чтобы
+                // выше сработал fallback (дрейф станции / личная волна).
+                if (trackId in excludeIds) {
+                    knownStreak++
+                    Log.d(TAG, "Server returned known track $trackId (streak=$knownStreak)")
+                    if (knownStreak >= 5) {
+                        Log.w(TAG, "Station dried up: 5 known tracks in a row, aborting build")
+                        break
+                    }
+                    continue
+                }
+                knownStreak = 0
 
                 // Единственный локальный фильтр — ПЕРСОНАЛЬНЫЙ: если юзер стабильно скипает
                 // этот трек (skipRatio > 70% за ≥2 показа), не предлагаем снова. Никаких

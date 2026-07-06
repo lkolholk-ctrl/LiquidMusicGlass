@@ -24,8 +24,9 @@ object LyricsParser {
 
     private const val LRCLIB_BASE = "https://lrclib.net/api"
 
-    // In-memory lyrics cache — key: trackId
-    private val lyricsCache = mutableMapOf<String, Lyrics>()
+    // In-memory lyrics cache — key: trackId. Concurrent: пишется/читается с
+    // разных корутин (строка лирики на Wave, LyricsSheet, полный экран).
+    private val lyricsCache = java.util.concurrent.ConcurrentHashMap<String, Lyrics>()
 
     fun getCachedLyrics(trackId: String?): Lyrics? {
         if (trackId.isNullOrBlank()) return null
@@ -34,6 +35,12 @@ object LyricsParser {
 
     fun cacheLyrics(trackId: String, lyrics: Lyrics) {
         lyricsCache[trackId] = lyrics
+    }
+
+    /** Сброс in-memory кэша при давлении на память (onTrimMemory): лирика
+     *  перезагрузится из сети/файла при следующем обращении. */
+    fun trimCache() {
+        lyricsCache.clear()
     }
 
     /** Одно слово с таймкодом (word-level / Enhanced LRC). */
@@ -429,6 +436,7 @@ object LyricsParser {
 
         var title: String? = null
         var artist: String? = null
+        var offsetMs = 0L
         val lyricLines = mutableListOf<LyricLine>()
         var hasSyncedLines = false
 
@@ -443,9 +451,16 @@ object LyricsParser {
                 artist = trimmed.removeSurrounding("[ar:", "]").trim()
                 continue
             }
+            if (trimmed.startsWith("[offset:")) {
+                // Стандарт LRC: общий сдвиг таймкодов в мс. «+» = лирика раньше
+                // (display = tag − offset). Раньше тег ВЫБРАСЫВАЛСЯ — у песен,
+                // где автор синхры задал offset, вся лирика ехала на эту величину.
+                offsetMs = trimmed.removeSurrounding("[offset:", "]").trim()
+                    .replace("+", "").toLongOrNull() ?: 0L
+                continue
+            }
             if (trimmed.startsWith("[al:") || trimmed.startsWith("[by:") ||
-                trimmed.startsWith("[offset:") || trimmed.startsWith("[re:") ||
-                trimmed.startsWith("[ve:")) {
+                trimmed.startsWith("[re:") || trimmed.startsWith("[ve:")) {
                 continue
             }
 
@@ -484,6 +499,33 @@ object LyricsParser {
 
         if (hasSyncedLines) {
             lyricLines.sortBy { it.timeMs }
+        }
+
+        // Применяем [offset:] ко всем таймкодам (строки + пословные теги).
+        if (offsetMs != 0L && hasSyncedLines) {
+            for (i in lyricLines.indices) {
+                val l = lyricLines[i]
+                if (l.timeMs < 0) continue
+                lyricLines[i] = l.copy(
+                    timeMs = (l.timeMs - offsetMs).coerceAtLeast(0L),
+                    words = l.words.map { w ->
+                        w.copy(timeMs = (w.timeMs - offsetMs).coerceAtLeast(0L))
+                    }
+                )
+            }
+        }
+
+        // Строго возрастающие таймкоды: дубликаты (копипаст-опечатки в LRC,
+        // клампы offset у нуля) раздвигаем на +10мс. Порядок текста стабилен
+        // (sortBy устойчив), а заливка не получает нулевых гэпов.
+        if (hasSyncedLines) {
+            var prev = -1L
+            for (i in lyricLines.indices) {
+                val l = lyricLines[i]
+                if (l.timeMs < 0) continue
+                if (l.timeMs <= prev) lyricLines[i] = l.copy(timeMs = prev + 10)
+                prev = lyricLines[i].timeMs
+            }
         }
 
         return Lyrics(lyricLines, hasSyncedLines, title, artist)

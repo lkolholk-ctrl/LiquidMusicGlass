@@ -2,8 +2,6 @@ package com.liquidmusicglass.ui.screens
 
 import android.net.Uri
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsTopHeight
@@ -48,6 +46,8 @@ import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.Track
 import com.liquidmusicglass.engine.PlaylistDownloadService
 import com.liquidmusicglass.ui.glass.AlbumArtImage
+import com.liquidmusicglass.ui.glass.liquidClickable
+import com.liquidmusicglass.ui.theme.LiquidMotion
 import com.liquidmusicglass.ui.theme.LiquidTheme
 import com.liquidmusicglass.api.icm.IcmRepository
 import kotlinx.coroutines.launch
@@ -183,7 +183,7 @@ fun PlaylistDetailScreen(
                         .size(40.dp)
                         .background(if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7), CircleShape)
                         .clip(CircleShape)
-                        .clickable(remember { MutableInteractionSource() }, null) { onBack() },
+                        .liquidClickable(pressedScale = LiquidMotion.PressIcon) { onBack() },
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
@@ -201,7 +201,7 @@ fun PlaylistDetailScreen(
                             .size(40.dp)
                             .background(if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7), CircleShape)
                             .clip(CircleShape)
-                            .clickable(remember { MutableInteractionSource() }, null) {
+                            .liquidClickable(pressedScale = LiquidMotion.PressIcon) {
                                 val trackIds = tracks.map { it.id }
                                 val playlistName = if (isLocalPlaylist) {
                                     com.liquidmusicglass.engine.PlaylistManager.getById(playlistId)?.name ?: "Playlist"
@@ -309,7 +309,7 @@ fun PlaylistDetailScreen(
                                 .height(48.dp)
                                 .background(AppleRed, RoundedCornerShape(50))
                                 .clip(RoundedCornerShape(50))
-                                .clickable(remember { MutableInteractionSource() }, null) {
+                                .liquidClickable(pressedScale = LiquidMotion.PressButton) {
                                     PlayerController.playFromList(
                                         context = context,
                                         tracks = tracks,
@@ -340,7 +340,7 @@ fun PlaylistDetailScreen(
                                 .height(48.dp)
                                 .clip(RoundedCornerShape(50))
                                 .background(if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
-                                .clickable(remember { MutableInteractionSource() }, null) {
+                                .liquidClickable(pressedScale = LiquidMotion.PressButton) {
                                     PlayerController.playFromList(
                                         context = context,
                                         tracks = tracks.shuffled(),
@@ -376,9 +376,10 @@ fun PlaylistDetailScreen(
             itemsIndexed(tracks, key = { _, t -> t.id }) { index, track ->
                 Row(
                     modifier = Modifier
+                        .animateItem()
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(14.dp))
-                        .clickable(remember { MutableInteractionSource() }, null) {
+                        .liquidClickable {
                             PlayerController.playFromList(
                                 context = context,
                                 tracks = tracks,

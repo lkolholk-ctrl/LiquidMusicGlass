@@ -107,13 +107,15 @@ class IcmApi private constructor() {
             maxRequestsPerHost = 5
         }
         OkHttpClient.Builder()
-            .connectTimeout(5, TimeUnit.SECONDS)
+            // Чуть щедрее к долгому хендшейку (туннели/дальние маршруты): 5с
+            // connect давал ложные фейлы на ровном месте при высокой латентности.
+            .connectTimeout(7, TimeUnit.SECONDS)
             .readTimeout(8, TimeUnit.SECONDS)
             .writeTimeout(8, TimeUnit.SECONDS)
-            // callTimeout ограничивает ВЕСЬ вызов (connect+TLS+retry+ответ). 10с — чтобы
+            // callTimeout ограничивает ВЕСЬ вызов (connect+TLS+retry+ответ). 12с — чтобы
             // при мёртвой/медленной сети запрос падал БЫСТРО (юзер не думает, что
             // приложение встало колом), а зависшие коннекты не копились.
-            .callTimeout(10, TimeUnit.SECONDS)
+            .callTimeout(12, TimeUnit.SECONDS)
             // ВКЛючаем штатное восстановление соединения OkHttp: прозрачный повтор на
             // протухших keep-alive соединениях (сервер закрыл сокет) и перебор маршрутов
             // (IPv6→IPv4). Без этого единичный мёртвый маршрут/протухший коннект давал
@@ -205,6 +207,10 @@ class IcmApi private constructor() {
     /** Callback for X-Request-Id tracing */
     var onRequestId: ((String) -> Unit)? = null
 
+    /** Перевыпуск session-токена для авто-рефреша на 401 (ставит IcmAuthRepository).
+     *  Возвращает СВЕЖИЙ токен или null, если перевыпуск невозможен. */
+    var sessionRefresher: (suspend () -> String?)? = null
+
     private inline fun <reified T> parseResponse(body: okhttp3.ResponseBody?): T {
         val text = body?.string() ?: throw IcmApiException(0, "Empty response body")
         return json.decodeFromString(text)
@@ -227,9 +233,14 @@ class IcmApi private constructor() {
             builder.header("X-LMG-Fast", "1")
         }
 
-        // Auth: session token for user-scoped endpoints (/me/*, wave, likes)
-        sessionToken?.let {
-            builder.header("Authorization", "Bearer $it")
+        // Auth: session token for user-scoped endpoints (/me/*, wave, likes).
+        // S2S-only эндпоинты (session/issue, link/email/*) с Bearer'ом дают
+        // 403 s2s_only по доке — для них шлём только X-Partner-Key.
+        val s2sOnly = url.contains("/session/issue") || url.contains("/link/email")
+        if (!s2sOnly) {
+            sessionToken?.let {
+                builder.header("Authorization", "Bearer $it")
+            }
         }
 
         // X-Partner-Key is always required for source validation (VK, etc.)
@@ -261,12 +272,55 @@ class IcmApi private constructor() {
         body: String? = null,
         async: Boolean = false
     ): Result<T> {
+        val first = executeOnce<T>(endpoint, method, body, async)
+        // Session-токен живёт ~1ч, а раньше обновлялся ТОЛЬКО на старте
+        // приложения: через час слушания все юзерские вызовы (волна, лайки,
+        // playback-лог) падали 401 до перезапуска. Теперь: 401 при активном
+        // токене → перевыпуск через sessionRefresher и ОДИН повтор запроса.
+        val e = first.exceptionOrNull()
+        if (e is IcmApiException && e.code == 401 && sessionToken != null) {
+            val fresh = try {
+                sessionRefresher?.invoke()
+            } catch (_: Exception) {
+                null
+            }
+            if (!fresh.isNullOrBlank() && fresh != sessionToken) {
+                sessionToken = fresh
+                return executeOnce(endpoint, method, body, async)
+            }
+        }
+        // 5xx на /track* — временные ошибки шлюза: разовый 502 срывал
+        // кроссфейд AutoMix и предзагрузку (полевой лог: «ICM 502 /track …
+        // xfade LOAD FAILED»). До 2 повторов с коротким бэкоффом.
+        if (endpoint.startsWith("/track")) {
+            var res = first
+            var attempt = 0
+            while (attempt < 2) {
+                val ex = res.exceptionOrNull()
+                if (ex !is IcmApiException || ex.code !in 500..599) break
+                kotlinx.coroutines.delay(700L * (attempt + 1))
+                attempt++
+                com.liquidmusicglass.debug.DebugLog.add("ICM retry #$attempt $endpoint (${ex.code})")
+                res = executeOnce(endpoint, method, body, async)
+            }
+            return res
+        }
+        return first
+    }
+
+    private suspend inline fun <reified T> executeOnce(
+        endpoint: String,
+        method: String = "GET",
+        body: String? = null,
+        async: Boolean = false
+    ): Result<T> {
         // Обычный расширяемый Dispatchers.IO — НЕ limitedParallelism: при лежащей сети
         // узкий лимит забивался висяками и вешал весь API. Число коннектов держим
         // короткими таймаутами (callTimeout) + ограниченными ретраями, а не очередью.
         // ВНЕШНИЙ корутинный таймаут — на случай, если OkHttp callTimeout не сработает
         // (висение на socketRead0): корутина гарантированно отменяется, не вешает пул.
-        return withTimeoutOrNull(11_000L) {
+        // Внешний лимит > callTimeout (12с), иначе корутина отваливалась бы раньше OkHttp.
+        return withTimeoutOrNull(14_000L) {
         withContext(Dispatchers.IO) {
             // Circuit-breaker: пока активен бан — мгновенно фейлим, не выходя в сеть.
             if (IcmRateGate.isBanned()) {
@@ -280,8 +334,10 @@ class IcmApi private constructor() {
                 val request = buildRequest(url, method, body)
                 val response = client.newCall(request).execute()
                 IcmRateGate.recordSuccess()   // ответ получен → хост жив, сбрасываем счётчик фейлов
+                com.liquidmusicglass.engine.NetworkVitality.onRequestSuccess()
 
-                extractRequestId(response)?.let { onRequestId?.invoke(it) }
+                val requestId = extractRequestId(response)
+                requestId?.let { onRequestId?.invoke(it) }
 
                 when {
                     response.code == 202 && endpoint.contains("/track") -> {
@@ -301,7 +357,14 @@ class IcmApi private constructor() {
                     }
                     else -> {
                         val errorText = response.body?.string() ?: "HTTP ${response.code}"
-                        IcmApiFileLogger.log("E", "IcmApi", "API error: ${response.code} on $endpoint, body: $errorText")
+                        // rid — X-Request-Id сервера: по нему саппорт ICM находит
+                        // конкретный запрос в своих логах за секунды.
+                        IcmApiFileLogger.log("E", "IcmApi", "API error: ${response.code} on $endpoint rid=${requestId ?: "-"}, body: $errorText")
+                        if (response.code != 429) {
+                            com.liquidmusicglass.debug.DebugLog.add(
+                                "ICM ${response.code} $endpoint rid=${requestId ?: "-"}"
+                            )
+                        }
                         val error = try {
                             json.decodeFromString<IcmErrorWrapper>(errorText).detail
                         } catch (_: Exception) {
@@ -329,12 +392,17 @@ class IcmApi private constructor() {
                 }
             } catch (e: Exception) {
                 IcmRateGate.recordFailure()   // сетевой фейл без ответа → копим к circuit-breaker
+                // Fail-streak детект: N таких подряд = маршрут протух тихо
+                // (реконнект туннеля без смены Network id) → NetworkVitality
+                // сам вычистит пулы, не дожидаясь системного колбэка.
+                com.liquidmusicglass.engine.NetworkVitality.onRequestNetworkError()
                 Result.failure(e)
             }
         }
         } ?: run {
-            // Корутинный таймаут (запрос завис дольше 11с) — фиксируем фейл, не виснем.
+            // Корутинный таймаут (запрос завис дольше 14с) — фиксируем фейл, не виснем.
             IcmRateGate.recordFailure()
+            com.liquidmusicglass.engine.NetworkVitality.onRequestNetworkError()
             Result.failure(IcmApiException(408, "icm call coroutine timeout"))
         }
     }
@@ -457,7 +525,7 @@ class IcmApi private constructor() {
  * Search tracks, albums, and artists.
  * @param query Search string (up to 200 chars, min 2 alphanumeric)
  * @param region Region (us/ru/nz), null uses defaultRegion
- * @param source Music source: "primary" (default), "secondary", "all". Per ICM API docs.
+ * @param source Music source: "apple" (default), "vk", "all" — по доке ICM.
  * @param limit Max results (clamped to partner.config.search.max_results)
  * @return Search response with mixed items (artists, albums, tracks)
  */
@@ -630,19 +698,26 @@ suspend fun search(
     /**
      * Generate URL for linking user account to ICM via Telegram.
      * @param partnerUserId User ID in your system
-     * @param redirectUri Callback URI after authorization
+     * @param redirectUri Callback URI after authorization (custom-scheme deep link,
+     *   whitelisted by ICM — no intermediate redirect server needed)
      * @param state Random string for CSRF protection
+     * @param appName Название приложения, которое юзер увидит на экране входа
+     *   в аккаунт (параметр app_name, добавлен ICM). Пусто — дефолт сервера.
      */
     fun buildAccountLinkUrl(
         partnerId: String,
         partnerUserId: String,
         redirectUri: String,
-        state: String
+        state: String,
+        appName: String? = null
     ): String {
         val encRedirect = java.net.URLEncoder.encode(redirectUri, "UTF-8")
         val encState = java.net.URLEncoder.encode(state, "UTF-8")
         val encUserId = java.net.URLEncoder.encode(partnerUserId, "UTF-8")
-        return "https://byicloud.online/partner/$partnerId/link?partner_user_id=$encUserId&redirect_uri=$encRedirect&state=$encState"
+        val appNameParam = appName?.takeIf { it.isNotBlank() }?.let {
+            "&app_name=${java.net.URLEncoder.encode(it, "UTF-8")}"
+        } ?: ""
+        return "https://byicloud.online/partner/$partnerId/link?partner_user_id=$encUserId&redirect_uri=$encRedirect&state=$encState$appNameParam"
     }
 
     /**
@@ -750,6 +825,11 @@ suspend fun search(
     /**
      * Like a track.
      */
+    // ВНИМАНИЕ (аудит по доке): POST/DELETE на /library/likes в партнёрской
+    // доке НЕ описаны (документирован только GET), сервер отвечает 405 —
+    // IcmRepository.likesBlocked гасит повторы. Лайк до волны доходит через
+    // документированный wave/feedback more_track. Вопрос о write-эндпоинте
+    // задан менеджеру ICM; до ответа код оставлен под предохранителем.
     suspend fun likeTrack(trackId: String): Result<IcmLikeResponse> {
         val body = json.encodeToString(IcmLikeRequest(trackIdSnake = trackId, trackIdCamel = trackId))
         return execute("/library/likes", method = "POST", body = body)
@@ -901,22 +981,8 @@ suspend fun search(
     //  Personal Cabinet (/me/*) — requires linked user + subscription
     // ═══════════════════════════════════════════════════════════
 
-    /**
-     * Get user's preferred stream quality (legacy endpoint).
-     * Prefer [getUserPreferences] going forward.
-     */
-    suspend fun getUserQuality(): Result<IcmUserQualityResponse> {
-        return execute("/me/quality")
-    }
-
-    /**
-     * Set user's preferred stream quality (legacy endpoint).
-     * Prefer [updateUserPreferences].
-     */
-    suspend fun setUserQuality(quality: String): Result<IcmUserQualityResponse> {
-        val body = json.encodeToString(IcmUserQualityRequest(quality = quality))
-        return execute("/me/quality", method = "POST", body = body)
-    }
+    // /me/quality удалён: эндпоинта нет в доке (404) — качество задаётся
+    // через GET/PUT /me/preferences (getUserPreferences/updateUserPreferences).
 
     /**
      * Get current user preferences (quality, region, hide_explicit, source).
@@ -935,7 +1001,7 @@ suspend fun search(
     }
 
     /**
-     * Get user profile (icm_user_id, email, subscription).
+     * Get user profile (partner_user_id, name, username, avatar_url — email/phone дока не отдаёт никогда).
      */
     suspend fun getUserProfile(): Result<IcmUserProfile> {
         return execute("/me/profile")

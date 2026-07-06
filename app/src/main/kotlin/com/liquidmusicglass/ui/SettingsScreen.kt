@@ -16,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Equalizer
+import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -42,7 +43,9 @@ import com.liquidmusicglass.engine.MediaCacheManager
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.PlayerSettings
 import com.liquidmusicglass.api.icm.IcmRepository
+import com.liquidmusicglass.ui.glass.liquidClickable
 import com.liquidmusicglass.ui.liquid.LiquidToggle
+import com.liquidmusicglass.ui.theme.LiquidMotion
 import com.liquidmusicglass.ui.theme.LiquidTheme
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
@@ -54,6 +57,7 @@ private val Accent = Color(0xFF7FB77E)
 fun SettingsScreen(
     onBack: () -> Unit,
     onOpenEqualizer: () -> Unit = {},
+    onOpenProfile: () -> Unit = {},
     showBack: Boolean = true,
     backdrop: LayerBackdrop
 ) {
@@ -61,7 +65,6 @@ fun SettingsScreen(
     val scroll = rememberScrollState()
     val scope = rememberCoroutineScope()
 
-    val gaplessEnabled by AppSettings.gaplessEnabled.collectAsState()
     val sleepTimerMinutes by AppSettings.sleepTimerMinutes.collectAsState()
     val sleepOptions = listOf(0, 15, 30, 45, 60, 90)
 
@@ -92,10 +95,7 @@ fun SettingsScreen(
                             .size(40.dp)
                             .clip(CircleShape)
                             .background(if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null
-                            ) { onBack() },
+                            .liquidClickable(pressedScale = LiquidMotion.PressIcon) { onBack() },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
@@ -107,35 +107,222 @@ fun SettingsScreen(
                     }
                     Spacer(modifier = Modifier.width(16.dp))
                 }
+                // 5 быстрых тапов по заголовку — вкл/выкл отладочный UI
+                // (панель JUCE DEBUG, LOG-чип, LCAT). Скрыт по умолчанию.
+                var dbgTaps by remember { mutableStateOf(0) }
+                var dbgLastTapAt by remember { mutableStateOf(0L) }
+                val dbgContext = LocalContext.current
                 Text(
                     text = "Settings",
                     color = lc.textPrimary,
                     fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) {
+                        val now = System.currentTimeMillis()
+                        dbgTaps = if (now - dbgLastTapAt < 1200L) dbgTaps + 1 else 1
+                        dbgLastTapAt = now
+                        if (dbgTaps >= 5) {
+                            dbgTaps = 0
+                            val on = !AppSettings.debugUiEnabled.value
+                            AppSettings.setDebugUiEnabled(on)
+                            android.widget.Toast.makeText(
+                                dbgContext,
+                                if (on) "Debug tools: ON" else "Debug tools: OFF",
+                                android.widget.Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    }
                 )
             }
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // ── Шапка-профиль: аватарка + имя, тап → профиль (как у Apple/TG) ──
+            run {
+                val avatarUrl by com.liquidmusicglass.api.icm.IcmAuthRepository
+                    .avatarUrl.collectAsState()
+                val profileName by com.liquidmusicglass.api.icm.IcmAuthRepository
+                    .profileName.collectAsState()
+                val userEmail by com.liquidmusicglass.api.icm.IcmAuthRepository
+                    .userEmail.collectAsState()
+                val displayName = when {
+                    !profileName.isNullOrBlank() -> profileName!!
+                    userEmail != null -> userEmail!!.substringBefore("@")
+                        .replaceFirstChar { it.uppercase() }
+                    else -> "Guest"
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(28.dp))
+                        .background(if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
+                        .liquidClickable { onOpenProfile() }
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(52.dp)
+                            .clip(CircleShape)
+                            .background(if (lc.isDark) Color(0xFF2C2C2E) else Color(0xFFE5E5EA)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (!avatarUrl.isNullOrBlank()) {
+                            coil.compose.AsyncImage(
+                                model = avatarUrl,
+                                contentDescription = null,
+                                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Rounded.Person,
+                                contentDescription = null,
+                                tint = lc.iconMuted,
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(14.dp))
+                    Column {
+                        Text(
+                            text = displayName,
+                            color = lc.textPrimary,
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "Account, premium & data",
+                            color = lc.textSecondary,
+                            fontSize = 13.sp
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(28.dp))
 
             // PLAYBACK
             SectionLabel("PLAYBACK")
 
             val hideExplicit by AppSettings.hideExplicit.collectAsState()
+            val audioCompatMode by AppSettings.audioCompatMode.collectAsState()
+            val audioCompatAuto by AppSettings.audioCompatAuto.collectAsState()
+            val hapticMusicEnabled by AppSettings.hapticMusicEnabled.collectAsState()
+            val hapticStrength by AppSettings.hapticStrength.collectAsState()
 
             PlainCard {
-                SettingsToggleItem(
-                    title = "Gapless Playback",
-                    subtitle = "No silence between tracks",
-                    selected = gaplessEnabled,
-                    onSelect = { AppSettings.setGapless(it) }
-                )
-                PlainDivider()
+                // Gapless-тумблер удалён: флаг никто не читал (ExoPlayer бесшовный
+                // сам по себе, у JUCE — AutoMix), мёртвая настройка врала юзеру.
                 SettingsToggleItem(
                     title = "Hide Explicit",
                     subtitle = "Filter explicit content from search & artist",
                     selected = hideExplicit,
-                    onSelect = { AppSettings.setHideExplicit(it) }
+                    onSelect = { enabled ->
+                        AppSettings.setHideExplicit(enabled)
+                        // hide_explicit живёт в токене сессии ICM → перевыпускаем
+                        // его сразу, чтобы фильтр включился без перезапуска.
+                        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                            try {
+                                com.liquidmusicglass.api.icm.IcmAuthRepository.reissueSessionToken()
+                                com.liquidmusicglass.api.icm.IcmRepository.clearSearchCache()
+                            } catch (_: Exception) {}
+                        }
+                    }
                 )
+                PlainDivider()
+                // Выход локального аудио. Auto — вендорная таблица AudioQuirks +
+                // watchdog (рекомендуется); Fast — нативный low-latency (AAudio);
+                // Compat — legacy-путь без low-latency; Track — Java AudioTrack,
+                // путь ExoPlayer (максимальная совместимость: vivo/Xiaomi).
+                // Продвинутые режимы (exclusive/i16/OpenSL) — кнопкой MODE в
+                // дебаг-панели; при них здесь не подсвечено ничего.
+                Column(modifier = Modifier.padding(top = 6.dp, bottom = 2.dp)) {
+                    Text(
+                        text = "Audio Output",
+                        color = LiquidTheme.colors.textPrimary,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
+                    // Битые для этого вендора режимы — помечаем в селекторе.
+                    // Compat = mode 4 (SAFE_I16): float deep-buffer (был mode 1)
+                    // глух на Honor и капризен на vivo/Xiaomi; i16-вариант шире.
+                    val audioBadModes = remember { com.liquidmusicglass.engine.automix.AudioQuirks.knownBadModes() }
+                    val audioOutCtx = LocalContext.current
+                    val badKeys = remember(audioBadModes) {
+                        buildSet {
+                            if (0 in audioBadModes) add("fast")
+                            if (4 in audioBadModes) add("compat")
+                            if (6 in audioBadModes) add("track")
+                        }
+                    }
+                    AudioOutputSelector(
+                        selectedKey = when {
+                            audioCompatAuto -> "auto"
+                            audioCompatMode == 0 -> "fast"
+                            audioCompatMode == 1 || audioCompatMode == 4 -> "compat"
+                            audioCompatMode == 6 -> "track"
+                            else -> "custom"
+                        },
+                        badKeys = badKeys,
+                        onSelect = { key ->
+                            if (key in badKeys) {
+                                android.widget.Toast.makeText(
+                                    audioOutCtx,
+                                    "На этом устройстве этот путь известен как нерабочий. Если тишина/шум — вернись на Auto.",
+                                    android.widget.Toast.LENGTH_LONG
+                                ).show()
+                            }
+                            when (key) {
+                                "auto" -> AppSettings.setAudioCompatModeAuto()
+                                "fast" -> AppSettings.setAudioCompatMode(0)
+                                "compat" -> AppSettings.setAudioCompatMode(4)
+                                "track" -> AppSettings.setAudioCompatMode(6)
+                            }
+                        }
+                    )
+                    Text(
+                        text = "Auto picks the right path for this device and self-heals if audio stalls",
+                        color = LiquidTheme.colors.textSecondary,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
+                }
+                PlainDivider()
+                // Warm Sound: «звук как на Track» для быстрых выходов — свой
+                // bass-shelf + ширина в JUCE-цепочке (вендорский Histen быстрые
+                // пути обходит). На Track отключается сам (иначе бас двоится).
+                run {
+                    val warmEnabled by com.liquidmusicglass.engine.AudioFxController
+                        .warmEnabled.collectAsState()
+                    SettingsToggleItem(
+                        title = "Warm Sound",
+                        subtitle = "Track-like bass & width on the Fast output",
+                        selected = warmEnabled,
+                        onSelect = { com.liquidmusicglass.engine.AudioFxController.setWarmEnabled(it) }
+                    )
+                }
+                PlainDivider()
+                // Haptic Music: тактильные удары в такт (свой детектор в нативном
+                // колбэке — системный HapticGenerator вендоры не открывают).
+                SettingsToggleItem(
+                    title = "Haptic Music",
+                    subtitle = "Feel the beat — vibration taps follow the music",
+                    selected = hapticMusicEnabled,
+                    onSelect = { AppSettings.setHapticMusicEnabled(it) }
+                )
+                if (hapticMusicEnabled) {
+                    // Сила: Soft — только акценты (лёгкие тики), Medium — баланс,
+                    // Strong — каждый удар в полную руку.
+                    HapticStrengthSelector(
+                        selected = hapticStrength,
+                        onSelect = { AppSettings.setHapticStrength(it) }
+                    )
+                }
                 PlainDivider()
                 SettingsActionItem(
                     title = "Audio",
@@ -223,11 +410,7 @@ fun SettingsScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null,
-                                    enabled = isAvailable
-                                ) {
+                                .liquidClickable(enabled = isAvailable) {
                                     selectedQuality = quality
                                     context.getSharedPreferences("icm", Context.MODE_PRIVATE)
                                         .edit().putString("stream_quality", quality).apply()
@@ -350,9 +533,8 @@ fun SettingsScreen(
                                     RoundedCornerShape(50)
                                 )
                                 .clip(RoundedCornerShape(50))
-                                .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null,
+                                .liquidClickable(
+                                    pressedScale = LiquidMotion.PressButton,
                                     onClick = { PlayerController.setThemeMode(index) }
                                 ),
                             contentAlignment = Alignment.Center
@@ -442,10 +624,7 @@ fun SettingsScreen(
                             fontWeight = FontWeight.SemiBold,
                             modifier = Modifier
                                 .clip(RoundedCornerShape(50))
-                                .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null
-                                ) {
+                                .liquidClickable(pressedScale = LiquidMotion.PressButton) {
                                     scope.launch {
                                         MediaCacheManager.clearCache()
                                         delay(300)
@@ -456,6 +635,22 @@ fun SettingsScreen(
                         )
                     }
                 }
+            }
+
+            Spacer(modifier = Modifier.height(28.dp))
+
+            // ── BACKGROUND PLAYBACK ──
+            // Doze/оптимизация батареи душит фоновые декод-потоки и сеть стриминга
+            // (лаги/«цикличка» при погашенном экране). Исключение из оптимизации —
+            // штатное решение для музыкальных плееров.
+            SectionLabel("BACKGROUND PLAYBACK")
+            PlainCard {
+                SettingsActionItem(
+                    title = "Ignore Battery Optimization",
+                    subtitle = "Prevents background stutter (Doze). Recommended for music",
+                    icon = Icons.Rounded.ChevronRight,
+                    onClick = { requestIgnoreBatteryOptimizations(context) }
+                )
             }
 
             Spacer(modifier = Modifier.height(28.dp))
@@ -505,9 +700,8 @@ private fun CacheSizeSelector(
                             .height(36.dp)
                             .background(itemBg, RoundedCornerShape(50))
                             .clip(RoundedCornerShape(50))
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null,
+                            .liquidClickable(
+                                pressedScale = LiquidMotion.PressButton,
                                 onClick = { onSelect(bytes) }
                             ),
                         contentAlignment = Alignment.Center
@@ -523,6 +717,56 @@ private fun CacheSizeSelector(
             }
         }
     }
+}
+
+/**
+ * Запрос исключения из оптимизации батареи — МАКСИМАЛЬНО защищённо. На части
+ * прошивок/версий Android этот интент вырезан или кидает SecurityException
+ * (известны стабильные краши у приложений без страховок), поэтому:
+ *  - каждый шаг в runCatching (никогда не роняем приложение);
+ *  - FLAG_ACTIVITY_NEW_TASK (не зависим от типа контекста);
+ *  - цепочка фолбэков: системный диалог → общий список исключений →
+ *    страница приложения в настройках. Ничего не персистим — повторный
+ *    запуск приложения ни при каком исходе не затрагивается.
+ */
+private fun requestIgnoreBatteryOptimizations(context: Context) {
+    val pkg = context.packageName
+    val alreadyIgnoring = runCatching {
+        context.getSystemService(android.os.PowerManager::class.java)
+            ?.isIgnoringBatteryOptimizations(pkg) == true
+    }.getOrDefault(false)
+
+    fun tryStart(intent: android.content.Intent): Boolean = runCatching {
+        intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(intent)
+        true
+    }.getOrDefault(false)
+
+    if (!alreadyIgnoring) {
+        // 1) Прямой системный диалог (нужен REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+        //    в манифесте — добавлен; без него часть прошивок кидает SecurityException).
+        if (tryStart(
+                android.content.Intent(
+                    android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    android.net.Uri.parse("package:$pkg")
+                )
+            )
+        ) return
+    }
+    // 2) Общий список исключений (или уже в исключениях — показать, где это).
+    if (tryStart(
+            android.content.Intent(
+                android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS
+            )
+        )
+    ) return
+    // 3) Последний фолбэк — страница приложения в настройках.
+    tryStart(
+        android.content.Intent(
+            android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            android.net.Uri.parse("package:$pkg")
+        )
+    )
 }
 
 private fun cacheLabel(bytes: Long): String = when {
@@ -577,6 +821,106 @@ private fun PlainDivider() {
     )
 }
 
+/** Выбор выхода локального аудио: Auto / Fast / Compat / Track (стиль PreloadSelector). */
+@Composable
+private fun AudioOutputSelector(
+    selectedKey: String,
+    badKeys: Set<String> = emptySet(),
+    onSelect: (String) -> Unit
+) {
+    val options = listOf("auto" to "Auto", "fast" to "Fast", "compat" to "Compat", "track" to "Track")
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        options.forEach { (key, label) ->
+            val isSelected = selectedKey == key
+            val isBad = key in badKeys
+            val isDark = LiquidTheme.colors.isDark
+            val itemBg = if (isSelected) Accent else (if (isDark) Color(0xFF1C1C1E) else Color(0xFFE5E5EA))
+            // Битый режим — сильно приглушаем (юзер видит: путь есть, но глухой).
+            val baseAlpha = if (isBad) 0.25f else 0.45f
+            val unselectedTextColor = if (isDark) Color.White.copy(alpha = baseAlpha) else Color.Black.copy(alpha = baseAlpha)
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(36.dp)
+                    .background(itemBg, RoundedCornerShape(50))
+                    .clip(RoundedCornerShape(50))
+                    .liquidClickable(
+                        pressedScale = LiquidMotion.PressButton,
+                        onClick = { onSelect(key) }
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                val textColor by animateColorAsState(
+                    targetValue = if (isSelected) Color.White else unselectedTextColor,
+                    animationSpec = tween(200),
+                    label = "audioOutText"
+                )
+                Text(
+                    // Битый режим помечаем крестиком-подсказкой.
+                    text = if (isBad) "$label ✕" else label,
+                    color = textColor,
+                    fontSize = 13.sp,
+                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+                )
+            }
+        }
+    }
+}
+
+/** Сила Haptic Music: Soft / Medium / Strong (стиль AudioOutputSelector). */
+@Composable
+private fun HapticStrengthSelector(
+    selected: Int,
+    onSelect: (Int) -> Unit
+) {
+    val options = listOf(1 to "Medium", 2 to "Strong")
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp)
+            .padding(bottom = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        options.forEach { (key, label) ->
+            val isSelected = selected == key
+            val isDark = LiquidTheme.colors.isDark
+            val itemBg = if (isSelected) Accent else (if (isDark) Color(0xFF1C1C1E) else Color(0xFFE5E5EA))
+            val unselectedTextColor = if (isDark) Color.White.copy(alpha = 0.45f) else Color.Black.copy(alpha = 0.45f)
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(36.dp)
+                    .background(itemBg, RoundedCornerShape(50))
+                    .clip(RoundedCornerShape(50))
+                    .liquidClickable(
+                        pressedScale = LiquidMotion.PressButton,
+                        onClick = { onSelect(key) }
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                val textColor by animateColorAsState(
+                    targetValue = if (isSelected) Color.White else unselectedTextColor,
+                    animationSpec = tween(200),
+                    label = "hapticStrengthText"
+                )
+                Text(
+                    text = label,
+                    color = textColor,
+                    fontSize = 13.sp,
+                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun SettingsToggleItem(
     title: String,
@@ -588,10 +932,7 @@ private fun SettingsToggleItem(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) { onSelect(!selected) }
+            .liquidClickable { onSelect(!selected) }
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -622,10 +963,7 @@ private fun SettingsActionItem(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) { onClick() }
+            .liquidClickable { onClick() }
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -675,9 +1013,8 @@ private fun PreloadSelector(
                     .height(36.dp)
                     .background(itemBg, RoundedCornerShape(50))
                     .clip(RoundedCornerShape(50))
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
+                    .liquidClickable(
+                        pressedScale = LiquidMotion.PressButton,
                         onClick = { onSelect(sec) }
                     ),
                 contentAlignment = Alignment.Center
@@ -725,9 +1062,8 @@ private fun SleepTimerSelector(
                         RoundedCornerShape(50)
                     )
                     .clip(RoundedCornerShape(50))
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
+                    .liquidClickable(
+                        pressedScale = LiquidMotion.PressButton,
                         onClick = { onSelect(minutes) }
                     ),
                 contentAlignment = Alignment.Center

@@ -63,10 +63,22 @@ class JuceLocalPlayer(
 
     private var playlist: List<MediaItem> = emptyList()
     private var currentIndex = 0
+
+    // getState() зовётся каждые ~500мс (тикер) и на каждую инвалидацию. Маппинг
+    // ВСЕГО плейлиста в MediaItemData на каждый вызов — лишний CPU/мусор на main
+    // при длинной очереди волны (GC-паузы косвенно бьют по аудио на слабых
+    // устройствах). Кэшируем по identity списка: плейлист всегда заменяется
+    // новым инстансом при мутации, поэтому сравнение по ссылке корректно.
+    private var cachedItemsSource: List<MediaItem>? = null
+    private var cachedItems: List<MediaItemData> = emptyList()
     @Volatile private var playWhenReadyFlag = false   // пишется на main, читается фоном
     private var prepared = false
     @Volatile private var ended = false
     @Volatile private var released = false
+    // Мастер-громкость плеера (дак 0.2 при уведомлениях, фейды сервиса). Раньше
+    // activePlayer().volume=… тихо глотался (COMMAND_SET_VOLUME не был реализован),
+    // и JUCE-путь играл в полный голос поверх навигатора/уведомлений.
+    @Volatile private var volume01 = 1f
 
     // ── Stage 8c (ШАГ 1: ТОЛЬКО НАБЛЮДЕНИЕ) ──────────────────────────────────
     // Когда трек подходит к концу и включён тумблер AutoMix — в фоне анализируем
@@ -74,7 +86,13 @@ class JuceLocalPlayer(
     // переход трека идёт как обычно. Это безопасная проверка, что v4 даёт
     // вменяемые параметры свода, прежде чем реально исполнять кроссфейд (шаг 2).
     private val autoMixScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
-    private val autoMixController by lazy { AutoMixController(context.applicationContext) }
+    @Volatile private var autoMixControllerCreated = false
+    private val autoMixController by lazy {
+        autoMixControllerCreated = true
+        AutoMixController(context.applicationContext)
+    }
+    // Поколение движка, инициализированного ЭТИМ плеером, — для безопасного release.
+    @Volatile private var engineGeneration = -1L
     @Volatile private var autoMixAnalyzedIndex = -1
     private val AUTOMIX_LEAD_MS = 40_000L   // окно до конца трека для анализа (хватает на свод ≤30с)
     private val MIN_AUTOMIX_XFADE_MS = 5_000L
@@ -82,6 +100,24 @@ class JuceLocalPlayer(
     private val TICK_MS = 100L              // точка свода должна ловиться плотнее, чем UI polling
     private val STATE_TICK_MS = 500L        // MediaSession state не надо инвалидировать 10 раз/с
     private var lastStateInvalidateMs = 0L
+
+    // Телеметрия underrun'ов Oboe: раз в XRUN_LOG_MS сверяем счётчик xrun и
+    // пишем прирост в DebugLog — тюнить размер буфера по реальным данным.
+    private val XRUN_LOG_MS = 5_000L
+    private var lastXRunCheckMs = 0L
+    private var lastXRuns = -1
+
+    // Адаптация буфера: если за окно проверки прилетело ≥ XRUN_ESCALATE_DELTA
+    // underrun'ов — просим движок расширить буфер (6×→8×burst). Не чаще
+    // MAX_BUFFER_ESCALATIONS раз за сессию плеера; сам вызов — на loadHandler
+    // (внутри реопен устройства, main это делать нельзя).
+    private val XRUN_ESCALATE_DELTA = 3
+    private val MAX_BUFFER_ESCALATIONS = 1
+    private var bufferEscalations = 0
+
+    // Синхронизация буфера движка с Battery Saver: тикер замечает смену режима
+    // и передаёт движку (реопен на loadHandler — не на main).
+    private var lastPowerSave: Boolean? = null
 
     // ── Stage 8c (ШАГ 2: РЕАЛЬНЫЙ СВОД) ──────────────────────────────────────
     // Когда модель сказала ready и подобрала параметры — у точки свода реально
@@ -109,6 +145,21 @@ class JuceLocalPlayer(
             maybeAnalyzeForAutoMix()       // шаг 1: анализ пары моделью + план свода
             maybeRunAutoMixTransition()    // шаг 2: реальный кроссфейд по плану модели
             maybeAdvanceAtEnd()            // обычное переключение (если свода нет)
+            maybeLogXRuns()                // телеметрия underrun'ов Oboe
+            maybeSyncPowerSave()           // буфер движка ↔ Battery Saver
+            // Watchdog выхода: «должны играть, а прогресса нет» → авто-уход на
+            // AudioTrack. Кормим только когда звук ОБЯЗАН идти прямо сейчас.
+            val playingAudibly = prepared && !loading && playWhenReadyFlag &&
+                !ended && playlist.isNotEmpty() && transitionState != 1
+            AudioOutputWatchdog.noteTick(
+                playingAudibly = playingAudibly,
+                positionMs = engine.positionMsCurrent().toLong()
+            )
+            // Дыхание дыма/пульс обложки на ЛОКАЛЬНОЙ музыке: кормим AudioReactor
+            // нативной бас-огибающей (у стриминга это делает BassAudioProcessor).
+            com.liquidmusicglass.engine.AudioReactor.feedJuceBass(
+                if (playingAudibly) AutoMixNativeEngine.hapticEnv() else 0f
+            )
             invalidateStateFromTicker()
             handler.postDelayed(this, TICK_MS)
         }
@@ -136,20 +187,28 @@ class JuceLocalPlayer(
             .add(Player.COMMAND_GET_METADATA)
             .add(Player.COMMAND_SET_MEDIA_ITEM)
             .add(Player.COMMAND_CHANGE_MEDIA_ITEMS)
+            .add(Player.COMMAND_SET_VOLUME)
+            .add(Player.COMMAND_GET_VOLUME)
             .add(Player.COMMAND_RELEASE)
             .build()
 
-        val items = playlist.mapIndexed { i, mi ->
-            val b = MediaItemData.Builder(/* uid = */ mi.mediaId.ifEmpty { "juce_$i" })
-                .setMediaItem(mi)
-            // ВАЖНО: длительность берём из СТАБИЛЬНЫХ метаданных трека (MediaStore),
-            // а НЕ из движка. Меняющийся durationUs между вызовами getState() Media3
-            // трактует как разрыв таймлайна; если длина на миг просядет ниже позиции
-            // (например, read-ahead голодает при тяжёлой перерисовке UI), плеер ложно
-            // «заканчивает» трек → стоп + перемотка в начало. Метаданные не плавают.
-            val durMs = mi.mediaMetadata.durationMs
-            if (durMs != null && durMs > 0L) b.setDurationUs(durMs * 1000L)
-            b.build()
+        val currentPlaylist = playlist
+        val items = if (currentPlaylist === cachedItemsSource) cachedItems else {
+            currentPlaylist.mapIndexed { i, mi ->
+                val b = MediaItemData.Builder(/* uid = */ mi.mediaId.ifEmpty { "juce_$i" })
+                    .setMediaItem(mi)
+                // ВАЖНО: длительность берём из СТАБИЛЬНЫХ метаданных трека (MediaStore),
+                // а НЕ из движка. Меняющийся durationUs между вызовами getState() Media3
+                // трактует как разрыв таймлайна; если длина на миг просядет ниже позиции
+                // (например, read-ahead голодает при тяжёлой перерисовке UI), плеер ложно
+                // «заканчивает» трек → стоп + перемотка в начало. Метаданные не плавают.
+                val durMs = mi.mediaMetadata.durationMs
+                if (durMs != null && durMs > 0L) b.setDurationUs(durMs * 1000L)
+                b.build()
+            }.also {
+                cachedItemsSource = currentPlaylist
+                cachedItems = it
+            }
         }
 
         val state = when {
@@ -163,6 +222,7 @@ class JuceLocalPlayer(
         val builder = State.Builder()
             .setAvailableCommands(commands)
             .setPlaybackState(state)
+            .setVolume(volume01)
             .setPlayWhenReady(playWhenReadyFlag, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
         if (items.isNotEmpty()) {
             builder.setPlaylist(items)
@@ -364,8 +424,21 @@ class JuceLocalPlayer(
             notifyCurrentTrackChanged()
         } else {
             val to = (if (positionMs == C.TIME_UNSET) 0L else positionMs).toDouble()
-            loadHandler.post { if (!released && !loading) engine.seekCurrent(to) }
+            // Не выбрасываем seek во время загрузки: loadHandler последователен,
+            // поэтому пост встанет В ОЧЕРЕДЬ за идущей загрузкой и применится к
+            // только что загруженному треку. Guard по loadSeq отменяет seek, если
+            // к моменту исполнения стартовала более новая загрузка (другой трек).
+            val seq = loadSeq.get()
+            loadHandler.post { if (!released && seq == loadSeq.get()) engine.seekCurrent(to) }
         }
+        invalidateState()
+        return Futures.immediateVoidFuture()
+    }
+
+    override fun handleSetVolume(volume: Float): ListenableFuture<*> {
+        volume01 = volume.coerceIn(0f, 1f)
+        // Применяется в аудио-колбэке движка со сглаживанием ~20мс (без щелчков).
+        engine.setPlaybackVolume(volume01)
         invalidateState()
         return Futures.immediateVoidFuture()
     }
@@ -393,7 +466,14 @@ class JuceLocalPlayer(
         loadHandler.removeCallbacksAndMessages(null)
         // release() движка тоже @Synchronized — на фоне, чтобы не ждать монитор на
         // main. quitSafely даёт этой задаче выполниться перед остановкой потока.
-        loadHandler.post { runCatching { engine.release() } }
+        // Поколение защищает НОВЫЙ движок пересозданного сервиса от нашего
+        // отложенного release (см. AutoMixNativeEngine.release).
+        val gen = engineGeneration
+        loadHandler.post {
+            runCatching { engine.release(gen) }
+            // TFLite-интерпретатор течёт на каждый рестарт сервиса без релиза.
+            if (autoMixControllerCreated) runCatching { autoMixController.release() }
+        }
         loadThread.quitSafely()
         return Futures.immediateVoidFuture()
     }
@@ -430,6 +510,7 @@ class JuceLocalPlayer(
             runCatching {
                 if (released || seq != loadSeq.get()) return@runCatching
                 engine.init(context)
+                engineGeneration = engine.currentGeneration()
                 if (released || seq != loadSeq.get()) return@runCatching
                 engine.stop()              // current deck back to A
                 engine.clearDeck(1)        // incoming empty
@@ -440,6 +521,13 @@ class JuceLocalPlayer(
                 // Старт здесь же, на фоне — main не дёргает @Synchronized движок.
                 if (ok && !released && playWhenReadyFlag && seq == loadSeq.get()) engine.playCurrent()
             }
+            // ДИАГНОСТИКА локального аудио: показываем результат загрузки и что
+            // движок видит по длине/позиции (сразу видно: не загрузился трек,
+            // ложная длина ~3с, или движок вообще не поднялся).
+            DebugLog.add(
+                "JUCE.loadDone ok=$ok loaded=${AutoMixNativeEngine.isLoaded} " +
+                    "len=${engine.lengthMsCurrent().toLong()} pos=${engine.positionMsCurrent().toLong()} pwr=$playWhenReadyFlag"
+            )
             // Состояние применяем на main — только если загрузка ещё актуальна.
             handler.post {
                 if (released || seq != loadSeq.get()) return@post
@@ -496,6 +584,9 @@ class JuceLocalPlayer(
         if (len <= 1000L) return                 // длина ещё не известна/мусор — не дёргаем
         val pos = engine.positionMsCurrent().toLong()
         if (pos > 1000L && pos >= len - 300L) {   // требуем реально доигранный трек
+            // ДИАГНОСТИКА: если это срабатывает на ~3с — значит движок отдаёт
+            // ложно-короткую длину, и трек «доигрывает» и перезагружается по кругу.
+            DebugLog.add("JUCE.advanceAtEnd pos=$pos len=$len idx=$currentIndex")
             if (currentIndex < playlist.lastIndex) {
                 currentIndex++
                 ended = false
@@ -516,6 +607,39 @@ class JuceLocalPlayer(
         playlist.getOrNull(currentIndex)?.mediaId?.takeIf { it.isNotBlank() }?.let {
             PlayerController.onTrackChanged(it)
         }
+    }
+
+    /** Раз в XRUN_LOG_MS пишем прирост underrun'ов Oboe в DebugLog. Вызов не
+     *  блокирует (try_lock в нативке). Счётчик сбрасывается при переоткрытии
+     *  потока (смена маршрута) — тогда просто перезахватываем базу. */
+    private fun maybeLogXRuns() {
+        val now = SystemClock.uptimeMillis()
+        if (now - lastXRunCheckMs < XRUN_LOG_MS) return
+        lastXRunCheckMs = now
+        if (!playWhenReadyFlag) return
+        val x = engine.xRunCount()
+        if (x >= 0) {
+            val delta = if (lastXRuns in 0 until x) x - lastXRuns else 0
+            if (delta > 0) DebugLog.add("JUCE.xruns +$delta (total=$x)")
+            lastXRuns = x
+
+            // Стабильные underrun'ы под системной нагрузкой → адаптивно расширяем
+            // буфер. Счётчик xrun сбросится при реопене — база перезахватится.
+            if (delta >= XRUN_ESCALATE_DELTA && bufferEscalations < MAX_BUFFER_ESCALATIONS) {
+                bufferEscalations++
+                DebugLog.add("JUCE.xruns escalate buffer (#$bufferEscalations)")
+                loadHandler.post { if (!released) engine.escalateBufferForUnderruns() }
+                lastXRuns = -1
+            }
+        }
+    }
+
+    /** Смена режима энергосбережения → движку максимальный буфер (или обратно). */
+    private fun maybeSyncPowerSave() {
+        val ps = com.liquidmusicglass.ui.PowerSaveMonitor.active
+        if (ps == lastPowerSave) return
+        lastPowerSave = ps
+        loadHandler.post { if (!released) engine.setPowerSaveMode(ps) }
     }
 
     private fun invalidateStateFromTicker() {
@@ -618,7 +742,22 @@ class JuceLocalPlayer(
                 transitionState == 1 &&
                 transitionFromIndex == plan.fromIndex &&
                 currentIndex == plan.fromIndex
-            val ok = canStart && loadUriIntoIncoming(plan.nextUri)
+            var ok = canStart && loadUriIntoIncoming(plan.nextUri)
+            if (!ok && canStart) {
+                // Разовый ретрай: провал загрузки incoming часто разовый
+                // (сеть/5xx на резолве URL). Времени хватает — до конца
+                // трека ещё целый xfade (5-30с).
+                val canRetry = !released &&
+                    playWhenReadyFlag &&
+                    transitionState == 1 &&
+                    transitionFromIndex == plan.fromIndex &&
+                    currentIndex == plan.fromIndex
+                if (canRetry) {
+                    runCatching { Thread.sleep(700) }
+                    DebugLog.add("AutoMix.xfade load retry")
+                    ok = loadUriIntoIncoming(plan.nextUri)
+                }
+            }
             val stillCurrent = ok &&
                 !released &&
                 playWhenReadyFlag &&
@@ -700,17 +839,44 @@ class JuceLocalPlayer(
         return try {
             val dir = File(context.cacheDir, "juce_local_audio").apply { mkdirs() }
             val target = File(dir, cacheFileName(uri))
-            if (target.exists() && target.length() > 0L) return target.absolutePath
+            if (target.exists() && target.length() > 0L) {
+                target.setLastModified(System.currentTimeMillis())  // «использован» — для LRU
+                return target.absolutePath
+            }
 
             context.contentResolver.openInputStream(uri)?.use { input ->
                 target.outputStream().use { output -> input.copyTo(output) }
             } ?: return null
 
+            evictLocalAudioCache(dir)  // не даём кэшу расти бесконечно
             target.takeIf { it.exists() && it.length() > 0L }?.absolutePath
         } catch (t: Throwable) {
             DebugLog.add("JUCE.cacheCopyFAILED uri=$uri err=${t.message}")
             null
         }
+    }
+
+    /**
+     * LRU-эвикция кэша локального аудио: раньше каждый content://-трек без
+     * прямого пути копировался сюда целиком и НИКОГДА не удалялся — за долгую
+     * жизнь приложения гигабайты мусора на диске. Держим ≤512 МБ / ≤40 файлов,
+     * вытесняя самые давно использованные.
+     */
+    private fun evictLocalAudioCache(dir: File) {
+        try {
+            val files = dir.listFiles()?.filter { it.isFile } ?: return
+            val maxBytes = 512L * 1024 * 1024
+            val maxCount = 40
+            var total = files.sumOf { it.length() }
+            if (total <= maxBytes && files.size <= maxCount) return
+            val byOldest = files.sortedBy { it.lastModified() }
+            var count = files.size
+            for (f in byOldest) {
+                if (total <= maxBytes && count <= maxCount) break
+                val len = f.length()
+                if (f.delete()) { total -= len; count-- }
+            }
+        } catch (_: Throwable) {}
     }
 
     private fun cacheFileName(uri: Uri): String {

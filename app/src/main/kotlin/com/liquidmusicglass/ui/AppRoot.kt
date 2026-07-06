@@ -1,7 +1,9 @@
 package com.liquidmusicglass.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -12,7 +14,9 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -29,7 +33,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -38,6 +41,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
@@ -58,25 +62,17 @@ import com.liquidmusicglass.engine.AppUpdater
 import com.liquidmusicglass.engine.NotificationRouter
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.ui.navigation.BottomBar
+import com.liquidmusicglass.ui.navigation.LiquidNavHost
+import com.liquidmusicglass.ui.navigation.NavRoutes
 import com.liquidmusicglass.ui.player.FullPlayer
-import com.liquidmusicglass.ui.player.MiniPlayer
-import com.liquidmusicglass.ui.screens.HomeScreen
-import com.liquidmusicglass.ui.screens.WaveHomeScreen
-import com.liquidmusicglass.ui.screens.SearchScreen
-import com.liquidmusicglass.ui.screens.LibraryScreen
-import com.liquidmusicglass.ui.screens.AlbumDetailScreen
-import com.liquidmusicglass.ui.screens.ArtistDetailScreen
 import com.liquidmusicglass.ui.screens.AudioFxScreen
-import com.liquidmusicglass.ui.screens.LocalLibraryScreen
-import com.liquidmusicglass.ui.screens.LocalArtistDetailScreen
-import com.liquidmusicglass.ui.screens.LocalAlbumDetailScreen
-import com.liquidmusicglass.ui.screens.NewScreen
-import com.liquidmusicglass.ui.screens.PlaylistDetailScreen
 import com.liquidmusicglass.ui.screens.SettingsScreen
 import com.liquidmusicglass.ui.screens.AuthScreen
 import com.liquidmusicglass.ui.screens.ProfileScreen
 import com.liquidmusicglass.ui.screens.WaveOnboardingScreen
-import com.liquidmusicglass.ui.screens.youtube.YouTubeSearchScreen
+import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
 import com.liquidmusicglass.ui.theme.ForceDarkContent
 import com.liquidmusicglass.ui.theme.LiquidTheme
 import kotlinx.coroutines.launch
@@ -86,27 +82,43 @@ fun AppRoot() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    var selectedIndex by remember { 
-        mutableIntStateOf(
-            try { AppSettings.lastScreenIndex.value } catch (_: Exception) { 0 }
-        ) 
+    // Навигация (батч 15): единый NavHost с пер-таб бэкстеком. Индекс вкладки
+    // выводим из текущего графа — весь низлежащий код (бар, мини-плеер, дым
+    // Волны) продолжает работать по selectedIndex как раньше.
+    val navController = rememberNavController()
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = navBackStackEntry?.destination?.route
+    val currentGraph = NavRoutes.graphOf(currentRoute)
+    val selectedIndex = when (currentGraph) {
+        NavRoutes.GRAPH_LIBRARY -> 2
+        NavRoutes.GRAPH_SETTINGS -> 3
+        NavRoutes.GRAPH_NEW -> 4
+        else -> 0
     }
-    var settingsOpen by remember { mutableStateOf(false) }
+    val onWaveHome = currentRoute == NavRoutes.WAVE_HOME
 
-    // Detail screen navigation
-    var detailAlbumId by remember { mutableStateOf<String?>(null) }
-    var detailArtistId by remember { mutableStateOf<String?>(null) }
+    fun switchTab(index: Int) {
+        val graph = when (index) {
+            2 -> NavRoutes.GRAPH_LIBRARY
+            3 -> NavRoutes.GRAPH_SETTINGS
+            4 -> NavRoutes.GRAPH_NEW
+            else -> NavRoutes.GRAPH_WAVE
+        }
+        navController.navigate(graph) {
+            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+            launchSingleTop = true
+            restoreState = true
+        }
+        AppSettings.setLastScreen(index)
+    }
+
+    // Оверлеи — живут НАД NavHost.
+    var settingsOpen by remember { mutableStateOf(false) }
     var equalizerOpen by remember { mutableStateOf(false) }
     var lrcPublishTrack by remember { mutableStateOf<com.liquidmusicglass.engine.Track?>(null) }
     var tagEditTrack by remember { mutableStateOf<com.liquidmusicglass.engine.Track?>(null) }
-    var playlistDetailId by remember { mutableStateOf<String?>(null) }
     var authOpen by remember { mutableStateOf(false) }
     var profileOpen by remember { mutableStateOf(false) }
-    var youtubeSearchOpen by remember { mutableStateOf(false) }
-    // Локальная медиатека (Артисты/Альбомы/Треки + поиск)
-    var localLibraryOpen by remember { mutableStateOf(false) }
-    var localArtistName by remember { mutableStateOf<String?>(null) }
-    var localAlbum by remember { mutableStateOf<Pair<Long, String>?>(null) }
 
     val currentTrack by PlayerController.currentTrack.collectAsState()
     val isPlaying by PlayerController.isPlaying.collectAsState()
@@ -173,22 +185,20 @@ fun AppRoot() {
 
     val rootBackdrop: LayerBackdrop = rememberLayerBackdrop()
 
-    // Back handler: close detail screens first, then player, then app
-    BackHandler(enabled = tagEditTrack != null || lrcPublishTrack != null || localAlbum != null || localArtistName != null || localLibraryOpen || detailAlbumId != null || detailArtistId != null || equalizerOpen || playlistDetailId != null || settingsOpen || authOpen || profileOpen || youtubeSearchOpen || expandProgress.value > 0.5f) {
+    // Back: сперва закрываем оверлеи (плеер/профиль/авторизация/эквалайзер/
+    // редакторы), потом — если ничего не открыто — back уходит в NavHost,
+    // который сам попает деталь → старт вкладки → предыдущая вкладка → выход.
+    BackHandler(
+        enabled = tagEditTrack != null || lrcPublishTrack != null || settingsOpen ||
+            authOpen || profileOpen || equalizerOpen || expandProgress.value > 0.5f
+    ) {
         when {
             tagEditTrack != null -> tagEditTrack = null
             lrcPublishTrack != null -> lrcPublishTrack = null
-            localAlbum != null -> localAlbum = null
-            localArtistName != null -> localArtistName = null
-            localLibraryOpen -> localLibraryOpen = false
             settingsOpen -> settingsOpen = false
             authOpen -> authOpen = false
             profileOpen -> profileOpen = false
-            youtubeSearchOpen -> youtubeSearchOpen = false
             equalizerOpen -> equalizerOpen = false
-            playlistDetailId != null -> playlistDetailId = null
-            detailAlbumId != null -> detailAlbumId = null
-            detailArtistId != null -> detailArtistId = null
             expandProgress.value > 0.5f -> animateCollapse()
         }
     }
@@ -228,118 +238,23 @@ fun AppRoot() {
                 .background(lc.settingsBackground)
                 .layerBackdrop(rootBackdrop)
         ) {
-            val isHomeActive = selectedIndex == 0 &&
-                    detailAlbumId == null &&
-                    detailArtistId == null &&
-                    playlistDetailId == null &&
-                    !equalizerOpen &&
-                    !settingsOpen &&
-                    !authOpen &&
-                    !profileOpen &&
-                    !youtubeSearchOpen &&
+            val waveAnimationsActive = onWaveHome &&
+                    !equalizerOpen && !settingsOpen && !authOpen && !profileOpen &&
                     expandProgress.value < 0.05f &&
-                    // При потере фокуса окна (пикер файла/фото, «о приложении», шторка,
-                    // сворачивание) замораживаем тяжёлый дым — чтобы наш рендер не душил
-                    // аудио-колбэк JUCE именно в момент системного перехода.
+                    // При потере фокуса окна (пикер, «о приложении», шторка) замораживаем
+                    // тяжёлый дым Волны, чтобы рендер не душил аудио-колбэк JUCE.
                     EffectsLifecycle.hasWindowFocus
 
-            // ── Main screens ──
-            when (selectedIndex) {
-                0 -> if (currentCamp is com.liquidmusicglass.camp.MusicCamp.Youtube) {
-                    HomeScreen(
-                        onNavigateToAlbum = { detailAlbumId = it },
-                        onNavigateToArtist = { detailArtistId = it },
-                        onNavigateToPlaylist = { playlistDetailId = it },
-                        onNavigateToYouTube = { youtubeSearchOpen = true }
-                    )
-                } else {
-                    // Wave всегда тёмный — эффекты завязаны на тёмный фон.
-                    ForceDarkContent {
-                        WaveHomeScreen(
-                            onNavigateToSearch = { selectedIndex = 1 },
-                            onOpenPlayer = { animateExpand() },
-                            onNavigateToAlbum = { detailAlbumId = it },
-                            onNavigateToArtist = { detailArtistId = it },
-                            onNavigateToPlaylist = { playlistDetailId = it },
-                            onOpenAuth = { authOpen = true },
-                            onOpenProfile = { profileOpen = true },
-                            animationsActive = isHomeActive
-                        )
-                    }
-                }
-                1 -> SearchScreen(
-                    onNavigateToAlbum = { detailAlbumId = it },
-                    onNavigateToArtist = { detailArtistId = it }
-                )
-                2 -> LibraryScreen(
-                    onNavigateToAlbum = { detailAlbumId = it },
-                    onNavigateToArtist = { detailArtistId = it },
-                    onOpenPlaylist = { playlistDetailId = it },
-                    onOpenLocalLibrary = { localLibraryOpen = true }
-                )
-                3 -> SettingsScreen(
-                    onBack = {},
-                    onOpenEqualizer = { equalizerOpen = true },
-                    showBack = false,
-                    backdrop = rootBackdrop
-                )
-                4 -> NewScreen(
-                    onNavigateToAlbum = { detailAlbumId = it },
-                    onNavigateToArtist = { detailArtistId = it }
-                )
-                else -> HomeScreen(
-                    onNavigateToAlbum = { detailAlbumId = it },
-                    onNavigateToArtist = { detailArtistId = it },
-                    onNavigateToPlaylist = { playlistDetailId = it }
-                )
-            }
-
-            // ── Album Detail ──
-            AnimatedVisibility(
-                visible = detailAlbumId != null,
-                enter = slideInHorizontally(
-                    initialOffsetX = { it },
-                    animationSpec = spring(dampingRatio = 0.9f, stiffness = 300f)
-                ) + fadeIn(tween(200)),
-                exit = slideOutHorizontally(
-                    targetOffsetX = { it },
-                    animationSpec = spring(dampingRatio = 0.9f, stiffness = 350f)
-                ) + fadeOut(tween(150))
-            ) {
-                detailAlbumId?.let { albumId ->
-                    AlbumDetailScreen(
-                        albumId = albumId,
-                        onBack = { detailAlbumId = null }
-                    )
-                }
-            }
-
-            // ── Artist Detail ──
-            AnimatedVisibility(
-                visible = detailArtistId != null,
-                enter = slideInHorizontally(
-                    initialOffsetX = { it },
-                    animationSpec = spring(dampingRatio = 0.9f, stiffness = 300f)
-                ) + fadeIn(tween(200)),
-                exit = slideOutHorizontally(
-                    targetOffsetX = { it },
-                    animationSpec = spring(dampingRatio = 0.9f, stiffness = 350f)
-                ) + fadeOut(tween(150))
-            ) {
-                detailArtistId?.let { id ->
-                    ArtistDetailScreen(
-                        artistId = id,
-                        onBack = { detailArtistId = null },
-                        onNavigateToAlbum = { albumId ->
-                            detailArtistId = null
-                            detailAlbumId = albumId
-                        },
-                        onNavigateToArtist = { nextArtistId ->
-                            detailArtistId = nextArtistId
-                        }
-                    )
-                }
-            }
+            // ── Единый NavHost: вкладки + их детали (пер-таб бэкстек) ──
+            LiquidNavHost(
+                navController = navController,
+                backdrop = rootBackdrop,
+                waveAnimationsActive = waveAnimationsActive,
+                onOpenPlayer = { animateExpand() },
+                onOpenAuth = { authOpen = true },
+                onOpenProfile = { profileOpen = true },
+                onOpenEqualizer = { equalizerOpen = true }
+            )
 
             // ── Equalizer ──
             AnimatedVisibility(
@@ -356,97 +271,121 @@ fun AppRoot() {
                 AudioFxScreen(onBack = { equalizerOpen = false })
             }
 
-            // ── Local library: Артисты / Альбомы / Треки + поиск ──
-            AnimatedVisibility(
-                visible = localLibraryOpen,
-                enter = slideInVertically(initialOffsetY = { it }, animationSpec = spring(dampingRatio = 0.88f, stiffness = 300f)) + fadeIn(tween(200)),
-                exit = slideOutVertically(targetOffsetY = { it }, animationSpec = spring(dampingRatio = 0.92f, stiffness = 400f)) + fadeOut(tween(150))
-            ) {
-                LocalLibraryScreen(
-                    onBack = { localLibraryOpen = false },
-                    onOpenArtist = { localArtistName = it },
-                    onOpenAlbum = { id, name -> localAlbum = id to name }
-                )
-            }
-
-            AnimatedVisibility(
-                visible = localArtistName != null,
-                enter = slideInHorizontally(initialOffsetX = { it }, animationSpec = spring(dampingRatio = 0.9f, stiffness = 300f)) + fadeIn(tween(200)),
-                exit = slideOutHorizontally(targetOffsetX = { it }, animationSpec = spring(dampingRatio = 0.92f, stiffness = 400f)) + fadeOut(tween(150))
-            ) {
-                localArtistName?.let { name ->
-                    LocalArtistDetailScreen(
-                        artistName = name,
-                        onBack = { localArtistName = null },
-                        onOpenAlbum = { id, n -> localAlbum = id to n }
-                    )
-                }
-            }
-
-            AnimatedVisibility(
-                visible = localAlbum != null,
-                enter = slideInHorizontally(initialOffsetX = { it }, animationSpec = spring(dampingRatio = 0.9f, stiffness = 300f)) + fadeIn(tween(200)),
-                exit = slideOutHorizontally(targetOffsetX = { it }, animationSpec = spring(dampingRatio = 0.92f, stiffness = 400f)) + fadeOut(tween(150))
-            ) {
-                localAlbum?.let { (id, name) ->
-                    LocalAlbumDetailScreen(albumId = id, albumName = name, onBack = { localAlbum = null })
-                }
-            }
-
-
-
-            // ── Playlist Detail ──
-            AnimatedVisibility(
-                visible = playlistDetailId != null,
-                enter = slideInHorizontally(
-                    initialOffsetX = { it },
-                    animationSpec = spring(dampingRatio = 0.9f, stiffness = 300f)
-                ) + fadeIn(tween(200)),
-                exit = slideOutHorizontally(
-                    targetOffsetX = { it },
-                    animationSpec = spring(dampingRatio = 0.9f, stiffness = 350f)
-                ) + fadeOut(tween(150))
-            ) {
-                playlistDetailId?.let { id ->
-                    PlaylistDetailScreen(
-                        playlistId = id,
-                        onBack = { playlistDetailId = null }
-                    )
-                }
-            }
         }
 
-     val barsVisible = detailAlbumId == null && detailArtistId == null &&
-                        !equalizerOpen && playlistDetailId == null &&
-                        !settingsOpen && !authOpen && !profileOpen && !youtubeSearchOpen
+     // Бар теперь виден И на экранах-деталях (пер-таб навигация): из глубины
+     // можно сразу уйти на другую вкладку. Прячем только под полными оверлеями.
+     val barsVisible = !equalizerOpen && !settingsOpen && !authOpen && !profileOpen
 
     if (barsVisible) {
             val density = androidx.compose.ui.platform.LocalDensity.current
             val bottomBarTranslateY = expandProgress.value * density.run { 160.dp.toPx() }
             val bottomBarAlpha = if (expandProgress.value >= 0.99f) 0f else 1f
 
+            // ── Автоскрытие бара на главной (Wave): 3с бездействия → бар плавно
+            // уезжает вниз, фон обложки дотекает до края. Тап по нижней зоне —
+            // бар возвращается (и таймер перезапускается). Без жестов. ──
+            var waveBarShown by remember { mutableStateOf(true) }
+            var waveBarPokes by remember { mutableStateOf(0) }
+            LaunchedEffect(selectedIndex) { waveBarShown = true }  // смена вкладки — показать
+            LaunchedEffect(selectedIndex, waveBarShown, waveBarPokes) {
+                if (selectedIndex == 0 && waveBarShown) {
+                    kotlinx.coroutines.delay(3000)
+                    waveBarShown = false
+                }
+            }
+            val waveHideFrac by animateFloatAsState(
+                targetValue = if (selectedIndex == 0 && !waveBarShown) 1f else 0f,
+                animationSpec = tween(350),
+                label = "waveBarHide"
+            )
+
+            // На вкладке Wave бар подстраивается под дым: красится тёмной базой
+            // палитры обложки (darkMuted — тот же цвет, к которому аура гасит дым
+            // у нижней кромки), с плавным переливом при смене трека. На остальных
+            // вкладках — обычный цвет темы.
+            val onWaveTab = selectedIndex == 0
+            val albumColorsForBar = com.liquidmusicglass.ui.glass.rememberAlbumColors(
+                currentTrack?.displayArtUri, currentTrack?.coverUrl
+            )
+            val waveBarColor by animateColorAsState(
+                targetValue = lerp(albumColorsForBar.darkMuted, Color.Black, 0.35f),
+                animationSpec = tween(600),
+                label = "waveBarColor"
+            )
+            val barBackground =
+                if (onWaveTab) waveBarColor
+                else if (LiquidTheme.colors.isDark) Color(0xFF0D0D0F) else Color(0xFFF2F2F4)
+
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .align(Alignment.BottomCenter)
                     .graphicsLayer {
-                        translationY = bottomBarTranslateY
+                        translationY = bottomBarTranslateY +
+                            waveHideFrac * 160.dp.toPx()   // автоскрытие на Wave
                         alpha = bottomBarAlpha
                     }
-                    .background(
-                        if (LiquidTheme.colors.isDark) Color(0xFF0D0D0F) else Color(0xFFF2F2F4)
-                    )
+                    .background(barBackground),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                BottomBar(
-                    selectedIndex = selectedIndex,
-                    onItemSelected = {
-                        com.liquidmusicglass.debug.DebugLog.add("TAB -> $it")
-                        selectedIndex = it; AppSettings.setLastScreen(it)
+                // Мини-плеер (стиль ЯМ, плоский — без стекла): только на вкладках,
+                // где включают музыку. На Wave-главной не нужен — экран сам плеер.
+                val miniTrack = currentTrack
+                if (selectedIndex != 0 && miniTrack != null) {
+                    val miniLibraryRepo = remember {
+                        com.liquidmusicglass.data.local.db.LibraryRepository.getInstance(context)
                     }
-                )
+                    val miniLiked by miniLibraryRepo.isFavoriteFlow(miniTrack.id)
+                        .collectAsState(initial = false)
+                    Spacer(Modifier.height(6.dp))
+                    com.liquidmusicglass.ui.player.MiniPlayer(
+                        trackTitle = trackTitle,
+                        artistName = artistName,
+                        isPlaying = isPlaying,
+                        albumArtUri = miniTrack.displayArtUri,
+                        coverUrl = miniTrack.coverUrl,
+                        tint = albumColorsForBar.darkMuted,
+                        isLiked = miniLiked,
+                        onToggleLike = { scope.launch { miniLibraryRepo.toggleFavorite(miniTrack) } },
+                        onExpand = { animateExpand() },
+                        onPlayPause = { PlayerController.togglePlayPause(context) },
+                        onSkipNext = { PlayerController.skipNext(context) },
+                        onSkipPrevious = { PlayerController.skipPrevious(context) }
+                    )
+                    Spacer(Modifier.height(6.dp))
+                }
+                // Wave-контент всегда тёмный → на дымном фоне иконки бара тоже
+                // должны быть «тёмной темы» (белые), даже если тема приложения светлая.
+                val barContent: @Composable () -> Unit = {
+                    BottomBar(
+                        selectedIndex = selectedIndex,
+                        onItemSelected = { index ->
+                            com.liquidmusicglass.debug.DebugLog.add("TAB -> $index")
+                            waveBarPokes++                 // взаимодействие — перезапуск таймера
+                            switchTab(index)
+                        }
+                    )
+                }
+                if (onWaveTab) ForceDarkContent { barContent() } else barContent()
 
                 Spacer(
                     modifier = Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)
+                )
+            }
+
+            // Невидимая тап-зона внизу: пока бар скрыт, тап возвращает его
+            // (и НЕ проваливается в контент под ним). Только Wave + плеер свёрнут.
+            if (onWaveTab && !waveBarShown && expandProgress.value < 0.1f) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .height(64.dp)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) { waveBarShown = true }
                 )
             }
         }
@@ -488,7 +427,15 @@ fun AppRoot() {
             onVolumeChange = { PlayerController.setVolume(it) },
             onOpenSettings = { settingsOpen = true },
             onNavigateToArtist = { artistId ->
-                detailArtistId = artistId
+                // Открываем деталь артиста в текущей вкладке (у Настроек нет
+                // графа деталей — тогда уходим в Волну).
+                val tab = when (currentGraph) {
+                    NavRoutes.GRAPH_LIBRARY -> NavRoutes.TAB_LIBRARY
+                    NavRoutes.GRAPH_NEW -> NavRoutes.TAB_NEW
+                    else -> NavRoutes.TAB_WAVE
+                }
+                navController.navigate(NavRoutes.artist(tab, artistId))
+                animateCollapse()   // плеер рисуется ПОВЕРХ деталей — сворачиваем
             },
             onPublishLyrics = { track -> lrcPublishTrack = track },
             onEditTags = { track -> tagEditTrack = track }
@@ -549,30 +496,8 @@ fun AppRoot() {
             SettingsScreen(
                 onBack = { settingsOpen = false },
                 onOpenEqualizer = { equalizerOpen = true; settingsOpen = false },
+                onOpenProfile = { profileOpen = true; settingsOpen = false },
                 backdrop = rootBackdrop
-            )
-        }
-
-        // ── Auth Screen ──
-        AnimatedVisibility(
-            visible = authOpen,
-            enter = slideInVertically(
-                initialOffsetY = { it },
-                animationSpec = spring(dampingRatio = 0.88f, stiffness = 300f)
-            ) + fadeIn(tween(200)),
-            exit = slideOutVertically(
-                targetOffsetY = { it },
-                animationSpec = spring(dampingRatio = 0.92f, stiffness = 400f)
-            ) + fadeOut(tween(150))
-        ) {
-            AuthScreen(
-                onAuthSuccess = {
-                    authOpen = false
-                    // На Wave (профиль теперь иконка слева вверху, не таб).
-                    selectedIndex = 0
-                    AppSettings.setLastScreen(0)
-                },
-                onBack = { authOpen = false }
             )
         }
 
@@ -589,31 +514,43 @@ fun AppRoot() {
             ) + fadeOut(tween(150))
         ) {
             ProfileScreen(
-                onOpenSettings = { profileOpen = false; selectedIndex = 3 },
+                onOpenSettings = { profileOpen = false; switchTab(3) },
                 onLogout = { profileOpen = false },
                 onOpenAuth = { authOpen = true }
             )
         }
 
-        // ── YouTube Search Screen ──
+        // ── Auth Screen ──
+        // ДОЛЖЕН идти ПОСЛЕ ProfileScreen: экраны — соседние AnimatedVisibility
+        // в одном Box, порядок в коде = z-порядок. Раньше Auth рисовался ДО
+        // профиля и при «Sign In» из профиля выезжал ПОД ним — казалось, что
+        // кнопка мертва. Теперь Auth — верхний слой, открывается поверх всего.
         AnimatedVisibility(
-            visible = youtubeSearchOpen,
-            enter = slideInHorizontally(
-                initialOffsetX = { it },
-                animationSpec = spring(dampingRatio = 0.9f, stiffness = 300f)
+            visible = authOpen,
+            enter = slideInVertically(
+                initialOffsetY = { it },
+                animationSpec = spring(dampingRatio = 0.88f, stiffness = 300f)
             ) + fadeIn(tween(200)),
-            exit = slideOutHorizontally(
-                targetOffsetX = { it },
-                animationSpec = spring(dampingRatio = 0.9f, stiffness = 350f)
+            exit = slideOutVertically(
+                targetOffsetY = { it },
+                animationSpec = spring(dampingRatio = 0.92f, stiffness = 400f)
             ) + fadeOut(tween(150))
         ) {
-            YouTubeSearchScreen(onBack = { youtubeSearchOpen = false })
+            AuthScreen(
+                onAuthSuccess = {
+                    authOpen = false
+                    profileOpen = false
+                    // На Wave (профиль теперь иконка слева вверху, не таб).
+                    switchTab(0)
+                },
+                onBack = { authOpen = false }
+            )
         }
 
         // ── Update Dialog ──
         UpdateDialog(backdrop = rootBackdrop)
 
-        // ── ВРЕМЕННЫЙ on-screen логгер (отладка JUCE без logcat) ──
+        // On-screen логгер (диагностика аудио на устройстве друга — MMAP/Oboe).
         com.liquidmusicglass.ui.debug.DebugOverlay()
         }
     }

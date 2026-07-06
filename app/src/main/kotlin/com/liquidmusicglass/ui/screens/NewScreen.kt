@@ -1,6 +1,7 @@
 package com.liquidmusicglass.ui.screens
 
 import android.net.Uri
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -27,7 +28,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -41,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.api.icm.toTrack
 import com.liquidmusicglass.data.local.db.AppDatabase
 import com.liquidmusicglass.engine.PlayerController
@@ -49,6 +53,8 @@ import com.liquidmusicglass.ui.glass.AlbumArtImage
 import com.liquidmusicglass.ui.theme.AppFontFamily
 import com.liquidmusicglass.ui.theme.LiquidTheme
 import com.liquidmusicglass.ui.viewmodel.HomeViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Таб «New» — все предложки (recently played / home-блоки / charts), перенесённые
@@ -67,6 +73,8 @@ fun NewScreen(
     val recentlyPlayed by PlayerController.recentlyPlayed.collectAsState()
     val homeContent by viewModel.homeContent.collectAsState()
     val charts by viewModel.charts.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
+    val isLoadingCharts by viewModel.isLoadingCharts.collectAsState()
     val homeBlocks = remember(homeContent) {
         homeContent?.blocks?.filter { it.type != "charts" && it.items.isNotEmpty() } ?: emptyList()
     }
@@ -74,12 +82,24 @@ fun NewScreen(
     val dao = remember { AppDatabase.getInstance(context).listenHistoryDao() }
     val history by remember { dao.observe() }.collectAsState(initial = emptyList())
 
+    // Long-press по мудкарточке → предпросмотр станции (сеть только на IO).
+    // Переехали сюда с Wave вместе с карточками.
+    var previewMood by remember { mutableStateOf<WaveMood?>(null) }
+    var previewTracks by remember { mutableStateOf<List<Track>?>(null) }
+    LaunchedEffect(previewMood) {
+        val mood = previewMood ?: return@LaunchedEffect
+        previewTracks = null
+        previewTracks = withContext(Dispatchers.IO) {
+            runCatching { IcmRepository.searchTracks(mood.query, limit = 4) }.getOrDefault(emptyList())
+        }
+    }
+
     val lc = LiquidTheme.colors
 
     Box(modifier = Modifier.fillMaxSize().background(lc.settingsBackground)) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 110.dp)
+            contentPadding = PaddingValues(bottom = 178.dp)
         ) {
             item { Spacer(Modifier.windowInsetsTopHeight(WindowInsets.statusBars)) }
             item {
@@ -91,6 +111,16 @@ fun NewScreen(
                     fontFamily = AppFontFamily,
                     modifier = Modifier.padding(start = 20.dp, top = 12.dp, bottom = 16.dp)
                 )
+            }
+
+            // ── Волны по настроению (мудкарточки, переехали с экрана Wave) ──
+            item {
+                NewSectionHeader("Waves by mood")
+                WaveMoodTiles(
+                    onSelect = { mood -> viewModel.buildMoodWave(context, mood.query, mood.label) },
+                    onPreview = { mood -> previewMood = mood }
+                )
+                Spacer(Modifier.height(28.dp))
             }
 
             // ── Recently played ──
@@ -111,6 +141,16 @@ fun NewScreen(
                             )
                         }
                     }
+                    Spacer(Modifier.height(28.dp))
+                }
+            }
+
+            // ── Скелетоны на время первой загрузки: пока нет ни блоков, ни чартов
+            // (кэш пуст), вместо пустоты — пульсирующие плейсхолдеры секций,
+            // в том же стиле, что шиммер в поиске. ──
+            if (homeBlocks.isEmpty() && charts.isEmpty() && (isLoading || isLoadingCharts)) {
+                items(count = 2, key = { "skeleton_$it" }) {
+                    NewSectionSkeleton()
                     Spacer(Modifier.height(28.dp))
                 }
             }
@@ -182,6 +222,7 @@ fun NewScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .animateItem()
                             .clickable {
                                 PlayerController.playFromList(
                                     context,
@@ -227,6 +268,95 @@ fun NewScreen(
                             )
                         }
                     }
+                }
+            }
+        }
+
+        // ── Long-press по мудкарточке: предпросмотр станции перед запуском ──
+        previewMood?.let { mood ->
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { previewMood = null },
+                title = { Text(mood.label) },
+                text = {
+                    val tracks = previewTracks
+                    when {
+                        tracks == null -> Text("Loading…")
+                        tracks.isEmpty() -> Text("Nothing found for this mood.")
+                        else -> Column {
+                            tracks.forEach { t ->
+                                Text(
+                                    text = "${t.title} — ${t.artist}",
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(Modifier.height(6.dp))
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(onClick = {
+                        previewMood = null
+                        viewModel.buildMoodWave(context, mood.query, mood.label)
+                    }) { Text("Play station") }
+                },
+                dismissButton = {
+                    androidx.compose.material3.TextButton(onClick = { previewMood = null }) { Text("Close") }
+                }
+            )
+        }
+    }
+}
+
+/** Пульсирующий плейсхолдер секции: плашка заголовка + ряд карточек 140dp. */
+@Composable
+private fun NewSectionSkeleton() {
+    val pulse by androidx.compose.animation.core.rememberInfiniteTransition(label = "newSkeleton")
+        .animateFloat(
+            initialValue = 0.45f,
+            targetValue = 1f,
+            animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+                animation = androidx.compose.animation.core.tween(650),
+                repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
+            ),
+            label = "newSkeletonPulse"
+        )
+    val base = if (LiquidTheme.colors.isDark) Color(0xFF1A1A1A) else Color(0xFFEAEAEF)
+    Column {
+        Box(
+            modifier = Modifier
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 12.dp)
+                .size(width = 130.dp, height = 20.dp)
+                .clip(RoundedCornerShape(50))
+                .background(base.copy(alpha = pulse))
+        )
+        Row(
+            modifier = Modifier.padding(horizontal = 20.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            repeat(3) {
+                Column {
+                    Box(
+                        modifier = Modifier
+                            .size(140.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(base.copy(alpha = pulse))
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .size(width = 96.dp, height = 12.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(base.copy(alpha = pulse))
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Box(
+                        modifier = Modifier
+                            .size(width = 64.dp, height = 11.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(base.copy(alpha = pulse))
+                    )
                 }
             }
         }

@@ -16,8 +16,14 @@ android {
         applicationId = "com.liquidmusicglass"
         minSdk = 29
         targetSdk = 36
-        versionCode = 20260530
-        versionName = "2026.05.30 pre-release1 gsm"
+        // Выше 20260702 (сборки greeting уже стоят на тест-девайсах с ним):
+        // меньший versionCode Android считает даунгрейдом и отклоняет установку
+        // поверх с ошибкой «пакет недействителен».
+        versionCode = 20260703
+        // Метка билда (видно в Профиле внизу). Бампается вручную на заметных
+        // сборках, чтобы можно было отличить, какой билд стоит. Динамический
+        // git-хэш убран — он ломал конфигурацию Gradle в CI.
+        versionName = "06.07 spot-native+fast+yellow"
 
         // Build native libs only for arm64-v8a (faster builds, smaller APK).
         // Note: won't run on 32-bit (armeabi-v7a) or x86/x86_64 emulators.
@@ -68,9 +74,12 @@ android {
             // Debug uses auto-generated debug signing
         }
         release {
-            // TODO: ВРЕМЕННО для ускорения отладочных сборок — вернуть оба в true.
-            isMinifyEnabled = false
-            isShrinkResources = false
+            // Полная защита: R8-минификация + обфускация + ресурс-шринк.
+            // Keep-правила — в proguard-rules.pro (JNI-мосты, Room, сериализация,
+            // LiteRT сохранены). Диагностика показала, что баг локального аудио
+            // был НЕ в R8 (в Oboe-патче + страже кодека, откачены).
+            isMinifyEnabled = true
+            isShrinkResources = true
             isDebuggable = false
             isJniDebuggable = false
             vcsInfo.include = false
@@ -159,6 +168,10 @@ dependencies {
     implementation("androidx.compose.material:material-ripple")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.material3:material3")
+
+    // Навигация (батч 15): пер-таб бэкстек + сохранение состояния + транзишены.
+    // 2.8.x совместима с Compose 1.7.x из BOM 2024.12.01.
+    implementation("androidx.navigation:navigation-compose:2.8.5")
 
     implementation("io.github.kyant0:backdrop:2.0.0-alpha03")
     implementation("io.github.kyant0:shapes:1.2.0")

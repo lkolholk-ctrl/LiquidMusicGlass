@@ -2,8 +2,6 @@ package com.liquidmusicglass.ui.navigation
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -33,6 +31,8 @@ import com.liquidmusicglass.ui.theme.AppFontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.liquidmusicglass.ui.glass.liquidClickable
+import com.liquidmusicglass.ui.theme.LiquidMotion
 import com.liquidmusicglass.ui.theme.LiquidTheme
 
 /**
@@ -103,15 +103,9 @@ private fun BottomTab(
         label = "tabColor"
     )
 
-    val interaction = remember { MutableInteractionSource() }
-
     Column(
         modifier = modifier
-            .clickable(
-                interactionSource = interaction,
-                indication = null,
-                onClick = onClick
-            )
+            .liquidClickable(pressedScale = LiquidMotion.PressIcon, onClick = onClick)
             .padding(vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center

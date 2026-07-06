@@ -29,6 +29,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.liquidmusicglass.ui.theme.LiquidMotion
 import com.liquidmusicglass.ui.theme.LiquidTheme
 
 /**
@@ -136,10 +137,7 @@ fun GlassDialog(
                                 .clip(RoundedCornerShape(23.dp))
                                 .background(secondaryBtnBg)
                                 .border(1.dp, secondaryBtnBorder, RoundedCornerShape(23.dp))
-                                .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null
-                                ) { btn.onClick() },
+                                .liquidClickable(pressedScale = LiquidMotion.PressButton) { btn.onClick() },
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
@@ -157,10 +155,7 @@ fun GlassDialog(
                             .height(46.dp)
                             .clip(RoundedCornerShape(23.dp))
                             .background(primaryButton.backgroundColor)
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null
-                            ) { primaryButton.onClick() },
+                            .liquidClickable(pressedScale = LiquidMotion.PressButton) { primaryButton.onClick() },
                         contentAlignment = Alignment.Center
                     ) {
                         Text(

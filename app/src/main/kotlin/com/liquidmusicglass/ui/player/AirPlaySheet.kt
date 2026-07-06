@@ -69,6 +69,7 @@ import com.kyant.backdrop.shadow.Shadow
 import com.kyant.shapes.RoundedRectangle
 import com.liquidmusicglass.engine.AudioService
 import com.liquidmusicglass.ui.glass.AlbumArtImage
+import com.liquidmusicglass.ui.glass.liquidClickable
 
 data class AudioOutputDevice(
     val id: Int,
@@ -444,10 +445,7 @@ private fun DeviceRow(
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
             .background(rowColor)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) { onClick() }
+            .liquidClickable { onClick() }
             .padding(horizontal = 14.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

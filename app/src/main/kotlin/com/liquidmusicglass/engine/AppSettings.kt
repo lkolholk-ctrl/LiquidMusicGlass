@@ -44,8 +44,32 @@ object AppSettings {
     private val _ignoreShortEnabled = MutableStateFlow(false)
     val ignoreShortEnabled: StateFlow<Boolean> = _ignoreShortEnabled
 
+    // ── Аудио-совместимость (JUCE/Oboe) ──
+    // Режимы 0..6 — см. OboeRuntime.h / AutoMixNativeEngine. Пока явного выбора
+    // не было (auto=true), режим берётся из вендорной таблицы AudioQuirks; явный
+    // выбор (селектор в настройках / MODE / watchdog) персистится навсегда.
+    private val _audioCompatMode = MutableStateFlow(0)
+    val audioCompatMode: StateFlow<Int> = _audioCompatMode
+
+    private val _audioCompatAuto = MutableStateFlow(true)
+    val audioCompatAuto: StateFlow<Boolean> = _audioCompatAuto
+
+    // ── Haptic Music: тактильные удары в такт музыке (HapticMusicEngine) ──
+    private val _hapticMusicEnabled = MutableStateFlow(false)
+    val hapticMusicEnabled: StateFlow<Boolean> = _hapticMusicEnabled
+
+    /** Сила хаптики: 1 Medium, 2 Strong (Soft выброшен — гейт душил всё). */
+    private val _hapticStrength = MutableStateFlow(1)
+    val hapticStrength: StateFlow<Int> = _hapticStrength
+
     private val _ignoreThresholdSec = MutableStateFlow(30f)
     val ignoreThresholdSec: StateFlow<Float> = _ignoreThresholdSec
+
+    // ── Debug UI (оверлей JUCE DEBUG / LOG-чип / LCAT) ──
+    // По умолчанию СКРЫТ: включается жестом — 5 быстрых тапов по заголовку
+    // «Settings». Публичной сборке отладочные чипы на экране не нужны.
+    private val _debugUiEnabled = MutableStateFlow(false)
+    val debugUiEnabled: StateFlow<Boolean> = _debugUiEnabled
 
     // ── Preload next track (lead time before current track ends) ──
     // За сколько секунд до конца трека начинать предзагрузку следующего. 30..90.
@@ -93,6 +117,10 @@ object AppSettings {
     private val _isOnboardingCompleted = MutableStateFlow(false)
     val isOnboardingCompleted: StateFlow<Boolean> = _isOnboardingCompleted
 
+    // ── Правый тайм-лейбл плеера: false = «-осталось», true = общая длительность ──
+    private val _timeShowTotal = MutableStateFlow(false)
+    val timeShowTotal: StateFlow<Boolean> = _timeShowTotal
+
     private val _onboardingGenres = MutableStateFlow<List<String>>(emptyList())
     val onboardingGenres: StateFlow<List<String>> = _onboardingGenres
 
@@ -137,6 +165,51 @@ object AppSettings {
     fun setIgnoreShort(enabled: Boolean) {
         _ignoreShortEnabled.value = enabled
         safePrefs()?.edit()?.putBoolean("ignore_short", enabled)?.apply()
+    }
+
+    fun setHapticMusicEnabled(enabled: Boolean) {
+        _hapticMusicEnabled.value = enabled
+        safePrefs()?.edit()?.putBoolean("haptic_music", enabled)?.apply()
+    }
+
+    fun setDebugUiEnabled(enabled: Boolean) {
+        _debugUiEnabled.value = enabled
+        safePrefs()?.edit()?.putBoolean("debug_ui", enabled)?.apply()
+    }
+
+    fun setHapticStrength(level: Int) {
+        val v = level.coerceIn(1, 2)
+        _hapticStrength.value = v
+        safePrefs()?.edit()?.putInt("haptic_strength", v)?.apply()
+    }
+
+    fun setAudioCompatMode(mode: Int) {
+        val m = mode.coerceIn(0, 6)
+        _audioCompatAuto.value = false
+        if (_audioCompatMode.value == m) {
+            // Значение то же, но выбор стал ЯВНЫМ — зафиксировать в prefs.
+            safePrefs()?.edit()?.putInt("audio_compat_mode", m)?.apply()
+            return
+        }
+        _audioCompatMode.value = m
+        safePrefs()?.edit()?.putInt("audio_compat_mode", m)?.apply()
+        // Живой движок переоткроет Oboe-поток с новым режимом (на фоне);
+        // если движок ещё не поднят — режим подхватится при init().
+        com.liquidmusicglass.engine.automix.AutoMixNativeEngine.setOboeCompatMode(m)
+        com.liquidmusicglass.engine.automix.AudioTelemetry.onModeChanged()
+    }
+
+    /** Вернуться в «Авто»: явный выбор стирается, действует вендорная таблица
+     *  (AudioQuirks) + watchdog. */
+    fun setAudioCompatModeAuto() {
+        _audioCompatAuto.value = true
+        safePrefs()?.edit()?.remove("audio_compat_mode")?.apply()
+        val m = com.liquidmusicglass.engine.automix.AudioQuirks.defaultMode()
+        if (_audioCompatMode.value != m) {
+            _audioCompatMode.value = m
+            com.liquidmusicglass.engine.automix.AutoMixNativeEngine.setOboeCompatMode(m)
+        }
+        com.liquidmusicglass.engine.automix.AudioTelemetry.onModeChanged()
     }
 
     fun setIgnoreThreshold(sec: Float) {
@@ -204,6 +277,11 @@ object AppSettings {
     fun setOnboardingCompleted(completed: Boolean) {
         _isOnboardingCompleted.value = completed
         safePrefs()?.edit()?.putBoolean("onboarding_completed", completed)?.apply()
+    }
+
+    fun setTimeShowTotal(showTotal: Boolean) {
+        _timeShowTotal.value = showTotal
+        safePrefs()?.edit()?.putBoolean("time_show_total", showTotal)?.apply()
     }
 
     fun setOnboardingData(genres: List<String>, artists: List<String>) {
@@ -319,7 +397,20 @@ object AppSettings {
         _sleepTimerMinutes.value = p.getInt("sleep_timer", 0)
         _ignoreShortEnabled.value = p.getBoolean("ignore_short", false)
         _ignoreThresholdSec.value = p.getFloat("ignore_threshold", 30f)
+        // Пользователь/watchdog ещё не выбирали режим → вендорная таблица
+        // AudioQuirks (модель → семейство → NORMAL). Дефолт НЕ персистим: если
+        // завтра карта улучшится, обновление её подхватит; явный выбор
+        // (селектор/MODE/watchdog) — персистится навсегда.
+        _audioCompatAuto.value = !p.contains("audio_compat_mode")
+        _audioCompatMode.value = if (_audioCompatAuto.value)
+            com.liquidmusicglass.engine.automix.AudioQuirks.defaultMode()
+        else
+            p.getInt("audio_compat_mode", 0).coerceIn(0, 6)
         _preloadLeadSeconds.value = p.getInt("preload_lead_seconds", 60).coerceIn(30, 90)
+        _hapticMusicEnabled.value = p.getBoolean("haptic_music", false)
+        // 0 (бывший Soft) мигрирует в Medium.
+        _hapticStrength.value = p.getInt("haptic_strength", 1).coerceIn(1, 2)
+        _debugUiEnabled.value = p.getBoolean("debug_ui", false)
 
         _lastTrackIndex.value = p.getInt("last_track", -1)
         _lastPositionMs.value = p.getLong("last_position", 0L)
@@ -348,6 +439,7 @@ object AppSettings {
         } catch (_: Exception) {}
 
         _isOnboardingCompleted.value = p.getBoolean("onboarding_completed", false)
+        _timeShowTotal.value = p.getBoolean("time_show_total", false)
         _onboardingGenres.value = p.getString("onboarding_genres", "")?.split(",")?.filter { it.isNotBlank() } ?: emptyList()
         _onboardingArtists.value = p.getString("onboarding_artists", "")?.split(",")?.filter { it.isNotBlank() } ?: emptyList()
     }

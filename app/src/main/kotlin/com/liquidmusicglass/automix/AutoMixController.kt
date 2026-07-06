@@ -7,7 +7,9 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.net.Uri
 import com.liquidmusicglass.debug.DebugLog
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -62,7 +64,7 @@ class AutoMixController(
         currentTrackUri: Uri,
         nextTrackUri: Uri,
         currentTrackDurationMs: Long
-    ): TrackFeatures = withContext(Dispatchers.Default) {
+    ): TrackFeatures = withContext(analysisDispatcher) {
 
         // 1. Декодируем и анализируем оба трека
         val energyA = getOrAnalyze(currentTrackUri, currentTrackDurationMs)
@@ -150,7 +152,7 @@ class AutoMixController(
      */
     suspend fun analyzeTrack(
         trackUri: Uri
-    ): TrackFeatures = withContext(Dispatchers.Default) {
+    ): TrackFeatures = withContext(analysisDispatcher) {
         TrackFeatures(
             trackUri = trackUri,
             compatibility = DEFAULT_COMPATIBILITY,
@@ -500,12 +502,38 @@ class AutoMixController(
     }
 
     fun release() {
-        try { predictor?.close() } catch (_: Throwable) {}
+        // Закрытие СТРОГО на analysisDispatcher: инференс сериализован на этом
+        // единственном потоке, и close() из чужого потока освобождал нативный
+        // интерпретатор ПОД работающим interpreter.run → UAF/нативный краш.
+        // Очередь single-thread гарантирует: close выполнится после того, как
+        // in-flight анализ доработает.
+        val p = predictor
         predictor = null
         energyCache.clear()
+        if (p != null) {
+            CoroutineScope(analysisDispatcher).launch {
+                try { p.close() } catch (_: Throwable) {}
+            }
+        }
     }
 
     companion object {
+        // Весь тяжёлый анализ (декод двух треков + FFT/мел-спектры + модель) — на
+        // ОДНОМ фоновом потоке с минимальным приоритетом. Раньше он шёл на общем
+        // Dispatchers.Default (пул на все ядра, обычный приоритет) за ~40с до конца
+        // КАЖДОГО трека и отбирал CPU у аудио-декода → периодические лаги/цикличка
+        // «в некоторых местах трека», особенно на слабых устройствах. Анализ может
+        // идти дольше — это фон, ему некуда спешить.
+        private val analysisDispatcher =
+            java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+                Thread({
+                    android.os.Process.setThreadPriority(
+                        android.os.Process.THREAD_PRIORITY_BACKGROUND
+                    )
+                    r.run()
+                }, "automix-analysis")
+            }.asCoroutineDispatcher()
+
         private const val MIN_COMPATIBILITY = 0.25f
         private const val DEFAULT_COMPATIBILITY = 0.75f
         private const val DEFAULT_CROSSFADE_MS = 8000L

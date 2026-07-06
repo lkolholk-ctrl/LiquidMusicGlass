@@ -1,10 +1,6 @@
 package com.liquidmusicglass
 
 import android.content.Intent
-import android.net.ConnectivityManager
-import android.net.Network
-import android.net.NetworkCapabilities
-import android.net.NetworkRequest
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -50,42 +46,6 @@ class MainActivity : ComponentActivity() {
 
     private val authScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    @Volatile
-    private var isNetworkCallbackRegistered = false
-
-    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
-        private var currentNetwork: Network? = null
-        private var reconnectJob: kotlinx.coroutines.Job? = null
-
-        override fun onAvailable(network: Network) {
-            val isNewNetwork = currentNetwork != network
-            currentNetwork = network
-            if (isNewNetwork) {
-                // Активная сеть сменилась (Wi-Fi↔моб., VPN вкл/выкл): соединения в пуле
-                // привязаны к старому маршруту и мертвы. Эвиктим пулы (ICM + обложки) и
-                // сбрасываем локальный бан — иначе приложение долбится в «трупы» и ничего
-                // не грузит, пока соединения сами не протухнут.
-                com.liquidmusicglass.api.icm.IcmApi.getInstance().evictConnections()
-                (application as? App)?.evictImageConnections()
-            }
-            // Debounce: на флапающей мобильной сети onAvailable может прийти много раз —
-            // ждём 1.5с стабильности и делаем ОДИН рефетч + ретрай зависшего плеера,
-            // вместо залпа запросов на каждое срабатывание.
-            reconnectJob?.cancel()
-            reconnectJob = authScope.launch {
-                kotlinx.coroutines.delay(1500)
-                if (IcmAuthRepository.isLoggedIn.value) {
-                    IcmAuthRepository.fetchUserData()
-                }
-                PlayerController.retryCurrentIfStalled(applicationContext)
-            }
-        }
-
-        override fun onLost(network: Network) {
-            if (currentNetwork == network) currentNetwork = null
-        }
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -104,11 +64,8 @@ class MainActivity : ComponentActivity() {
         // на слабом GPU, чтобы RenderThread успевал и не было ANR-плашки.
         com.liquidmusicglass.ui.PerfMonitor.start()
 
-        // Default-network callback ловит СМЕНУ активной сети (Wi-Fi↔моб., VPN вкл/выкл),
-        // чтобы вовремя эвиктить мёртвые соединения и не «терять сеть» после переключения.
-        val connectivityManager = getSystemService(ConnectivityManager::class.java)
-        connectivityManager?.registerDefaultNetworkCallback(networkCallback)
-        isNetworkCallbackRegistered = true
+        // Сетевой колбэк переехал на уровень App (NetworkVitality): живёт весь
+        // срок процесса, а не только пока открыта Activity.
 
         // Initialize ICM API with native key (or BuildConfig fallback)
         val apiKey = try {
@@ -421,14 +378,6 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         com.liquidmusicglass.engine.automix.JuceContextHolder.clear(this)
-        if (!isNetworkCallbackRegistered) return
-        val connectivityManager = getSystemService(ConnectivityManager::class.java)
-        try {
-            connectivityManager?.unregisterNetworkCallback(networkCallback)
-        } catch (e: IllegalArgumentException) {
-            // Callback was not registered — ignore
-        }
-        isNetworkCallbackRegistered = false
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -449,8 +398,10 @@ class MainActivity : ComponentActivity() {
     private fun handleTelegramAuth(intent: Intent?) {
         val data = intent?.data ?: return
         
-        // Handle ICM Telegram link redirect (liquidmusicglass://oauth/icm)
-        if (data.scheme == "liquidmusicglass" && data.host == "oauth" && data.path == "/icm") {
+        // Handle ICM Telegram link redirect. Принимаем ЛЮБОЙ путь под host=oauth
+        // (…/icm и голый liquidmusicglass://oauth): ICM whitelist сверяет
+        // redirect_uri по scheme://netloc, поэтому итоговый путь может отличаться.
+        if (data.scheme == "liquidmusicglass" && data.host == "oauth") {
             val linkedParam = data.getQueryParameter("linked")
             val linked = linkedParam == "1" || linkedParam.equals("true", ignoreCase = true)
             val icmUserId = data.getQueryParameter("icm_user_id")

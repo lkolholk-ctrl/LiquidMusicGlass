@@ -9,11 +9,13 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -21,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
@@ -44,10 +47,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.liquidmusicglass.engine.LyricsFxController
 import com.liquidmusicglass.engine.LyricsParser
+import com.liquidmusicglass.engine.LyricsSyncStore
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.ui.glass.AlbumArtImage
 import com.liquidmusicglass.ui.glass.AlbumColors
-import com.liquidmusicglass.engine.vad.VadLyricsEngine
 import com.liquidmusicglass.ui.glass.rememberAlbumColors
 import com.liquidmusicglass.ui.theme.AppFontFamily
 import kotlinx.coroutines.Dispatchers
@@ -68,6 +71,10 @@ private const val ACTIVE_LINE_TOP_BIAS = 0.28f
 
 /** Высота зоны заголовка со скрим-градиентом (плотная часть закрывает название+артиста). */
 private val HEADER_SCRIM_HEIGHT = 170.dp
+
+/** Пауза автоследования после ручного скролла: пользователь читает текст —
+ *  не дёргаем список обратно, возвращаемся к активной строке через этот таймаут. */
+private const val USER_SCROLL_PAUSE_MS = 4000L
 
 /**
  * Полноэкранный караоке-экран лирики (Apple Music style).
@@ -156,14 +163,23 @@ fun LyricsScreen(
         timeProcessor?.reset()
     }
 
-    // ── VAD-лирики: модель крутится только пока открыт экран лирики с синхро-текстом.
-    // start() поднимает VocalState.enabled → BassAudioProcessor начинает кормить FFT-тап.
-    val isSyncedLyrics = lyrics.isSynced
-    DisposableEffect(isSyncedLyrics) {
-        if (isSyncedLyrics) VadLyricsEngine.start(context)
-        onDispose { VadLyricsEngine.stop() }
-    }
     val isInterlude by timeProcessor?.isInterlude?.collectAsState() ?: remember { mutableStateOf(false) }
+    val interludeProgress by timeProcessor?.interludeProgress?.collectAsState()
+        ?: remember { mutableFloatStateOf(0f) }
+
+    // ── Ручная подстройка синхры (± мс, память на трек) ──
+    // Лечит кривые таймкоды источника: + = лирика раньше, − = позже.
+    var syncOffsetMs by remember(resolvedTrackId) {
+        mutableLongStateOf(LyricsSyncStore.get(context, resolvedTrackId))
+    }
+    var syncUiOpen by remember { mutableStateOf(false) }
+    fun adjustSync(deltaMs: Long) {
+        syncOffsetMs = (syncOffsetMs + deltaMs).coerceIn(-10_000L, 10_000L)
+        LyricsSyncStore.set(context, resolvedTrackId, syncOffsetMs)
+        // Сброс процессора: монотонный курсор не пускает позицию назад,
+        // без сброса сдвиг «−» применился бы только на следующей строке.
+        timeProcessor?.reset()
+    }
 
     // ── Smooth 60/120 FPS position ticker ──
     val isPlaying by PlayerController.isPlaying.collectAsState()
@@ -172,10 +188,10 @@ fun LyricsScreen(
     // Sync with coarse position only when paused — во время игры позицией
     // владеет покадровый тикер (getSmoothPositionMs), иначе грубые апдейты
     // дёргали бы плавный sweep.
-    LaunchedEffect(currentPositionMs) {
+    LaunchedEffect(currentPositionMs, syncOffsetMs) {
         if (!isPlaying) {
             smoothPositionMs = currentPositionMs
-            timeProcessor?.updatePosition(currentPositionMs)
+            timeProcessor?.updatePosition(currentPositionMs + syncOffsetMs)
         }
     }
 
@@ -195,7 +211,8 @@ fun LyricsScreen(
             withFrameMillis { _ ->
                 if (PlayerController.isPlaying.value) {
                     smoothPositionMs = PlayerController.getSmoothPositionMs()
-                    currentProcessor?.updatePosition(smoothPositionMs)
+                    // syncOffsetMs — state: тикер всегда читает свежий сдвиг.
+                    currentProcessor?.updatePosition(smoothPositionMs + syncOffsetMs)
                 }
             }
         }
@@ -225,8 +242,22 @@ fun LyricsScreen(
     // Ширина мягкого края sweep (px) — из настройки плавности; 0 для line-level.
     val edgeSoftPx = if (isWordLevel) (0.02f + wordSmoothness * 0.16f) * lineMaxWidthPx else 0f
 
-    LaunchedEffect(currentLineIndex) {
+    // Ручной скролл (drag) ставит автоследование на паузу — фиксируем момент касания.
+    var userScrolledAt by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(listState) {
+        listState.interactionSource.interactions.collect { interaction ->
+            if (interaction is DragInteraction.Start) {
+                userScrolledAt = System.currentTimeMillis()
+            }
+        }
+    }
+
+    LaunchedEffect(currentLineIndex, userScrolledAt) {
         if (currentLineIndex >= 0) {
+            // Если пользователь недавно листал руками — ждём остаток паузы,
+            // потом плавно возвращаемся (новый drag перезапустит эффект и ожидание).
+            val sinceTouch = System.currentTimeMillis() - userScrolledAt
+            if (sinceTouch < USER_SCROLL_PAUSE_MS) delay(USER_SCROLL_PAUSE_MS - sinceTouch)
             // Поднимаем активную строку в верхнюю треть (см. ACTIVE_LINE_TOP_BIAS)
             val targetIndex = currentLineIndex.coerceAtMost((lyrics.lines.size - 1).coerceAtLeast(0))
             val aboveCenterOffset = (screenHeightPx * ACTIVE_LINE_TOP_BIAS).toInt()
@@ -324,12 +355,30 @@ fun LyricsScreen(
                                         .padding(vertical = 40.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    WaitingDots(dotColor = Color.White)
+                                    WaitingDots(dotColor = Color.White, progress = interludeProgress)
                                 }
                             }
                         }
 
                         itemsIndexed(lyrics.lines) { index, line ->
+                            // Несинхронная лирика — обычный текст: мельче и кучнее
+                            // (32sp-строки с воздухом рассчитаны на караоке-свип,
+                            // без таймкодов они просто раздувают простыню).
+                            if (!lyrics.isSynced) {
+                                Text(
+                                    text = line.text,
+                                    color = Color.White.copy(alpha = 0.82f),
+                                    fontSize = 17.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    fontFamily = AppFontFamily,
+                                    lineHeight = 24.sp,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 24.dp, vertical = 4.dp)
+                                )
+                                return@itemsIndexed
+                            }
+
                             val isCurrent = index == currentLineIndex
                             val isPast = index < currentLineIndex
 
@@ -355,16 +404,38 @@ fun LyricsScreen(
                             }
 
                             val base = duetColor ?: Color.White
+
+                            // Глубина списка: чем дальше строка от активной, тем сильнее
+                            // растворяется (ближние читаемы, дальние — «туман»). До первой
+                            // строки градации нет — весь текст ровный.
+                            val dist = if (currentLineIndex >= 0) abs(index - currentLineIndex) else 1
+                            val depthTarget = if (isCurrent || currentLineIndex < 0) 1f
+                                else (1f - 0.13f * (dist - 1)).coerceAtLeast(0.45f)
+                            val depth by animateFloatAsState(
+                                targetValue = depthTarget,
+                                animationSpec = tween(durationMillis = 450),
+                                label = "depth"
+                            )
+
                             val sungColor by animateColorAsState(
-                                targetValue = base.copy(alpha = if (isCurrent) 1f else 0.55f),
+                                targetValue = base.copy(alpha = if (isCurrent) 1f else 0.55f * depth),
                                 animationSpec = tween(durationMillis = sungTweenMs),
                                 label = "sung"
                             )
-                            val unsungColor = base.copy(alpha = 0.30f)
+                            val unsungColor = base.copy(alpha = 0.30f * depth)
 
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    // Тап по строке = перемотка на неё (Apple Music).
+                                    // Только для синхронной лирики.
+                                    .then(
+                                        if (lyrics.isSynced) Modifier.clickable(
+                                            interactionSource = remember { MutableInteractionSource() },
+                                            indication = null
+                                        ) { PlayerController.seekTo(line.timeMs) }
+                                        else Modifier
+                                    )
                                     .padding(horizontal = 24.dp, vertical = 10.dp),
                                 horizontalAlignment = Alignment.Start
                             ) {
@@ -380,14 +451,19 @@ fun LyricsScreen(
                                     edgeSoftPx = if (isCurrent) edgeSoftPx else 0f
                                 )
                                 // Точки ожидания во время инструментального проигрыша
-                                // (см. showWaiting: VAD решает, LRC-эвристика — fallback).
+                                // (сегментная модель LyricsTimeProcessor, VAD не используется).
+                                // progress: точки наливаются по мере проигрыша и схлопываются
+                                // перед возвратом вокала.
                                 if (isCurrent && showWaiting) {
                                     Spacer(Modifier.height(16.dp))
                                     Box(
                                         modifier = Modifier.fillMaxWidth(),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        WaitingDots(dotColor = duetColor ?: Color.White)
+                                        WaitingDots(
+                                            dotColor = duetColor ?: Color.White,
+                                            progress = interludeProgress
+                                        )
                                     }
                                 }
                             }
@@ -442,8 +518,71 @@ fun LyricsScreen(
                     maxLines = 1
                 )
             }
+
+            // ── Подстройка синхры: бейдж SYNC в правом верхнем углу ──
+            // Тап раскрывает чипы −0.5s / +0.5s / Reset; сдвиг хранится на трек.
+            if (lyrics.isSynced) {
+                // Авто-скрытие чипов через 6с бездействия.
+                LaunchedEffect(syncUiOpen, syncOffsetMs) {
+                    if (syncUiOpen) {
+                        delay(6000)
+                        syncUiOpen = false
+                    }
+                }
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = 12.dp, end = 12.dp),
+                    horizontalAlignment = Alignment.End
+                ) {
+                    val badgeActive = syncUiOpen || syncOffsetMs != 0L
+                    Text(
+                        text = if (syncOffsetMs == 0L) "SYNC"
+                               else "SYNC %+.1fs".format(syncOffsetMs / 1000f),
+                        color = Color.White.copy(alpha = if (badgeActive) 0.95f else 0.45f),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color.Black.copy(alpha = 0.35f))
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) { syncUiOpen = !syncUiOpen }
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    )
+                    if (syncUiOpen) {
+                        Spacer(Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            SyncChip("−0.5s") { adjustSync(-500L) }
+                            SyncChip("+0.5s") { adjustSync(+500L) }
+                            SyncChip("Reset") { adjustSync(-syncOffsetMs) }
+                        }
+                    }
+                }
+            }
         }
     }
+}
+
+/** Чип панели подстройки синхры лирики. */
+@Composable
+private fun SyncChip(label: String, onClick: () -> Unit) {
+    Text(
+        text = label,
+        color = Color.White,
+        fontSize = 13.sp,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color.Black.copy(alpha = 0.45f))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick
+            )
+            .padding(horizontal = 14.dp, vertical = 8.dp)
+    )
 }
 
 /**
@@ -468,9 +607,13 @@ internal fun LyricLineSweep(
     if (text.isEmpty()) return
 
     val measurer = rememberTextMeasurer()
+    // Стиль ОДИН для активной и неактивной строки: смена 30↔32sp была
+    // перевёрсткой (другие переносы, прыжок высоты — дёргался весь список).
+    // «Укрупнение» активной строки теперь чисто визуальное — spring-scale
+    // через graphicsLayer ниже, вёрстка не меняется никогда.
     val style = TextStyle(
-        fontSize = if (isActive) 32.sp else 30.sp,
-        fontWeight = if (isActive) FontWeight.Bold else FontWeight.SemiBold,
+        fontSize = 32.sp,
+        fontWeight = FontWeight.Bold,
         fontFamily = AppFontFamily,
         lineHeight = 44.sp,
         textAlign = TextAlign.Start,
@@ -491,7 +634,26 @@ internal fun LyricLineSweep(
     val wDp = with(LocalDensity.current) { layout.size.width.toDp() }
     val hDp = with(LocalDensity.current) { layout.size.height.toDp() }
 
-    Canvas(modifier = Modifier.size(wDp, hDp)) {
+    // «Дыхание» активной строки: неактивные визуально ~30sp (32 × 0.94),
+    // активная плавно вырастает до 100%. От левого края — без бокового дрейфа.
+    val lineScale by animateFloatAsState(
+        targetValue = if (isActive) 1f else 0.94f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessLow
+        ),
+        label = "lineScale"
+    )
+
+    Canvas(
+        modifier = Modifier
+            .size(wDp, hDp)
+            .graphicsLayer {
+                scaleX = lineScale
+                scaleY = lineScale
+                transformOrigin = TransformOrigin(0f, 0.5f)
+            }
+    ) {
         // 0) гло-подсветка активной строки: цвет облегает текст. Блюр УЗКИЙ —
         //    свечение хватает текст вплотную, без широких колец вокруг круглых букв.
         if (isActive) {

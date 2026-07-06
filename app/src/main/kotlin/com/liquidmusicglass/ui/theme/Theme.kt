@@ -60,7 +60,9 @@ private val DarkLiquidColors = LiquidColors(
     glassTint = Color.White.copy(alpha = 0.04f),
     glassBorder = Color.White.copy(alpha = 0.20f),
     divider = Color.White.copy(alpha = 0.06f),
-    cardSurface = Color.Transparent,
+    // Серые подложки-карточки как в настройках (были Transparent — секции
+    // AudioFx/библиотеки/тегов рисовались «голыми», полевой фидбек).
+    cardSurface = Color(0xFF1C1C1E),
     accent = Color(0xFF88C088),
     accentRed = Color(0xFFFC3C44),
     accentGreen = Color(0xFF34C759),
@@ -92,7 +94,7 @@ private val LightLiquidColors = LiquidColors(
     glassTint = Color.Black.copy(alpha = 0.03f),
     glassBorder = Color.Black.copy(alpha = 0.08f),
     divider = Color.Black.copy(alpha = 0.06f),
-    cardSurface = Color.Transparent,
+    cardSurface = Color(0xFFF2F2F7),
     accent = Color(0xFF7FB77E),
     accentRed = Color(0xFFFC3C44),
     accentGreen = Color(0xFF34C759),

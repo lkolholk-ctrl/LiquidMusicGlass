@@ -8,14 +8,15 @@ import com.liquidmusicglass.api.icm.icmUserMessage
 import com.liquidmusicglass.api.icm.IcmSearchItem
 import com.liquidmusicglass.api.icm.IcmSearchSource
 import com.liquidmusicglass.api.icm.IcmWaveOnboardingArtist
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.debounce
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -53,12 +54,16 @@ class SearchViewModel : ViewModel() {
         get() = _query.value.isNotBlank()
 
     init {
-        // Setup debounced search: 300ms after user stops typing
+        // Debounce 300мс после остановки ввода. БЕЗ distinctUntilChanged:
+        // он сравнивал с последним ПРОПУЩЕННЫМ значением, поэтому «стёр и
+        // набрал то же название» глотался молча — поиск не запускался вообще
+        // (главная причина «пишу правильно, а не ищет»).
         _query
             .debounce(300)
-            .filter { it.trim().length >= 2 }
-            .distinctUntilChanged()
-            .onEach { performSearch(it) }
+            .onEach { q ->
+                val t = q.trim()
+                if (t.length >= 2) performSearch(t)
+            }
             .launchIn(viewModelScope)
     }
 
@@ -89,7 +94,7 @@ class SearchViewModel : ViewModel() {
         _selectedSource.value = source
         // Re-trigger search if query is not empty
         if (_query.value.isNotBlank()) {
-            performSearch(_query.value)
+            performSearch(_query.value.trim())
         }
     }
 
@@ -118,21 +123,45 @@ class SearchViewModel : ViewModel() {
         }
     }
 
+    /** Активный поисковый запрос — новый всегда отменяет предыдущий. */
+    private var searchJob: Job? = null
+
     private fun performSearch(q: String) {
-        viewModelScope.launch {
+        // Гонка ответов: без отмены медленный ответ на СТАРЫЙ запрос мог
+        // прийти позже свежего и затереть результаты (при быстром вводе —
+        // «правильное название, а список пустой/чужой»).
+        searchJob?.cancel()
+        searchJob = viewModelScope.launch {
             _isLoading.value = true
             _error.value = null
             try {
-                val result = IcmRepository.searchAll(q, source = _selectedSource.value)
+                var result = IcmRepository.searchAll(q, source = _selectedSource.value)
+                // Транзиент от быстрого ввода: сервер мог ответить rate_limited
+                // на очередь запросов, или таймаут на слабой сети. Один ТИХИЙ
+                // повтор через 1.2с вместо мгновенного Error — к этому моменту
+                // очередь рассосалась. delay отменяемый: новый запрос его убьёт.
+                if (result == null && q == _query.value.trim()) {
+                    kotlinx.coroutines.delay(1200)
+                    if (q == _query.value.trim())
+                        result = IcmRepository.searchAll(q, source = _selectedSource.value)
+                }
+                // Пока летел ответ, пользователь уже напечатал другое — не
+                // показываем устаревшие результаты (отмена ловит не всё:
+                // новый debounce мог ещё не выстрелить).
+                if (q != _query.value.trim() && _query.value.trim().length >= 2)
+                    return@launch
                 _searchResults.value = result?.items ?: emptyList()
                 if (result == null) {
                     // Человекочитаемое сообщение вместо сырого JSON тела ответа.
                     _error.value = icmUserMessage(IcmRepository.lastApiException.value)
                 }
+            } catch (ce: CancellationException) {
+                throw ce   // отмена — не ошибка, не показываем её пользователю
             } catch (e: Exception) {
                 _error.value = icmUserMessage(e)
             } finally {
-                _isLoading.value = false
+                // Отменённый job не гасит спиннер нового (тот уже поставил true).
+                if (isActive) _isLoading.value = false
             }
         }
     }

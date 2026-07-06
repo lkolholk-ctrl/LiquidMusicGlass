@@ -6,4 +6,8 @@
     <external-path
         name="external"
         path="." />
+    <!-- Экспорт логов (LogcatReader.exportLogs): cache/logs/*.txt в «Поделиться» -->
+    <cache-path
+        name="logs"
+        path="logs/" />
 </paths>

@@ -4,8 +4,10 @@
 
 На время отладки вся защита и оптимизация выключены (НЕ оставлять в финале!):
 
-- [ ] `PROTECTION_ENABLED = true` в `MainActivity.kt` (сейчас `false` — security-проверки root/emulator/Frida/подпись отключены).
-- [ ] R8/минификация: `isMinifyEnabled = true` и `isShrinkResources = true` в `app/build.gradle.kts` (release) — сейчас оба `false`.
+- [x] `PROTECTION_ENABLED = true` в `MainActivity.kt` — включено.
+- [x] R8/минификация: `isMinifyEnabled = true` и `isShrinkResources = true` в
+  `app/build.gradle.kts` (release) — включено; keep-правила расписаны в
+  `app/proguard-rules.pro` (JNI-мосты, Room, kotlinx.serialization, LiteRT).
 
 ---
 

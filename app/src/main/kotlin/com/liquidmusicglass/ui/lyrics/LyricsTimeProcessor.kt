@@ -25,7 +25,7 @@ import kotlinx.coroutines.flow.asStateFlow
  * Waiting (точки ожидания) — ОТДЕЛЬНЫЙ механизм: только когда строка докрашена
  * ПОЛНОСТЬЮ и до следующей строки разрыв > WAIT_GAP_MS (реальный проигрыш).
  *
- * VAD-модель отключена флагом [com.liquidmusicglass.engine.vad.VadLyricsEngine.ENABLED].
+ * VAD-модель НЕ используется (косячная): экран лирики её больше не запускает.
  */
 @Stable
 class LyricsTimeProcessor(
@@ -101,9 +101,54 @@ class LyricsTimeProcessor(
     private val _isInterlude = MutableStateFlow(false)
     val isInterlude: StateFlow<Boolean> = _isInterlude.asStateFlow()
 
+    /** Прогресс текущего ожидания 0..1 (интро до первой строки или проигрыш):
+     *  точки WaitingDots «наливаются» по нему и схлопываются к концу. */
+    private val _interludeProgress = MutableStateFlow(0f)
+    val interludeProgress: StateFlow<Float> = _interludeProgress.asStateFlow()
+
     /** Монотонный курсор по строкам. */
     private var lineCursor = 0
     private var lastProcessedPositionMs = -1L
+
+    /**
+     * Автокалибровка темпа: сырой сэмпл «мс на символ» ПО КАЖДОЙ строке
+     * (гэп до следующей / длина текста), null = строка не показательна
+     * (выкрик, проигрыш). VAD не используется (модель косячная).
+     */
+    private val rateSamples: List<Double?> = lyrics.lines.mapIndexed { idx, line ->
+        val next = lyrics.lines.getOrNull(idx + 1)?.timeMs ?: return@mapIndexed null
+        val text = line.text.replace(DUET_TAG, "").trim()
+        if (text.length < 6) return@mapIndexed null      // выкрики не показательны
+        val gap = next - line.timeMs
+        if (gap <= 0L || gap > 15_000L) return@mapIndexed null  // проигрыши не считаем
+        gap.toDouble() / text.length
+    }
+
+    /** П40 по набору сэмплов (чуть ниже медианы: гэпы включают дыхание —
+     *  сам вокал быстрее), клампы 40..160 мс/симв. */
+    private fun p40Rate(samples: List<Double>): Long? {
+        if (samples.size < 4) return null
+        val sorted = samples.sorted()
+        return sorted[(sorted.size * 2) / 5].toLong().coerceIn(40L, 160L)
+    }
+
+    /** Глобальный темп трека — фолбэк, когда локального окна не хватает. */
+    private val trackMsPerChar: Long =
+        p40Rate(rateSamples.filterNotNull()) ?: MS_PER_CHAR
+
+    /**
+     * ЛОКАЛЬНЫЙ темп строки: п40 по окну ±5 соседних строк. Куплет и припев
+     * одной песни часто идут с разной скоростью (Godzilla: рэп 10 слов/с и
+     * тянучий припев) — глобальный темп мажет по обоим, окно даёт каждой
+     * секции свой.
+     */
+    private fun rateForLine(idx: Int): Long {
+        val local = ArrayList<Double>(11)
+        for (j in (idx - 5)..(idx + 5)) {
+            rateSamples.getOrNull(j)?.let { local.add(it) }
+        }
+        return p40Rate(local) ?: trackMsPerChar
+    }
 
     /** Предрасчитанная заливка по строкам. */
     private val lineFills: List<LineFill>
@@ -117,7 +162,7 @@ class LyricsTimeProcessor(
                 buildWordLineFill(line, next)
             } else {
                 val text = line.text.replace(DUET_TAG, "").trim()
-                buildLineFill(line.timeMs, next, text)
+                buildLineFill(line.timeMs, next, text, rateForLine(idx))
             }
             fills.add(fill)
         }
@@ -131,8 +176,10 @@ class LyricsTimeProcessor(
         var charPos = 0
         for ((i, w) in words.withIndex()) {
             val start = w.timeMs
+            // Последнее слово последней строки: длительность от темпа трека.
             val end = if (i + 1 < words.size) words[i + 1].timeMs
-                      else (nextStartMs ?: (start + LAST_LINE_MS))
+                      else (nextStartMs
+                          ?: (start + (w.text.length * trackMsPerChar).coerceIn(500L, LAST_LINE_MS)))
             // длина слова + пробел после (кроме последнего) — закрас «течёт» и через пробел
             val len = (w.text.length + if (i < words.size - 1) 1 else 0).coerceAtLeast(1)
             spans.add(WordSpan(charPos, len, start, end.coerceAtLeast(start + 1)))
@@ -152,15 +199,24 @@ class LyricsTimeProcessor(
         )
     }
 
-    /** Строит таймлайн заливки одной строки. */
-    private fun buildLineFill(startMs: Long, nextStartMs: Long?, text: String): LineFill {
-        val gap = if (nextStartMs != null) (nextStartMs - startMs).coerceAtLeast(1L) else LAST_LINE_MS
+    /** Строит таймлайн заливки одной строки ([rate] — локальный темп мс/симв). */
+    private fun buildLineFill(startMs: Long, nextStartMs: Long?, text: String, rate: Long): LineFill {
         val length = text.length.coerceAtLeast(1)
+        // Последняя строка (нет следующей): синтетический «гэп» от темпа ЭТОГО
+        // трека, а не фикс LAST_LINE_MS — финал баллады держится дольше,
+        // финал рэпа не тянется.
+        val gap = if (nextStartMs != null) (nextStartMs - startMs).coerceAtLeast(1L)
+                  else (length * rate * 6 / 5).coerceIn(2000L, 12_000L)
 
-        // estMs: по содержимому, но не больше 90% реального гэпа (чтоб не отставать от вокала).
-        var est = length * MS_PER_CHAR
+        // Floor длительности строки от ЛОКАЛЬНОГО темпа: короткий выкрик
+        // в балладе держится как ~10 «средних» символов её секции.
+        val minLine = (rate * 10).coerceIn(600L, 2200L)
+
+        // estMs: длина × локальный темп секции (окно ±5 строк), но не больше
+        // 90% реального гэпа (чтоб не отставать от вокала).
+        var est = length * rate
         if (nextStartMs != null) est = minOf(est, gap * 9 / 10)
-        est = est.coerceAtLeast(minOf(MIN_MS, gap)).coerceAtLeast(1L)
+        est = est.coerceAtLeast(minOf(minLine, gap)).coerceAtLeast(1L)
 
         // Сегменты по знакам препинания: (длина, сырая пауза после).
         val rawSegs = splitSegments(text)
@@ -235,6 +291,9 @@ class LyricsTimeProcessor(
         if (currentLine < 0) {
             _currentLineProgress.value = 0f
             _isInterlude.value = false
+            // Интро: точки перед первой строкой наливаются от старта трека.
+            _interludeProgress.value =
+                (safePosition.toFloat() / lineFills[0].startMs.coerceAtLeast(1L)).coerceIn(0f, 1f)
             return
         }
 
@@ -248,10 +307,15 @@ class LyricsTimeProcessor(
 
         // Waiting: строка докрашена полностью И до следующей строки реальный разрыв.
         val fullyDrawnAt = lf.startMs + lf.estMs
-        _isInterlude.value = lf.hasNext &&
+        val interlude = lf.hasNext &&
                 safePosition >= fullyDrawnAt &&
                 (lf.nextStartMs - fullyDrawnAt) >= WAIT_GAP_MS &&
                 safePosition < lf.nextStartMs
+        _isInterlude.value = interlude
+        _interludeProgress.value = if (interlude) {
+            ((safePosition - fullyDrawnAt).toFloat() /
+                (lf.nextStartMs - fullyDrawnAt).coerceAtLeast(1L)).coerceIn(0f, 1f)
+        } else 0f
     }
 
     /** Доля закрашенных символов строки в момент [now] (мс от старта строки). */
@@ -333,6 +397,7 @@ class LyricsTimeProcessor(
         _pastWords.value = emptyList()
         _currentWords.value = emptyList()
         _isInterlude.value = false
+        _interludeProgress.value = 0f
     }
 
     data class WordToken(

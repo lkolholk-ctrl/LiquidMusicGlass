@@ -6,6 +6,7 @@
 #include <array>
 #include <atomic>
 #include <memory>
+#include <mutex>
 
 #include "AudioFxChain.h"
 
@@ -36,6 +37,20 @@ public:
      *  fast-path/RT). Позиция воспроизведения сохраняется. Зовётся НЕ из аудио-потока. */
     void onOutputRouteChanged (bool isBluetooth);
 
+    /** Сменился режим совместимости Oboe (OboeRuntime): переоткрыть поток, чтобы
+     *  новый sharing/performance mode применился. Позиция сохраняется (как при
+     *  смене маршрута). Зовётся НЕ из аудио-потока. */
+    void reopenAudioDevice();
+
+    // ── AudioTrack-выход (Java-sink): третий вход в аудио-систему ────────────
+    // Для устройств, где кривые ОБА нативных пути (AAudio и OpenSL): Oboe-девайс
+    // закрывается, движок остаётся жив, и готовые блоки тянет Java-поток
+    // AudioTrackSink — тем же путём, каким играет ExoPlayer/стриминг.
+    /** Закрыть Oboe-устройство и подготовить движок под ручной рендер. */
+    void enterSinkMode (double sampleRate, int blockSize);
+    /** Отрендерить numSamples стерео-кадров в l/r (зовёт ТОЛЬКО поток sink'а). */
+    void renderSinkBlock (float* left, float* right, int numSamples);
+
     // Stage 1 diagnostic tone (only when neither deck has a track) -----------
     void startTone();
     void stopTone();
@@ -52,6 +67,10 @@ public:
     void stop();
     /** RT-safe emergency mute. Used before async pause/skip/load reaches the engine. */
     void silenceOutput();
+
+    /** Мастер-громкость 0..1 (дак при уведомлениях, фейды сервиса). Применяется
+     *  в колбэке со сглаживанием ~20мс — без щелчков. Любой поток. */
+    void setPlaybackVolume (float v01);
 
     /** Crossfade deck A -> deck B over durationMs. Starts both decks. */
     void startCrossfade (double durationMs, int transitionType = 0);
@@ -104,6 +123,23 @@ public:
     /** Deck A transport position / length in ms — for transition timing. */
     double positionMsA();
     double lengthMsA();
+
+    /** Счётчик underrun'ов (xrun) Oboe-потока с момента его открытия; -1 если
+     *  неизвестен/устройство занято переоткрытием. Не блокирует (try_lock) и
+     *  не зовётся с аудио-потока. Для телеметрии/DebugLog — тюнить буфер по
+     *  реальным данным, а не вслепую. */
+    int xRunCount();
+
+    /** Underrun-адаптация: телеметрия поймала рост xrun → увеличить буфер
+     *  (множитель burst 4→6→8, кап) и переоткрыть поток на текущем маршруте.
+     *  Короткий разрыв звука при реопене — цена за прекращение постоянных
+     *  заиканий под системной нагрузкой. НЕ с аудио- и НЕ с main-потока. */
+    void escalateBufferForUnderruns();
+
+    /** Энергосбережение (Battery Saver): система жёстче тротлит CPU — на время
+     *  режима держим максимальный буфер (8×burst) для динамика/провода.
+     *  Реопен потока при смене состояния. НЕ с аудио- и НЕ с main-потока. */
+    void setPowerSaveMode (bool on);
 
     /**
      * Stage 4: pre-stretch deck B so its tempo matches deck A (bpmB -> bpmA),
@@ -166,8 +202,16 @@ private:
     int deckIndex (const Deck& deck) const { return &deck == &deckA ? 0 : 1; }
     void invalidateHoldForDeck (const Deck& deck);
     void invalidateAllHolds();
-    void applyBufferForRoute (bool isBluetooth, bool forceReopen);  // not on audio thread
+    void applyBufferForRoute (bool isBluetooth, bool forceReopen);          // not on audio thread
+    void applyBufferForRouteUnlocked (bool isBluetooth, bool forceReopen);  // держа deviceControlMutex
+    void prepareInternal (double sampleRate, int blockSize);                // общая подготовка (device/sink)
     Deck& deckRef (int index) { return index == 0 ? deckA : deckB; }
+
+    // Управляющие операции с устройством (init / переоткрытие под маршрут /
+    // закрытие в release) идут с РАЗНЫХ потоков (main, route-монитор, load) и
+    // после ухода от глобального JNI-мьютекса могут перекрыться. Сериализуем их
+    // здесь; аудио-коллбэк этот мьютекс НИКОГДА не берёт.
+    std::mutex deviceControlMutex;
 
     juce::AudioDeviceManager deviceManager;
     juce::AudioFormatManager formatManager;
@@ -206,6 +250,32 @@ private:
     // апдейты коэффициентов — внутри AudioFxChain.
     AudioFxChain audioFx;
 
+    // Мастер-громкость (дак/фейды сервиса): target — атомик из любого потока,
+    // smoothed — состояние ТОЛЬКО аудио-потока (линейный рамп в колбэке).
+    std::atomic<float> masterVolumeTarget { 1.0f };
+    float masterVolumeSmoothed { 1.0f };
+
+    // Haptic Music: состояния фильтров (только аудио-поток) — LP ~110 Гц (бас)
+    // и полоса ~200..1800 Гц (середина: LP1800 - LP200) для двухполосного
+    // детектора ударов (automix::noteBassLevel).
+    float hapticLpState { 0.0f };
+    float hapticLpMidLo { 0.0f };
+    float hapticLpMidHi { 0.0f };
+
+    // ── DJ FX переходов (состояние ТОЛЬКО аудио-потока) ─────────────────────
+    // Реальный DSP вместо «постелей громкости»:
+    //  - FILTER_SWEEP (type 4): one-pole LP на уходящей деке, срез уезжает
+    //    экспоненциально ~16кГц → ~150Гц по ходу перехода (муффл как у DJ);
+    //  - ECHO_OUT (type 5): feedback-делэй на уходящей деке (pre-fader send:
+    //    сухой звук гаснет фейдером, повторы остаются) + хвост, дозвучивающий
+    //    ПОСЛЕ конца перехода поверх нового трека.
+    // Буфер делэя аллоцируется в prepareInternal (не на аудио-потоке).
+    float djSweepLp[2] { 0.0f, 0.0f };     // состояние LP свипа (стерео)
+    juce::AudioBuffer<float> djEchoBuf;    // кольцевой буфер делэя (2 канала)
+    int djEchoPos { 0 };
+    int djEchoLen { 0 };                   // длина делэя в сэмплах
+    long long djEchoTail { 0 };            // остаток дозвучки хвоста (сэмплы)
+
     std::atomic<bool> initialised { false };
     std::atomic<bool> toneOn { false };
     std::atomic<bool> outputMuted { false };
@@ -215,6 +285,13 @@ private:
     // вызов с тем же значением всё равно применился, а последующие без изменения — нет.
     std::atomic<bool> routeIsBluetooth { false };
     std::atomic<bool> routeEverApplied { false };
+
+    // Множитель burst-размера для встроенного/проводного маршрута. Стартует с 6
+    // (запас против CPU-сторма системного UI: шторка/переключения); телеметрия
+    // xrun'ов может адаптивно поднять до 8 (escalateBufferForUnderruns).
+    std::atomic<int> bufferBurstMultiplier { 6 };
+    // Battery Saver: на время режима буфер держится на максимуме (8×burst).
+    std::atomic<bool> powerSaveBuffer { false };
 
     // Crossfade state. crossfadeStart is latched by the audio thread so the
     // sample position resets in sync; everything else is plain atomics.

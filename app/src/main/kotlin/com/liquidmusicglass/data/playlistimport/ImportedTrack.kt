@@ -60,6 +60,7 @@ data class PlaylistImportResult(
 enum class PlaylistSourceType {
     YANDEX,
     APPLE,
+    SPOTIFY,
     UNKNOWN
 }
 
