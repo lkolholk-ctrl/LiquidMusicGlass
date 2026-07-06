@@ -1041,7 +1041,24 @@ object PlayerController {
         }
     }
 
+    // Коды, при которых ретрай бессмыслен (ответ окончательный). Всё остальное
+    // ("unknown"/"network_error") — транзиент: сеть моргнула / холодный коннект /
+    // гонка запросов; повтор обычно проходит.
+    private val definitiveStreamErrors =
+        setOf("region_unavailable", "source_not_allowed", "track_not_found", "early_access", "rate_limited")
+
     private suspend fun doResolveStreamUrl(trackId: String): StreamResult {
+        // Полевой кейс: ОДИН трек падал с «Can't reach the server», а следующий
+        // играл без проблем → это не бан, а разовый сбой запроса. Один ретрай
+        // через 500мс: со второй попытки резолвится, юзер ошибки не видит.
+        val first = attemptResolveStreamUrl(trackId)
+        if (first is StreamResult.Success) return first
+        if (first is StreamResult.Error && first.code in definitiveStreamErrors) return first
+        kotlinx.coroutines.delay(500)
+        return attemptResolveStreamUrl(trackId)
+    }
+
+    private suspend fun attemptResolveStreamUrl(trackId: String): StreamResult {
         return try {
             withTimeout(15_000) {
                 val quality = getEffectiveQuality(trackId)
