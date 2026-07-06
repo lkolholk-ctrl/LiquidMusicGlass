@@ -118,11 +118,12 @@ jobs:
           NDK="$ANDROID_HOME/ndk/26.3.11579264"
           CLANG="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang"
           if [ ! -x "$CLANG" ]; then echo "::warning::NDK clang not found at $CLANG — plain build"; exit 0; fi
-          # Smoke компилируем ТЕМИ ЖЕ флагами, что и реальный резолвер
-          # (C++ / -Oz / -fPIC): пасс AntiHook в 1.4.0 гоняется по модулю
-          # безусловно и падал segfault'ом на голом C при -O0. Если он
-          # свалится и здесь — значит свалит и настоящую сборку, поэтому
-          # smoke должен быть верным её слепком, а не однострочником.
+          # Smoke оставляем как ДИАГНОСТИКУ (печатаем результат), но БОЛЬШЕ НЕ
+          # гейтим по нему: синтетический «clang -c» по крошечному файлу — это
+          # не то же самое, что реальная CMake/ndk-сборка resolve.cpp. Раньше
+          # smoke падал в AntiHook и глушил обфускацию, а настоящую сборку мы
+          # так ни разу и не попробовали. Теперь ПРИНУДИТЕЛЬНО включаем O-MVLL
+          # на реальном таргете lmg_resolve и смотрим, что будет на живом коде.
           printf '%s\n' \
             '#include <string.h>' \
             '__attribute__((visibility("default")))' \
@@ -135,14 +136,15 @@ jobs:
             '}' > /tmp/smoke.c
           if OMVLL_CONFIG="$CONFIG" OMVLL_PYTHONPATH="$PYHOME" \
                "$CLANG" -c -Oz -fPIC -std=c++17 -x c++ -fpass-plugin="$PLUGIN" /tmp/smoke.c -o /tmp/smoke.o 2> /tmp/smoke.log; then
-            echo "O-MVLL smoke test PASSED — enabling obfuscation for lmg_resolve"
-            echo "OMVLL_PLUGIN=$PLUGIN"       >> "$GITHUB_ENV"
-            echo "OMVLL_CONFIG=$CONFIG"       >> "$GITHUB_ENV"
-            echo "OMVLL_PYTHONPATH=$PYHOME"   >> "$GITHUB_ENV"
+            echo "O-MVLL smoke (diagnostic): PASSED"
           else
-            echo "::warning::O-MVLL smoke test FAILED — building without obfuscation. Log:"
+            echo "::warning::O-MVLL smoke (diagnostic): FAILED — но всё равно пробуем на реальной сборке. Log:"
             sed 's/^/  /' /tmp/smoke.log || true
           fi
+          echo "Force-enabling O-MVLL on the real lmg_resolve build (bypassing smoke gate)"
+          echo "OMVLL_PLUGIN=$PLUGIN"       >> "$GITHUB_ENV"
+          echo "OMVLL_CONFIG=$CONFIG"       >> "$GITHUB_ENV"
+          echo "OMVLL_PYTHONPATH=$PYHOME"   >> "$GITHUB_ENV"
 
       - name: Build release APK
         env:
