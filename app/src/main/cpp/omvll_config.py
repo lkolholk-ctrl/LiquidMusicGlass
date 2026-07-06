@@ -5,37 +5,63 @@
 # Подключается флагом clang -fpass-plugin=<omvll.so>; O-MVLL вызывает
 # omvll_get_config() и спрашивает по каждой функции, что обфусцировать.
 #
-# Слои защиты здесь:
-#   • obfuscate_string — шифрование строковых литералов (второй слой ПОВЕРХ
-#     нашего XOR-ключа RK; это и есть «O-MVLL с xor key»). Дёшево и стабильно.
-#   • obfuscate_constants — опаковые константы (маскируем числовые литералы).
-#   • flatten_cfg — control-flow flattening на JNI-входах резолвера
-#     (Java_..._ResolveNative_*): граф исполнения становится нечитаемым.
+# МАКСИМАЛЬНЫЙ набор пассов (пользователь выбрал «O-MVLL с максимальными
+# пассами» вместо недоступной на этом стеке настоящей VM-виртуализации):
+#   • obfuscate_string        — шифрование строковых литералов (2-й слой поверх
+#                               нашего XOR-ключа RK) — во ВСЁМ модуле;
+#   • obfuscate_constants     — опаковые константы — во всём модуле;
+#   • flatten_cfg             — control-flow flattening на функциях резолвера;
+#   • break_control_flow      — разрыв графа (jump-threading-стайл) там же;
+#   • anti_hooking            — анти-хук (Frida/PLT) на JNI-входах;
+#   • obfuscate_arithmetic    — MBA (mixed boolean-arithmetic) там же;
+#   • indirect_call / branch  — косвенные переходы/вызовы там же.
 #
-# Безопасность сборки: плагин в CI сначала проходит smoke-тест на тривиальном
-# файле; если он падает — O-MVLL отключается и .so собирается как обычно, APK
-# всегда собирается (см. шаг «Prepare O-MVLL» в ci.yml).
+# Тяжёлые пассы вешаем на функции резолвера (имя содержит "ResolveNative" —
+# JNI-входы; статические хелперы инлайнятся в них при -Oz). Строки/константы —
+# на весь модуль (дёшево и стабильно). Неизвестные методы O-MVLL просто не
+# вызовет (для сборки безопасно). Если какой-то пасс сломает резолвер в рантайме
+# (импорт перестанет возвращать треки) — отключаем этот метод точечно.
+#
+# Безопасность СБОРКИ: плагин в CI сначала smoke-тестируется; при провале
+# O-MVLL отключается и .so собирается как обычно (APK всегда зелёный).
 
 import omvll
+
+
+# Тяжёлые пассы — только на функциях резолвера (JNI-входы ResolveNative_*).
+def _is_resolver(func) -> bool:
+    return "ResolveNative" in func.name
 
 
 class ResolverConfig(omvll.ObfuscationConfig):
     def __init__(self):
         super().__init__()
 
-    # Строки шифруем во ВСЕХ функциях модуля (эндпоинты/UA/маркеры и так уже
-    # XOR-зашифрованы у нас — это добавляет второй независимый слой).
+    # ── Строки и константы: весь модуль ──
     def obfuscate_string(self, mod, func, string):
         return True
 
-    # Опаковые константы — тоже во всём модуле, риск минимальный.
     def obfuscate_constants(self, mod, func):
         return True
 
-    # Плоский граф — на JNI-входах резолвера (основная точка интереса в jadx →
-    # native). Имена JNI: Java_com_liquidmusicglass_security_ResolveNative_*.
+    # ── Тяжёлые пассы: функции резолвера ──
     def flatten_cfg(self, mod, func):
-        return "ResolveNative" in func.name
+        return _is_resolver(func)
+
+    def break_control_flow(self, mod, func):
+        return _is_resolver(func)
+
+    def anti_hooking(self, mod, func):
+        return _is_resolver(func)
+
+    def obfuscate_arithmetic(self, mod, func):
+        return _is_resolver(func)
+
+    def indirect_call(self, mod, func):
+        return _is_resolver(func)
+
+    def indirect_branch(self, mod, func):
+        return _is_resolver(func)
 
 
 def omvll_get_config() -> omvll.ObfuscationConfig:

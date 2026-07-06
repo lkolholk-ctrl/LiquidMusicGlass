@@ -27,7 +27,7 @@ android {
         // плагин (env OMVLL_PLUGIN указывает на .so). Метка билда это отражает,
         // чтобы на девайсе было видно, реально ли обфускация в сборке.
         val omvllPlugin = System.getenv("OMVLL_PLUGIN")?.takeIf { it.isNotBlank() }
-        versionName = "06.07 album-crash-fix" + if (omvllPlugin != null) "+omvll" else ""
+        versionName = "06.07 omvll-max" + if (omvllPlugin != null) "+omvll" else ""
 
         // Build native libs only for arm64-v8a (faster builds, smaller APK).
         // Note: won't run on 32-bit (armeabi-v7a) or x86/x86_64 emulators.
