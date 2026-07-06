@@ -69,6 +69,18 @@ fun AlbumArtImage(
         return
     }
 
+    // Онлайн-трек (http/https) без coverUrl: локальной обложки у него быть не
+    // может. Раньше мы всё равно дёргали MediaMetadataRetriever.openFileDescriptor
+    // и loadThumbnail по https-URI + MediaStore.Audio.Albums по фиктивному
+    // albumId (хэш id трека) — сотни впустую-биндер-вызовов к MediaProvider на
+    // каждую строку импортированного плейлиста подтормаживали скролл до фриза
+    // (у ICM-плейлистов coverUrl всегда есть, поэтому они не залипали). Для
+    // удалённых треков сразу отдаём плейсхолдер, без локального зондирования.
+    fun Uri?.isRemote(): Boolean = this?.scheme?.let { it == "http" || it == "https" } == true
+    if ((audioFileUri == null || audioFileUri.isRemote()) && (uri == null || uri.isRemote())) {
+        PlaceholderArt(modifier = modifier)
+        return
+    }
 
     val context = LocalContext.current
     var bitmap by remember(uri, audioFileUri, albumId) { mutableStateOf<ImageBitmap?>(null) }
