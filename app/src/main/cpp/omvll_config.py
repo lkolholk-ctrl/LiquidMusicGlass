@@ -6,12 +6,20 @@
 # omvll_get_config() и спрашивает по каждой функции, что обфусцировать.
 #
 # Набор пассов — СТАБИЛЬНОЕ ядро O-MVLL (максимум из того, что реально
-# проходит сборку под NDK r26d / clang 17):
+# проходит сборку под NDK r26d / clang 17), ВСЕ — только на функциях резолвера:
 #   • obfuscate_string        — шифрование строковых литералов (2-й слой поверх
-#                               нашего XOR-ключа RK) — во ВСЁМ модуле;
-#   • obfuscate_constants     — опаковые константы — во всём модуле;
-#   • flatten_cfg             — control-flow flattening на функциях резолвера;
-#   • obfuscate_arithmetic    — MBA (mixed boolean-arithmetic) там же.
+#                               нашего XOR-ключа RK);
+#   • obfuscate_constants     — опаковые константы (в т.ч. наши XOR-массивы);
+#   • flatten_cfg             — control-flow flattening;
+#   • obfuscate_arithmetic    — MBA (mixed boolean-arithmetic).
+#
+# ВАЖНО про охват: resolve.cpp тянет header-only nlohmann/json (десятки тысяч
+# строк/констант). Если гонять obfuscate_string/constants по ВСЕМУ модулю,
+# O-MVLL шифрует каждую строку json.hpp через встроенный CPython — сборка
+# native-части раздувается с ~2 мин до 20+ мин (проверено на CI). Нам это не
+# нужно: секреты — в НАШИХ функциях (JNI-входы ResolveNative_* + инлайн
+# хелперов при -Oz), json — просто парсер. Поэтому ВСЕ пассы скоупим на
+# _is_resolver — и защита там, где надо, и сборка быстрая («не перегибаем»).
 #
 # ЯВНО ВЫКЛЮЧЕН anti_hooking. Он у O-MVLL включён ПО УМОЛЧАНИЮ: если метод
 # не переопределить, база возвращает True, и пасс AntiHook::run для каждой
@@ -23,10 +31,10 @@
 # дефолт. (Другие тяжёлые пассы — indirect_call/branch, break_control_flow —
 # по умолчанию OFF, поэтому их не трогаем.)
 #
-# Тяжёлые пассы вешаем на функции резолвера (имя содержит "ResolveNative" —
-# JNI-входы; статические хелперы инлайнятся в них при -Oz). Строки/константы —
-# на весь модуль. Если какой-то пасс сломает резолвер в рантайме (импорт
-# перестанет возвращать треки) — отключаем этот метод точечно.
+# Все пассы вешаем на функции резолвера (имя содержит "ResolveNative" —
+# JNI-входы; статические хелперы инлайнятся в них при -Oz). Если какой-то
+# пасс сломает резолвер в рантайме (импорт перестанет возвращать треки) —
+# отключаем этот метод точечно.
 #
 # Безопасность СБОРКИ: плагин в CI сначала smoke-тестируется; при провале
 # O-MVLL отключается и .so собирается как обычно (APK всегда зелёный).
@@ -47,12 +55,12 @@ class ResolverConfig(omvll.ObfuscationConfig):
     def anti_hooking(self, mod, func):
         return False
 
-    # ── Строки и константы: весь модуль ──
+    # ── Строки и константы: ТОЛЬКО функции резолвера (json.hpp не трогаем) ──
     def obfuscate_string(self, mod, func, string):
-        return True
+        return _is_resolver(func)
 
     def obfuscate_constants(self, mod, func):
-        return True
+        return _is_resolver(func)
 
     # ── Тяжёлые пассы: функции резолвера (стабильные) ──
     def flatten_cfg(self, mod, func):
