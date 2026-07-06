@@ -1,10 +1,14 @@
 package com.liquidmusicglass.debug
 
+import android.content.ContentUris
+import android.content.ContentValues
 import android.content.Context
+import android.net.Uri
+import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
-import java.io.File
+import android.provider.MediaStore
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -134,11 +138,44 @@ object UiWatchdog {
             if (hot.isNotEmpty()) sb.append(" | hot: ").append(hot)
             val line = sb.toString()
             DebugLog.add(line)
-            // Постоянный файл: одна строка на фриз, с временем.
-            runCatching {
-                val dir = File(context.filesDir, "crash_logs").apply { mkdirs() }
-                File(dir, "ui_freeze_summary.txt")
-                    .appendText("${System.currentTimeMillis()} $line\n")
+            // Публичная папка Downloads (без Shizuku): одна строка на фриз.
+            writeToDownloads(context, "LMG_ui_freeze.txt", "${System.currentTimeMillis()} $line\n", append = true)
+        }
+    }
+
+    /**
+     * Пишет/дописывает текст в ПУБЛИЧНУЮ папку Downloads через MediaStore
+     * (minSdk 29). Открывается любым файловым менеджером без Shizuku — в отличие
+     * от Android/data. append=true дозаписывает ("wa") в существующий файл.
+     */
+    private fun writeToDownloads(context: Context, fileName: String, text: String, append: Boolean) {
+        runCatching {
+            val resolver = context.contentResolver
+            val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+            var uri: Uri? = null
+            if (append) {
+                resolver.query(
+                    collection,
+                    arrayOf(MediaStore.Downloads._ID),
+                    "${MediaStore.Downloads.DISPLAY_NAME}=?",
+                    arrayOf(fileName),
+                    null
+                )?.use { c ->
+                    if (c.moveToFirst()) uri = ContentUris.withAppendedId(collection, c.getLong(0))
+                }
+            }
+            if (uri == null) {
+                val values = ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+                    put(MediaStore.Downloads.MIME_TYPE, "text/plain")
+                    put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                }
+                uri = resolver.insert(collection, values)
+            }
+            uri?.let { u ->
+                resolver.openOutputStream(u, if (append) "wa" else "wt")?.use {
+                    it.write(text.toByteArray())
+                }
             }
         }
     }
@@ -163,9 +200,8 @@ object UiWatchdog {
                 st.take(24).forEach { sb.append("  at ").append(it).append('\n') }
             }
 
-            val dir = File(context.filesDir, "crash_logs").apply { mkdirs() }
-            File(dir, "ui_freeze_${System.currentTimeMillis()}.txt")
-                .writeText(sb.toString())
+            // Полный дамп — тоже в Downloads (без Shizuku), отдельным файлом.
+            writeToDownloads(context, "LMG_ui_freeze_${System.currentTimeMillis()}.txt", sb.toString(), append = false)
         }
     }
 }
