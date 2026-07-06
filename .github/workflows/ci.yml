@@ -26,12 +26,12 @@ jobs:
     # GitHub-hosted runner ships a base Android SDK and ANDROID_HOME; the
     # self-hosted runner has no SDK configured (the cause of the previous
     # "SDK location not found" failures).
-    # Пиним ubuntu-22.04 (не latest=24.04): готовый плагин O-MVLL 1.4.x собран
-    # под окружение постарше (у автора заводился на сервере, не на свежем
-    # раннере), и на glibc/libc++ из 24.04 его JIT-пасс AntiHook падал (exit
-    # 139). Smoke-гейт сам покажет, лечит ли это: если на 22.04 AntiHook не
-    # роняет clang — обфускация включится автоматически, иначе — plain APK.
-    runs-on: ubuntu-22.04
+    # ubuntu-latest. Проверено: и на 24.04, и на 22.04 пасс AntiHook из O-MVLL
+    # 1.4.x одинаково роняет clang (exit 139) — т.е. дело не в версии Ubuntu, а
+    # в среде хостед-раннера (похоже на харднинг JIT/исполняемой памяти); у
+    # автора заводилось на СВОЁМ сервере. Значит смена версии Ubuntu не лечит —
+    # оставляем latest (быстрее провижнится), smoke-гейт держит APK зелёным.
+    runs-on: ubuntu-latest
     timeout-minutes: 60
 
     steps:
