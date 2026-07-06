@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -79,7 +80,7 @@ private val IMPORT_SERVICES = listOf(
         key = "yandex",
         name = "Yandex Music",
         iconRes = R.drawable.ic_service_yandex,
-        accent = Color(0xFFFC3F1D),
+        accent = Color(0xFFFFCC00),          // жёлтый Яндекса (под иконку-звезду)
         throttled = true,
         placeholder = "https://music.yandex.ru/playlists/…",
         // #73: подсказка «как получить ссылку» — только для Яндекса.
@@ -368,6 +369,9 @@ private fun ImportServiceCard(
 
                 // Import button
                 val canImport = url.isNotBlank() && !globallyBusy && !outOfQuota
+                // Текст/иконка — тёмные на светлом акценте (жёлтый Яндекса),
+                // белые на тёмном (красный Apple, зелёный Spotify).
+                val onAccent = if (svc.accent.luminance() > 0.55f) Color.Black else Color.White
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -387,13 +391,13 @@ private fun ImportServiceCard(
                         Icon(
                             Icons.Rounded.Download,
                             contentDescription = null,
-                            tint = Color.White,
+                            tint = onAccent,
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(Modifier.width(6.dp))
                         Text(
                             if (globallyBusy && isActive) "Importing…" else "Import",
-                            color = Color.White,
+                            color = onAccent,
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 15.sp
                         )
