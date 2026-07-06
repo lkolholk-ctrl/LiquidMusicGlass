@@ -41,12 +41,13 @@ object HapticMusicEngine {
     private const val POLL_MS = 15L   // быстрее опрос — тап ближе к биту
     private const val BEAT_COOLDOWN_MS = 120L
 
-    // ── Бит-грид v2 (#77): PLL по онсетам → тап на КАЖДЫЙ предсказанный бит ──
+    // ── Бит-грид v2 (#77): PLL по онсетам ДОЗАПОЛНЯЕТ пропущенные биты ──
     // Друг просил «докрутить, чтоб под каждый бит»: онсет-детектор точный, но на
-    // слабых/тихих битах тап дрожит/пропадает. Решение — по онсетам оценить темп
-    // и фазу, и при устойчивом бите («лок») ставить тапы ПО СЕТКЕ, а не по факту
-    // удара. Без лока (трек без чёткого бита / пауза) — деградируем в старый
-    // онсет-режим. Всё на Kotlin, натив-детектор не трогаем.
+    // слабых/тихих битах тап пропадает. Решение — по онсетам оценить темп и фазу,
+    // и при устойчивом бите («лок») ДОБАВЛЯТЬ тап на предсказанный бит, ЕСЛИ его
+    // пропустил детектор. Живые онсет-тапы при этом НЕ глушатся (иначе теряется
+    // плотность — регрессия «половина вибро пропала»). Всё на Kotlin, натив не
+    // трогаем.
     private const val GRID_MIN_PERIOD = 300f   // мс = 200 BPM
     private const val GRID_MAX_PERIOD = 1000f  // мс = 60 BPM
     private const val GRID_LOCK_COUNT = 4      // столько онсетов «в сетку» → лок
@@ -178,9 +179,10 @@ object HapticMusicEngine {
                 lastNativeBeats = beats
                 val strength = AutoMixNativeEngine.hapticBeatStrength()
                 onOnset(now, strength)
-                // Под локом басовый тап отдаёт СЕТКА (maybeFireGridBeat) — сырой
-                // онсет только кормит PLL, иначе задвоение.
-                if (!gridLocked) tap(strength)
+                // Живой онсет ВСЕГДА даёт тап — это основная плотность вибрации.
+                // Сетка (maybeFireGridBeat) не заменяет его, а лишь дозаполняет
+                // пропущенные слабые биты (см. регрессию «половина вибро пропала»).
+                tap(strength)
             }
             // Средняя полоса (снейр/клэп) — лёгкие тики поверх басовых тапов.
             val midBeats = AutoMixNativeEngine.hapticMidBeatCount()
@@ -217,10 +219,10 @@ object HapticMusicEngine {
                 val ratio = level / maxOf(prevEnv, 0.05f)
                 val strength = ((ratio - trigMul) / 3f).coerceIn(0f, 1f)
                 onOnset(now, strength)
-                if (!gridLocked) tap(strength)
+                tap(strength)   // онсет всегда → тап; сетка лишь дозаполняет пробелы
             }
         }
-        // Под локом — тап на КАЖДЫЙ предсказанный бит (даже если онсета не было).
+        // Дозаполнить пропущенные слабые биты по сетке (поверх онсет-тапов).
         maybeFireGridBeat(now)
     }
 
@@ -275,9 +277,14 @@ object HapticMusicEngine {
         }
         if (!gridLocked || gridPeriod <= 0f) return
         if (now >= gridNextBeat) {
-            // Пол силы, чтобы слабый бит тоже чувствовался (в этом весь смысл).
-            tap(gridBeatStrength.coerceIn(0.28f, 1f))
-            gridBeatsFired++
+            // Сетка — ЗАПОЛНИТЕЛЬ ПРОБЕЛОВ, а не замена онсет-тапов. Если реальный
+            // удар уже дал тап недавно (онсет попал в бит) — не дублируем: тап от
+            // сетки идёт ТОЛЬКО когда бит был пропущен детектором (слабый/тихий).
+            // Так восстанавливается плотность v1 + сохраняется «под каждый бит».
+            if (now - lastBassTapAtMs > gridPeriod * 0.45f) {
+                tap(gridBeatStrength.coerceIn(0.28f, 1f))
+                gridBeatsFired++
+            }
             gridNextBeat += gridPeriod.toLong()
             // Если отстали (лаг опроса) — досинхронизировать, без залпа догоняющих.
             if (now - gridNextBeat > gridPeriod) gridNextBeat = now + gridPeriod.toLong()
