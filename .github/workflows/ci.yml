@@ -97,7 +97,17 @@ jobs:
           tar xzf /tmp/omvll.tgz -C "$DIR" || { echo "::warning::O-MVLL extract failed — plain build"; exit 0; }
           PLUGIN="$(find "$DIR" \( -name 'libOMVLL*.so' -o -name 'omvll*.so' \) | head -n1)"
           if [ -z "$PLUGIN" ]; then echo "::warning::O-MVLL plugin .so not found — plain build"; exit 0; fi
-          PYHOME="$(dirname "$PLUGIN")"
+          echo "O-MVLL tarball layout:"; find "$DIR" -maxdepth 3 | sed 's/^/  /' | head -60
+          # Встроенному CPython нужен его stdlib: ищем каталог с encodings/ (или
+          # zip). Мимо этого падало «ModuleNotFoundError: No module named encodings».
+          STDLIB="$(find "$DIR" -type d -name encodings 2>/dev/null | head -n1)"
+          if [ -n "$STDLIB" ]; then
+            PYHOME="$(dirname "$STDLIB")"
+          else
+            ZIP="$(find "$DIR" -name 'python3*.zip' 2>/dev/null | head -n1)"
+            PYHOME="${ZIP:-$(dirname "$PLUGIN")}"
+          fi
+          echo "O-MVLL PYHOME=$PYHOME"
           NDK="$ANDROID_HOME/ndk/26.3.11579264"
           CLANG="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang"
           if [ ! -x "$CLANG" ]; then echo "::warning::NDK clang not found at $CLANG — plain build"; exit 0; fi
