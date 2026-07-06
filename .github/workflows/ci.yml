@@ -79,6 +79,40 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x gradlew
 
+      # O-MVLL (этап 2, #83): качаем LLVM-плагин под NDK r26d, СНАЧАЛА гоняем
+      # smoke-тест на тривиальном файле тем же NDK-clang. Только если он прошёл —
+      # экспортируем env, и сборка обфусцирует резолвер. Любой сбой (нет сети,
+      # не тот формат, плагин падает) → env не выставлен → APK собирается без
+      # обфускации. Шаг НИКОГДА не валит джобу (всегда exit 0).
+      - name: Prepare O-MVLL (NDK r26d, smoke-tested, best-effort)
+        run: |
+          set -u
+          URL="https://github.com/open-obfuscator/o-mvll/releases/download/1.4.0/omvll_v1-4-0_linux_2025-09-26T07.18.59.tar.gz"
+          DIR="$GITHUB_WORKSPACE/omvll"
+          CONFIG="$GITHUB_WORKSPACE/app/src/main/cpp/omvll_config.py"
+          mkdir -p "$DIR"
+          if ! curl -fsSL -o /tmp/omvll.tgz "$URL"; then
+            echo "::warning::O-MVLL download failed — building without obfuscation"; exit 0
+          fi
+          tar xzf /tmp/omvll.tgz -C "$DIR" || { echo "::warning::O-MVLL extract failed — plain build"; exit 0; }
+          PLUGIN="$(find "$DIR" \( -name 'libOMVLL*.so' -o -name 'omvll*.so' \) | head -n1)"
+          if [ -z "$PLUGIN" ]; then echo "::warning::O-MVLL plugin .so not found — plain build"; exit 0; fi
+          PYHOME="$(dirname "$PLUGIN")"
+          NDK="$ANDROID_HOME/ndk/26.3.11579264"
+          CLANG="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang"
+          if [ ! -x "$CLANG" ]; then echo "::warning::NDK clang not found at $CLANG — plain build"; exit 0; fi
+          printf 'int lmg_smoke(int x){const char*s="probe";return x*3+(int)s[0];}\n' > /tmp/smoke.c
+          if OMVLL_CONFIG="$CONFIG" OMVLL_PYTHONPATH="$PYHOME" \
+               "$CLANG" -c -fpass-plugin="$PLUGIN" /tmp/smoke.c -o /tmp/smoke.o 2> /tmp/smoke.log; then
+            echo "O-MVLL smoke test PASSED — enabling obfuscation for lmg_resolve"
+            echo "OMVLL_PLUGIN=$PLUGIN"       >> "$GITHUB_ENV"
+            echo "OMVLL_CONFIG=$CONFIG"       >> "$GITHUB_ENV"
+            echo "OMVLL_PYTHONPATH=$PYHOME"   >> "$GITHUB_ENV"
+          else
+            echo "::warning::O-MVLL smoke test FAILED — building without obfuscation. Log:"
+            sed 's/^/  /' /tmp/smoke.log || true
+          fi
+
       - name: Build release APK
         env:
           KEYSTORE_PATH: ${{ github.workspace }}/release-key.jks
