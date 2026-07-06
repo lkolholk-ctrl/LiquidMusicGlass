@@ -56,10 +56,17 @@ jobs:
       - name: Prepare O-MVLL (NDK r26d, smoke-tested, best-effort)
         run: |
           set -u
-          URL="https://github.com/open-obfuscator/o-mvll/releases/download/1.4.0/omvll_v1-4-0_linux_2025-09-26T07.18.59.tar.gz"
           DIR="$GITHUB_WORKSPACE/omvll"
           CONFIG="$GITHUB_WORKSPACE/app/src/main/cpp/omvll_config.py"
           mkdir -p "$DIR"
+          # Берём САМЫЙ СВЕЖИЙ ассет линии 1.4.x (NDK r26d / LLVM 17 — под наш
+          # тулчейн; 1.5+ уже на r27/LLVM18, который у нас не заводится). Через
+          # GitHub API, чтобы не хардкодить таймстамп в имени; если API/сеть
+          # подведут — падаем на зашитый 1.4.0.
+          FALLBACK="https://github.com/open-obfuscator/o-mvll/releases/download/1.4.0/omvll_v1-4-0_linux_2025-09-26T07.18.59.tar.gz"
+          URL="$(curl -fsSL "https://api.github.com/repos/open-obfuscator/o-mvll/releases?per_page=50" 2>/dev/null | python3 -c 'import sys,json,re; d=json.load(sys.stdin); c=[(int(m.group(1)),a["browser_download_url"]) for r in d for a in r.get("assets",[]) if (m:=re.search(r"omvll_v1-4-(\d+)_linux_.*\.tar\.gz$", a.get("name","")))]; c.sort(); print(c[-1][1] if c else "")' 2>/dev/null)"
+          [ -z "$URL" ] && URL="$FALLBACK"
+          echo "O-MVLL asset: $URL"
           if ! curl -fsSL -o /tmp/omvll.tgz "$URL"; then
             echo "::warning::O-MVLL download failed — building without obfuscation"; exit 0
           fi
