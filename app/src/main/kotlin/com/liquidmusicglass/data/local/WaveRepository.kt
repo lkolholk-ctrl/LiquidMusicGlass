@@ -3,6 +3,7 @@ package com.liquidmusicglass.data.local
 import android.content.Context
 import android.util.Log
 import com.liquidmusicglass.api.icm.IcmRepository
+import com.liquidmusicglass.api.icm.wave.IcmWaveRepository
 import com.liquidmusicglass.data.local.db.AppDatabase
 import com.liquidmusicglass.data.local.db.CachedTrack
 import com.liquidmusicglass.data.local.db.GenreCount
@@ -170,7 +171,7 @@ class WaveRepository(context: Context) {
 
     /**
      * Builds a "My Wave" queue using the ICM /library/wave/next endpoint.
-     * 
+     *
      * Uses random favorite seeds, applies ban filters and skipRatio filters, and heuristic genre tagging.
      */
     /**
@@ -205,6 +206,7 @@ class WaveRepository(context: Context) {
 
         val queue = mutableListOf<Track>()
         val excludeIds = mutableSetOf<String>()
+        val callerExcludeIsEmpty = exclude.isEmpty()
 
         // Anti-repeat: caller-supplied IDs (текущая очередь + уже игравшие в этой волне).
         excludeIds.addAll(exclude)
@@ -219,6 +221,60 @@ class WaveRepository(context: Context) {
             emptyList()
         }
         excludeIds.addAll(recentIds)
+
+        // Личная волна теперь умеет batch-дозаправку. Используем её только для
+        // хвоста очереди (когда caller уже дал exclude): первый трек остаётся на
+        // /library/wave/start, а station-by-track остаётся на seed_track_id.
+        if (seedTrackId == null && count > 1 && !callerExcludeIsEmpty) {
+            val batchQueue = try {
+                val response = IcmWaveRepository.nextBatch(
+                    limit = count,
+                    diversity = 0.6,
+                    excludeTrackIds = excludeIds.toList().takeLast(80),
+                    playedTrackIds = recentIds.take(50)
+                ).getOrNull()
+
+                if (response?.status == "ok" && response.tracks.isNotEmpty()) {
+                    val tracks = mutableListOf<Track>()
+                    for (waveTrack in response.tracks) {
+                        if (tracks.size >= count) break
+                        val trackId = waveTrack.id
+                        if (trackId in excludeIds) {
+                            Log.d(TAG, "Batch returned known track $trackId, skipping")
+                            continue
+                        }
+
+                        val stats = playbackDao.getTrackStat(trackId)
+                        if (stats != null) {
+                            val total = stats.playCount + stats.skippedCount
+                            if (total >= 2) {
+                                val skipRatio = stats.skippedCount.toFloat() / total.toFloat()
+                                if (skipRatio > 0.70f) {
+                                    Log.d(TAG, "Batch skip-filter: excluding $trackId (skipRatio=$skipRatio)")
+                                    excludeIds.add(trackId)
+                                    continue
+                                }
+                            }
+                        }
+
+                        val track = waveTrack.toTrack()
+                        tracks.add(track)
+                        excludeIds.add(trackId)
+                    }
+                    tracks
+                } else {
+                    emptyList()
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Personal wave batch failed, falling back to sequential: ${e.message}")
+                emptyList()
+            }
+
+            if (batchQueue.isNotEmpty()) {
+                Log.d(TAG, "Personal wave batch added ${batchQueue.size} tracks")
+                return@withContext batchQueue
+            }
+        }
 
         var attempts = 0
         val maxAttempts = count * 6 // Fail-safe boundary limit
@@ -250,12 +306,25 @@ class WaveRepository(context: Context) {
                 // (до 550 id) раздувал GET-запрос до километрового query-string
                 // с риском 414. Сервер и так ведёт свою playback_history по
                 // нашим wave/playback-событиям — древние эксклюды избыточны.
-                var response = IcmRepository.getWaveNext(
-                    seedTrackId = seedTrackId,
-                    exclude = excludeIds.toList().takeLast(80).takeIf { it.isNotEmpty() },
-                    recentSkips = recentSkipsVal,
-                    genre = null
-                )
+                val shouldUseWaveStart = seedTrackId == null &&
+                    attempts == 1 &&
+                    queue.isEmpty() &&
+                    callerExcludeIsEmpty
+
+                var response = if (shouldUseWaveStart) {
+                    IcmWaveRepository.startPersonalWave().getOrNull()
+                } else {
+                    null
+                }
+
+                if (response == null) {
+                    response = IcmRepository.getWaveNext(
+                        seedTrackId = seedTrackId,
+                        exclude = excludeIds.toList().takeLast(80).takeIf { it.isNotEmpty() },
+                        recentSkips = recentSkipsVal,
+                        genre = null
+                    )
+                }
 
                 // Никакого «случайного лайка» как seed (это и была «херня»): по доке
                 // пустая персональная волна = у сервера нет seed-артистов/лайков, и

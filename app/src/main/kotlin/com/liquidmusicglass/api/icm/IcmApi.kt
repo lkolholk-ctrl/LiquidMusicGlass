@@ -308,6 +308,109 @@ class IcmApi private constructor() {
         return first
     }
 
+    /**
+     * Raw JSON request for feature-specific API wrappers that live outside this
+     * file but must still reuse the same auth, rate-gate, timeout and token
+     * refresh behavior as the core ICM client.
+     */
+    internal suspend fun requestJson(
+        endpoint: String,
+        method: String = "GET",
+        body: String? = null,
+        async: Boolean = false
+    ): Result<String> {
+        val first = requestJsonOnce(endpoint, method, body, async)
+        val e = first.exceptionOrNull()
+        if (e is IcmApiException && e.code == 401 && sessionToken != null) {
+            val fresh = try {
+                sessionRefresher?.invoke()
+            } catch (_: Exception) {
+                null
+            }
+            if (!fresh.isNullOrBlank() && fresh != sessionToken) {
+                sessionToken = fresh
+                return requestJsonOnce(endpoint, method, body, async)
+            }
+        }
+        return first
+    }
+
+    private suspend fun requestJsonOnce(
+        endpoint: String,
+        method: String = "GET",
+        body: String? = null,
+        async: Boolean = false
+    ): Result<String> {
+        return withTimeoutOrNull(14_000L) {
+            withContext(Dispatchers.IO) {
+                if (IcmRateGate.isBanned()) {
+                    return@withContext Result.failure(
+                        IcmApiException(429, "rate-limited (local gate)", "ip_temporarily_blocked", null, IcmRateGate.bannedForSeconds().coerceAtLeast(1), null)
+                    )
+                }
+                try {
+                    IcmRateGate.throttle()
+                    val url = if (async) "$BASE_URL$endpoint?async=1" else "$BASE_URL$endpoint"
+                    val request = buildRequest(url, method, body)
+                    val response = client.newCall(request).execute()
+                    IcmRateGate.recordSuccess()
+                    com.liquidmusicglass.engine.NetworkVitality.onRequestSuccess()
+
+                    val requestId = extractRequestId(response)
+                    requestId?.let { onRequestId?.invoke(it) }
+
+                    when {
+                        response.isSuccessful -> {
+                            val bodyText = response.body?.string() ?: ""
+                            IcmApiFileLogger.log("D", "IcmApi", "Success ${response.code} on $endpoint, body: ${bodyText.take(500)}")
+                            Result.success(bodyText)
+                        }
+                        else -> {
+                            val errorText = response.body?.string() ?: "HTTP ${response.code}"
+                            IcmApiFileLogger.log("E", "IcmApi", "API error: ${response.code} on $endpoint rid=${requestId ?: "-"}, body: $errorText")
+                            if (response.code != 429) {
+                                com.liquidmusicglass.debug.DebugLog.add(
+                                    "ICM ${response.code} $endpoint rid=${requestId ?: "-"}"
+                                )
+                            }
+                            val error = try {
+                                json.decodeFromString<IcmErrorWrapper>(errorText).detail
+                            } catch (_: Exception) {
+                                try {
+                                    json.decodeFromString<IcmError>(errorText)
+                                } catch (_: Exception) {
+                                    null
+                                }
+                            }
+                            val retryAfterHeader = response.header("Retry-After")?.toIntOrNull()
+                            if (response.code == 429 || error?.error == "rate_limited" || error?.error == "ip_temporarily_blocked") {
+                                IcmRateGate.tripBan(retryAfterHeader ?: error?.retryAfter)
+                            }
+                            Result.failure(
+                                IcmApiException(
+                                    response.code,
+                                    errorText,
+                                    error?.error,
+                                    error?.requiredRegion,
+                                    retryAfterHeader ?: error?.retryAfter,
+                                    error?.source
+                                )
+                            )
+                        }
+                    }
+                } catch (e: Exception) {
+                    IcmRateGate.recordFailure()
+                    com.liquidmusicglass.engine.NetworkVitality.onRequestNetworkError()
+                    Result.failure(e)
+                }
+            }
+        } ?: run {
+            IcmRateGate.recordFailure()
+            com.liquidmusicglass.engine.NetworkVitality.onRequestNetworkError()
+            Result.failure(IcmApiException(408, "icm call coroutine timeout"))
+        }
+    }
+
     private suspend inline fun <reified T> executeOnce(
         endpoint: String,
         method: String = "GET",
