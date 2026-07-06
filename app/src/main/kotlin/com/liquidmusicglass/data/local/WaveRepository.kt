@@ -229,7 +229,10 @@ class WaveRepository(context: Context) {
             val batchQueue = try {
                 val response = IcmWaveRepository.nextBatch(
                     limit = count,
-                    diversity = 0.6,
+                    // Личная волна уже ранжируется сервером по истории/лайкам.
+                    // Жёсткий diversity (>=0.33) режет артистов до 2 треков на
+                    // пачку и на узком вкусе может вернуть всего 1-2 трека.
+                    diversity = 0.0,
                     excludeTrackIds = excludeIds.toList().takeLast(80),
                     playedTrackIds = recentIds.take(50)
                 ).getOrNull()
@@ -272,7 +275,7 @@ class WaveRepository(context: Context) {
 
             if (batchQueue.isNotEmpty()) {
                 Log.d(TAG, "Personal wave batch added ${batchQueue.size} tracks")
-                return@withContext batchQueue
+                queue.addAll(batchQueue)
             }
         }
 
