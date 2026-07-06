@@ -89,14 +89,17 @@ class EndlessPlaybackEngine(
      * @return true, если дозагрузка была успешно выполнена.
      */
     suspend fun checkAndRefillIfNeeded(remainingCount: Int = -1): Boolean {
-        // Дозаправка работает ВЕЗДЕ (полевой фидбек: «одно и то же по кругу —
-        // не по кайфу»):
-        //  - волна (Global) — продолжаем волну: личную или станцию по seed;
-        //  - альбом/плейлист/поиск/артист — когда свой материал кончается,
-        //    бесшовно переходим в станцию по хвосту очереди (как у Яндекса).
-        // Прежние гейты (AutoMix-тумблер и boundary-lock на Global) убраны:
-        // тумблер AutoMix управляет кроссфейдами, а не бесконечностью, и
-        // именно эта связка оставляла очередь «ходить по кругу».
+        // Бесконечная дозаправка — ТОЛЬКО для discovery-станций (Global): «Моя
+        // волна», муд-плитка, трек/артист-станция. Коллекции (плейлист/альбом/
+        // артист-список/загрузки, включая ИМПОРТИРОВАННОЕ и ЛЮБИМОЕ) играются как
+        // есть и НЕ подмешивают внешние рекомендации — «треки только оттуда»
+        // (полевой фидбек: волна лезла в середину импортированного плейлиста и
+        // подставляла по смыслу последнего трека). Инфинити-открытие живёт
+        // отдельно в «Моей волне».
+        if (PlayerController.playbackContext !is PlaybackContext.Global) {
+            android.util.Log.d("EndlessEngine", "Bounded context (${PlayerController.playbackContext}) — no external refill")
+            return false
+        }
 
         if (isRefilling.get()) {
             android.util.Log.d("EndlessEngine", "Already refilling in background, skip")
@@ -153,10 +156,20 @@ class EndlessPlaybackEngine(
                     val seed = if (isGlobal && baseSeed != null) {
                         refillCounter++
                         when {
-                            refillCounter % 2 == 1 -> baseSeed
+                            // Артист-волна: чередуем исходный сид и топ-трек
+                            // артиста из пула — ОБА остаются на артисте, жанр
+                            // держится.
                             seedPool.isNotEmpty() ->
-                                seedPool.randomOrNull() ?: baseSeed
-                            else -> queueIds.takeLast(5).randomOrNull() ?: baseSeed
+                                if (refillCounter % 2 == 1) baseSeed
+                                else seedPool.randomOrNull() ?: baseSeed
+                            // Трек/муд-станция: держим ЯКОРЬ. Сервер строит
+                            // станцию ВОКРУГ seed_track_id (по доке — это
+                            // единственный рычаг жанра, параметра genre у
+                            // /wave/next нет). Прежний «чётный рефилл от хвоста
+                            // очереди» пересеивал станцию с соседа-соседа →
+                            // за один батч уползала из жанра (хаус→рок). Разно-
+                            // образие даёт растущий exclude, а не дрейф сида.
+                            else -> baseSeed
                         }
                     } else baseSeed
                     // Anti-repeat: playedIds (вся история этой сессии волны) +

@@ -478,8 +478,15 @@ object PlayerController {
 
         // ── Determine playback context BEFORE any async work ──
         val newContext = when {
-            autoRefillType.equals("library", ignoreCase = true) && autoRefillId.equals("downloads", ignoreCase = true) ->
-                PlaybackContext.Downloads
+            // Библиотека — коллекция, НЕ волна: и загрузки, и Любимое играются
+            // только своим составом (раньше Любимое с id="favorites" не попадало
+            // в ветку downloads и проваливалось в Global → личная волна лезла
+            // поверх лайков; фидбек «из любимых должны идти треки только оттуда»).
+            autoRefillType.equals("library", ignoreCase = true) ->
+                if (autoRefillId.equals("downloads", ignoreCase = true))
+                    PlaybackContext.Downloads
+                else
+                    PlaybackContext.Playlist(autoRefillId ?: "favorites")
             autoRefillType.equals("playlist", ignoreCase = true) && autoRefillId != null ->
                 PlaybackContext.Playlist(autoRefillId)
             autoRefillType.equals("album", ignoreCase = true) && autoRefillId != null ->
