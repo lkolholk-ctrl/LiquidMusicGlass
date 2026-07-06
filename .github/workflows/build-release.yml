@@ -80,9 +80,11 @@ jobs:
           NDK="$ANDROID_HOME/ndk/26.3.11579264"
           CLANG="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang"
           if [ ! -x "$CLANG" ]; then echo "::warning::NDK clang not found at $CLANG — plain build"; exit 0; fi
-          # Реалистичный smoke (не однострочник): экспортируемая функция с
-          # циклом, строкой, XOR и вызовом — иначе пасс AntiHook давится на
-          # тривиальной функции (segfault clang), хотя на реальном коде работает.
+          # Smoke компилируем ТЕМИ ЖЕ флагами, что и реальный резолвер
+          # (C++ / -Oz / -fPIC): пасс AntiHook в 1.4.0 гоняется по модулю
+          # безусловно и падал segfault'ом на голом C при -O0. Если он
+          # свалится и здесь — значит свалит и настоящую сборку, поэтому
+          # smoke должен быть верным её слепком, а не однострочником.
           printf '%s\n' \
             '#include <string.h>' \
             '__attribute__((visibility("default")))' \
@@ -94,7 +96,7 @@ jobs:
             '  return acc;' \
             '}' > /tmp/smoke.c
           if OMVLL_CONFIG="$CONFIG" OMVLL_PYTHONPATH="$PYHOME" \
-               "$CLANG" -c -fpass-plugin="$PLUGIN" /tmp/smoke.c -o /tmp/smoke.o 2> /tmp/smoke.log; then
+               "$CLANG" -c -Oz -fPIC -std=c++17 -x c++ -fpass-plugin="$PLUGIN" /tmp/smoke.c -o /tmp/smoke.o 2> /tmp/smoke.log; then
             echo "O-MVLL smoke test PASSED — enabling obfuscation for lmg_resolve"
             echo "OMVLL_PLUGIN=$PLUGIN"       >> "$GITHUB_ENV"
             echo "OMVLL_CONFIG=$CONFIG"       >> "$GITHUB_ENV"
