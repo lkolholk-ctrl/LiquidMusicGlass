@@ -15,6 +15,7 @@ import com.liquidmusicglass.debug.DebugLog
 import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.api.icm.IcmTrackResponse
 import com.liquidmusicglass.data.local.WaveRepository
+import com.liquidmusicglass.engine.automix.AudioTrackSink
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -331,6 +332,21 @@ object PlayerController {
     private var preCacheJob: kotlinx.coroutines.Job? = null
 
     /**
+     * Оборвать активную предзагрузку целиком: и корутину-джоб, и БЛОКИРУЮЩИЙ
+     * CacheWriter внутри (см. [MediaCacheManager.cancelActivePreCache]). Без
+     * второго один только job.cancel() оставлял недокачку тянуть трек по сети
+     * параллельно с плеером/переходом/JUCE — лишний media/io-стресс, из-за
+     * которого системный аудио-стек тормозил main-лупер (ANR-дамп).
+     */
+    private fun cancelPreCache(reason: String) {
+        val wasActive = preCacheJob?.isActive == true
+        preCacheJob?.cancel()
+        preCacheJob = null
+        MediaCacheManager.cancelActivePreCache()
+        if (wasActive) DebugLog.add("PRELOAD cancel: $reason")
+    }
+
+    /**
      * Полная закачка СЛЕДУЮЩИХ ДВУХ онлайн-треков в медиа-кэш. Стартует через
      * [initialDelayMs] после смены трека (текущему треку — приоритет сети на
      * старте), качает последовательно: next, потом next+1 — двойной скип тоже
@@ -346,13 +362,36 @@ object PlayerController {
         initialDelayMs: Long = 8_000L
     ) {
         if (!MediaCacheManager.isCacheEnabled()) return
-        preCacheJob?.cancel()
+        // Гейт против ANR: пока играет локальный JUCE, очередь — файлы с диска
+        // (качать нечего), а онлайн-предзагрузка из прошлой стриминг-сессии
+        // добавляла бы сетевую/io-нагрузку поверх движка + AudioTrackSink +
+        // AutoMix-перехода. Просто обрываем и выходим.
+        if (isLocalJucePlaybackActive) {
+            cancelPreCache("JUCE local backend")
+            return
+        }
+        cancelPreCache("reschedule")
         preCacheJob = ioScope.launch {
             kotlinx.coroutines.delay(initialDelayMs)
+            // Не наваливаем предзагрузку, пока живой поток ещё буферизуется/
+            // грузится — ждём до 6с, чтобы не конкурировать за сеть/декодер.
+            var waitedForBuffer = 0L
+            while (_isBuffering.value && waitedForBuffer < 6_000L && isActive) {
+                kotlinx.coroutines.delay(500L); waitedForBuffer += 500L
+            }
+            DebugLog.add(
+                "PRELOAD start from=$fromIndex backend=${_playbackBackend.value} " +
+                    "buffering=${_isBuffering.value} sink=${AudioTrackSink.isRunning}"
+            )
             val snapshot = queue.toList()
             val lastIdx = kotlin.math.min(fromIndex + 2, snapshot.lastIndex)
             for (idx in (fromIndex + 1)..lastIdx) {
                 if (!isActive) break
+                // Бэкенд мог переключиться на локальный JUCE уже в процессе — стоп.
+                if (isLocalJucePlaybackActive) {
+                    DebugLog.add("PRELOAD abort: JUCE local mid-job")
+                    MediaCacheManager.cancelActivePreCache(); break
+                }
                 val track = snapshot.getOrNull(idx) ?: break
                 if (!track.isOnlineTrack) continue
                 var ok = false
@@ -583,6 +622,10 @@ object PlayerController {
             // Статичная локальная очередь — без онлайн-рефилла.
             _playbackContext = playbackContext
             _playbackBackend.value = PlaybackBackend.JUCE_LOCAL
+            // Уходим на локальный JUCE — обрываем оставшуюся с прошлой стриминг-
+            // сессии предзагрузку (её блокирующий CacheWriter иначе продолжал бы
+            // качать онлайн-трек параллельно с движком/переходом → ANR).
+            cancelPreCache("switch to JUCE local")
             endlessEngine.reset()
 
             val immutableTracks = tracks.toList()
@@ -692,10 +735,20 @@ object PlayerController {
     fun setPlaying(playing: Boolean) {
         // re-anchor smooth position at the play/pause transition (uses old state)
         reanchorSmoothPosition()
+        val wasPlaying = lastIsPlaying
         _isPlaying.value = playing
         lastIsPlaying = playing
         if (!playing && _isBuffering.value) {
             _isBuffering.value = false
+        }
+        // Предзагрузка вокруг паузы: на реальной паузе — оборвать (снять сетевую/
+        // io-нагрузку, если система в этот момент буксует), на возобновлении —
+        // переназначить (кроме локального JUCE, где качать нечего). CacheWriter
+        // резюмируемый: докачает готовые куски заново без потерь.
+        if (wasPlaying && !playing) {
+            cancelPreCache("paused")
+        } else if (!wasPlaying && playing && !isLocalJucePlaybackActive) {
+            appContext?.let { scheduleAudioPreCache(it, currentIndex) }
         }
     }
 

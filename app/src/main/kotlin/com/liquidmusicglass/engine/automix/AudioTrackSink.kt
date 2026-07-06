@@ -28,6 +28,9 @@ object AudioTrackSink {
     @Volatile private var running = false
     private var thread: Thread? = null
 
+    /** Идёт ли сейчас вывод через AudioTrack-sink (для диагностики в дампе). */
+    val isRunning: Boolean get() = thread != null
+
     /** Запустить sink (идемпотентно). Зовётся с compatExecutor движка. */
     @Synchronized
     fun start() {
