@@ -13,11 +13,15 @@
 #   • flatten_cfg             — control-flow flattening на функциях резолвера;
 #   • obfuscate_arithmetic    — MBA (mixed boolean-arithmetic) там же.
 #
-# УБРАНЫ как крашащие/нестабильные (smoke-тест валился segfault'ом clang):
-#   • anti_hooking            — omvll::AntiHook::run падал (exit 139);
-#   • indirect_call / branch  — новые в 1.4.0, часто ломают фронтенд;
-#   • break_control_flow      — экспериментальный (signal/computed-goto).
-# Если захочется — можно вернуть по одному и проверять smoke отдельно.
+# ЯВНО ВЫКЛЮЧЕН anti_hooking. Он у O-MVLL включён ПО УМОЛЧАНИЮ: если метод
+# не переопределить, база возвращает True, и пасс AntiHook::run для каждой
+# функции лезет в JIT (jitAsm) собирать anti-hook пролог — на CI-хосте это
+# падало segfault'ом (exit 139). В исходнике O-MVLL видно: jitAsm вызывается
+# только внутри runOnFunction(), а туда попадают лишь функции, для которых
+# antiHooking() вернул True. Значит достаточно вернуть False — и краш уходит,
+# APK собирается с обфускацией. Просто «убрать» метод мало: срабатывал
+# дефолт. (Другие тяжёлые пассы — indirect_call/branch, break_control_flow —
+# по умолчанию OFF, поэтому их не трогаем.)
 #
 # Тяжёлые пассы вешаем на функции резолвера (имя содержит "ResolveNative" —
 # JNI-входы; статические хелперы инлайнятся в них при -Oz). Строки/константы —
@@ -38,6 +42,10 @@ def _is_resolver(func) -> bool:
 class ResolverConfig(omvll.ObfuscationConfig):
     def __init__(self):
         super().__init__()
+
+    # ── Anti-hooking: ЯВНО OFF (дефолт True → segfault в JIT на CI) ──
+    def anti_hooking(self, mod, func):
+        return False
 
     # ── Строки и константы: весь модуль ──
     def obfuscate_string(self, mod, func, string):
