@@ -77,7 +77,7 @@ object UiWatchdog {
                         // разморозки, без файлов и ПК: видно, что держало main
                         // (или какой фон молотил при idle-main). Именно этого не
                         // хватало на серии фризов (импорт-плейлист, лок-альбом).
-                        logFreezeSummary(silentMs, mainIdle, mainStack)
+                        logFreezeSummary(appContext, silentMs, mainIdle, mainStack)
 
                         // Полный файловый дамп — только для НАСТОЯЩЕГО блока main
                         // (застрял в коде/локе/биндере). При idle-main файл не
@@ -103,8 +103,14 @@ object UiWatchdog {
         }.start()
     }
 
-    /** Короткая строка причины фриза в in-app LCAT (читается сразу после разморозки). */
+    /**
+     * Короткая строка причины фриза. Пишем В ДВА места:
+     *  - in-app LCAT (DebugLog) — читается сразу после разморозки;
+     *  - постоянный файл crash_logs/ui_freeze_summary.txt (append) — переживает
+     *    перезапуск и открывается файловым менеджером, если фриз намертво.
+     */
     private fun logFreezeSummary(
+        context: Context,
         silentMs: Long,
         mainIdle: Boolean,
         mainStack: Array<StackTraceElement>
@@ -126,7 +132,14 @@ object UiWatchdog {
                 .take(4)
                 .joinToString("; ") { (t, st) -> "${t.name}:${short(st[0])}" }
             if (hot.isNotEmpty()) sb.append(" | hot: ").append(hot)
-            DebugLog.add(sb.toString())
+            val line = sb.toString()
+            DebugLog.add(line)
+            // Постоянный файл: одна строка на фриз, с временем.
+            runCatching {
+                val dir = File(context.filesDir, "crash_logs").apply { mkdirs() }
+                File(dir, "ui_freeze_summary.txt")
+                    .appendText("${System.currentTimeMillis()} $line\n")
+            }
         }
     }
 
