@@ -80,7 +80,19 @@ jobs:
           NDK="$ANDROID_HOME/ndk/26.3.11579264"
           CLANG="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang"
           if [ ! -x "$CLANG" ]; then echo "::warning::NDK clang not found at $CLANG — plain build"; exit 0; fi
-          printf 'int lmg_smoke(int x){const char*s="probe";return x*3+(int)s[0];}\n' > /tmp/smoke.c
+          # Реалистичный smoke (не однострочник): экспортируемая функция с
+          # циклом, строкой, XOR и вызовом — иначе пасс AntiHook давится на
+          # тривиальной функции (segfault clang), хотя на реальном коде работает.
+          printf '%s\n' \
+            '#include <string.h>' \
+            '__attribute__((visibility("default")))' \
+            'int lmg_probe(const char* in, char* out, int n){' \
+            '  static const char* K="abcdefABCDEF0123456789";' \
+            '  int acc=0;' \
+            '  for(int i=0;i<n && in[i];i++){ char c=in[i]^K[i%22]; out[i]=c; acc=(acc*131+(unsigned char)c)&0x7fffffff; }' \
+            '  if(acc==0) acc=(int)strlen(K);' \
+            '  return acc;' \
+            '}' > /tmp/smoke.c
           if OMVLL_CONFIG="$CONFIG" OMVLL_PYTHONPATH="$PYHOME" \
                "$CLANG" -c -fpass-plugin="$PLUGIN" /tmp/smoke.c -o /tmp/smoke.o 2> /tmp/smoke.log; then
             echo "O-MVLL smoke test PASSED — enabling obfuscation for lmg_resolve"
