@@ -250,6 +250,22 @@ object MediaCacheManager {
         }
     }
 
+    /**
+     * Немедленно оборвать текущую фоновую предзагрузку, если она идёт.
+     *
+     * Ключевой момент: [CacheWriter.cache] — БЛОКИРУЮЩИЙ, поэтому отмена
+     * корутины-джоба сама по себе его не останавливает (проверка isActive
+     * происходит только ПОСЛЕ возврата из write). Без явного [cancel] недокачка
+     * продолжала тянуть трек по сети параллельно с плеером/переходом/JUCE —
+     * лишняя media/io-нагрузка, зафиксированная в ANR-дампе. Этот вызов
+     * дёргает CacheWriter.cancel(), из-за чего cache() бросает и выходит сразу.
+     */
+    fun cancelActivePreCache() {
+        try { activePreCache?.cancel() } catch (_: Throwable) {}
+        activePreCache = null
+        activePreCacheKey = null
+    }
+
     /** Реально занятый объём кэша в байтах (для строки «В данный момент: X МБ»). */
     suspend fun getCacheSizeBytes(): Long = withContext(Dispatchers.IO) {
         try {

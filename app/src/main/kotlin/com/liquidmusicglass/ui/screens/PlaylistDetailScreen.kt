@@ -90,7 +90,7 @@ fun PlaylistDetailScreen(
             }
 
             // Convert PlaylistTrack to Track using stored metadata
-            tracks = localPlaylist.tracks.map { pt ->
+            val mapped = localPlaylist.tracks.map { pt ->
                 Track(
                     id = pt.id,
                     title = pt.title,
@@ -102,7 +102,11 @@ fun PlaylistDetailScreen(
                     coverUrl = pt.coverUrl
                 )
             }
+            tracks = mapped          // показываем сразу
             isLoading = false
+            // Многие импортированные треки без длительности/E (поиск их не
+            // сохранил) — догружаем точечной batch-meta по id и обновляем список.
+            tracks = IcmRepository.enrichTrackMeta(mapped)
         } else {
             // Load cloud playlist info & tracks with pagination
             scope.launch {
@@ -158,6 +162,9 @@ fun PlaylistDetailScreen(
                 
                 tracks = allTracks
                 isLoading = false
+                // Догрузить недостающие длительности/E (часть треков плейлиста
+                // приходит без duration) точечной batch-meta.
+                tracks = IcmRepository.enrichTrackMeta(allTracks)
             }
         }
     }
@@ -373,10 +380,18 @@ fun PlaylistDetailScreen(
             }
 
             // Tracks
-            itemsIndexed(tracks, key = { _, t -> t.id }) { index, track ->
+            itemsIndexed(
+                tracks,
+                key = { _, t -> t.id },
+                // Один тип строки → LazyColumn переиспользует разметку вместо
+                // пересборки. Плюс убран Modifier.animateItem(): на списке в
+                // сотни строк его анимация размещения захлёбывалась на флинге и
+                // залипал UI-поток («фриз при листании импортированного 707»,
+                // #85/#86). Анимация тут чисто косметическая — плейлист статичен.
+                contentType = { _, _ -> "playlist_track" }
+            ) { index, track ->
                 Row(
                     modifier = Modifier
-                        .animateItem()
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(14.dp))
                         .liquidClickable {

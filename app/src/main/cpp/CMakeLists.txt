@@ -72,6 +72,13 @@ target_compile_options(lmg_resolve PRIVATE
 )
 target_link_libraries(lmg_resolve android log nlohmann_json::nlohmann_json)
 
+# Примечание: этап 2 (#83) — LLVM-обфускация резолвера через O-MVLL — свёрнут.
+# Готовый плагин O-MVLL 1.4.x (под NDK r26d) роняет clang в пассе AntiHook на
+# хостед-раннерах GitHub (и 24.04, и 22.04), отключить пасс в этой версии
+# нельзя. Защита резолвера обеспечивается на уровне исходника (натив C++ +
+# XOR-строки, этап 1). Если появится совместимый раннер/сервер — вернуть можно
+# передачей -fpass-plugin в target_compile_options(lmg_resolve ...).
+
 # Fetch the JUCE SOURCES only — deliberately NOT FetchContent_MakeAvailable /
 # add_subdirectory(JUCE). JUCE's own CMake builds a host helper tool "juceaide"
 # that compiles juce_gui_basics for the host and needs X11/freetype dev headers

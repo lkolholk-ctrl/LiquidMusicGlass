@@ -5,6 +5,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -567,6 +569,69 @@ object IcmRepository {
             _lastError.value = it.message
         }
         return result.getOrNull()
+    }
+
+    /**
+     * Догружает недостающие длительность/explicit по батч-эндпоинту
+     * /tracks/meta (до 50 id за запрос) и возвращает обновлённый список.
+     *
+     * Зачем: у многих треков (импортированные плейлисты, VK/secondary в
+     * альбомах/у артистов) поиск/каталог НЕ отдаёт duration, поэтому в UI
+     * пусто. Точечная meta по id отдаёт её. Трогаем только треки с
+     * durationMs<=0 — у кого длительность уже есть, не перезапрашиваем.
+     * Explicit добираем, если сервер прислал его в meta.
+     *
+     * Мягко к лимитам: батчами по 50 с паузой, на 429/blocked прекращаем и
+     * отдаём что успели. Идемпотентно (durationMs>0 → трек пропускается).
+     */
+    suspend fun enrichTrackMeta(
+        tracks: List<com.liquidmusicglass.engine.Track>
+    ): List<com.liquidmusicglass.engine.Track> = withContext(Dispatchers.IO) {
+        // Догрузка длительностей — НИЗКИЙ приоритет и не должна мешать
+        // воспроизведению: если уже есть бан/лимит — вообще не суёмся (иначе
+        // добьём circuit-breaker, и тап по треку упадёт с «Can't reach server»).
+        if (IcmRateGate.isBanned()) return@withContext tracks
+
+        val needIds = tracks.asSequence()
+            .filter { it.durationMs <= 0L }
+            .map { it.id }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .toList()
+        if (needIds.isEmpty()) return@withContext tracks
+
+        // Стартовая пауза: даём тапу по треку (резолв стрима) уйти первым, а не
+        // конкурировать с пачкой meta-запросов сразу при открытии экрана.
+        kotlinx.coroutines.delay(600)
+
+        val metaById = HashMap<String, IcmBatchTrackMetaItem>(needIds.size)
+        for ((i, chunk) in needIds.chunked(50).withIndex()) {
+            // Перед каждым чанком уступаем дорогу: бан/лимит → прекращаем, отдаём
+            // что успели (длительности — не критично, воспроизведение — критично).
+            if (IcmRateGate.isBanned() ||
+                getLastHttpCode() == 429 ||
+                getLastErrorCode() == "rate_limited" ||
+                getLastErrorCode() == "ip_temporarily_blocked"
+            ) break
+            if (i > 0) kotlinx.coroutines.delay(400)   // мягче к лимиту (было 150)
+            val res = api.getBatchTrackMeta(chunk).getOrNull() ?: continue
+            res.items.forEach { item ->
+                if (item.isSuccess) {
+                    metaById[item.id] = item
+                    item.trackId?.let { metaById[it] = item }
+                }
+            }
+        }
+        if (metaById.isEmpty()) return@withContext tracks
+
+        tracks.map { t ->
+            val m = metaById[t.id] ?: return@map t
+            val dMs = m.durationMs
+            val newDur = if (t.durationMs <= 0L && dMs > 0L) dMs else t.durationMs
+            val newExp = t.isExplicit || m.isExplicit
+            if (newDur == t.durationMs && newExp == t.isExplicit) t
+            else t.copy(durationMs = newDur, isExplicit = newExp)
+        }
     }
 
     /**

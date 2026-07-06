@@ -455,6 +455,10 @@ data class IcmBatchTrackMetaItem(
     val duration: Long? = null,
     @SerialName("collectionId") val collectionId: String? = null,
     @SerialName("track_id") val trackId: String? = null,
+    // Если сервер отдаёт explicit в meta — заберём для значка «E» (в т.ч. на
+    // импортированных треках, где поиск его не сохранил). Нет поля в ответе →
+    // остаётся false, хуже не делает.
+    @SerialName("is_explicit") val isExplicit: Boolean = false,
     val error: String? = null
 ) {
     val isSuccess: Boolean

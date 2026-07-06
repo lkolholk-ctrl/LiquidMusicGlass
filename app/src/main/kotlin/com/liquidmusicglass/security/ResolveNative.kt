@@ -23,4 +23,20 @@ object ResolveNative {
      * запись = title  artist, записи разделены . Пусто = не распарсили.
      */
     external fun spotifyParse(htmlUtf8: ByteArray): ByteArray
+
+    // ── Яндекс Музыка (вторая половина #82) ──
+    external fun yandexUa(): String
+    external fun yandexAccept(): String
+    external fun yandexAcceptLang(): String
+    external fun yandexReferer(): String
+    external fun yandexApiAccept(): String
+
+    /** Из HTML страницы плейлиста достать uid/kind → официальный api-URL; "" если нет. */
+    external fun yandexApiUrl(htmlUtf8: ByteArray): String
+
+    /** Тело официального API (UTF-8) → записи title/artist (\x1E между, \x1F внутри). */
+    external fun yandexApiParse(bodyUtf8: ByteArray): ByteArray
+
+    /** HTML старой ссылки (UTF-8) → те же записи из __STATE_SNAPSHOT__. */
+    external fun yandexSnapshotParse(htmlUtf8: ByteArray): ByteArray
 }
