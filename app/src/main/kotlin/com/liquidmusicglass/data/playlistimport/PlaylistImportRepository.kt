@@ -25,14 +25,18 @@ class PlaylistImportRepository(
 ) {
 
     companion object {
-        /** Max concurrent ICM search requests to avoid rate limiting. */
-        private const val DEFAULT_CONCURRENCY = 3
+        /** Max concurrent ICM search requests. Поднято 3→6: матчинг 50 треков
+         *  шёл ~15с (полевой фидбек). 6 параллельных поисков — всё ещё
+         *  безопасно для search-эндпоинта, но вдвое быстрее. */
+        private const val DEFAULT_CONCURRENCY = 6
 
         /** Batch size for progress reporting. */
         private const val BATCH_SIZE = 25
 
-        /** Delay between individual requests in ms. */
-        private const val REQUEST_DELAY_MS = 300L
+        /** Delay between individual requests in ms. Снижено 300→150: семафор уже
+         *  ограничивает число одновременных запросов, лишняя задержка только
+         *  копила латентность. */
+        private const val REQUEST_DELAY_MS = 150L
 
         /** ICM search region for track matching. */
         private const val SEARCH_REGION = "us"
