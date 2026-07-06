@@ -122,7 +122,7 @@ fun LiquidNavHost(
                 NavRoutes.LOCAL_ARTIST_ROUTE,
                 arguments = listOf(navArgument(NavRoutes.ARG_NAME) { type = NavType.StringType })
             ) { entry ->
-                val name = entry.arguments?.getString(NavRoutes.ARG_NAME).orEmpty()
+                val name = NavRoutes.decodeArg(entry.arguments?.getString(NavRoutes.ARG_NAME).orEmpty())
                 LocalArtistDetailScreen(
                     artistName = name,
                     onBack = { navController.popBackStack() },
@@ -137,7 +137,7 @@ fun LiquidNavHost(
                 )
             ) { entry ->
                 val id = entry.arguments?.getLong(NavRoutes.ARG_ID) ?: -1L
-                val name = entry.arguments?.getString(NavRoutes.ARG_NAME).orEmpty()
+                val name = NavRoutes.decodeArg(entry.arguments?.getString(NavRoutes.ARG_NAME).orEmpty())
                 LocalAlbumDetailScreen(
                     albumId = id,
                     albumName = name,

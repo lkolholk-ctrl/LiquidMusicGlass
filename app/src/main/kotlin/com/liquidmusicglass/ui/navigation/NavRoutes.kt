@@ -42,11 +42,32 @@ object NavRoutes {
     fun playlist(tab: String, id: String) = "$tab/playlist/$id"
 
     // ── Локальная медиатека (только внутри Библиотеки) ──
+    // Имя альбома/артиста кладётся в путь роута, поэтому ВСЕГДА кодируем его в
+    // URL-safe Base64: сырое имя с '/', '?', '#', '%' или пробелами ломало
+    // сопоставление роута Nav-Compose → IllegalArgumentException и падение при
+    // тапе (полевой кейс: альбом «200 KM/H In the Wrong Lane» — слэш в KM/H).
+    // Base64.URL_SAFE даёт только [A-Za-z0-9_-] — в пути безопасно.
+    private fun encArg(s: String): String = android.util.Base64.encodeToString(
+        s.toByteArray(Charsets.UTF_8),
+        android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING
+    )
+
+    /** Обратное к [encArg]; на не-base64 (легаси) вернёт вход как есть. */
+    fun decodeArg(s: String): String = runCatching {
+        String(
+            android.util.Base64.decode(
+                s,
+                android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING
+            ),
+            Charsets.UTF_8
+        )
+    }.getOrDefault(s)
+
     const val LOCAL_LIBRARY = "library/local"
     const val LOCAL_ARTIST_ROUTE = "library/local/artist/{$ARG_NAME}"
-    fun localArtist(name: String) = "library/local/artist/$name"
+    fun localArtist(name: String) = "library/local/artist/${encArg(name)}"
     const val LOCAL_ALBUM_ROUTE = "library/local/album/{$ARG_ID}/{$ARG_NAME}"
-    fun localAlbum(id: Long, name: String) = "library/local/album/$id/$name"
+    fun localAlbum(id: Long, name: String) = "library/local/album/$id/${encArg(name)}"
 
     /** Короткий тег вкладки для построения префиксных route. */
     const val TAB_WAVE = "wave"
