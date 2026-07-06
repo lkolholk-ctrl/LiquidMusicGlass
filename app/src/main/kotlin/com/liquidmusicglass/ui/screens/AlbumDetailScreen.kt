@@ -80,8 +80,13 @@ fun AlbumDetailScreen(
         }
     }
 
-    val albumTracks = remember(album) {
-        album?.tracks?.map { it.toTrack() }?.distinctBy { it.id } ?: emptyList()
+    var albumTracks by remember { mutableStateOf<List<com.liquidmusicglass.engine.Track>>(emptyList()) }
+    LaunchedEffect(album) {
+        val base = album?.tracks?.map { it.toTrack() }?.distinctBy { it.id } ?: emptyList()
+        albumTracks = base
+        // Часть треков альбома (VK/secondary) приходит без длительности —
+        // догружаем точечной batch-meta по id.
+        if (base.isNotEmpty()) albumTracks = IcmRepository.enrichTrackMeta(base)
     }
 
     val albumName = album?.album?.title ?: "Unknown Album"
