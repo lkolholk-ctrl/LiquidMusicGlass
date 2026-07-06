@@ -373,10 +373,18 @@ fun PlaylistDetailScreen(
             }
 
             // Tracks
-            itemsIndexed(tracks, key = { _, t -> t.id }) { index, track ->
+            itemsIndexed(
+                tracks,
+                key = { _, t -> t.id },
+                // Один тип строки → LazyColumn переиспользует разметку вместо
+                // пересборки. Плюс убран Modifier.animateItem(): на списке в
+                // сотни строк его анимация размещения захлёбывалась на флинге и
+                // залипал UI-поток («фриз при листании импортированного 707»,
+                // #85/#86). Анимация тут чисто косметическая — плейлист статичен.
+                contentType = { _, _ -> "playlist_track" }
+            ) { index, track ->
                 Row(
                     modifier = Modifier
-                        .animateItem()
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(14.dp))
                         .liquidClickable {
