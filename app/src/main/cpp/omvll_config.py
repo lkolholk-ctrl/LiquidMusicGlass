@@ -5,22 +5,24 @@
 # Подключается флагом clang -fpass-plugin=<omvll.so>; O-MVLL вызывает
 # omvll_get_config() и спрашивает по каждой функции, что обфусцировать.
 #
-# МАКСИМАЛЬНЫЙ набор пассов (пользователь выбрал «O-MVLL с максимальными
-# пассами» вместо недоступной на этом стеке настоящей VM-виртуализации):
+# Набор пассов — СТАБИЛЬНОЕ ядро O-MVLL (максимум из того, что реально
+# проходит сборку под NDK r26d / clang 17):
 #   • obfuscate_string        — шифрование строковых литералов (2-й слой поверх
 #                               нашего XOR-ключа RK) — во ВСЁМ модуле;
 #   • obfuscate_constants     — опаковые константы — во всём модуле;
 #   • flatten_cfg             — control-flow flattening на функциях резолвера;
-#   • break_control_flow      — разрыв графа (jump-threading-стайл) там же;
-#   • anti_hooking            — анти-хук (Frida/PLT) на JNI-входах;
-#   • obfuscate_arithmetic    — MBA (mixed boolean-arithmetic) там же;
-#   • indirect_call / branch  — косвенные переходы/вызовы там же.
+#   • obfuscate_arithmetic    — MBA (mixed boolean-arithmetic) там же.
+#
+# УБРАНЫ как крашащие/нестабильные (smoke-тест валился segfault'ом clang):
+#   • anti_hooking            — omvll::AntiHook::run падал (exit 139);
+#   • indirect_call / branch  — новые в 1.4.0, часто ломают фронтенд;
+#   • break_control_flow      — экспериментальный (signal/computed-goto).
+# Если захочется — можно вернуть по одному и проверять smoke отдельно.
 #
 # Тяжёлые пассы вешаем на функции резолвера (имя содержит "ResolveNative" —
 # JNI-входы; статические хелперы инлайнятся в них при -Oz). Строки/константы —
-# на весь модуль (дёшево и стабильно). Неизвестные методы O-MVLL просто не
-# вызовет (для сборки безопасно). Если какой-то пасс сломает резолвер в рантайме
-# (импорт перестанет возвращать треки) — отключаем этот метод точечно.
+# на весь модуль. Если какой-то пасс сломает резолвер в рантайме (импорт
+# перестанет возвращать треки) — отключаем этот метод точечно.
 #
 # Безопасность СБОРКИ: плагин в CI сначала smoke-тестируется; при провале
 # O-MVLL отключается и .so собирается как обычно (APK всегда зелёный).
@@ -44,23 +46,11 @@ class ResolverConfig(omvll.ObfuscationConfig):
     def obfuscate_constants(self, mod, func):
         return True
 
-    # ── Тяжёлые пассы: функции резолвера ──
+    # ── Тяжёлые пассы: функции резолвера (стабильные) ──
     def flatten_cfg(self, mod, func):
         return _is_resolver(func)
 
-    def break_control_flow(self, mod, func):
-        return _is_resolver(func)
-
-    def anti_hooking(self, mod, func):
-        return _is_resolver(func)
-
     def obfuscate_arithmetic(self, mod, func):
-        return _is_resolver(func)
-
-    def indirect_call(self, mod, func):
-        return _is_resolver(func)
-
-    def indirect_branch(self, mod, func):
         return _is_resolver(func)
 
 
