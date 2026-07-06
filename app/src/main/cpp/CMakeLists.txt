@@ -72,18 +72,12 @@ target_compile_options(lmg_resolve PRIVATE
 )
 target_link_libraries(lmg_resolve android log nlohmann_json::nlohmann_json)
 
-# ── O-MVLL (этап 2, #83): обфускация резолвера LLVM-плагином ──
-# Путь к плагину приходит из CI через -DLMG_OMVLL_PLUGIN (см. gradle + шаг
-# «Prepare O-MVLL» в ci.yml/build-release.yml). Плагин ТАМ проходит smoke-тест
-# на тривиальном файле; сюда попадает только рабочий. Нет пути / файла нет —
-# резолвер собирается без обфускации, APK всегда собирается.
-set(LMG_OMVLL_PLUGIN "" CACHE FILEPATH "Path to the O-MVLL pass plugin (.so)")
-if(LMG_OMVLL_PLUGIN AND EXISTS "${LMG_OMVLL_PLUGIN}")
-    message(STATUS "O-MVLL: obfuscating lmg_resolve via ${LMG_OMVLL_PLUGIN}")
-    target_compile_options(lmg_resolve PRIVATE "-fpass-plugin=${LMG_OMVLL_PLUGIN}")
-else()
-    message(STATUS "O-MVLL: disabled — lmg_resolve built without obfuscation")
-endif()
+# Примечание: этап 2 (#83) — LLVM-обфускация резолвера через O-MVLL — свёрнут.
+# Готовый плагин O-MVLL 1.4.x (под NDK r26d) роняет clang в пассе AntiHook на
+# хостед-раннерах GitHub (и 24.04, и 22.04), отключить пасс в этой версии
+# нельзя. Защита резолвера обеспечивается на уровне исходника (натив C++ +
+# XOR-строки, этап 1). Если появится совместимый раннер/сервер — вернуть можно
+# передачей -fpass-plugin в target_compile_options(lmg_resolve ...).
 
 # Fetch the JUCE SOURCES only — deliberately NOT FetchContent_MakeAvailable /
 # add_subdirectory(JUCE). JUCE's own CMake builds a host helper tool "juceaide"

@@ -23,24 +23,12 @@ android {
         // Метка билда (видно в Профиле внизу). Бампается вручную на заметных
         // сборках, чтобы можно было отличить, какой билд стоит. Динамический
         // git-хэш убран — он ломал конфигурацию Gradle в CI.
-        // O-MVLL включается только когда CI подготовил и smoke-протестировал
-        // плагин (env OMVLL_PLUGIN указывает на .so). Метка билда это отражает,
-        // чтобы на девайсе было видно, реально ли обфускация в сборке.
-        val omvllPlugin = System.getenv("OMVLL_PLUGIN")?.takeIf { it.isNotBlank() }
-        versionName = "06.07 obf-try" + if (omvllPlugin != null) "+omvll" else ""
+        versionName = "06.07"
 
         // Build native libs only for arm64-v8a (faster builds, smaller APK).
         // Note: won't run on 32-bit (armeabi-v7a) or x86/x86_64 emulators.
         ndk {
             abiFilters += "arm64-v8a"
-        }
-
-        externalNativeBuild {
-            cmake {
-                // Передаём путь к O-MVLL-плагину в CMake только если CI его
-                // подготовил; иначе резолвер собирается без обфускации.
-                if (omvllPlugin != null) arguments("-DLMG_OMVLL_PLUGIN=$omvllPlugin")
-            }
         }
 
         // Read ICM API key from local.properties (GitHub Secret in CI)
