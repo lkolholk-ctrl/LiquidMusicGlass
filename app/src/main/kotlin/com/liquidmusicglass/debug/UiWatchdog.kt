@@ -21,9 +21,9 @@ import java.util.concurrent.atomic.AtomicLong
 object UiWatchdog {
 
     private const val BEAT_MS = 1000L
-    private const val CHECK_MS = 2500L
-    private const val FREEZE_THRESHOLD_MS = 6000L
-    private const val COOLDOWN_MS = 30000L
+    private const val CHECK_MS = 1500L
+    private const val FREEZE_THRESHOLD_MS = 3000L   // было 6000 — ловим и короткие фризы
+    private const val COOLDOWN_MS = 15000L
     private const val MAX_DUMPS = 5
 
     @Volatile private var started = false
@@ -64,23 +64,31 @@ object UiWatchdog {
 
                     val silentMs = now - lastBeat.get()
                     if (silentMs > FREEZE_THRESHOLD_MS) {
-                        // Страж №2: heartbeat молчит, но main стоит в холостом
-                        // nativePollOnce (лупер ПУСТ) → это разморозка после
-                        // фона, а не зависание. Настоящий фриз = main застрял
-                        // в коде/локе/биндере. Полевой кейс: три дампа по
-                        // 7-132с, во всех main idle — спам, не диагноз.
-                        val top = Looper.getMainLooper().thread.stackTrace.firstOrNull()
+                        val mainStack = Looper.getMainLooper().thread.stackTrace
+                        val top = mainStack.firstOrNull()
+                        // main стоит в холостом nativePollOnce (лупер ПУСТ) —
+                        // либо разморозка после фона, либо системный/фоновый
+                        // столл (аудио/io/gpu), а не блок main-кодом.
                         val mainIdle = top != null &&
                             top.className == "android.os.MessageQueue" &&
                             top.methodName == "nativePollOnce"
-                        if (mainIdle) {
-                            lastBeat.set(now)
-                            continue
+
+                        // КОРОТКАЯ сводка в in-app LCAT — доступна сразу после
+                        // разморозки, без файлов и ПК: видно, что держало main
+                        // (или какой фон молотил при idle-main). Именно этого не
+                        // хватало на серии фризов (импорт-плейлист, лок-альбом).
+                        logFreezeSummary(silentMs, mainIdle, mainStack)
+
+                        // Полный файловый дамп — только для НАСТОЯЩЕГО блока main
+                        // (застрял в коде/локе/биндере). При idle-main файл не
+                        // пишем (спам), сводки в LCAT достаточно.
+                        if (!mainIdle) {
+                            dumpAllThreads(appContext, silentMs)
+                            dumps++
                         }
-                        dumpAllThreads(appContext, silentMs)
-                        dumps++
                         Thread.sleep(COOLDOWN_MS)
                         lastCheckAt = SystemClock.uptimeMillis()
+                        lastBeat.set(SystemClock.uptimeMillis())
                     }
                 } catch (_: InterruptedException) {
                     return@Thread
@@ -93,6 +101,33 @@ object UiWatchdog {
             name = "lmg-ui-watchdog"
             priority = Thread.MIN_PRIORITY
         }.start()
+    }
+
+    /** Короткая строка причины фриза в in-app LCAT (читается сразу после разморозки). */
+    private fun logFreezeSummary(
+        silentMs: Long,
+        mainIdle: Boolean,
+        mainStack: Array<StackTraceElement>
+    ) {
+        runCatching {
+            fun short(e: StackTraceElement) = "${e.className.substringAfterLast('.')}.${e.methodName}"
+            val sb = StringBuilder(320)
+            sb.append("UI FREEZE ${silentMs}мс — main: ")
+            if (mainIdle) {
+                sb.append("idle(nativePollOnce)")
+            } else {
+                sb.append(mainStack.take(6).joinToString(" <- ") { short(it) })
+            }
+            // Самые горячие фон-потоки (RUNNABLE) — при idle-main виновник тут
+            // (аудио-sink / io / декодер / сеть), как было в ANR-дампе.
+            val main = Looper.getMainLooper().thread
+            val hot = Thread.getAllStackTraces().entries
+                .filter { it.key !== main && it.key.state == Thread.State.RUNNABLE && it.value.isNotEmpty() }
+                .take(4)
+                .joinToString("; ") { (t, st) -> "${t.name}:${short(st[0])}" }
+            if (hot.isNotEmpty()) sb.append(" | hot: ").append(hot)
+            DebugLog.add(sb.toString())
+        }
     }
 
     private fun dumpAllThreads(context: Context, silentMs: Long) {
