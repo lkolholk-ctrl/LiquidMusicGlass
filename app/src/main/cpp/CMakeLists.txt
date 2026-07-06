@@ -43,6 +43,35 @@ target_link_libraries(icmkey ${log-lib})
 # ---------------------------------------------------------------------------
 include(FetchContent)
 
+# ---------------------------------------------------------------------------
+# lmg_resolve — нативные резолверы плейлистов (батч 16, защита #82).
+# Логика скрейпа (URL/заголовки/парсинг) уходит из Kotlin в .so; секретные
+# строки XOR-зашифрованы. Парсинг JSON — через nlohmann/json (корректный
+# разэкран \uXXXX для кириллицы/эмодзи). Header-only, отдельный target, чтобы
+# не влиять на аудио-движок.
+# ---------------------------------------------------------------------------
+FetchContent_Declare(
+    nlohmann_json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG v3.11.3
+    GIT_SHALLOW TRUE
+)
+set(JSON_BuildTests OFF CACHE INTERNAL "")
+set(JSON_Install OFF CACHE INTERNAL "")
+FetchContent_MakeAvailable(nlohmann_json)
+
+add_library(lmg_resolve SHARED resolve.cpp)
+target_compile_features(lmg_resolve PRIVATE cxx_std_17)
+target_compile_options(lmg_resolve PRIVATE
+    -fexceptions          # nlohmann/json бросает при парсинге — ловим catch(...)
+    -fvisibility=hidden
+    -fomit-frame-pointer
+    -fdata-sections
+    -ffunction-sections
+    -Oz
+)
+target_link_libraries(lmg_resolve android log nlohmann_json::nlohmann_json)
+
 # Fetch the JUCE SOURCES only — deliberately NOT FetchContent_MakeAvailable /
 # add_subdirectory(JUCE). JUCE's own CMake builds a host helper tool "juceaide"
 # that compiles juce_gui_basics for the host and needs X11/freetype dev headers
