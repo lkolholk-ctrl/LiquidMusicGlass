@@ -587,6 +587,11 @@ object IcmRepository {
     suspend fun enrichTrackMeta(
         tracks: List<com.liquidmusicglass.engine.Track>
     ): List<com.liquidmusicglass.engine.Track> = withContext(Dispatchers.IO) {
+        // Догрузка длительностей — НИЗКИЙ приоритет и не должна мешать
+        // воспроизведению: если уже есть бан/лимит — вообще не суёмся (иначе
+        // добьём circuit-breaker, и тап по треку упадёт с «Can't reach server»).
+        if (IcmRateGate.isBanned()) return@withContext tracks
+
         val needIds = tracks.asSequence()
             .filter { it.durationMs <= 0L }
             .map { it.id }
@@ -595,13 +600,20 @@ object IcmRepository {
             .toList()
         if (needIds.isEmpty()) return@withContext tracks
 
+        // Стартовая пауза: даём тапу по треку (резолв стрима) уйти первым, а не
+        // конкурировать с пачкой meta-запросов сразу при открытии экрана.
+        kotlinx.coroutines.delay(600)
+
         val metaById = HashMap<String, IcmBatchTrackMetaItem>(needIds.size)
         for ((i, chunk) in needIds.chunked(50).withIndex()) {
-            if (getLastHttpCode() == 429 ||
+            // Перед каждым чанком уступаем дорогу: бан/лимит → прекращаем, отдаём
+            // что успели (длительности — не критично, воспроизведение — критично).
+            if (IcmRateGate.isBanned() ||
+                getLastHttpCode() == 429 ||
                 getLastErrorCode() == "rate_limited" ||
                 getLastErrorCode() == "ip_temporarily_blocked"
             ) break
-            if (i > 0) kotlinx.coroutines.delay(150)
+            if (i > 0) kotlinx.coroutines.delay(400)   // мягче к лимиту (было 150)
             val res = api.getBatchTrackMeta(chunk).getOrNull() ?: continue
             res.items.forEach { item ->
                 if (item.isSuccess) {

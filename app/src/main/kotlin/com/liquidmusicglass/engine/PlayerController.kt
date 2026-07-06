@@ -1054,6 +1054,15 @@ object PlayerController {
                     val apiException = IcmRepository.lastApiException.value
                     
                     when {
+                        // Лимит запросов / временный бан IP — это НЕ «нет сети» и
+                        // НЕ «сервер недоступен». Раньше падало в else→"unknown"→
+                        // «Can't reach the server» (пугало при живом интернете).
+                        error?.contains("rate_limited") == true ||
+                            error?.contains("ip_temporarily_blocked") == true ||
+                            error?.contains("429") == true ||
+                            com.liquidmusicglass.api.icm.IcmRateGate.isBanned() -> {
+                            StreamResult.Error("rate_limited", error)
+                        }
                         error?.contains("region_unavailable") == true || error?.contains("451") == true -> {
                             val requiredRegion = apiException?.requiredRegion
                             if (requiredRegion != null) {
