@@ -132,25 +132,32 @@ class EndlessPlaybackEngine(
                 if (ctx != null) {
                     val refillCtx = _refillContext.value
                     val isGlobal = PlayerController.playbackContext is PlaybackContext.Global
-                    val queueIds = PlayerController.getCurrentQueue().map { it.id }
+                    val currentQueue = PlayerController.getCurrentQueue()
+                    val queueIds = currentQueue.map { it.id }
+                    val currentIndex = PlayerController.getCurrentIndex()
+                    val activeQueueIds = currentQueue
+                        .drop(currentIndex.coerceIn(0, currentQueue.size))
+                        .map { it.id }
+                    val seedPool = refillCtx?.seedPool.orEmpty()
+                    val isStrictTrackStation = isGlobal &&
+                        refillCtx != null &&
+                        refillCtx.type == RefillContext.Type.WAVE &&
+                        !refillCtx.seedTrackId.isNullOrBlank() &&
+                        refillCtx.id.isNullOrBlank() &&
+                        refillCtx.name.isNullOrBlank() &&
+                        seedPool.isEmpty()
+
                     // Волна: seed из контекста (мудовая/трековая станция) или null
                     // (личная волна). Не-волна: станция по ПОСЛЕДНЕМУ треку
                     // очереди — альбом кончился, продолжаем «по мотивам».
                     val baseSeed = if (isGlobal) refillCtx?.seedTrackId else queueIds.lastOrNull()
-                    // Ротация seed — станция как у Яндекса (пул 500+): похожих
-                    // ИМЕННО на исходный трек у сервера обычно немного, зато
-                    // соседей-соседей — сотни. Чередуем: нечётный рефилл строит
-                    // от исходного seed (ДНК станции держится), чётный — от
-                    // случайного из последних треков станции (пул расширяется
-                    // транзитивно, волна блуждает по окрестностям, не по кругу).
-                    // Контекстный seed при этом НЕ трогаем — исходный трек
-                    // остаётся якорем станции.
-                    // Артист-волна (seedPool не пуст): чётный рефилл берёт seed
-                    // из пула топ-треков артиста, а не из хвоста очереди —
-                    // станция постоянно «притягивается» обратно к артисту
-                    // вместо транзитивного уползания в соседей-соседей.
-                    val seedPool = refillCtx?.seedPool.orEmpty()
-                    val seed = if (isGlobal && baseSeed != null) {
+                    // Обычная "волна по треку" должна всегда оставаться anchored к
+                    // исходному seed_track_id. Ротация и дрейф ниже нужны для артист-
+                    // волны/жанровых сценариев, но для track station они превращают
+                    // станцию в личную волну или соседей-соседей.
+                    val seed = if (isStrictTrackStation) {
+                        baseSeed
+                    } else if (isGlobal && baseSeed != null) {
                         refillCounter++
                         when {
                             refillCounter % 2 == 1 -> baseSeed
@@ -159,21 +166,46 @@ class EndlessPlaybackEngine(
                             else -> queueIds.takeLast(5).randomOrNull() ?: baseSeed
                         }
                     } else baseSeed
-                    // Anti-repeat: playedIds (вся история этой сессии волны) +
-                    // текущая очередь (в не-Global контекстах playedIds пуст).
-                    val exclude = (playedIds + queueIds).toList()
+
+                    // Для station-by-track по доке достаточно слать текущую клиентскую
+                    // очередь. В PlayerController уже сыгранные треки остаются в queue,
+                    // поэтому берём только current+future, иначе станция высыхает после
+                    // первой пачки примерно на 15 треках.
+                    val exclude = if (isStrictTrackStation) {
+                        activeQueueIds.distinct()
+                    } else {
+                        (playedIds + queueIds).toList()
+                    }
                     val waveRepo = com.liquidmusicglass.data.local.WaveRepository.getInstance(ctx)
                     var tracks = waveRepo.buildWaveQueue(
                         count = REFILL_BATCH_SIZE,
                         seedTrackId = seed,
                         exclude = exclude
                     )
+                    // Если Apple station вернула только треки из текущего хвоста, не
+                    // меняем seed и не уходим в персональную волну. Ослабляем exclude
+                    // до текущего + пары следующих, чтобы станция могла быть бесконечной
+                    // даже при небольшом пуле похожих треков.
+                    if (tracks.isEmpty() && isStrictTrackStation && seed != null) {
+                        val relaxedExclude = activeQueueIds.take(3).distinct()
+                        if (relaxedExclude.size < exclude.size) {
+                            android.util.Log.w(
+                                "EndlessEngine",
+                                "Track station returned empty (seed=$seed), retrying with relaxed exclude=${relaxedExclude.size}"
+                            )
+                            tracks = waveRepo.buildWaveQueue(
+                                count = REFILL_BATCH_SIZE,
+                                seedTrackId = seed,
+                                exclude = relaxedExclude
+                            )
+                        }
+                    }
                     // Станция пересохла (похожие на seed кончились) → ДРЕЙФ,
                     // как у Яндекса: строим станцию вокруг последнего трека
                     // очереди (похожие-на-похожие — пул расширяется транзитивно,
                     // «подобных очень много»). Seed в контексте обновляем, чтобы
                     // следующие рефиллы не молотили сухую станцию.
-                    if (tracks.isEmpty() && seed != null) {
+                    if (tracks.isEmpty() && seed != null && !isStrictTrackStation) {
                         val driftSeed = queueIds.lastOrNull()?.takeIf { it != seed }
                         if (driftSeed != null) {
                             android.util.Log.w("EndlessEngine", "Station dried up (seed=$seed) — drifting to seed=$driftSeed")
@@ -190,7 +222,7 @@ class EndlessPlaybackEngine(
                     }
                     // Дрейфовать некуда/нечем → личная волна: музыка не должна
                     // останавливаться и идти по кругу.
-                    if (tracks.isEmpty() && seed != null) {
+                    if (tracks.isEmpty() && seed != null && !isStrictTrackStation) {
                         android.util.Log.w("EndlessEngine", "Drift dried up too — falling back to personal wave")
                         tracks = waveRepo.buildWaveQueue(
                             count = REFILL_BATCH_SIZE,
