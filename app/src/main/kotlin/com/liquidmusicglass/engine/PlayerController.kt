@@ -14,6 +14,7 @@ import com.google.common.util.concurrent.MoreExecutors
 import com.liquidmusicglass.debug.DebugLog
 import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.api.icm.IcmTrackResponse
+import com.liquidmusicglass.api.icm.wave.IcmWaveRepository
 import com.liquidmusicglass.data.local.WaveRepository
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
@@ -1313,18 +1314,34 @@ object PlayerController {
      */
     fun startTrackWave(context: Context, seedTrack: Track, seedPool: List<String> = emptyList()) {
         ioScope.launch {
+            val stationSeedId = seedTrack.id.takeIf { canUseAsAppleStationSeed(seedTrack) }
+            val stationSeedPool = if (stationSeedId != null) {
+                seedPool.filter { IcmWaveRepository.isAppleSeedTrackId(it) }
+            } else {
+                emptyList()
+            }
+            if (stationSeedId == null) {
+                DebugLog.add("WAVE track station skipped: non-Apple seed ${seedTrack.id}")
+            }
+
             // Мгновенный старт: seed-трек играет СРАЗУ (ноль сетевых запросов),
             // станция вокруг него добирается фоном и доклеивается в очередь.
+            // Если seed не Apple numeric id, по доке station недоступна: играем
+            // текущий трек и дальше мягко продолжаем личной волной.
             playFromList(
                 context = context,
                 tracks = listOf(seedTrack),
                 startIndex = 0,
                 autoRefillType = "WAVE",
-                seedTrackId = seedTrack.id,
-                seedPool = seedPool
+                seedTrackId = stationSeedId,
+                seedPool = stationSeedPool
             )
             val repo = com.liquidmusicglass.data.local.WaveRepository.getInstance(context)
-            val station = repo.buildWaveQueue(seedTrackId = seedTrack.id)
+            val station = if (stationSeedId != null) {
+                repo.buildWaveQueue(seedTrackId = stationSeedId)
+            } else {
+                repo.buildWaveQueue(seedTrackId = null, exclude = listOf(seedTrack.id))
+            }
             val rest = station.filter { it.id != seedTrack.id }
             if (rest.isNotEmpty()) {
                 withContext(Dispatchers.Main) { addTracksToQueue(rest) }
@@ -1332,6 +1349,14 @@ object PlayerController {
             // Добить очередь до «сытого» запаса сразу, не дожидаясь перехода.
             endlessEngine.checkAndRefillIfNeeded()
         }
+    }
+
+    private fun canUseAsAppleStationSeed(track: Track): Boolean {
+        val scheme = track.uri.scheme?.lowercase()
+        if (scheme == "content" || scheme == "file" || track.isCustom) return false
+        if (!IcmWaveRepository.isAppleSeedTrackId(track.id)) return false
+        val source = track.source?.lowercase()
+        return source == null || source == "apple"
     }
 
     /**
