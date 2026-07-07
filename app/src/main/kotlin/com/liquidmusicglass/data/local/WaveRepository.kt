@@ -207,6 +207,10 @@ class WaveRepository(context: Context) {
         val queue = mutableListOf<Track>()
         val excludeIds = mutableSetOf<String>()
         val callerExcludeIsEmpty = exclude.isEmpty()
+        val effectiveSeedTrackId = seedTrackId?.takeIf { IcmWaveRepository.isAppleSeedTrackId(it) }
+        if (seedTrackId != null && effectiveSeedTrackId == null) {
+            Log.w(TAG, "Track station seed is not an Apple numeric id ($seedTrackId), falling back to personal wave")
+        }
 
         // Anti-repeat: caller-supplied IDs (текущая очередь + уже игравшие в этой волне).
         excludeIds.addAll(exclude)
@@ -220,12 +224,16 @@ class WaveRepository(context: Context) {
             Log.w(TAG, "Failed to get recent track IDs: ${e.message}")
             emptyList()
         }
-        excludeIds.addAll(recentIds)
+        // Personal wave can use global listening history as anti-repeat. Track station
+        // is a narrow Apple station; excluding unrelated recent history can dry it up.
+        if (effectiveSeedTrackId == null) {
+            excludeIds.addAll(recentIds)
+        }
 
         // Личная волна теперь умеет batch-дозаправку. Используем её только для
         // хвоста очереди (когда caller уже дал exclude): первый трек остаётся на
         // /library/wave/start, а station-by-track остаётся на seed_track_id.
-        if (seedTrackId == null && count > 1 && !callerExcludeIsEmpty) {
+        if (effectiveSeedTrackId == null && count > 1 && !callerExcludeIsEmpty) {
             val batchQueue = try {
                 val response = IcmWaveRepository.nextBatch(
                     limit = count,
@@ -300,7 +308,7 @@ class WaveRepository(context: Context) {
                     kotlinx.coroutines.delay(150)
                 }
 
-                // seedTrackId == null → персональная волна (подстраивается под юзера сервером:
+                // effectiveSeedTrackId == null → персональная волна (подстраивается под юзера сервером:
                 // лайки / completion / skip-streak). Иначе — станция вокруг seed-трека (мудовая плитка).
                 val recentSkipsVal = com.liquidmusicglass.engine.PlayerController.consecutiveSkips
 
@@ -309,20 +317,25 @@ class WaveRepository(context: Context) {
                 // (до 550 id) раздувал GET-запрос до километрового query-string
                 // с риском 414. Сервер и так ведёт свою playback_history по
                 // нашим wave/playback-событиям — древние эксклюды избыточны.
-                val shouldUseWaveStart = seedTrackId == null &&
+                val shouldUseWaveStart = effectiveSeedTrackId == null &&
                     attempts == 1 &&
                     queue.isEmpty() &&
                     callerExcludeIsEmpty
 
-                var response = if (shouldUseWaveStart) {
-                    IcmWaveRepository.startPersonalWave().getOrNull()
-                } else {
-                    null
+                var response = when {
+                    effectiveSeedTrackId != null -> {
+                        IcmWaveRepository.nextTrackStation(
+                            seedTrackId = effectiveSeedTrackId,
+                            exclude = excludeIds.toList().takeLast(80)
+                        ).getOrNull()
+                    }
+                    shouldUseWaveStart -> IcmWaveRepository.startPersonalWave().getOrNull()
+                    else -> null
                 }
 
-                if (response == null) {
+                if (response == null && effectiveSeedTrackId == null) {
                     response = IcmRepository.getWaveNext(
-                        seedTrackId = seedTrackId,
+                        seedTrackId = null,
                         exclude = excludeIds.toList().takeLast(80).takeIf { it.isNotEmpty() },
                         recentSkips = recentSkipsVal,
                         genre = null
