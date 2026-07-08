@@ -8,6 +8,9 @@ import com.liquidmusicglass.data.local.db.AppDatabase
 import com.liquidmusicglass.data.local.db.CachedTrack
 import com.liquidmusicglass.data.local.db.GenreCount
 import com.liquidmusicglass.data.local.db.ListeningHistory
+import com.liquidmusicglass.data.wave.WaveCandidateFilter
+import com.liquidmusicglass.data.wave.WaveSessionState
+import com.liquidmusicglass.data.wave.toWaveCandidate
 import com.liquidmusicglass.engine.Track
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -230,60 +233,18 @@ class WaveRepository(context: Context) {
             excludeIds.addAll(recentIds)
         }
 
-        // Личная волна теперь умеет batch-дозаправку. Используем её только для
-        // хвоста очереди (когда caller уже дал exclude): первый трек остаётся на
-        // /library/wave/start, а station-by-track остаётся на seed_track_id.
-        if (effectiveSeedTrackId == null && count > 1 && !callerExcludeIsEmpty) {
-            val batchQueue = try {
-                val response = IcmWaveRepository.nextBatch(
-                    limit = count,
-                    // Личная волна уже ранжируется сервером по истории/лайкам.
-                    // Жёсткий diversity (>=0.33) режет артистов до 2 треков на
-                    // пачку и на узком вкусе может вернуть всего 1-2 трека.
-                    diversity = 0.0,
-                    excludeTrackIds = excludeIds.toList().takeLast(80),
-                    playedTrackIds = recentIds.take(50)
-                ).getOrNull()
-
-                if (response?.status == "ok" && response.tracks.isNotEmpty()) {
-                    val tracks = mutableListOf<Track>()
-                    for (waveTrack in response.tracks) {
-                        if (tracks.size >= count) break
-                        val trackId = waveTrack.id
-                        if (trackId in excludeIds) {
-                            Log.d(TAG, "Batch returned known track $trackId, skipping")
-                            continue
-                        }
-
-                        val stats = playbackDao.getTrackStat(trackId)
-                        if (stats != null) {
-                            val total = stats.playCount + stats.skippedCount
-                            if (total >= 2) {
-                                val skipRatio = stats.skippedCount.toFloat() / total.toFloat()
-                                if (skipRatio > 0.70f) {
-                                    Log.d(TAG, "Batch skip-filter: excluding $trackId (skipRatio=$skipRatio)")
-                                    excludeIds.add(trackId)
-                                    continue
-                                }
-                            }
-                        }
-
-                        val track = waveTrack.toTrack()
-                        tracks.add(track)
-                        excludeIds.add(trackId)
-                    }
-                    tracks
-                } else {
-                    emptyList()
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Personal wave batch failed, falling back to sequential: ${e.message}")
-                emptyList()
-            }
-
+        // Stage 2: personal wave starts from the expanded batch endpoint.
+        // The old one-by-one /library/wave/* path below stays as a fallback.
+        if (effectiveSeedTrackId == null && count > 0) {
+            val batchQueue = fetchPersonalWaveBatch(
+                targetCount = count,
+                excludeIds = excludeIds,
+                recentIds = recentIds
+            )
             if (batchQueue.isNotEmpty()) {
                 Log.d(TAG, "Personal wave batch added ${batchQueue.size} tracks")
                 queue.addAll(batchQueue)
+                excludeIds.addAll(batchQueue.map { it.id })
             }
         }
 
@@ -426,6 +387,77 @@ class WaveRepository(context: Context) {
 
         Log.d(TAG, "Final wave queue: ${queue.size} tracks (attempts: $attempts)")
         queue
+    }
+
+    private suspend fun fetchPersonalWaveBatch(
+        targetCount: Int,
+        excludeIds: Set<String>,
+        recentIds: List<String>
+    ): List<Track> {
+        val requestLimit = (targetCount * 2)
+            .coerceAtLeast(targetCount + 5)
+            .coerceIn(1, 50)
+
+        return try {
+            val response = IcmWaveRepository.nextBatch(
+                limit = requestLimit,
+                // Personal wave is already ranked server-side. Keep diversity
+                // soft here: strict server-side artist caps made narrow taste
+                // profiles return only 1-2 tracks.
+                diversity = 0.0,
+                excludeTrackIds = excludeIds.toList().takeLast(120),
+                playedTrackIds = recentIds.take(80)
+            ).getOrNull()
+
+            if (response?.status != "ok" || response.tracks.isEmpty()) {
+                Log.w(TAG, "Personal wave batch status: ${response?.status ?: "null"}")
+                return emptyList()
+            }
+
+            val statsByTrackId = mutableMapOf<String, WaveCandidateFilter.TrackStats>()
+            for (track in response.tracks) {
+                val stats = playbackDao.getTrackStat(track.id) ?: continue
+                statsByTrackId[track.id] = WaveCandidateFilter.TrackStats(
+                    playCount = stats.playCount,
+                    skipCount = stats.skippedCount
+                )
+            }
+
+            val initialState = WaveSessionState(
+                excludeIds = excludeIds.toList(),
+                playedIds = recentIds
+            )
+            val filter = WaveCandidateFilter(
+                WaveCandidateFilter.Policy(
+                    // Expanded personal wave is Apple-only per API docs. Leaving
+                    // sources open avoids dropping legacy responses that omit it.
+                    allowedSources = emptySet(),
+                    maxTracksPerArtistWindow = 3,
+                    artistWindowSize = 12
+                )
+            )
+            val filtered = filter.filter(
+                candidates = response.tracks.map { it.toWaveCandidate() },
+                state = initialState,
+                statsByTrackId = statsByTrackId,
+                limit = targetCount
+            )
+
+            if (filtered.rejected.isNotEmpty()) {
+                Log.d(
+                    TAG,
+                    "Personal wave batch filtered ${filtered.rejected.size}/${response.tracks.size}"
+                )
+            }
+
+            val tracksById = response.tracks.associateBy { it.id }
+            filtered.accepted.mapNotNull { candidate ->
+                tracksById[candidate.id]?.toTrack()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Personal wave batch failed, falling back to sequential: ${e.message}")
+            emptyList()
+        }
     }
 
     /**
