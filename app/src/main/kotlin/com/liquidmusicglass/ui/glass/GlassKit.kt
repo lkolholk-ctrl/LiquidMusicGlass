@@ -1,5 +1,6 @@
 package com.liquidmusicglass.ui.glass
 
+import com.liquidmusicglass.ui.icons.LiquidGlyphs
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
@@ -8,7 +9,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -181,7 +181,7 @@ object GlassKit {
     @Composable
     fun VerifiedBadge(modifier: Modifier = Modifier) {
         Icon(
-            imageVector = Icons.Rounded.CheckCircle,
+            imageVector = LiquidGlyphs.CheckCircle,
             contentDescription = null,
             tint = Color(0xFF00BFFF),
             modifier = modifier.size(14.dp)

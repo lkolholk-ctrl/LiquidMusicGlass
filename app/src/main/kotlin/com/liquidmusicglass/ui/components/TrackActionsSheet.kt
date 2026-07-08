@@ -1,10 +1,10 @@
 package com.liquidmusicglass.ui.components
 
+import com.liquidmusicglass.ui.icons.LiquidGlyphs
 import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Share
@@ -86,17 +86,17 @@ fun TrackActionsSheet(
 
             Spacer(Modifier.height(16.dp))
 
-            ActionRow(rowBg, Icons.Rounded.QueueMusic, "Play next") {
+            ActionRow(rowBg, LiquidGlyphs.QueueMusic, "Play next") {
                 PlayerController.insertNext(track)
                 onDismiss()
             }
             Spacer(Modifier.height(8.dp))
-            ActionRow(rowBg, Icons.Rounded.PlaylistAdd, "Add to queue") {
+            ActionRow(rowBg, LiquidGlyphs.PlaylistAdd, "Add to queue") {
                 PlayerController.addToQueue(track)
                 onDismiss()
             }
             Spacer(Modifier.height(8.dp))
-            ActionRow(rowBg, Icons.Rounded.Share, "Share") {
+            ActionRow(rowBg, LiquidGlyphs.Share, "Share") {
                 val text = "${track.title} — ${track.artist}\nhttps://byicloud.online/track/${track.id}"
                 val send = Intent(Intent.ACTION_SEND).apply {
                     type = "text/plain"

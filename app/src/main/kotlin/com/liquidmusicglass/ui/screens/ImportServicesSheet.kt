@@ -1,5 +1,6 @@
 package com.liquidmusicglass.ui.screens
 
+import com.liquidmusicglass.ui.icons.LiquidGlyphs
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
@@ -185,7 +186,7 @@ fun ImportServicesSheet(
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        Icons.Rounded.Close,
+                        LiquidGlyphs.Close,
                         contentDescription = "Close",
                         tint = lc.textSecondary,
                         modifier = Modifier.size(18.dp)
@@ -389,7 +390,7 @@ private fun ImportServiceCard(
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
-                            Icons.Rounded.Download,
+                            LiquidGlyphs.Download,
                             contentDescription = null,
                             tint = onAccent,
                             modifier = Modifier.size(18.dp)
@@ -456,7 +457,7 @@ private fun ImportProgressBlock(
                 modifier = Modifier.padding(bottom = 12.dp)
             ) {
                 Icon(
-                    Icons.Rounded.CheckCircle,
+                    LiquidGlyphs.CheckCircle,
                     contentDescription = null,
                     tint = Color(0xFF34C759),
                     modifier = Modifier.size(18.dp)
@@ -476,7 +477,7 @@ private fun ImportProgressBlock(
                 modifier = Modifier.padding(bottom = 12.dp)
             ) {
                 Icon(
-                    Icons.Rounded.ErrorOutline,
+                    LiquidGlyphs.ErrorOutline,
                     contentDescription = null,
                     tint = Color(0xFFFF453A),
                     modifier = Modifier.size(18.dp)

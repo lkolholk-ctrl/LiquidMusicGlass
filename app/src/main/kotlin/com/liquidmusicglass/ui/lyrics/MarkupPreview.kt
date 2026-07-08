@@ -1,5 +1,6 @@
 package com.liquidmusicglass.ui.lyrics
 
+import com.liquidmusicglass.ui.icons.LiquidGlyphs
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -11,11 +12,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Pause
-import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.Replay
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
@@ -118,7 +115,7 @@ fun MarkupPreviewView(
                     contentAlignment = Alignment.Center
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, tint = Color.White,
+                        Icon(LiquidGlyphs.Back, null, tint = Color.White,
                             modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
                         Text("К разметке", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
@@ -165,10 +162,10 @@ fun MarkupPreviewView(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                CircleBtn(if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, accent) {
+                CircleBtn(if (isPlaying) LiquidGlyphs.Pause else LiquidGlyphs.Play, accent) {
                     PlayerController.togglePlayPause(context)
                 }
-                CircleBtn(Icons.Rounded.Replay, accent) {
+                CircleBtn(LiquidGlyphs.Repeat, accent) {
                     val t = lyrics.lines.getOrNull(startLineIndex)?.timeMs?.coerceAtLeast(0L) ?: 0L
                     PlayerController.seekTo(t)
                 }

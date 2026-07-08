@@ -1,5 +1,6 @@
 package com.liquidmusicglass.ui.player
 
+import com.liquidmusicglass.ui.icons.LiquidGlyphs
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
@@ -35,15 +36,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DragHandle
-import androidx.compose.material.icons.rounded.FastForward
-import androidx.compose.material.icons.rounded.FastRewind
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Pause
-import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Repeat
-import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -172,7 +169,7 @@ fun QueueSheet(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = Icons.Rounded.Close,
+                            imageVector = LiquidGlyphs.Close,
                             contentDescription = null,
                             tint = Color.White,
                             modifier = Modifier.size(22.dp)
@@ -240,8 +237,8 @@ fun QueueSheet(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
-                                    imageVector = if (isFavorite) Icons.Rounded.Favorite
-                                    else Icons.Rounded.FavoriteBorder,
+                                    imageVector = if (isFavorite) LiquidGlyphs.Favorite
+                                    else LiquidGlyphs.FavoriteBorder,
                                     contentDescription = null,
                                     tint = if (isFavorite) Color(0xFFFC3C44)
                                     else Color.White.copy(alpha = 0.70f),
@@ -337,7 +334,7 @@ fun QueueSheet(
                             ) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                     Icon(
-                                        imageVector = Icons.Rounded.MusicNote,
+                                        imageVector = LiquidGlyphs.MusicNote,
                                         contentDescription = null,
                                         tint = Color.White.copy(alpha = 0.25f),
                                         modifier = Modifier.size(48.dp)

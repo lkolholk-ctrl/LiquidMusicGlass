@@ -1,5 +1,6 @@
 package com.liquidmusicglass.ui.screens.camp
 
+import com.liquidmusicglass.ui.icons.LiquidGlyphs
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
@@ -18,12 +19,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.outlined.CloudDownload
-import androidx.compose.material.icons.outlined.HighQuality
-import androidx.compose.material.icons.outlined.MusicNote
 import androidx.compose.material.icons.outlined.Radio
 import androidx.compose.material.icons.outlined.Translate
-import androidx.compose.material.icons.outlined.Waves
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -183,7 +180,7 @@ private fun CampCard(
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = Icons.Outlined.Waves,
+                    imageVector = LiquidGlyphs.TrackRadio,
                     contentDescription = null,
                     tint = accentColor,
                     modifier = Modifier.size(24.dp)
@@ -225,7 +222,7 @@ private fun CampCard(
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Filled.CheckCircle,
+                            imageVector = LiquidGlyphs.CheckCircle,
                             contentDescription = null,
                             tint = NeonGreen,
                             modifier = Modifier.size(16.dp)
@@ -294,17 +291,17 @@ private fun CapabilitiesPreview(
         // Feature grid
         val features = listOf(
             FeatureRowData(
-                icon = Icons.Outlined.CloudDownload,
+                icon = LiquidGlyphs.Download,
                 label = "Downloads",
                 enabled = capabilities[Feature.DOWNLOAD] == true
             ),
             FeatureRowData(
-                icon = Icons.Outlined.HighQuality,
+                icon = LiquidGlyphs.Quality,
                 label = "Hi-Res Audio",
                 enabled = capabilities[Feature.HIGH_QUALITY] == true
             ),
             FeatureRowData(
-                icon = Icons.Outlined.Radio,
+                icon = LiquidGlyphs.TrackRadio,
                 label = "Radio / My Wave",
                 enabled = capabilities[Feature.PERSONAL_WAVE] == true
             ),

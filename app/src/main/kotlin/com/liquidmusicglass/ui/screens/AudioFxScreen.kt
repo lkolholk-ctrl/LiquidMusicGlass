@@ -1,5 +1,6 @@
 package com.liquidmusicglass.ui.screens
 
+import com.liquidmusicglass.ui.icons.LiquidGlyphs
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -9,8 +10,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -426,6 +425,6 @@ private fun CircleButton(lc: LiquidColors, onClick: () -> Unit) {
             .liquidClickable(pressedScale = LiquidMotion.PressIcon, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, tint = lc.iconDefault, modifier = Modifier.size(22.dp))
+        Icon(LiquidGlyphs.Back, null, tint = lc.iconDefault, modifier = Modifier.size(22.dp))
     }
 }

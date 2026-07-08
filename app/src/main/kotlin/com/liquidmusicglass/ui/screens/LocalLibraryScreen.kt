@@ -1,5 +1,6 @@
 package com.liquidmusicglass.ui.screens
 
+import com.liquidmusicglass.ui.icons.LiquidGlyphs
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -20,15 +21,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Person
-import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -172,7 +170,7 @@ fun LocalLibraryScreen(
                         .padding(horizontal = 16.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Rounded.Edit, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                    Icon(LiquidGlyphs.Edit, null, tint = Color.White, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
                     Text("Редактировать теги", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 }
@@ -207,7 +205,7 @@ private fun SelectionHeader(count: Int, lc: LiquidColors, onClose: () -> Unit) {
             Modifier.size(40.dp).background(if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7), CircleShape)
                 .clip(CircleShape).liquidClickable(pressedScale = LiquidMotion.PressIcon, onClick = onClose),
             contentAlignment = Alignment.Center
-        ) { Icon(Icons.Rounded.Close, null, tint = lc.iconDefault, modifier = Modifier.size(22.dp)) }
+        ) { Icon(LiquidGlyphs.Close, null, tint = lc.iconDefault, modifier = Modifier.size(22.dp)) }
         Spacer(Modifier.width(14.dp))
         Text(if (count == 0) "Выбор треков" else "Выбрано: $count",
             color = lc.textPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
@@ -318,13 +316,13 @@ private fun SelectableTrackRow(
     ) {
         if (selectionMode) {
             if (selectedNow) {
-                Icon(Icons.Rounded.CheckCircle, null, tint = lc.accent, modifier = Modifier.size(24.dp))
+                Icon(LiquidGlyphs.CheckCircle, null, tint = lc.accent, modifier = Modifier.size(24.dp))
             } else {
                 Box(Modifier.size(24.dp).clip(CircleShape).border(2.dp, lc.iconMuted, CircleShape))
             }
             Spacer(Modifier.width(10.dp))
         }
-        ArtBox(albumArt(e.albumId), 48.dp, 8.dp, lc, Icons.Rounded.MusicNote)
+        ArtBox(albumArt(e.albumId), 48.dp, 8.dp, lc, LiquidGlyphs.MusicNote)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(e.title, color = lc.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium,
@@ -440,7 +438,7 @@ fun LocalAlbumDetailScreen(albumId: Long, albumName: String, onBack: () -> Unit)
                 }
                 Spacer(Modifier.height(12.dp))
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    ArtBox(albumArt(albumId), 180.dp, 16.dp, lc, Icons.Rounded.Album)
+                    ArtBox(albumArt(albumId), 180.dp, 16.dp, lc, LiquidGlyphs.Album)
                 }
                 Spacer(Modifier.height(14.dp))
                 Text(albumName, color = lc.textPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold,
@@ -473,7 +471,7 @@ private fun ArtistRow(a: ArtistAgg, lc: LiquidColors, onClick: () -> Unit) {
             .padding(horizontal = 8.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        ArtBox(albumArt(a.anyAlbumId), 48.dp, 24.dp, lc, Icons.Rounded.Person)
+        ArtBox(albumArt(a.anyAlbumId), 48.dp, 24.dp, lc, LiquidGlyphs.Person)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(a.name, color = lc.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium,
@@ -491,7 +489,7 @@ private fun AlbumRow(al: AlbumAgg, lc: LiquidColors, onClick: () -> Unit) {
             .padding(horizontal = 8.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        ArtBox(albumArt(al.albumId), 48.dp, 8.dp, lc, Icons.Rounded.Album)
+        ArtBox(albumArt(al.albumId), 48.dp, 8.dp, lc, LiquidGlyphs.Album)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(al.name, color = lc.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium,
@@ -507,7 +505,7 @@ private fun AlbumCard(al: AlbumAgg, lc: LiquidColors, onClick: () -> Unit) {
         Modifier.clip(RoundedCornerShape(12.dp))
             .liquidClickable(onClick = onClick).padding(4.dp)
     ) {
-        ArtBox(albumArt(al.albumId), null, 12.dp, lc, Icons.Rounded.Album, Modifier.fillMaxWidth().aspectRatio(1f))
+        ArtBox(albumArt(al.albumId), null, 12.dp, lc, LiquidGlyphs.Album, Modifier.fillMaxWidth().aspectRatio(1f))
         Spacer(Modifier.height(6.dp))
         Text(al.name, color = lc.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium,
             maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -523,7 +521,7 @@ private fun TrackRow(e: LocalTrackEntity, lc: LiquidColors, paddingH: Dp = 8.dp,
             .padding(horizontal = paddingH, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        ArtBox(albumArt(e.albumId), 48.dp, 8.dp, lc, Icons.Rounded.MusicNote)
+        ArtBox(albumArt(e.albumId), 48.dp, 8.dp, lc, LiquidGlyphs.MusicNote)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(e.title, color = lc.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium,
@@ -608,7 +606,7 @@ private fun SearchField(query: String, lc: LiquidColors, onChange: (String) -> U
             .background(lc.searchFieldBg).padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(Icons.Rounded.Search, null, tint = lc.iconMuted, modifier = Modifier.size(20.dp))
+        Icon(LiquidGlyphs.Search, null, tint = lc.iconMuted, modifier = Modifier.size(20.dp))
         Spacer(Modifier.width(10.dp))
         BasicTextField(
             value = query, onValueChange = onChange, singleLine = true,
@@ -622,7 +620,7 @@ private fun SearchField(query: String, lc: LiquidColors, onChange: (String) -> U
             }
         )
         if (query.isNotEmpty()) {
-            Icon(Icons.Rounded.Close, null, tint = lc.iconMuted,
+            Icon(LiquidGlyphs.Close, null, tint = lc.iconMuted,
                 modifier = Modifier.size(20.dp).liquidClickable(pressedScale = LiquidMotion.PressIcon, onClick = onClear))
         }
     }
@@ -635,7 +633,7 @@ private fun PlayAllButton(lc: LiquidColors, onClick: () -> Unit) {
             .liquidClickable(pressedScale = LiquidMotion.PressIcon, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Icon(Icons.Rounded.PlayArrow, null, tint = Color.White, modifier = Modifier.size(24.dp))
+        Icon(LiquidGlyphs.Play, null, tint = Color.White, modifier = Modifier.size(24.dp))
     }
 }
 
@@ -646,6 +644,6 @@ private fun CircleBack(lc: LiquidColors, onClick: () -> Unit) {
             .clip(CircleShape).liquidClickable(pressedScale = LiquidMotion.PressIcon, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, tint = lc.iconDefault, modifier = Modifier.size(22.dp))
+        Icon(LiquidGlyphs.Back, null, tint = lc.iconDefault, modifier = Modifier.size(22.dp))
     }
 }

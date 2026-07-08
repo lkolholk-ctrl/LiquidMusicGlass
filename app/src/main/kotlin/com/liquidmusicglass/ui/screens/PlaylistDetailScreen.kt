@@ -1,5 +1,6 @@
 package com.liquidmusicglass.ui.screens
 
+import com.liquidmusicglass.ui.icons.LiquidGlyphs
 import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.WindowInsets
@@ -22,9 +23,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
-import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material3.CircularProgressIndicator
@@ -187,7 +186,7 @@ fun PlaylistDetailScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        Icons.AutoMirrored.Rounded.ArrowBack,
+                        LiquidGlyphs.Back,
                         null,
                         tint = lc.iconDefault,
                         modifier = Modifier.size(22.dp)
@@ -213,7 +212,7 @@ fun PlaylistDetailScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            Icons.Rounded.Download,
+                            LiquidGlyphs.Download,
                             contentDescription = "Download playlist",
                             tint = AppleRed,
                             modifier = Modifier.size(22.dp)
@@ -323,7 +322,7 @@ fun PlaylistDetailScreen(
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(
-                                    Icons.Rounded.PlayArrow,
+                                    LiquidGlyphs.Play,
                                     null,
                                     tint = Color.White,
                                     modifier = Modifier.size(22.dp)

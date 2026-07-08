@@ -1,5 +1,6 @@
 package com.liquidmusicglass.ui.screens
 
+import com.liquidmusicglass.ui.icons.LiquidGlyphs
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,8 +21,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material3.CircularProgressIndicator
@@ -152,7 +151,7 @@ fun AlbumDetailScreen(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
-                                    imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                                    imageVector = LiquidGlyphs.Back,
                                     contentDescription = null,
                                     tint = LiquidTheme.colors.iconDefault,
                                     modifier = Modifier.size(22.dp)
@@ -178,7 +177,7 @@ fun AlbumDetailScreen(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
-                                    imageVector = Icons.Rounded.Share,
+                                    imageVector = LiquidGlyphs.Share,
                                     contentDescription = null,
                                     tint = LiquidTheme.colors.iconDefault,
                                     modifier = Modifier.size(22.dp)
@@ -269,7 +268,7 @@ fun AlbumDetailScreen(
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(
-                                        Icons.Rounded.PlayArrow, null,
+                                        LiquidGlyphs.Play, null,
                                         tint = Color.White,
                                         modifier = Modifier.size(20.dp)
                                     )

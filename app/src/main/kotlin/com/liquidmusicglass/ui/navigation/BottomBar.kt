@@ -1,5 +1,6 @@
 package com.liquidmusicglass.ui.navigation
 
+import com.liquidmusicglass.ui.icons.LiquidGlyphs
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
@@ -11,10 +12,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
-import androidx.compose.material.icons.rounded.AutoAwesome
-import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -60,10 +57,10 @@ fun BottomBar(
 ) {
     val items = remember {
         listOf(
-            BottomNavItem(Icons.Rounded.GraphicEq, "Wave", 0),
-            BottomNavItem(Icons.Rounded.AutoAwesome, "New", 4),
-            BottomNavItem(Icons.AutoMirrored.Rounded.PlaylistPlay, "Playlist", 2),
-            BottomNavItem(Icons.Rounded.Settings, "Settings", 3)
+            BottomNavItem(LiquidGlyphs.Equalizer, "Wave", 0),
+            BottomNavItem(LiquidGlyphs.Star, "New", 4),
+            BottomNavItem(LiquidGlyphs.Playlist, "Playlist", 2),
+            BottomNavItem(LiquidGlyphs.Settings, "Settings", 3)
         )
     }
 

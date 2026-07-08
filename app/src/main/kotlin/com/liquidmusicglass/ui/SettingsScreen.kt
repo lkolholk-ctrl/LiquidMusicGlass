@@ -1,5 +1,6 @@
 package com.liquidmusicglass.ui.screens
 
+import com.liquidmusicglass.ui.icons.LiquidGlyphs
 import android.content.Context
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
@@ -12,8 +13,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Equalizer
 import androidx.compose.material.icons.rounded.Person
@@ -99,7 +98,7 @@ fun SettingsScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                            imageVector = LiquidGlyphs.Back,
                             contentDescription = null,
                             tint = lc.iconDefault,
                             modifier = Modifier.size(22.dp)
@@ -179,7 +178,7 @@ fun SettingsScreen(
                             )
                         } else {
                             Icon(
-                                imageVector = Icons.Rounded.Person,
+                                imageVector = LiquidGlyphs.Person,
                                 contentDescription = null,
                                 tint = lc.iconMuted,
                                 modifier = Modifier.size(28.dp)
@@ -327,7 +326,7 @@ fun SettingsScreen(
                 SettingsActionItem(
                     title = "Audio",
                     subtitle = "EQ, Bass, Loudness, Compressor, Limiter",
-                    icon = Icons.Rounded.Equalizer,
+                    icon = LiquidGlyphs.Equalizer,
                     onClick = onOpenEqualizer
                 )
             }
@@ -489,7 +488,7 @@ fun SettingsScreen(
                 SettingsActionItem(
                     title = "Reset Wave Preferences",
                     subtitle = if (waveResetSuccess) "Preferences reset successfully" else "Clear wave history and start fresh",
-                    icon = Icons.Rounded.ChevronRight,
+                    icon = LiquidGlyphs.ChevronRight,
                     onClick = {
                         if (isResettingWave) return@SettingsActionItem
                         scope.launch {
@@ -648,7 +647,7 @@ fun SettingsScreen(
                 SettingsActionItem(
                     title = "Ignore Battery Optimization",
                     subtitle = "Prevents background stutter (Doze). Recommended for music",
-                    icon = Icons.Rounded.ChevronRight,
+                    icon = LiquidGlyphs.ChevronRight,
                     onClick = { requestIgnoreBatteryOptimizations(context) }
                 )
             }
@@ -981,7 +980,7 @@ private fun SettingsActionItem(
             )
         }
         Icon(
-            imageVector = Icons.Rounded.ChevronRight,
+            imageVector = LiquidGlyphs.ChevronRight,
             contentDescription = null,
             tint = LiquidTheme.colors.iconDefault,
             modifier = Modifier.size(20.dp)

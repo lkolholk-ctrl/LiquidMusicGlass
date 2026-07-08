@@ -1,5 +1,6 @@
 package com.liquidmusicglass.ui.glass
 
+import com.liquidmusicglass.ui.icons.LiquidGlyphs
 import android.content.ContentUris
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -11,7 +12,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
@@ -215,7 +215,7 @@ private fun PlaceholderArt(modifier: Modifier = Modifier) {
         )
         // Bold, heavy icon on top
         Icon(
-            imageVector = Icons.Rounded.MusicNote,
+            imageVector = LiquidGlyphs.MusicNote,
             contentDescription = null,
             tint = Color.White.copy(alpha = 0.85f),
             modifier = Modifier.fillMaxSize(0.55f)

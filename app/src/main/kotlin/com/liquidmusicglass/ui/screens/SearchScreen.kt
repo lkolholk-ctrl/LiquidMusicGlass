@@ -1,5 +1,6 @@
 package com.liquidmusicglass.ui.screens
 
+import com.liquidmusicglass.ui.icons.LiquidGlyphs
 import android.content.Context
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
@@ -20,7 +21,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.History
@@ -228,7 +228,7 @@ fun SearchScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
-                    imageVector = Icons.Rounded.Search,
+                    imageVector = LiquidGlyphs.Search,
                     contentDescription = null,
                     tint = LiquidTheme.colors.iconMuted,
                     modifier = Modifier.size(20.dp)
@@ -281,7 +281,7 @@ fun SearchScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = Icons.Rounded.Close,
+                            imageVector = LiquidGlyphs.Close,
                             contentDescription = null,
                             tint = LiquidTheme.colors.textSecondary,
                             modifier = Modifier.size(14.dp)
@@ -541,7 +541,7 @@ fun SearchScreen(
                                             SearchResultRow(
                                                 title = item.title,
                                                 subtitle = item.displayArtist,
-                                                icon = Icons.Rounded.MusicNote,
+                                                icon = LiquidGlyphs.MusicNote,
                                                 coverUrl = item.cover,
                                                 isExplicit = item.isExplicit,
                                                 isCustom = item.isCustom,
@@ -699,7 +699,7 @@ private fun ArtistChip(
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = Icons.Rounded.Person,
+                    imageVector = LiquidGlyphs.Person,
                     contentDescription = null,
                     tint = LiquidTheme.colors.iconMuted,
                     modifier = Modifier.size(32.dp)
@@ -776,7 +776,7 @@ private fun HistoryChip(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
-            imageVector = Icons.Rounded.History,
+            imageVector = LiquidGlyphs.History,
             contentDescription = null,
             tint = LiquidTheme.colors.iconMuted,
             modifier = Modifier.size(15.dp)
