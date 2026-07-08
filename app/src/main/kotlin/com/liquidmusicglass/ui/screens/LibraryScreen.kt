@@ -1,6 +1,5 @@
 package com.liquidmusicglass.ui.screens
 
-import com.liquidmusicglass.ui.icons.LiquidGlyphs
 import android.content.Context
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -27,7 +26,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.Download
@@ -232,7 +234,7 @@ fun LibraryScreen(
                             MenuCard(
                                 title = "Favorites",
                                 subtitle = "${favorites.size} tracks",
-                                icon = LiquidGlyphs.Favorite,
+                                icon = Icons.Default.Favorite,
                                 tint = AppleRed,
                                 onClick = { currentView = LibraryView.FAVORITES },
                                 trailing = {
@@ -245,7 +247,7 @@ fun LibraryScreen(
                                 subtitle = downloadsSize
                                     ?.let { "${downloadedTracks.size} tracks · $it" }
                                     ?: "${downloadedTracks.size} tracks",
-                                icon = LiquidGlyphs.Download,
+                                icon = Icons.Default.Download,
                                 tint = Color(0xFF29B6F6),
                                 onClick = { currentView = LibraryView.DOWNLOADS }
                             )
@@ -283,7 +285,7 @@ fun LibraryScreen(
                                     },
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(LiquidGlyphs.Add, null, tint = Color(0xFF30D158), modifier = Modifier.size(20.dp))
+                                Icon(Icons.Rounded.Add, null, tint = Color(0xFF30D158), modifier = Modifier.size(20.dp))
                             }
                         }
                     }
@@ -295,7 +297,7 @@ fun LibraryScreen(
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
                                 Icon(
-                                    LiquidGlyphs.Playlist, null,
+                                    Icons.AutoMirrored.Rounded.PlaylistPlay, null,
                                     tint = lc.iconMuted, modifier = Modifier.size(48.dp)
                                 )
                                 Spacer(Modifier.height(10.dp))
@@ -325,7 +327,7 @@ fun LibraryScreen(
                         onDismiss = { playlistToDelete = null },
                         title = "Delete Playlist",
                         message = "Are you sure you want to delete '${cell.name}'?",
-                        icon = LiquidGlyphs.Close,
+                        icon = Icons.Rounded.Close,
                         iconTint = Color(0xFFFF5252),
                         primaryButton = GlassDialogButton(
                             text = "Delete",
@@ -372,7 +374,7 @@ fun LibraryScreen(
                             )
                         } else {
                             IconButton(onClick = { viewModel.syncWithCloud() }) {
-                                Icon(LiquidGlyphs.Refresh, null, tint = lc.iconMuted, modifier = Modifier.size(20.dp))
+                                Icon(Icons.Filled.Refresh, null, tint = lc.iconMuted, modifier = Modifier.size(20.dp))
                             }
                         }
                     }
@@ -385,14 +387,14 @@ fun LibraryScreen(
                                 .padding(horizontal = 20.dp, vertical = 8.dp),
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            ActionButton("Play All", LiquidGlyphs.Play, onClick = { viewModel.playAll(context) }, modifier = Modifier.weight(1f))
+                            ActionButton("Play All", Icons.Default.PlayArrow, onClick = { viewModel.playAll(context) }, modifier = Modifier.weight(1f))
                             ActionButton("Shuffle", Icons.Default.Shuffle, onClick = { viewModel.shuffleAndPlay(context) }, modifier = Modifier.weight(1f))
                         }
                     }
 
                     // Content
                     if (favorites.isEmpty() && !isSyncing) {
-                        EmptyState("No favorites yet", LiquidGlyphs.Favorite)
+                        EmptyState("No favorites yet", Icons.Default.Favorite)
                     } else {
                         LazyColumn(
                             modifier = Modifier.weight(1f),
@@ -444,7 +446,7 @@ fun LibraryScreen(
                             if (downloadedTracks.isNotEmpty()) {
                                 IconButton(onClick = { showClearAllDialog = true }) {
                                     Icon(
-                                        imageVector = LiquidGlyphs.Close,
+                                        imageVector = Icons.Rounded.Close,
                                         contentDescription = "Clear all downloads",
                                         tint = AppleRed,
                                         modifier = Modifier.size(24.dp)
@@ -457,7 +459,7 @@ fun LibraryScreen(
                     if (!isPremium && downloadedTracks.isEmpty()) {
                         PremiumDownloadsPromo(backdrop = backdrop)
                     } else if (downloadedTracks.isEmpty()) {
-                        EmptyState("No downloaded tracks yet", LiquidGlyphs.Download)
+                        EmptyState("No downloaded tracks yet", Icons.Default.Download)
                     } else {
                         LazyColumn(
                             modifier = Modifier.weight(1f),
@@ -505,7 +507,7 @@ fun LibraryScreen(
                         onDismiss = { showClearAllDialog = false },
                         title = "Clear All Downloads",
                         message = "This will permanently delete all ${downloadedTracks.size} downloaded tracks from your device and the database. This action cannot be undone.",
-                        icon = LiquidGlyphs.Download,
+                        icon = Icons.Default.Download,
                         iconTint = AppleRed,
                         primaryButton = GlassDialogButton(
                             text = "Clear All",
@@ -533,7 +535,7 @@ fun LibraryScreen(
                         onDismiss = { trackToDelete = null },
                         title = "Delete Offline Track",
                         message = "Remove '${track.title}' from your device storage?",
-                        icon = LiquidGlyphs.Close,
+                        icon = Icons.Rounded.Close,
                         iconTint = Color(0xFFFF5252),
                         primaryButton = GlassDialogButton(
                             text = "Remove",
@@ -566,12 +568,12 @@ fun LibraryScreen(
                 ) {
                     SubHeader("My Playlists", onBack = { currentView = LibraryView.MAIN }) {
                         IconButton(onClick = { showImportDialog = true }) {
-                            Icon(LiquidGlyphs.Add, null, tint = Color(0xFF30D158), modifier = Modifier.size(24.dp))
+                            Icon(Icons.Rounded.Add, null, tint = Color(0xFF30D158), modifier = Modifier.size(24.dp))
                         }
                     }
 
                     if (localPlaylists.isEmpty()) {
-                        EmptyState("No playlists yet.\nImport one to get started!", LiquidGlyphs.Playlist)
+                        EmptyState("No playlists yet.\nImport one to get started!", Icons.AutoMirrored.Rounded.PlaylistPlay)
                     } else {
                         LazyColumn(
                             modifier = Modifier.weight(1f),
@@ -596,7 +598,7 @@ fun LibraryScreen(
                         onDismiss = { playlistToDelete = null },
                         title = "Delete Playlist",
                         message = "Are you sure you want to delete '${playlist.name}'?",
-                        icon = LiquidGlyphs.Close,
+                        icon = Icons.Rounded.Close,
                         iconTint = Color(0xFFFF5252),
                         primaryButton = GlassDialogButton(
                             text = "Delete",
@@ -630,10 +632,10 @@ fun LibraryScreen(
                         if (isLoggedIn) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 IconButton(onClick = { loadImportedPlaylists() }) {
-                                    Icon(LiquidGlyphs.Refresh, null, tint = lc.iconMuted, modifier = Modifier.size(20.dp))
+                                    Icon(Icons.Filled.Refresh, null, tint = lc.iconMuted, modifier = Modifier.size(20.dp))
                                 }
                                 IconButton(onClick = { showImportDialog = true }) {
-                                    Icon(LiquidGlyphs.Add, null, tint = AppleRed, modifier = Modifier.size(24.dp))
+                                    Icon(Icons.Rounded.Add, null, tint = AppleRed, modifier = Modifier.size(24.dp))
                                 }
                             }
                         }
@@ -647,7 +649,7 @@ fun LibraryScreen(
                             contentAlignment = Alignment.Center
                         ) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(LiquidGlyphs.Playlist, null, tint = lc.iconMuted, modifier = Modifier.size(64.dp))
+                                Icon(Icons.AutoMirrored.Rounded.PlaylistPlay, null, tint = lc.iconMuted, modifier = Modifier.size(64.dp))
                                 Spacer(Modifier.height(16.dp))
                                 Text("Sync Playlists", color = lc.textPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                                 Spacer(Modifier.height(8.dp))
@@ -673,7 +675,7 @@ fun LibraryScreen(
                         } + importedPlaylists.filter { it.source == null }
 
                         if (importedPlaylists.isEmpty()) {
-                            EmptyState("No imported playlists yet.\nTap + to import one!", LiquidGlyphs.Playlist)
+                            EmptyState("No imported playlists yet.\nTap + to import one!", Icons.AutoMirrored.Rounded.PlaylistPlay)
                         } else {
                             LazyColumn(
                                 modifier = Modifier.weight(1f),
@@ -741,7 +743,7 @@ fun LibraryScreen(
                         onDismiss = { importedPlaylistToDelete = null },
                         title = "Delete Playlist",
                         message = "Are you sure you want to delete '${playlist.name}' from your ICM library?",
-                        icon = LiquidGlyphs.Close,
+                        icon = Icons.Rounded.Close,
                         iconTint = Color(0xFFFF5252),
                         primaryButton = GlassDialogButton(
                             text = "Delete",
@@ -845,7 +847,7 @@ private fun MenuCard(
 
         trailing()
 
-        Icon(LiquidGlyphs.ChevronRight, null, tint = lc.textTertiary, modifier = Modifier.size(24.dp))
+        Icon(Icons.Rounded.ChevronRight, null, tint = lc.textTertiary, modifier = Modifier.size(24.dp))
     }
 }
 
@@ -943,7 +945,7 @@ private fun PlaylistCell(
                 }
                 else -> {
                     Icon(
-                        LiquidGlyphs.Playlist,
+                        Icons.AutoMirrored.Rounded.PlaylistPlay,
                         null,
                         tint = lc.iconMuted,
                         modifier = Modifier.size(40.dp).align(Alignment.Center)
@@ -1145,7 +1147,7 @@ private fun LocalAudioView(
             !hasPermission -> {
                 Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(LiquidGlyphs.MusicNote, null, tint = lc.iconMuted, modifier = Modifier.size(64.dp))
+                        Icon(Icons.Rounded.MusicNote, null, tint = lc.iconMuted, modifier = Modifier.size(64.dp))
                         Spacer(Modifier.height(16.dp))
                         Text("Allow access to your music", color = lc.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(8.dp))
@@ -1157,7 +1159,7 @@ private fun LocalAudioView(
                             lineHeight = 20.sp
                         )
                         Spacer(Modifier.height(16.dp))
-                        ActionButton("Grant Permission", LiquidGlyphs.Play, onClick = { permissionLauncher.launch(permission) })
+                        ActionButton("Grant Permission", Icons.Default.PlayArrow, onClick = { permissionLauncher.launch(permission) })
                     }
                 }
             }
@@ -1167,7 +1169,7 @@ private fun LocalAudioView(
                 }
             }
             tracks.isEmpty() -> {
-                EmptyState("No local audio found", LiquidGlyphs.MusicNote)
+                EmptyState("No local audio found", Icons.Rounded.MusicNote)
             }
             else -> {
                 LazyColumn(
@@ -1218,7 +1220,7 @@ private fun LocalTrackRow(
             contentAlignment = Alignment.Center
         ) {
             // Иконка-заглушка снизу; обложка (если есть) рисуется поверх.
-            Icon(LiquidGlyphs.MusicNote, null, tint = lc.iconMuted, modifier = Modifier.size(22.dp))
+            Icon(Icons.Rounded.MusicNote, null, tint = lc.iconMuted, modifier = Modifier.size(22.dp))
             AsyncImage(
                 model = track.albumArtUri,
                 contentDescription = null,
@@ -1256,7 +1258,7 @@ private fun SubHeader(
                 .liquidClickable(pressedScale = LiquidMotion.PressIcon, onClick = onBack),
             contentAlignment = Alignment.Center
         ) {
-            Icon(LiquidGlyphs.Back, null, tint = lc.textPrimary, modifier = Modifier.size(20.dp))
+            Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, tint = lc.textPrimary, modifier = Modifier.size(20.dp))
         }
 
         Spacer(Modifier.width(16.dp))
@@ -1348,7 +1350,7 @@ private fun ImportedPlaylistRow(
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        LiquidGlyphs.Playlist,
+                        Icons.AutoMirrored.Rounded.PlaylistPlay,
                         null,
                         tint = lc.iconMuted,
                         modifier = Modifier.size(28.dp)
@@ -1376,7 +1378,7 @@ private fun ImportedPlaylistRow(
         }
 
         IconButton(onClick = onDelete) {
-            Icon(LiquidGlyphs.Close, null, tint = lc.textTertiary, modifier = Modifier.size(22.dp))
+            Icon(Icons.Rounded.Close, null, tint = lc.textTertiary, modifier = Modifier.size(22.dp))
         }
     }
 }
@@ -1428,7 +1430,7 @@ private fun LocalPlaylistRow(
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        LiquidGlyphs.Playlist,
+                        Icons.AutoMirrored.Rounded.PlaylistPlay,
                         null,
                         tint = lc.iconMuted,
                         modifier = Modifier.size(28.dp)
@@ -1456,7 +1458,7 @@ private fun LocalPlaylistRow(
         }
 
         IconButton(onClick = onDelete) {
-            Icon(LiquidGlyphs.Close, null, tint = lc.textTertiary, modifier = Modifier.size(22.dp))
+            Icon(Icons.Rounded.Close, null, tint = lc.textTertiary, modifier = Modifier.size(22.dp))
         }
     }
 }
@@ -1622,7 +1624,7 @@ private fun ImportPlaylistDialog(
                     Text("Import Playlist", color = lc.textPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                     if (!isImporting) {
                         IconButton(onClick = onDismiss) {
-                            Icon(LiquidGlyphs.Close, null, tint = lc.iconMuted)
+                            Icon(Icons.Rounded.Close, null, tint = lc.iconMuted)
                         }
                     }
                 }
@@ -2104,7 +2106,7 @@ private fun FavoriteTrackItem(
 
         IconButton(onClick = onToggleLike) {
             Icon(
-                imageVector = if (isLiked) LiquidGlyphs.Favorite else LiquidGlyphs.FavoriteBorder,
+                imageVector = if (isLiked) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
                 contentDescription = null,
                 tint = if (isLiked) AppleRed else lc.textTertiary,
                 modifier = Modifier.size(22.dp)
@@ -2176,7 +2178,7 @@ private fun DownloadedTrackItem(
 
         IconButton(onClick = onDelete) {
             Icon(
-                imageVector = LiquidGlyphs.Close,
+                imageVector = Icons.Rounded.Close,
                 contentDescription = null,
                 tint = lc.textTertiary,
                 modifier = Modifier.size(22.dp)
@@ -2239,7 +2241,7 @@ private fun PremiumDownloadsPromo(backdrop: LayerBackdrop? = null) {
                 .padding(32.dp)
         ) {
             Icon(
-                imageVector = LiquidGlyphs.Download,
+                imageVector = Icons.Default.Download,
                 contentDescription = null,
                 tint = AppleRed,
                 modifier = Modifier.size(64.dp)

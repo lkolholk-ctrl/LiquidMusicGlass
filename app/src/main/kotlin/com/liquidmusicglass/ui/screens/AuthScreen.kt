@@ -1,6 +1,5 @@
 package com.liquidmusicglass.ui.screens
 
-import com.liquidmusicglass.ui.icons.LiquidGlyphs
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -21,6 +20,7 @@ import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Send
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -89,7 +89,7 @@ fun AuthScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = LiquidGlyphs.Back,
+                        imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
                         contentDescription = null,
                         tint = lc.iconDefault,
                         modifier = Modifier.size(22.dp)

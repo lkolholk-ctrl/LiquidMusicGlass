@@ -1,6 +1,5 @@
 package com.liquidmusicglass.ui.screens
 
-import com.liquidmusicglass.ui.icons.LiquidGlyphs
 import android.app.Activity
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -15,6 +14,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -373,6 +374,6 @@ private fun CircleBack(lc: LiquidColors, onClick: () -> Unit) {
             .clip(CircleShape).clickable(remember { MutableInteractionSource() }, null, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Icon(LiquidGlyphs.Back, null, tint = lc.iconDefault, modifier = Modifier.size(22.dp))
+        Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, tint = lc.iconDefault, modifier = Modifier.size(22.dp))
     }
 }

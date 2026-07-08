@@ -1,6 +1,5 @@
 package com.liquidmusicglass.ui.components
 
-import com.liquidmusicglass.ui.icons.LiquidGlyphs
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.spring
@@ -11,6 +10,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material3.Icon
@@ -92,7 +92,7 @@ fun LikeBurstHeart(
             }
         }
         Icon(
-            imageVector = if (isLiked) LiquidGlyphs.Favorite else LiquidGlyphs.FavoriteBorder,
+            imageVector = if (isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
             contentDescription = null,
             tint = if (isLiked) likedTint else idleTint,
             modifier = Modifier

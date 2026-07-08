@@ -1,6 +1,5 @@
 package com.liquidmusicglass.ui
 
-import com.liquidmusicglass.ui.icons.LiquidGlyphs
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -20,6 +19,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -92,7 +93,7 @@ fun UpdateDialog(backdrop: LayerBackdrop) {
                     // Icon + title
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
-                            LiquidGlyphs.Download, null,
+                            Icons.Rounded.SystemUpdate, null,
                             tint = AppleRed,
                             modifier = Modifier.size(32.dp)
                         )

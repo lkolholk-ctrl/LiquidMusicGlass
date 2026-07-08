@@ -1,6 +1,5 @@
 package com.liquidmusicglass.ui.screens
 
-import com.liquidmusicglass.ui.icons.LiquidGlyphs
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -12,6 +11,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -602,7 +602,7 @@ private fun GenreSelectionView(
                         if (isSelected) {
                             Spacer(modifier = Modifier.width(6.dp))
                             Icon(
-                                imageVector = LiquidGlyphs.Check,
+                                imageVector = Icons.Rounded.Check,
                                 contentDescription = null,
                                 tint = Color.White,
                                 modifier = Modifier.size(16.dp)
@@ -778,7 +778,7 @@ private fun ArtistGridItem(
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = LiquidGlyphs.Check,
+                        imageVector = Icons.Rounded.Check,
                         contentDescription = null,
                         tint = Color.White,
                         modifier = Modifier.size(28.dp)

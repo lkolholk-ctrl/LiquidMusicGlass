@@ -1,6 +1,5 @@
 package com.liquidmusicglass.ui.screens
 
-import com.liquidmusicglass.ui.icons.LiquidGlyphs
 import android.net.Uri
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
@@ -37,7 +36,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.ThumbDown
 import androidx.compose.material.icons.rounded.Whatshot
@@ -382,7 +383,7 @@ fun WaveHomeScreen(
                         ) {
                             FlatCircleButton(onClick = { PlayerController.togglePlayPause(context) }) {
                                 Icon(
-                                    imageVector = if (isPlaying) LiquidGlyphs.Pause else LiquidGlyphs.Play,
+                                    imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                                     contentDescription = if (isPlaying) "Pause" else "Play",
                                     tint = Color.White,
                                     modifier = Modifier.size(26.dp)
@@ -453,7 +454,7 @@ fun WaveHomeScreen(
                             }
                             FlatCircleButton(onClick = { PlayerController.toggleFavorite(track.id) }) {
                                 Icon(
-                                    imageVector = LiquidGlyphs.FavoriteBorder,
+                                    imageVector = Icons.Rounded.FavoriteBorder,
                                     contentDescription = "Like",
                                     tint = if (isFavorite) Color(0xFFFF4D67) else Color.White,
                                     modifier = Modifier.size(24.dp)
@@ -478,7 +479,7 @@ fun WaveHomeScreen(
                                     }
                                 }
                                 WaveFeedbackChip(
-                                    icon = LiquidGlyphs.ThumbDown,
+                                    icon = Icons.Rounded.ThumbDown,
                                     label = "Less",
                                     tint = Color.White.copy(alpha = 0.75f)
                                 ) {
@@ -519,7 +520,7 @@ fun WaveHomeScreen(
                                     tint = accent.copy(alpha = 0.85f)
                                 ) { sendGenreFeedback("more_genre") }
                                 WaveFeedbackChip(
-                                    icon = LiquidGlyphs.ThumbDown,
+                                    icon = Icons.Rounded.ThumbDown,
                                     label = "Less genre",
                                     tint = Color.White.copy(alpha = 0.6f)
                                 ) { sendGenreFeedback("less_genre") }
@@ -776,7 +777,7 @@ private fun WaveStationIndicator(name: String, onClear: () -> Unit) {
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                imageVector = LiquidGlyphs.Close,
+                imageVector = Icons.Rounded.Close,
                 contentDescription = "Reset to My Wave",
                 tint = Color.White.copy(alpha = 0.85f),
                 modifier = Modifier.size(16.dp)
@@ -815,7 +816,7 @@ private fun WaveTopBar(onSearch: () -> Unit, onOpenProfile: () -> Unit) {
                 )
             } else {
                 Icon(
-                    imageVector = LiquidGlyphs.Person,
+                    imageVector = Icons.Rounded.AccountCircle,
                     contentDescription = "Profile",
                     tint = Color.White,
                     modifier = Modifier.size(26.dp)
@@ -833,7 +834,7 @@ private fun WaveTopBar(onSearch: () -> Unit, onOpenProfile: () -> Unit) {
         )
 
         Icon(
-            imageVector = LiquidGlyphs.Search,
+            imageVector = Icons.Rounded.Search,
             contentDescription = "Search",
             tint = Color.White,
             modifier = Modifier
@@ -861,7 +862,7 @@ private fun BigPlayButton(loading: Boolean, accent: Color = WaveAccent, onClick:
         } else {
             // Просто большой треугольник, без круга/подложки
             Icon(
-                imageVector = LiquidGlyphs.Play,
+                imageVector = Icons.Rounded.PlayArrow,
                 contentDescription = "Listen",
                 tint = accent,
                 modifier = Modifier.size(124.dp)

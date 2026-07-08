@@ -1,6 +1,5 @@
 package com.liquidmusicglass.ui.screens
 
-import com.liquidmusicglass.ui.icons.LiquidGlyphs
 import android.content.Context
 import android.net.Uri
 import androidx.compose.foundation.background
@@ -12,7 +11,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -430,7 +432,7 @@ fun HomeScreen(
                 )
                 IconButton(onClick = { viewModel.refresh() }) {
                     Icon(
-                        imageVector = LiquidGlyphs.Refresh,
+                        imageVector = Icons.Rounded.Refresh,
                         contentDescription = "Refresh",
                         tint = LiquidTheme.colors.textSecondary
                     )
@@ -815,7 +817,7 @@ private fun BannerCard(
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                imageVector = LiquidGlyphs.Play,
+                imageVector = Icons.Rounded.PlayArrow,
                 contentDescription = "Play",
                 tint = Color.White,
                 modifier = Modifier.size(20.dp)

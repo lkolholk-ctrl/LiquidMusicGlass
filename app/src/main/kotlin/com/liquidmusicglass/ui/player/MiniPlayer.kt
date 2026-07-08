@@ -1,6 +1,5 @@
 package com.liquidmusicglass.ui.player
 
-import com.liquidmusicglass.ui.icons.LiquidGlyphs
 import android.net.Uri
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.spring
@@ -20,7 +19,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -170,7 +171,7 @@ fun MiniPlayer(
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                imageVector = if (isPlaying) LiquidGlyphs.Pause else LiquidGlyphs.Play,
+                imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                 contentDescription = if (isPlaying) "Pause" else "Play",
                 modifier = Modifier.size(28.dp),
                 tint = Color.White

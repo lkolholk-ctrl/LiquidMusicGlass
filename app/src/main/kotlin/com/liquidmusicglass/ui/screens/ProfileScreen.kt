@@ -1,6 +1,5 @@
 package com.liquidmusicglass.ui.screens
 
-import com.liquidmusicglass.ui.icons.LiquidGlyphs
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -158,7 +157,7 @@ fun ProfileScreen(
                             )
                         } else {
                             Icon(
-                                LiquidGlyphs.Person,
+                                Icons.Rounded.Person,
                                 null,
                                 tint = lc.iconMuted,
                                 modifier = Modifier.size(64.dp)
@@ -184,7 +183,7 @@ fun ProfileScreen(
                         if (isPremium) {
                             Spacer(modifier = Modifier.width(8.dp))
                             Icon(
-                                imageVector = LiquidGlyphs.Star,
+                                imageVector = Icons.Rounded.Star,
                                 contentDescription = "Premium",
                                 tint = AppleRed,
                                 modifier = Modifier.size(18.dp)
@@ -317,7 +316,7 @@ fun ProfileScreen(
                                             )
                                         } else {
                                             Icon(
-                                                LiquidGlyphs.Person, null,
+                                                Icons.Rounded.Person, null,
                                                 tint = lc.iconMuted,
                                                 modifier = Modifier.size(28.dp)
                                             )
@@ -449,7 +448,7 @@ fun ProfileScreen(
                                     )
                                     if (selected) {
                                         Icon(
-                                            LiquidGlyphs.Star, null,
+                                            Icons.Rounded.Star, null,
                                             tint = AppleRed,
                                             modifier = Modifier.size(14.dp)
                                         )
@@ -490,7 +489,7 @@ fun ProfileScreen(
                         )
                     } else {
                         SettingRowNavigable(
-                            icon = LiquidGlyphs.Person,
+                            icon = Icons.Rounded.Person,
                             label = "Sign In",
                             value = "Connect your account",
                             onClick = onOpenAuth
@@ -661,7 +660,7 @@ private fun SimpleSubscriptionCard(
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    LiquidGlyphs.Star,
+                    Icons.Rounded.Star,
                     null,
                     tint = PremiumPurple,
                     modifier = Modifier.size(18.dp)
@@ -734,7 +733,7 @@ private fun SubscriptionDetailCard(
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    LiquidGlyphs.Star,
+                    Icons.Rounded.Star,
                     null,
                     tint = PremiumPurple,
                     modifier = Modifier.size(18.dp)

@@ -1,6 +1,5 @@
 package com.liquidmusicglass.ui.screens
 
-import com.liquidmusicglass.ui.icons.LiquidGlyphs
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
@@ -8,6 +7,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -139,7 +140,7 @@ private fun SuccessCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
-                LiquidGlyphs.CheckCircle,
+                Icons.Rounded.CheckCircle,
                 contentDescription = null,
                 tint = Color(0xFF30D158),
                 modifier = Modifier.size(24.dp)
@@ -190,7 +191,7 @@ private fun ErrorCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
-                LiquidGlyphs.Error,
+                Icons.Rounded.Error,
                 contentDescription = null,
                 tint = Color(0xFFFF453A),
                 modifier = Modifier.size(24.dp)
@@ -212,7 +213,7 @@ private fun ErrorCard(
             }
             IconButton(onClick = onDismiss) {
                 Icon(
-                    LiquidGlyphs.Close,
+                    Icons.Rounded.Close,
                     contentDescription = "Dismiss",
                     tint = Color.Gray,
                     modifier = Modifier.size(18.dp)

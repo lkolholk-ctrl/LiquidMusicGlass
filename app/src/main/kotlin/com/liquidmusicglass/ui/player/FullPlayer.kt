@@ -1,6 +1,5 @@
 package com.liquidmusicglass.ui.player
 
-import com.liquidmusicglass.ui.icons.LiquidGlyphs
 import android.content.Context
 import android.media.AudioManager
 import android.net.Uri
@@ -46,15 +45,23 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.automirrored.rounded.VolumeDown
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
+import androidx.compose.material.icons.rounded.Cast
+import androidx.compose.material.icons.rounded.ChatBubbleOutline
+import androidx.compose.material.icons.rounded.FastForward
+import androidx.compose.material.icons.rounded.FastRewind
 import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.Shuffle
+import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material.icons.rounded.ThumbUp
 import androidx.compose.material.icons.rounded.ThumbDown
 import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Edit
 // import androidx.compose.material.icons.rounded.ThumbUp  // DISABLED
@@ -626,7 +633,7 @@ fun FullPlayer(
                             }
                             isDownloaded -> {
                                 Icon(
-                                    imageVector = LiquidGlyphs.CheckCircle,
+                                    imageVector = Icons.Rounded.CheckCircle,
                                     contentDescription = "Downloaded",
                                     tint = Color(0xFF4CAF50),
                                     modifier = Modifier.size(24.dp)
@@ -634,7 +641,7 @@ fun FullPlayer(
                             }
                             else -> {
                                 Icon(
-                                    imageVector = LiquidGlyphs.Download,
+                                    imageVector = Icons.Rounded.Download,
                                     contentDescription = "Download",
                                     tint = Color.White.copy(alpha = 0.70f),
                                     modifier = Modifier.size(24.dp)
@@ -666,7 +673,7 @@ fun FullPlayer(
                             label = "thumbUp"
                         )
                         Icon(
-                            imageVector = LiquidGlyphs.ThumbUp,
+                            imageVector = Icons.Rounded.ThumbUp,
                             contentDescription = "More like this",
                             tint = thumbUpTint,
                             modifier = Modifier.size(24.dp)
@@ -696,7 +703,7 @@ fun FullPlayer(
                             label = "thumbDown"
                         )
                         Icon(
-                            imageVector = LiquidGlyphs.ThumbDown,
+                            imageVector = Icons.Rounded.ThumbDown,
                             contentDescription = "Less like this",
                             tint = thumbDownTint,
                             modifier = Modifier.size(24.dp)
@@ -709,7 +716,7 @@ fun FullPlayer(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            LiquidGlyphs.MoreHoriz, null,
+                            Icons.Rounded.MoreHoriz, null,
                             tint = Color.White.copy(alpha = 0.70f),
                             modifier = Modifier.size(26.dp)
                         )
@@ -794,7 +801,7 @@ fun FullPlayer(
                     }
 
                     AnimatedTransportButton(
-                        icon = LiquidGlyphs.Previous,
+                        icon = Icons.Rounded.FastRewind,
                         iconSize = 50.dp,
                         onClick = onSkipPrevious
                     )
@@ -802,8 +809,8 @@ fun FullPlayer(
                     // кольцо: видно, что плеер грузит трек, а не завис.
                     Box(contentAlignment = Alignment.Center) {
                         AnimatedTransportButton(
-                            icon = if (isPlaying) LiquidGlyphs.Pause
-                                   else LiquidGlyphs.Play,
+                            icon = if (isPlaying) Icons.Rounded.Pause
+                                   else Icons.Rounded.PlayArrow,
                             iconSize = 66.dp,
                             onClick = onPlayPause
                         )
@@ -816,7 +823,7 @@ fun FullPlayer(
                         }
                     }
                     AnimatedTransportButton(
-                        icon = LiquidGlyphs.Next,
+                        icon = Icons.Rounded.FastForward,
                         iconSize = 50.dp,
                         onClick = onSkipNext
                     )
@@ -829,8 +836,8 @@ fun FullPlayer(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            if (repeatMode == 2) LiquidGlyphs.RepeatOne
-                            else LiquidGlyphs.Repeat, null,
+                            if (repeatMode == 2) Icons.Rounded.RepeatOne
+                            else Icons.Rounded.Repeat, null,
                             tint = if (repeatMode > 0) Color(0xFFFC3C44)
                             else Color.White.copy(alpha = 0.40f),
                             modifier = Modifier.size(20.dp)
@@ -902,7 +909,7 @@ fun FullPlayer(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    BottomIcon(LiquidGlyphs.Chat) {
+                    BottomIcon(Icons.Rounded.ChatBubbleOutline) {
                         if (showLyrics) {
                             showLyrics = false
                             controlsVisible = true
@@ -912,7 +919,7 @@ fun FullPlayer(
                             showQueue = false // Close queue if open
                         }
                     }
-                    BottomIcon(LiquidGlyphs.AirSheetDevices) { showAirPlay = true }
+                    BottomIcon(Icons.Rounded.Cast) { showAirPlay = true }
 
                     // Playback Speed Button
                     val playbackSpeed by PlayerController.playbackSpeed.collectAsState()
@@ -941,7 +948,7 @@ fun FullPlayer(
                         )
                     }
 
-                    BottomIcon(LiquidGlyphs.QueueMusic) {
+                    BottomIcon(Icons.AutoMirrored.Rounded.QueueMusic) {
                         if (showQueue) {
                             showQueue = false
                             controlsVisible = true
@@ -1027,7 +1034,7 @@ fun FullPlayer(
                             )
                             if (artistId != null) {
                                 Icon(
-                                    imageVector = LiquidGlyphs.ChevronRight,
+                                    imageVector = Icons.Rounded.ChevronRight,
                                     contentDescription = null,
                                     tint = Color.White.copy(alpha = 0.40f),
                                     modifier = Modifier.size(24.dp)
@@ -1077,7 +1084,7 @@ fun FullPlayer(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
-                            imageVector = LiquidGlyphs.Equalizer,
+                            imageVector = Icons.Rounded.GraphicEq,
                             contentDescription = null,
                             tint = Color.White,
                             modifier = Modifier.size(24.dp)
@@ -1116,7 +1123,7 @@ fun FullPlayer(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
-                                imageVector = LiquidGlyphs.Edit,
+                                imageVector = Icons.Rounded.Edit,
                                 contentDescription = null,
                                 tint = Color.White,
                                 modifier = Modifier.size(24.dp)
@@ -1150,7 +1157,7 @@ fun FullPlayer(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
-                                imageVector = LiquidGlyphs.Edit,
+                                imageVector = Icons.Rounded.Edit,
                                 contentDescription = null,
                                 tint = Color.White,
                                 modifier = Modifier.size(24.dp)
@@ -1185,7 +1192,7 @@ fun FullPlayer(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
-                            imageVector = LiquidGlyphs.Settings,
+                            imageVector = Icons.Rounded.Settings,
                             contentDescription = null,
                             tint = Color.White,
                             modifier = Modifier.size(24.dp)
@@ -1206,7 +1213,7 @@ fun FullPlayer(
         GlassDialog(
             visible = showPromoDialog,
             onDismiss = { showPromoDialog = false },
-            icon = LiquidGlyphs.Download,
+            icon = Icons.Rounded.Download,
             iconTint = Color(0xFFFC3C44),
             title = "Premium Required",
             message = "Offline listening is strictly an exclusive feature for Premium subscribers under aggregator rules. Upgrade to save tracks and play offline.",
@@ -1233,7 +1240,7 @@ fun FullPlayer(
         GlassDialog(
             visible = showDeleteConfirmDialog,
             onDismiss = { showDeleteConfirmDialog = false },
-            icon = LiquidGlyphs.Close,
+            icon = Icons.Rounded.Close,
             iconTint = Color(0xFFFF5252),
             title = "Delete Download?",
             message = "Are you sure you want to delete this track from your device? You will need an internet connection to stream it again.",
@@ -1380,7 +1387,7 @@ private fun DebugPanel(onDismiss: () -> Unit) {
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            LiquidGlyphs.Close, null,
+                            Icons.Rounded.Close, null,
                             tint = Color.White.copy(alpha = 0.70f),
                             modifier = Modifier.size(22.dp)
                         )

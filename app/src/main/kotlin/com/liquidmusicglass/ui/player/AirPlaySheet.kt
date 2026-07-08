@@ -1,6 +1,5 @@
 package com.liquidmusicglass.ui.player
 
-import com.liquidmusicglass.ui.icons.LiquidGlyphs
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -145,7 +144,7 @@ private fun buildDeviceList(audioManager: AudioManager): List<AudioOutputDevice>
                 externalDevices += AudioOutputDevice(
                     id = device.id,
                     name = rawName.ifBlank { "Bluetooth Audio" },
-                    icon = LiquidGlyphs.Headphones,
+                    icon = Icons.Rounded.Headphones,
                     type = OutputType.BLUETOOTH,
                     isActive = activeType == OutputType.BLUETOOTH
                 )
@@ -157,7 +156,7 @@ private fun buildDeviceList(audioManager: AudioManager): List<AudioOutputDevice>
                 externalDevices += AudioOutputDevice(
                     id = device.id,
                     name = rawName.ifBlank { "Wired Headphones" },
-                    icon = LiquidGlyphs.Headphones,
+                    icon = Icons.Rounded.Headphones,
                     type = OutputType.WIRED,
                     isActive = activeType == OutputType.WIRED
                 )
@@ -401,7 +400,7 @@ fun AirPlaySheet(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = LiquidGlyphs.PersonAddAlt1,
+                            imageVector = Icons.Rounded.PersonAddAlt1,
                             contentDescription = null,
                             tint = Color.White.copy(alpha = 0.92f),
                             modifier = Modifier.size(16.dp)
@@ -475,7 +474,7 @@ private fun DeviceRow(
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = LiquidGlyphs.Check,
+                    imageVector = Icons.Rounded.Check,
                     contentDescription = null,
                     tint = Color.White,
                     modifier = Modifier.size(13.dp)

@@ -1,6 +1,5 @@
 package com.liquidmusicglass.ui.screens
 
-import com.liquidmusicglass.ui.icons.LiquidGlyphs
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -16,7 +15,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Replay
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -338,11 +341,11 @@ private fun SyncTaggingMode(
 
             // транспорт
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 8.dp)) {
-                RoundIcon(if (isPlaying) LiquidGlyphs.Pause else LiquidGlyphs.Play, lc) {
+                RoundIcon(if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, lc) {
                     PlayerController.togglePlayPause(context)
                 }
                 Spacer(Modifier.width(12.dp))
-                RoundIcon(LiquidGlyphs.Repeat, lc) { PlayerController.seekTo(0) }
+                RoundIcon(Icons.Rounded.Replay, lc) { PlayerController.seekTo(0) }
                 Spacer(Modifier.width(12.dp))
                 Text("ТЕСТ", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
                     modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(lc.accentGreen)
@@ -464,11 +467,11 @@ private fun SyncWordTaggingMode(
 
             // транспорт + большой TAP
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 8.dp)) {
-                RoundIcon(if (isPlaying) LiquidGlyphs.Pause else LiquidGlyphs.Play, lc) {
+                RoundIcon(if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, lc) {
                     PlayerController.togglePlayPause(context)
                 }
                 Spacer(Modifier.width(12.dp))
-                RoundIcon(LiquidGlyphs.Repeat, lc) { PlayerController.seekTo(0) }
+                RoundIcon(Icons.Rounded.Replay, lc) { PlayerController.seekTo(0) }
                 Spacer(Modifier.width(12.dp))
                 Text("ТЕСТ", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
                     modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(lc.accentGreen)
@@ -669,7 +672,7 @@ private fun CircleBack(lc: LiquidColors, onClick: () -> Unit) {
             .clickable(remember { MutableInteractionSource() }, null, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Icon(LiquidGlyphs.Back, null, tint = lc.iconDefault, modifier = Modifier.size(22.dp))
+        Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, tint = lc.iconDefault, modifier = Modifier.size(22.dp))
     }
 }
 
