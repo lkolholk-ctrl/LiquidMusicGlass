@@ -628,11 +628,40 @@ object PlayerController {
     }
 
     fun skipNext(context: Context) {
-        val currentQueue = queue
-        if (currentQueue.isEmpty()) return
-        val nextIndex = if (currentIndex + 1 < currentQueue.size) currentIndex + 1 else 0
-        val nextTrackId = currentQueue.getOrNull(nextIndex)?.id ?: return
         mainScope.launch {
+            var currentQueue = queue
+            if (currentQueue.isEmpty()) return@launch
+            val remaining = (currentQueue.size - currentIndex).coerceAtLeast(0)
+            val atQueueEnd = currentIndex + 1 >= currentQueue.size
+
+            if (remaining <= EndlessPlaybackEngine.REFILL_THRESHOLD) {
+                val refilled = withContext(Dispatchers.IO) {
+                    endlessEngine.checkAndRefillIfNeeded(
+                        remainingCount = remaining,
+                        force = atQueueEnd
+                    )
+                }
+                if (refilled) {
+                    var waitAttempts = 0
+                    while (waitAttempts < 5) {
+                        currentQueue = queue
+                        if (currentIndex + 1 < currentQueue.size) break
+                        waitAttempts++
+                        kotlinx.coroutines.delay(50)
+                    }
+                } else {
+                    currentQueue = queue
+                }
+            }
+
+            val nextIndex = when {
+                currentIndex + 1 < currentQueue.size -> currentIndex + 1
+                else -> {
+                    android.util.Log.w("PlayerController", "skipNext reached queue end and refill did not add a next track")
+                    return@launch
+                }
+            }
+            val nextTrackId = currentQueue.getOrNull(nextIndex)?.id ?: return@launch
             val player = getPlayer(context)
             if (player != null) {
                 val targetIndex = (0 until player.mediaItemCount).indexOfFirst {

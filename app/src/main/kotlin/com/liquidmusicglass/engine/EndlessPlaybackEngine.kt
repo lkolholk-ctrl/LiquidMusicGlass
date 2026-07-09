@@ -88,7 +88,7 @@ class EndlessPlaybackEngine(
      * @param remainingCount Количество треков, оставшихся в очереди перед активным треком.
      * @return true, если дозагрузка была успешно выполнена.
      */
-    suspend fun checkAndRefillIfNeeded(remainingCount: Int = -1): Boolean {
+    suspend fun checkAndRefillIfNeeded(remainingCount: Int = -1, force: Boolean = false): Boolean {
         // Дозаправка работает ВЕЗДЕ (полевой фидбек: «одно и то же по кругу —
         // не по кайфу»):
         //  - волна (Global) — продолжаем волну: личную или станцию по seed;
@@ -107,14 +107,14 @@ class EndlessPlaybackEngine(
         val remaining = if (remainingCount == -1) getRemainingTracks() else remainingCount
         android.util.Log.d("EndlessEngine", "Checking refill: remaining=$remaining, threshold=$REFILL_THRESHOLD")
 
-        if (remaining >= REFILL_THRESHOLD) {
+        if (!force && remaining >= REFILL_THRESHOLD) {
             android.util.Log.d("EndlessEngine", "Queue has sufficient tracks ($remaining >= $REFILL_THRESHOLD), skipping")
             return false
         }
 
         val now = System.currentTimeMillis()
         val last = lastRefillTime.get()
-        if (now - last < MIN_REFILL_INTERVAL_MS) {
+        if (!force && now - last < MIN_REFILL_INTERVAL_MS) {
             android.util.Log.d("EndlessEngine", "Throttled: only ${now - last}ms elapsed since last refill (min interval=$MIN_REFILL_INTERVAL_MS)")
             return false
         }

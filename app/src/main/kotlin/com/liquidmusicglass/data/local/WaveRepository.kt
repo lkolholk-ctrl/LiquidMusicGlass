@@ -2,13 +2,16 @@ package com.liquidmusicglass.data.local
 
 import android.content.Context
 import android.util.Log
+import com.liquidmusicglass.api.icm.IcmApiException
 import com.liquidmusicglass.api.icm.IcmRepository
+import com.liquidmusicglass.api.icm.wave.IcmWaveBatchResponse
 import com.liquidmusicglass.api.icm.wave.IcmWaveRepository
 import com.liquidmusicglass.data.local.db.AppDatabase
 import com.liquidmusicglass.data.local.db.CachedTrack
 import com.liquidmusicglass.data.local.db.GenreCount
 import com.liquidmusicglass.data.local.db.ListeningHistory
 import com.liquidmusicglass.data.wave.WaveCandidateFilter
+import com.liquidmusicglass.data.wave.WaveMode
 import com.liquidmusicglass.data.wave.WaveSessionState
 import com.liquidmusicglass.data.wave.toWaveCandidate
 import com.liquidmusicglass.engine.Track
@@ -30,6 +33,8 @@ class WaveRepository(context: Context) {
     private val db = AppDatabase.getInstance(context)
     private val dao = db.waveDao()
     private val playbackDao = db.playbackHistoryDao()
+    private val personalWaveStateLock = Any()
+    private var personalWaveState = WaveSessionState()
 
     companion object {
         private const val TAG = "WaveRepository"
@@ -39,6 +44,8 @@ class WaveRepository(context: Context) {
         const val GENRE_ANALYSIS_DAYS = 30
         /** Максимум треков в очереди волны */
         const val WAVE_QUEUE_SIZE = 20
+        private const val PERSONAL_WAVE_DIVERSITY = 0.0
+        private const val SESSION_EXPIRY_MARGIN_MS = 60_000L
 
         @Volatile
         private var instance: WaveRepository? = null
@@ -189,6 +196,19 @@ class WaveRepository(context: Context) {
         onFirst: suspend (List<Track>) -> Unit,
         onTopUp: suspend (List<Track>) -> Unit
     ) {
+        if (seedTrackId == null) {
+            val tracks = buildWaveQueue(
+                count = (topUpCount + 1).coerceAtLeast(1),
+                seedTrackId = null,
+                exclude = exclude
+            )
+            val first = tracks.take(1)
+            onFirst(first)
+            val rest = tracks.drop(1)
+            if (rest.isNotEmpty()) onTopUp(rest)
+            return
+        }
+
         val first = buildWaveQueue(count = 1, seedTrackId = seedTrackId, exclude = exclude)
         onFirst(first)
         if (first.isEmpty()) return
@@ -239,7 +259,8 @@ class WaveRepository(context: Context) {
             val batchQueue = fetchPersonalWaveBatch(
                 targetCount = count,
                 excludeIds = excludeIds,
-                recentIds = recentIds
+                recentIds = recentIds,
+                resetSession = callerExcludeIsEmpty
             )
             if (batchQueue.isNotEmpty()) {
                 Log.d(TAG, "Personal wave batch added ${batchQueue.size} tracks")
@@ -392,7 +413,8 @@ class WaveRepository(context: Context) {
     private suspend fun fetchPersonalWaveBatch(
         targetCount: Int,
         excludeIds: Set<String>,
-        recentIds: List<String>
+        recentIds: List<String>,
+        resetSession: Boolean
     ): List<Track> {
         val requestLimit = (targetCount * 2)
             .coerceAtLeast(targetCount + 5)
@@ -400,18 +422,34 @@ class WaveRepository(context: Context) {
         val negativeArtistKeys = getLocallyRejectedArtistKeys()
         val apiExcludeArtistIds = negativeArtistKeys
             .filter { key -> key.all { it.isDigit() } }
+        val initialState = preparePersonalWaveState(
+            resetSession = resetSession,
+            excludeIds = excludeIds,
+            recentIds = recentIds,
+            negativeArtistKeys = negativeArtistKeys
+        )
 
         return try {
-            val response = IcmWaveRepository.nextBatch(
-                limit = requestLimit,
-                // Personal wave is already ranked server-side. Keep diversity
-                // soft here: strict server-side artist caps made narrow taste
-                // profiles return only 1-2 tracks.
-                diversity = 0.0,
-                excludeTrackIds = excludeIds.toList().takeLast(120),
-                excludeArtistIds = apiExcludeArtistIds.take(50),
-                playedTrackIds = recentIds.take(80)
-            ).getOrNull()
+            var sessionState = ensurePersonalWaveSession(initialState) ?: return emptyList()
+            var responseResult = requestPersonalSessionBatch(
+                sessionState = sessionState,
+                requestLimit = requestLimit,
+                apiExcludeArtistIds = apiExcludeArtistIds
+            )
+            if (responseResult.isFailure && shouldRecreateWaveSession(responseResult.exceptionOrNull())) {
+                Log.w(TAG, "Personal wave session expired/invalid, recreating")
+                sessionState = ensurePersonalWaveSession(
+                    state = sessionState.withSessionId(null),
+                    forceNew = true
+                ) ?: return emptyList()
+                responseResult = requestPersonalSessionBatch(
+                    sessionState = sessionState,
+                    requestLimit = requestLimit,
+                    apiExcludeArtistIds = apiExcludeArtistIds
+                )
+            }
+
+            val response = responseResult.getOrNull()
 
             if (response?.status != "ok" || response.tracks.isEmpty()) {
                 Log.w(TAG, "Personal wave batch status: ${response?.status ?: "null"}")
@@ -427,11 +465,6 @@ class WaveRepository(context: Context) {
                 )
             }
 
-            val initialState = WaveSessionState(
-                excludeIds = excludeIds.toList(),
-                playedIds = recentIds,
-                negativeArtistKeys = negativeArtistKeys
-            )
             val filter = WaveCandidateFilter(
                 WaveCandidateFilter.Policy(
                     // Expanded personal wave is Apple-only per API docs. Leaving
@@ -443,9 +476,12 @@ class WaveRepository(context: Context) {
             )
             val filtered = filter.filter(
                 candidates = response.tracks.map { it.toWaveCandidate() },
-                state = initialState,
+                state = sessionState.withSessionId(response.sessionId ?: sessionState.sessionId),
                 statsByTrackId = statsByTrackId,
                 limit = targetCount
+            )
+            updatePersonalWaveState(
+                filtered.nextState.withSessionId(response.sessionId ?: sessionState.sessionId)
             )
 
             if (filtered.rejected.isNotEmpty()) {
@@ -463,6 +499,105 @@ class WaveRepository(context: Context) {
             Log.w(TAG, "Personal wave batch failed, falling back to sequential: ${e.message}")
             emptyList()
         }
+    }
+
+    private fun preparePersonalWaveState(
+        resetSession: Boolean,
+        excludeIds: Set<String>,
+        recentIds: List<String>,
+        negativeArtistKeys: List<String>
+    ): WaveSessionState {
+        return synchronized(personalWaveStateLock) {
+            val base = if (resetSession) WaveSessionState() else personalWaveState
+            base.copy(
+                mode = if (resetSession) WaveMode.Personal() else base.mode,
+                sessionId = if (resetSession) null else base.sessionId,
+                excludeIds = (base.excludeIds + excludeIds)
+                    .mapNotNull { it.trim().takeIf(String::isNotBlank) }
+                    .distinct()
+                    .takeLast(WaveSessionState.MAX_EXCLUDE_IDS),
+                playedIds = (base.playedIds + recentIds)
+                    .mapNotNull { it.trim().takeIf(String::isNotBlank) }
+                    .distinct()
+                    .takeLast(WaveSessionState.MAX_PLAYED_IDS),
+                negativeArtistKeys = negativeArtistKeys,
+                updatedAtMs = System.currentTimeMillis()
+            ).also { personalWaveState = it }
+        }
+    }
+
+    private suspend fun ensurePersonalWaveSession(
+        state: WaveSessionState,
+        forceNew: Boolean = false
+    ): WaveSessionState? {
+        if (!forceNew) {
+            val activeSessionId = state.activeSessionId()
+            if (activeSessionId != null) return state.withSessionId(activeSessionId)
+        }
+
+        val started = IcmWaveRepository.startSession(
+            source = "apple",
+            diversity = PERSONAL_WAVE_DIVERSITY
+        ).getOrElse { error ->
+            Log.w(TAG, "Failed to start personal wave session: ${error.message}")
+            return null
+        }
+
+        val now = System.currentTimeMillis()
+        val expiresAtMs = started.expiresIn?.let { now + it.coerceAtLeast(1) * 1000L }
+        val nextState = state
+            .withSessionId(started.sessionId)
+            .withMode(
+                WaveMode.Session(
+                    sessionId = started.sessionId,
+                    source = started.source ?: "apple",
+                    region = started.region,
+                    diversity = started.diversity ?: PERSONAL_WAVE_DIVERSITY,
+                    expiresAtMs = expiresAtMs
+                )
+            )
+        updatePersonalWaveState(nextState)
+        Log.d(TAG, "Started personal wave session ${started.sessionId}")
+        return nextState
+    }
+
+    private suspend fun requestPersonalSessionBatch(
+        sessionState: WaveSessionState,
+        requestLimit: Int,
+        apiExcludeArtistIds: List<String>
+    ): Result<IcmWaveBatchResponse> {
+        val sessionId = sessionState.sessionId
+            ?: return Result.failure(IllegalStateException("Personal wave session id is missing"))
+        return IcmWaveRepository.nextSessionBatch(
+            sessionId = sessionId,
+            limit = requestLimit,
+            diversity = PERSONAL_WAVE_DIVERSITY,
+            excludeTrackIds = sessionState.excludeIds.takeLast(200),
+            excludeArtistIds = apiExcludeArtistIds.take(50),
+            playedTrackIds = sessionState.playedIds.takeLast(120)
+        )
+    }
+
+    private fun updatePersonalWaveState(state: WaveSessionState) {
+        synchronized(personalWaveStateLock) {
+            personalWaveState = state
+        }
+    }
+
+    private fun WaveSessionState.activeSessionId(): String? {
+        val sessionMode = mode as? WaveMode.Session
+        val expiresAtMs = sessionMode?.expiresAtMs
+        if (expiresAtMs != null && expiresAtMs <= System.currentTimeMillis() + SESSION_EXPIRY_MARGIN_MS) {
+            return null
+        }
+        return sessionId?.takeIf { it.isNotBlank() }
+    }
+
+    private fun shouldRecreateWaveSession(error: Throwable?): Boolean {
+        val apiError = error as? IcmApiException ?: return false
+        val serverCode = apiError.errorCode.orEmpty()
+        return apiError.code in setOf(400, 404, 410) ||
+            serverCode.contains("session", ignoreCase = true)
     }
 
     private suspend fun getLocallyRejectedArtistKeys(limit: Int = 30): List<String> {
