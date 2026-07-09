@@ -170,7 +170,7 @@ class HomeViewModel : ViewModel() {
     }
 
     /**
-     * Builds the expanded personal wave through /wave/session/*.
+     * Builds the expanded personal wave through the wave session endpoints.
      */
     fun buildWaveQueue(context: Context) {
         if (_isBuildingWave.value) return
