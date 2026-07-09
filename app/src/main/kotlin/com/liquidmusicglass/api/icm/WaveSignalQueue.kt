@@ -34,9 +34,11 @@ object WaveSignalQueue {
 
     private val json = Json { ignoreUnknownKeys = true }
     private var prefs: SharedPreferences? = null
+    private var appContext: Context? = null
     private val lock = Any()
 
     fun init(context: Context) {
+        appContext = context.applicationContext
         if (prefs == null) {
             prefs = context.applicationContext
                 .getSharedPreferences("wave_signal_queue", Context.MODE_PRIVATE)
@@ -76,7 +78,21 @@ object WaveSignalQueue {
 
     /** Фидбек волны с гарантией доставки: неудача → копим и дошлём. */
     suspend fun sendFeedback(type: String, value: String) {
+        mirrorNegativeFeedback(type, value)
         send(Signal("feedback", type, value))
+    }
+
+    /**
+     * Негативный фидбек («реже»/дизлайк) отражаем в локальных состояниях
+     * волны СРАЗУ: сервер применит сигнал со своим decay, а клиент уже не
+     * предложит трек/артиста в следующих батчах этой сессии.
+     */
+    private fun mirrorNegativeFeedback(type: String, value: String) {
+        val ctx = appContext ?: return
+        runCatching {
+            com.liquidmusicglass.data.local.WaveRepository.getInstance(ctx)
+                .noteNegativeFeedback(type, value)
+        }
     }
 
     /** Событие прослушивания с гарантией доставки. */

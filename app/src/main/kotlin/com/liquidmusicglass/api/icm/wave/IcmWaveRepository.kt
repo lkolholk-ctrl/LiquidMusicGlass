@@ -10,6 +10,9 @@ object IcmWaveRepository {
     fun isAppleSeedTrackId(trackId: String): Boolean =
         trackId.isNotBlank() && trackId.all { it.isDigit() }
 
+    suspend fun startWave(region: String? = null): Result<IcmWaveResponse> =
+        api.startWave(region)
+
     suspend fun nextTrackStation(
         seedTrackId: String,
         exclude: List<String> = emptyList(),

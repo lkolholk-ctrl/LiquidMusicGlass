@@ -31,6 +31,10 @@ class EndlessPlaybackEngine(
         // до 8-10 треков и ждать сеть: initial batch 30, затем добиваем до ~60.
         const val REFILL_THRESHOLD = 40
         const val REFILL_BATCH_SIZE = 30
+        // Станция по треку — единственный режим без batch-эндпоинта: каждый
+        // трек = отдельный GET /library/wave/next. Пачка 30 давала залп из
+        // 30+ последовательных запросов (риск 429); добираем меньшими дозами.
+        const val STATION_REFILL_BATCH_SIZE = 12
         const val MIN_REFILL_INTERVAL_MS = 2000L
     }
 
@@ -200,17 +204,26 @@ class EndlessPlaybackEngine(
                         }
                     } else baseSeed
 
-                    // Для station-by-track по доке достаточно слать текущую клиентскую
-                    // очередь. В PlayerController уже сыгранные треки остаются в queue,
-                    // поэтому берём только current+future, иначе станция высыхает после
-                    // первой пачки примерно на 15 треках.
+                    // Станция по треку: по доке сервер НЕ подмешивает свою
+                    // 4-часовую сессию в этом режиме — анти-повтор целиком наш.
+                    // Шлём текущую+будущую очередь И хвост уже сыгранного (кап 40),
+                    // иначе станция ходит по кругу. Полную историю не шлём — от
+                    // неё узкая станция высыхает (проверено полевым фидбеком).
                     val exclude = if (isStrictTrackStation) {
-                        activeQueueIds.distinct()
+                        val playedPrefix = queueIds
+                            .take(currentIndex.coerceIn(0, queueIds.size))
+                            .takeLast(40)
+                        (playedPrefix + activeQueueIds).distinct()
                     } else {
                         (playedIds + queueIds).toList()
                     }
+                    val batchSize = if (isStrictTrackStation) {
+                        STATION_REFILL_BATCH_SIZE
+                    } else {
+                        REFILL_BATCH_SIZE
+                    }
                     var tracks = waveRepo.buildWaveQueue(
-                        count = REFILL_BATCH_SIZE,
+                        count = batchSize,
                         seedTrackId = seed,
                         exclude = exclude
                     )
@@ -226,7 +239,7 @@ class EndlessPlaybackEngine(
                                 "Track station returned empty (seed=$seed), retrying with relaxed exclude=${relaxedExclude.size}"
                             )
                             tracks = waveRepo.buildWaveQueue(
-                                count = REFILL_BATCH_SIZE,
+                                count = batchSize,
                                 seedTrackId = seed,
                                 exclude = relaxedExclude
                             )
