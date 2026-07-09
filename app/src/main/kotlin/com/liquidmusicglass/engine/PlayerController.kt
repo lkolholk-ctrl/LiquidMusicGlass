@@ -260,21 +260,22 @@ object PlayerController {
             withContext(Dispatchers.Main) {
                 val player = getPlayer(context)
                 if (player != null) {
-                    player.stop()
-                    player.clearMediaItems()
+                    val hasFullTimeline = player.mediaItemCount == currentQueue.size &&
+                        currentQueue.indices.all { idx ->
+                            player.getMediaItemAt(idx).mediaId == currentQueue[idx].id
+                        }
 
-                    // ── STRICT ID-MATCHED NAVIGATION ──
-                    val targetIndex = (0 until player.mediaItemCount).indexOfFirst {
-                        player.getMediaItemAt(it).mediaId == trackId
-                    }
-
-                    if (targetIndex != -1) {
-                        player.seekTo(targetIndex, 0L)
+                    if (hasFullTimeline) {
+                        player.seekTo(queueIndex, 0L)
                         player.prepare()
                         player.play()
                     } else {
-                        // Track missing from timeline — rebuild queue
+                        // Timeline missing items or only contains a lazy-loaded slice.
+                        // Rebuild from the full app queue so manual next/previous can
+                        // move through every visible queue item, not just loaded mediaItems.
                         val allMediaItems = currentQueue.map { t -> buildMediaItem(t) }
+                        player.stop()
+                        player.clearMediaItems()
                         player.setMediaItems(allMediaItems, queueIndex, 0L)
                         player.prepare()
                         player.play()
@@ -689,7 +690,10 @@ object PlayerController {
             }
             val currentQueue = queue
             if (currentQueue.isEmpty()) return@launch
-            val prevIndex = if (currentIndex > 0) currentIndex - 1 else currentQueue.lastIndex
+            val prevIndex = if (currentIndex > 0) currentIndex - 1 else {
+                android.util.Log.w("PlayerController", "skipPrevious reached queue start")
+                return@launch
+            }
             val prevTrackId = currentQueue.getOrNull(prevIndex)?.id ?: return@launch
             if (player != null) {
                 val targetIndex = (0 until player.mediaItemCount).indexOfFirst {
