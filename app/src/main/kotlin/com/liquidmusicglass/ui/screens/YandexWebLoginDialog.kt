@@ -2,6 +2,7 @@ package com.liquidmusicglass.ui.screens
 
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
+import android.os.Message
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -165,9 +166,17 @@ fun YandexWebLoginDialog(
                     .weight(1f),
                 factory = { ctx ->
                     WebView(ctx).apply {
+                        val mainWebView = this
                         settings.javaScriptEnabled = true
                         settings.domStorageEnabled = true
+                        settings.databaseEnabled = true
                         settings.userAgentString = CHROME_MOBILE_UA
+                        // «Войти по логину» и соц-логины Яндекс ID открывают
+                        // следующий шаг через window.open. Без поддержки
+                        // множественных окон WebView молча блокирует это —
+                        // ссылка «прыгает» и ничего не происходит.
+                        settings.setSupportMultipleWindows(true)
+                        settings.javaScriptCanOpenWindowsAutomatically = true
                         // Соц-логины (VK/Google/OK) ходят через сторонние домены
                         CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
                         webViewClient = object : WebViewClient() {
@@ -203,6 +212,36 @@ fun YandexWebLoginDialog(
                         webChromeClient = object : WebChromeClient() {
                             override fun onProgressChanged(view: WebView?, newProgress: Int) {
                                 progress = newProgress / 100f
+                            }
+
+                            // window.open из Яндекс ID («Войти по логину» и т.п.):
+                            // не открываем отдельное окно, а грузим целевой URL в
+                            // основной WebView. Временный WebView нужен только чтобы
+                            // перехватить первый переход и снять с него href.
+                            override fun onCreateWindow(
+                                view: WebView?,
+                                isDialog: Boolean,
+                                isUserGesture: Boolean,
+                                resultMsg: Message?
+                            ): Boolean {
+                                val transport = resultMsg?.obj as? WebView.WebViewTransport
+                                    ?: return false
+                                val temp = WebView(mainWebView.context)
+                                temp.settings.javaScriptEnabled = true
+                                temp.settings.userAgentString = CHROME_MOBILE_UA
+                                temp.webViewClient = object : WebViewClient() {
+                                    override fun shouldOverrideUrlLoading(
+                                        v: WebView?,
+                                        request: WebResourceRequest?
+                                    ): Boolean {
+                                        request?.url?.toString()?.let { mainWebView.loadUrl(it) }
+                                        temp.destroy()
+                                        return true
+                                    }
+                                }
+                                transport.webView = temp
+                                resultMsg.sendToTarget()
+                                return true
                             }
                         }
                         loadUrl(YANDEX_AUTH_URL)
