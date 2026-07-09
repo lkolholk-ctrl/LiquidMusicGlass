@@ -1,20 +1,19 @@
 package com.liquidmusicglass.ui.screens
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Search
@@ -60,15 +59,16 @@ import kotlinx.coroutines.withContext
 private val YandexYellow = Color(0xFFFFCC00)
 
 /**
- * Полноэкранный sheet Яндекс.Музыки (вкладка Playlists → строка Yandex Music).
+ * Полноэкранный экран Яндекс.Музыки (Библиотека → Yandex Music). Обычный
+ * navigation destination — открывается с тем же slide-переходом, что и
+ * остальные детали, а не sheet-оверлеем.
  *
- * Не connected → ввод OAuth-токена.
- * Connected → search (как .ysearch) + download в Downloads (как .dlt).
+ * Не connected → встроенный вход (WebView, автоперехват токена) или ручной
+ * ввод OAuth-токена. Connected → поиск + скачивание в Downloads.
  */
 @Composable
-fun YandexMusicSheet(onDismiss: () -> Unit) {
+fun YandexMusicScreen(onBack: () -> Unit) {
     val lc = LiquidTheme.colors
-    val isDark = lc.isDark
     val focusManager = LocalFocusManager.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -77,9 +77,7 @@ fun YandexMusicSheet(onDismiss: () -> Unit) {
     val label by YandexAuthRepository.displayLabel.collectAsState()
     val dlProgress by YandexDownloadManager.progress.collectAsState()
 
-    val dialogBg = if (isDark) Color(0xFF1C1C1E) else Color.White
-    val dialogBorder = if (isDark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.10f)
-    val inputBg = if (isDark) Color.White.copy(alpha = 0.06f) else Color.Black.copy(alpha = 0.04f)
+    val inputBg = if (lc.isDark) Color.White.copy(alpha = 0.06f) else Color.Black.copy(alpha = 0.04f)
 
     // search state
     var query by remember { mutableStateOf("") }
@@ -129,89 +127,84 @@ fun YandexMusicSheet(onDismiss: () -> Unit) {
         }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.6f))
-            .clickable(remember { MutableInteractionSource() }, null) {
-                focusManager.clearFocus()
-                onDismiss()
-            }
-            .navigationBarsPadding()
-            .imePadding(),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.92f)
-                .padding(horizontal = 16.dp)
-                .clip(RoundedCornerShape(28.dp))
-                .background(dialogBg)
-                .border(1.dp, dialogBorder, RoundedCornerShape(28.dp))
-                .clickable(remember { MutableInteractionSource() }, null) { }
-                .padding(16.dp)
-        ) {
-            // Header
+    Box(Modifier.fillMaxSize().background(lc.settingsBackground)) {
+        Column(Modifier.fillMaxSize().imePadding()) {
+            Spacer(Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
+            Spacer(Modifier.height(12.dp))
+
+            // Header: back + icon + title/status
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_service_yandex),
-                        contentDescription = null,
-                        tint = Color.Unspecified,
-                        modifier = Modifier.size(36.dp)
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    Column {
-                        Text(
-                            "Yandex Music",
-                            color = lc.textPrimary,
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            if (connected) "Connected · ${label ?: "account"}"
-                            else "Sign in with your Yandex account",
-                            color = if (connected) Color(0xFF34C759) else lc.textSecondary,
-                            fontSize = 12.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
                 Box(
                     modifier = Modifier
-                        .size(32.dp)
-                        .clip(RoundedCornerShape(16.dp))
+                        .size(36.dp)
+                        .clip(CircleShape)
                         .background(inputBg)
                         .liquidClickable(pressedScale = LiquidMotion.PressIcon) {
                             focusManager.clearFocus()
-                            onDismiss()
+                            onBack()
                         },
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(Icons.Rounded.Close, null, tint = lc.textSecondary, modifier = Modifier.size(18.dp))
+                    Icon(
+                        Icons.AutoMirrored.Rounded.ArrowBack,
+                        contentDescription = "Back",
+                        tint = lc.textPrimary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Icon(
+                    painter = painterResource(R.drawable.ic_service_yandex),
+                    contentDescription = null,
+                    tint = Color.Unspecified,
+                    modifier = Modifier.size(34.dp)
+                )
+                Spacer(Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Yandex Music",
+                        color = lc.textPrimary,
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        if (connected) "Connected · ${label ?: "account"}"
+                        else "Sign in with your Yandex account",
+                        color = if (connected) Color(0xFF34C759) else lc.textSecondary,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
 
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(16.dp))
 
             if (!connected) {
-                ConnectBody(
-                    inputBg = inputBg,
-                    lc = lc,
-                    onConnected = { /* state via repo flow */ }
-                )
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 16.dp)
+                        .padding(bottom = 120.dp)
+                ) {
+                    ConnectBody(
+                        inputBg = inputBg,
+                        lc = lc,
+                        onConnected = { /* state via repo flow */ }
+                    )
+                }
             } else {
                 // Search bar
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                ) {
                     Box(
                         modifier = Modifier
                             .weight(1f)
@@ -281,16 +274,23 @@ fun YandexMusicSheet(onDismiss: () -> Unit) {
 
                 if (searchError != null) {
                     Spacer(Modifier.height(8.dp))
-                    Text(searchError!!, color = Color(0xFFFF453A), fontSize = 12.sp)
+                    Text(
+                        searchError!!,
+                        color = Color(0xFFFF453A),
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
                 }
 
                 Spacer(Modifier.height(10.dp))
 
-                // Results
+                // Results + Disconnect последним элементом; 120dp снизу —
+                // просвет под плавающий бар (та же конвенция, что у остальных
+                // экранов Библиотеки).
                 LazyColumn(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
-                    contentPadding = PaddingValues(bottom = 8.dp)
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 120.dp)
                 ) {
                     if (results.isEmpty() && !searching && searchError == null) {
                         item {
@@ -323,25 +323,25 @@ fun YandexMusicSheet(onDismiss: () -> Unit) {
                             }
                         )
                     }
-                }
-
-                // Disconnect
-                Spacer(Modifier.height(8.dp))
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(42.dp)
-                        .clip(RoundedCornerShape(21.dp))
-                        .background(Color(0xFFFF453A).copy(alpha = 0.12f))
-                        .liquidClickable(pressedScale = LiquidMotion.PressButton) {
-                            YandexAuthRepository.disconnect()
-                            results = emptyList()
-                            query = ""
-                            searchError = null
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("Disconnect", color = Color(0xFFFF453A), fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                    item {
+                        Spacer(Modifier.height(10.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(42.dp)
+                                .clip(RoundedCornerShape(21.dp))
+                                .background(Color(0xFFFF453A).copy(alpha = 0.12f))
+                                .liquidClickable(pressedScale = LiquidMotion.PressButton) {
+                                    YandexAuthRepository.disconnect()
+                                    results = emptyList()
+                                    query = ""
+                                    searchError = null
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("Disconnect", color = Color(0xFFFF453A), fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                        }
+                    }
                 }
             }
         }

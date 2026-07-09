@@ -41,6 +41,9 @@ object NavRoutes {
     fun playlistRoute(tab: String) = "$tab/playlist/{$ARG_ID}"
     fun playlist(tab: String, id: String) = "$tab/playlist/$id"
 
+    // ── Yandex Music (внутри Библиотеки) ──
+    const val YANDEX_MUSIC = "library/yandex"
+
     // ── Локальная медиатека (только внутри Библиотеки) ──
     const val LOCAL_LIBRARY = "library/local"
     const val LOCAL_ARTIST_ROUTE = "library/local/artist/{$ARG_NAME}"
