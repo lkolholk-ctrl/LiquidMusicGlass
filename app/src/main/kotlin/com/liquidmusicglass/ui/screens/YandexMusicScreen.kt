@@ -88,6 +88,8 @@ fun YandexMusicScreen(onBack: () -> Unit) {
     val label by YandexAuthRepository.displayLabel.collectAsState()
     val hasPlus by YandexAuthRepository.hasPlus.collectAsState()
     val dlProgress by YandexDownloadManager.progress.collectAsState()
+    // Активная секция задаётся нижним баром ЯМ (его рисует AppRoot).
+    val section by YandexSection.current.collectAsState()
 
     val inputBg = if (lc.isDark) Color.White.copy(alpha = 0.06f) else Color.Black.copy(alpha = 0.04f)
 
@@ -144,7 +146,6 @@ fun YandexMusicScreen(onBack: () -> Unit) {
     }
 
     // ── Liked (фонотека ЯМ) ──
-    var tab by remember { mutableStateOf(0) }               // 0=Search, 1=Liked
     var liked by remember { mutableStateOf<List<YandexMusicClient.Track>>(emptyList()) }
     var likedLoading by remember { mutableStateOf(false) }
     var likedError by remember { mutableStateOf<String?>(null) }
@@ -236,11 +237,11 @@ fun YandexMusicScreen(onBack: () -> Unit) {
         }
     }
 
-    LaunchedEffect(tab, connected) {
+    LaunchedEffect(section, connected) {
         if (!connected) return@LaunchedEffect
-        when (tab) {
-            1 -> loadLiked()
-            2 -> loadPlaylists()
+        when (section) {
+            YandexSection.LIKED -> loadLiked()
+            YandexSection.PLAYLISTS -> loadPlaylists()
         }
     }
 
@@ -303,7 +304,7 @@ fun YandexMusicScreen(onBack: () -> Unit) {
         openPlaylist = null
         playlistTracks = emptyList()
         bulkStop = true
-        tab = 0
+        YandexSection.set(YandexSection.SEARCH)
     }
 
     Box(Modifier.fillMaxSize().background(lc.settingsBackground)) {
@@ -379,19 +380,10 @@ fun YandexMusicScreen(onBack: () -> Unit) {
                     )
                 }
             } else {
-                // Вкладки раздела ЯМ: поиск / лайки / свои плейлисты
-                Row(modifier = Modifier.padding(horizontal = 16.dp)) {
-                    YandexTab("Search", tab == 0, inputBg, lc) { tab = 0 }
-                    Spacer(Modifier.width(8.dp))
-                    YandexTab("Liked", tab == 1, inputBg, lc) { tab = 1 }
-                    Spacer(Modifier.width(8.dp))
-                    YandexTab("Playlists", tab == 2, inputBg, lc) { tab = 2 }
-                }
-
                 // Скачивание полных треков гейтится подпиской Плюс самого
                 // аккаунта — без неё честно предупреждаем вместо «Download failed».
-                if (!hasPlus) {
-                    Spacer(Modifier.height(10.dp))
+                // Показываем только в секциях со скачиванием (не в Волне/Аккаунте).
+                if (!hasPlus && section != YandexSection.WAVE && section != YandexSection.AUTH) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -406,11 +398,12 @@ fun YandexMusicScreen(onBack: () -> Unit) {
                             fontSize = 12.sp
                         )
                     }
+                    Spacer(Modifier.height(10.dp))
                 }
 
-                Spacer(Modifier.height(10.dp))
-
-                if (tab == 0) {
+                when (section) {
+                    YandexSection.WAVE -> YandexWaveComingSoon(lc)
+                    YandexSection.SEARCH -> {
                     // ── Search ──
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -507,7 +500,7 @@ fun YandexMusicScreen(onBack: () -> Unit) {
                             item {
                                 Text(
                                     "Type a query and tap Search.\nTap a track to play it; " +
-                                        "downloads go to Playlists → Downloads.",
+                                        "downloads go to Library → Downloads.",
                                     color = lc.textTertiary,
                                     fontSize = 13.sp,
                                     modifier = Modifier.padding(vertical = 24.dp)
@@ -549,9 +542,9 @@ fun YandexMusicScreen(onBack: () -> Unit) {
                                 onCancel = { YandexDownloadManager.cancel(sid) }
                             )
                         }
-                        item { DisconnectRow(onDisconnect = { doDisconnect() }) }
                     }
-                } else if (tab == 1) {
+                    }
+                    YandexSection.LIKED -> {
                     // ── Liked (фонотека) ──
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -643,9 +636,9 @@ fun YandexMusicScreen(onBack: () -> Unit) {
                                 onCancel = { YandexDownloadManager.cancel(sid) }
                             )
                         }
-                        item { DisconnectRow(onDisconnect = { doDisconnect() }) }
                     }
-                } else {
+                    }
+                    YandexSection.PLAYLISTS -> {
                     // ── Playlists (свои плейлисты ЯМ) ──
                     val pl = openPlaylist
                     if (pl == null) {
@@ -684,7 +677,6 @@ fun YandexMusicScreen(onBack: () -> Unit) {
                                     openPlaylistTracks(p)
                                 }
                             }
-                            item { DisconnectRow(onDisconnect = { doDisconnect() }) }
                         }
                     } else {
                         // Открытый плейлист: назад + название + Download all
@@ -797,35 +789,103 @@ fun YandexMusicScreen(onBack: () -> Unit) {
                             }
                         }
                     }
+                    }
+                    YandexSection.AUTH -> {
+                        AccountSection(
+                            label = label,
+                            hasPlus = hasPlus,
+                            inputBg = inputBg,
+                            lc = lc,
+                            onDisconnect = { doDisconnect() }
+                        )
+                    }
                 }
             }
         }
     }
 }
 
+/** Секция «Волна» ЯМ — заглушка до реализации ротора. */
 @Composable
-private fun YandexTab(
-    label: String,
-    selected: Boolean,
-    inputBg: Color,
-    lc: com.liquidmusicglass.ui.theme.LiquidColors,
-    onClick: () -> Unit,
-) {
+private fun YandexWaveComingSoon(lc: com.liquidmusicglass.ui.theme.LiquidColors) {
     Box(
         modifier = Modifier
-            .height(34.dp)
-            .clip(RoundedCornerShape(17.dp))
-            .background(if (selected) YandexYellow else inputBg)
-            .liquidClickable(pressedScale = LiquidMotion.PressButton) { onClick() }
-            .padding(horizontal = 16.dp),
+            .fillMaxSize()
+            .padding(horizontal = 24.dp, vertical = 40.dp),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            label,
-            color = if (selected) Color.Black else lc.textSecondary,
-            fontWeight = FontWeight.SemiBold,
-            fontSize = 13.sp
-        )
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(
+                imageVector = com.liquidmusicglass.ui.icons.LiquidGlyphs.Equalizer,
+                contentDescription = null,
+                tint = YandexYellow.copy(alpha = 0.7f),
+                modifier = Modifier.size(48.dp)
+            )
+            Spacer(Modifier.height(14.dp))
+            Text(
+                "My Wave — coming soon",
+                color = lc.textPrimary,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Personal Yandex rotor station will live here.",
+                color = lc.textSecondary,
+                fontSize = 13.sp
+            )
+        }
+    }
+}
+
+/** Секция «Аккаунт»: имя, статус Плюса, кнопка выхода. */
+@Composable
+private fun AccountSection(
+    label: String?,
+    hasPlus: Boolean,
+    inputBg: Color,
+    lc: com.liquidmusicglass.ui.theme.LiquidColors,
+    onDisconnect: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(inputBg)
+                .padding(16.dp)
+        ) {
+            Text(
+                label ?: "Connected",
+                color = lc.textPrimary,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                if (hasPlus) "Yandex Plus · active" else "No Yandex Plus — streaming only",
+                color = if (hasPlus) Color(0xFF34C759) else lc.textSecondary,
+                fontSize = 13.sp
+            )
+        }
+        Spacer(Modifier.height(16.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(46.dp)
+                .clip(RoundedCornerShape(23.dp))
+                .background(Color(0xFFFF453A).copy(alpha = 0.12f))
+                .liquidClickable(pressedScale = LiquidMotion.PressButton) { onDisconnect() },
+            contentAlignment = Alignment.Center
+        ) {
+            Text("Disconnect", color = Color(0xFFFF453A), fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+        }
     }
 }
 
@@ -917,22 +977,6 @@ private fun PlaylistRow(
             tint = lc.textTertiary,
             modifier = Modifier.size(22.dp)
         )
-    }
-}
-
-@Composable
-private fun DisconnectRow(onDisconnect: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 10.dp)
-            .height(42.dp)
-            .clip(RoundedCornerShape(21.dp))
-            .background(Color(0xFFFF453A).copy(alpha = 0.12f))
-            .liquidClickable(pressedScale = LiquidMotion.PressButton) { onDisconnect() },
-        contentAlignment = Alignment.Center
-    ) {
-        Text("Disconnect", color = Color(0xFFFF453A), fontWeight = FontWeight.Medium, fontSize = 14.sp)
     }
 }
 
