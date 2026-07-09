@@ -288,7 +288,7 @@ fun HomeScreen(
             if (moodId == "my_wave") {
                 // === ICM МОЯ ВОЛНА ===
                 val waveRepo = WaveRepository.getInstance(context)
-                val queue = waveRepo.buildWaveQueue()
+                val queue = waveRepo.buildWaveQueue(count = WaveRepository.WAVE_QUEUE_SIZE)
                 moodLoading = moodLoading - moodId
 
                 if (queue.isNotEmpty()) {

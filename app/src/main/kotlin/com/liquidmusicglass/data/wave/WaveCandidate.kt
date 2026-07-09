@@ -19,6 +19,9 @@ data class WaveCandidate(
 
     val artistKey: String?
         get() = artistId.normalizedKey() ?: artistName.normalizedKey()
+
+    val artistKeys: Set<String>
+        get() = setOfNotNull(artistId.normalizedKey(), artistName.normalizedKey())
 }
 
 internal fun String?.normalizedKey(): String? =

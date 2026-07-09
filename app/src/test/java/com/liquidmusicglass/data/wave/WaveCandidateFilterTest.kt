@@ -49,6 +49,23 @@ class WaveCandidateFilterTest {
     }
 
     @Test
+    fun `filter rejects negative artist by display name when id differs`() {
+        val filter = WaveCandidateFilter()
+        val state = WaveSessionState(negativeArtistKeys = listOf("kishlak"))
+
+        val result = filter.filter(
+            candidates = listOf(
+                WaveCandidate(id = "12", artistId = "123456", artistName = "Kishlak"),
+                WaveCandidate(id = "13", artistId = "654321", artistName = "Other")
+            ),
+            state = state
+        )
+
+        assertEquals(listOf("13"), result.accepted.map { it.id })
+        assertEquals(WaveCandidateFilter.RejectReason.NegativeArtist, result.rejected.single().reason)
+    }
+
+    @Test
     fun `filter rejects tracks with high local skip ratio`() {
         val filter = WaveCandidateFilter()
 

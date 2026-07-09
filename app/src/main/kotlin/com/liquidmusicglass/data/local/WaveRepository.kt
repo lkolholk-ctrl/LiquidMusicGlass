@@ -129,7 +129,7 @@ class WaveRepository(context: Context) {
         playbackDao.incrementPlayCount(
             trackId = track.id,
             title = track.title,
-            artistId = track.artist, // Using artist name as artistId for now
+            artistId = track.primaryArtistStatKey(),
             timestamp = System.currentTimeMillis()
         )
         Log.d(TAG, "TrackStats: playCount++ for ${track.title}")
@@ -142,7 +142,7 @@ class WaveRepository(context: Context) {
         playbackDao.incrementSkipCount(
             trackId = track.id,
             title = track.title,
-            artistId = track.artist
+            artistId = track.primaryArtistStatKey()
         )
         Log.d(TAG, "TrackStats: skipCount++ for ${track.title}")
     }
@@ -397,6 +397,9 @@ class WaveRepository(context: Context) {
         val requestLimit = (targetCount * 2)
             .coerceAtLeast(targetCount + 5)
             .coerceIn(1, 50)
+        val negativeArtistKeys = getLocallyRejectedArtistKeys()
+        val apiExcludeArtistIds = negativeArtistKeys
+            .filter { key -> key.all { it.isDigit() } }
 
         return try {
             val response = IcmWaveRepository.nextBatch(
@@ -406,6 +409,7 @@ class WaveRepository(context: Context) {
                 // profiles return only 1-2 tracks.
                 diversity = 0.0,
                 excludeTrackIds = excludeIds.toList().takeLast(120),
+                excludeArtistIds = apiExcludeArtistIds.take(50),
                 playedTrackIds = recentIds.take(80)
             ).getOrNull()
 
@@ -425,7 +429,8 @@ class WaveRepository(context: Context) {
 
             val initialState = WaveSessionState(
                 excludeIds = excludeIds.toList(),
-                playedIds = recentIds
+                playedIds = recentIds,
+                negativeArtistKeys = negativeArtistKeys
             )
             val filter = WaveCandidateFilter(
                 WaveCandidateFilter.Policy(
@@ -456,6 +461,20 @@ class WaveRepository(context: Context) {
             }
         } catch (e: Exception) {
             Log.w(TAG, "Personal wave batch failed, falling back to sequential: ${e.message}")
+            emptyList()
+        }
+    }
+
+    private suspend fun getLocallyRejectedArtistKeys(limit: Int = 30): List<String> {
+        return try {
+            playbackDao.getMostSkipped(limit)
+                .asSequence()
+                .filter { it.skippedCount >= 2 && it.skippedCount > it.playCount }
+                .mapNotNull { it.artistId?.trim()?.lowercase()?.takeIf { key -> key.isNotBlank() } }
+                .distinct()
+                .toList()
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to read local skipped artists: ${e.message}")
             emptyList()
         }
     }
@@ -515,4 +534,7 @@ class WaveRepository(context: Context) {
         dao.getTrackById(trackId)?.genre?.let { return it }
         return null
     }
+
+    private fun Track.primaryArtistStatKey(): String =
+        artists.firstOrNull()?.id?.takeIf { it.isNotBlank() } ?: artist
 }

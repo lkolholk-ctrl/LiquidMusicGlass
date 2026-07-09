@@ -114,7 +114,7 @@ class WaveCandidateFilter(
 
         val artistKey = candidate.artistKey
         if (artistKey != null) {
-            if (artistKey in state.negativeArtistSet) return RejectReason.NegativeArtist
+            if (candidate.artistKeys.any { it in state.negativeArtistSet }) return RejectReason.NegativeArtist
             if (recentArtistKeys.count { it == artistKey } >= policy.maxTracksPerArtistWindow) {
                 return RejectReason.ArtistCooldown
             }

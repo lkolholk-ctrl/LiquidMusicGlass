@@ -183,6 +183,7 @@ class HomeViewModel : ViewModel() {
                 // Мгновенный старт: музыка играет после ПЕРВОГО wave/next,
                 // остальная пачка доклеивается в очередь фоном.
                 repo.buildWaveQueueFast(
+                    topUpCount = WaveRepository.WAVE_QUEUE_SIZE - 1,
                     onFirst = { tracks ->
                         if (tracks.isNotEmpty()) {
                             started = true
