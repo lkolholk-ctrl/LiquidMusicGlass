@@ -36,6 +36,7 @@ object YandexAuthRepository {
     private const val KEY_UID = "account_uid"
     private const val KEY_LOGIN = "account_login"
     private const val KEY_DISPLAY = "account_display_name"
+    private const val KEY_PLUS = "account_has_plus"
 
     private var prefs: SharedPreferences? = null
     private var appContext: Context? = null
@@ -46,6 +47,10 @@ object YandexAuthRepository {
     private val _displayLabel = MutableStateFlow<String?>(null)
     /** Логин или displayName для подписи «Connected as …» (не токен). */
     val displayLabel: StateFlow<String?> = _displayLabel.asStateFlow()
+
+    private val _hasPlus = MutableStateFlow(false)
+    /** Активная подписка Яндекс Плюс — скачивание полных треков без неё не работает. */
+    val hasPlus: StateFlow<Boolean> = _hasPlus.asStateFlow()
 
     fun init(context: Context) {
         appContext = context.applicationContext
@@ -59,6 +64,7 @@ object YandexAuthRepository {
         val has = !readTokenRaw().isNullOrBlank()
         _isConnected.value = has
         _displayLabel.value = if (has) readLabel() else null
+        _hasPlus.value = has && prefs?.getBoolean(KEY_PLUS, false) == true
         // Только факт наличия — без значения токена
         Log.i(TAG, if (has) "session restored (encrypted)" else "no saved session")
     }
@@ -107,6 +113,7 @@ object YandexAuthRepository {
             .putLong(KEY_UID, account.uid)
             .putString(KEY_LOGIN, account.login)
             .putString(KEY_DISPLAY, account.displayName)
+            .putBoolean(KEY_PLUS, account.hasPlus)
             .apply()
 
         // На всякий: если legacy ещё жив — вычистить plaintext
@@ -114,8 +121,38 @@ object YandexAuthRepository {
 
         _isConnected.value = true
         _displayLabel.value = label
-        Log.i(TAG, "connect: ok (uid=${account.uid})")
+        _hasPlus.value = account.hasPlus
+        Log.i(TAG, "connect: ok (uid=${account.uid}, plus=${account.hasPlus})")
         label
+    }
+
+    /**
+     * Обновить сведения об аккаунте (label, статус Яндекс Плюс) по сохранённому
+     * токену. Плюс может истечь/появиться после подключения — зовём при входе на
+     * экран Яндекса. Ошибка сети — не страшно, остаёмся на кеше; 401 — сессия
+     * мертва, отключаемся.
+     */
+    suspend fun refreshAccountInfo() = withContext(Dispatchers.IO) {
+        val client = clientOrNull() ?: return@withContext
+        val account = try {
+            client.fetchAccount()
+        } catch (e: YandexUnauthorizedException) {
+            Log.w(TAG, "refresh: token no longer valid")
+            disconnect()
+            return@withContext
+        } catch (_: Exception) {
+            return@withContext
+        }
+        prefs?.edit()
+            ?.putLong(KEY_UID, account.uid)
+            ?.putString(KEY_LOGIN, account.login)
+            ?.putString(KEY_DISPLAY, account.displayName)
+            ?.putBoolean(KEY_PLUS, account.hasPlus)
+            ?.apply()
+        _displayLabel.value = account.displayName
+            ?: account.login
+            ?: "uid ${account.uid}"
+        _hasPlus.value = account.hasPlus
     }
 
     fun disconnect() {
@@ -123,6 +160,7 @@ object YandexAuthRepository {
         clearLegacyPlaintext(appContext)
         _isConnected.value = false
         _displayLabel.value = null
+        _hasPlus.value = false
         Log.i(TAG, "disconnected")
     }
 

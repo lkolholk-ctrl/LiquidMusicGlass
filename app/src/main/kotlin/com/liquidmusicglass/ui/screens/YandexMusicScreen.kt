@@ -76,6 +76,7 @@ fun YandexMusicScreen(onBack: () -> Unit) {
 
     val connected by YandexAuthRepository.isConnected.collectAsState()
     val label by YandexAuthRepository.displayLabel.collectAsState()
+    val hasPlus by YandexAuthRepository.hasPlus.collectAsState()
     val dlProgress by YandexDownloadManager.progress.collectAsState()
 
     val inputBg = if (lc.isDark) Color.White.copy(alpha = 0.06f) else Color.Black.copy(alpha = 0.04f)
@@ -96,7 +97,11 @@ fun YandexMusicScreen(onBack: () -> Unit) {
     }
 
     LaunchedEffect(connected) {
-        if (connected) refreshOffline()
+        if (connected) {
+            refreshOffline()
+            // Плюс может истечь/появиться после подключения — освежаем статус
+            YandexAuthRepository.refreshAccountInfo()
+        }
     }
 
     fun runSearch() {
@@ -281,6 +286,26 @@ fun YandexMusicScreen(onBack: () -> Unit) {
                         fontSize = 12.sp,
                         modifier = Modifier.padding(horizontal = 16.dp)
                     )
+                }
+
+                // Скачивание полных треков гейтится подпиской Яндекс Плюс самого
+                // аккаунта — без неё честно предупреждаем вместо «Download failed».
+                if (!hasPlus) {
+                    Spacer(Modifier.height(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(YandexYellow.copy(alpha = 0.12f))
+                            .padding(horizontal = 12.dp, vertical = 10.dp)
+                    ) {
+                        Text(
+                            "Downloads require an active Yandex Plus subscription on this account.",
+                            color = lc.textSecondary,
+                            fontSize = 12.sp
+                        )
+                    }
                 }
 
                 Spacer(Modifier.height(10.dp))

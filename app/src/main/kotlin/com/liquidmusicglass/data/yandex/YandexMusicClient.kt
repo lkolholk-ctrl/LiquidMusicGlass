@@ -46,6 +46,8 @@ class YandexMusicClient(
         val uid: Long,
         val login: String?,
         val displayName: String?,
+        /** Активная подписка Яндекс Плюс — без неё API не отдаёт полные треки на скачивание. */
+        val hasPlus: Boolean = false,
     )
 
     data class DownloadInfo(
@@ -75,6 +77,7 @@ class YandexMusicClient(
                 ?.optString("name")
                 ?.takeIf { it.isNotBlank() }
                 ?: account.optString("fullName").takeIf { it.isNotBlank() },
+            hasPlus = result.optJSONObject("plus")?.optBoolean("hasPlus", false) ?: false,
         )
     }
 
