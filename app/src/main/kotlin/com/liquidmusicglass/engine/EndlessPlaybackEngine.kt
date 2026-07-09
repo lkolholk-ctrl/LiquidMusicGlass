@@ -58,7 +58,7 @@ class EndlessPlaybackEngine(
         // обратно к артисту вместо транзитивного дрейфа в соседей-соседей.
         val seedPool: List<String> = emptyList()
     ) {
-        enum class Type { WAVE, ARTIST, ALBUM, SEARCH, GENRE, MOOD, PLAYLIST, LIBRARY }
+        enum class Type { WAVE, ARTIST, ALBUM, SEARCH, GENRE, MOOD, PLAYLIST, LIBRARY, YWAVE }
     }
 
     fun setRefillContext(context: RefillContext?) {
@@ -151,6 +151,12 @@ class EndlessPlaybackEngine(
                         refillCtx.name.isNullOrBlank() &&
                         seedPool.isEmpty()
                     val waveRepo = com.liquidmusicglass.data.local.WaveRepository.getInstance(ctx)
+
+                    // Волна ЯМ: дозаправка пачками ротора, минуя ICM-логику ниже.
+                    if (isGlobal && refillCtx?.type == RefillContext.Type.YWAVE) {
+                        return@withContext com.liquidmusicglass.data.yandex.YandexWaveEngine
+                            .nextBatch(excludeIds = (playedIds + queueIds).toSet())
+                    }
 
                     if (isGlobal && refillCtx?.type == RefillContext.Type.MOOD) {
                         val mood = refillCtx.id ?: refillCtx.name

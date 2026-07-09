@@ -444,6 +444,12 @@ object PlayerController {
         val startTrack = tracks[startIndex]
         DebugLog.add("PC.playFromList(EXO) n=${tracks.size} start=$startIndex online=${startTrack.isOnlineTrack} | ${DebugLog.caller()}")
 
+        // Любой НЕ-YWAVE плейбек завершает волну ЯМ: её дозаправка/фидбек
+        // не должны продолжаться под чужой очередью.
+        if (!autoRefillType.equals("YWAVE", ignoreCase = true)) {
+            com.liquidmusicglass.data.yandex.YandexWaveEngine.stop()
+        }
+
         // ── Determine playback context BEFORE any async work ──
         val newContext = when {
             autoRefillType.equals("library", ignoreCase = true) && autoRefillId.equals("downloads", ignoreCase = true) ->
@@ -1219,6 +1225,20 @@ object PlayerController {
                     skipped = isSkippedForServer && isWaveContext
                 )
             } catch (_: Exception) {}
+        }
+
+        // Обучение волны ЯМ: ym_-треки шлют trackFinished/skip в ротор,
+        // пока волна активна (внутри движка это гейтится isActive).
+        if (com.liquidmusicglass.data.yandex.YandexDownloadManager.isYandexId(track.id)) {
+            ioScope.launch {
+                try {
+                    com.liquidmusicglass.data.yandex.YandexWaveEngine.onPlaybackLogged(
+                        trackId = track.id,
+                        playedSeconds = playedSec.toDouble(),
+                        skipped = isSkippedForServer
+                    )
+                } catch (_: Exception) {}
+            }
         }
     }
 

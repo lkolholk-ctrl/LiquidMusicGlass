@@ -292,7 +292,44 @@ fun YandexMusicScreen(onBack: () -> Unit) {
         }
     }
 
+    // ── Волна ЯМ (ротор) ──
+    val yWaveActive by com.liquidmusicglass.data.yandex.YandexWaveEngine.isActive.collectAsState()
+    var waveStarting by remember { mutableStateOf(false) }
+    var waveError by remember { mutableStateOf<String?>(null) }
+
+    fun startYWave() {
+        if (waveStarting) return
+        waveStarting = true
+        waveError = null
+        scope.launch {
+            try {
+                val tracks = withContext(Dispatchers.IO) {
+                    com.liquidmusicglass.data.yandex.YandexWaveEngine.start()
+                }
+                if (tracks.isEmpty()) {
+                    waveError = "Failed to start the wave"
+                } else {
+                    PlayerController.playFromList(
+                        context = context,
+                        tracks = tracks,
+                        startIndex = 0,
+                        autoRefillType = "YWAVE"
+                    )
+                    PlayerController.ensureWaveRefill()
+                }
+            } catch (_: YandexUnauthorizedException) {
+                waveError = "Token expired — reconnect"
+                YandexAuthRepository.disconnect()
+            } catch (_: Exception) {
+                waveError = "Failed to start the wave"
+            } finally {
+                waveStarting = false
+            }
+        }
+    }
+
     fun doDisconnect() {
+        com.liquidmusicglass.data.yandex.YandexWaveEngine.stop()
         YandexAuthRepository.disconnect()
         results = emptyList()
         query = ""
@@ -402,7 +439,15 @@ fun YandexMusicScreen(onBack: () -> Unit) {
                 }
 
                 when (section) {
-                    YandexSection.WAVE -> YandexWaveComingSoon(lc)
+                    YandexSection.WAVE -> {
+                        YandexWaveSection(
+                            active = yWaveActive,
+                            starting = waveStarting,
+                            error = waveError,
+                            lc = lc,
+                            onStart = { startYWave() }
+                        )
+                    }
                     YandexSection.SEARCH -> {
                     // ── Search ──
                     Row(
@@ -805,9 +850,19 @@ fun YandexMusicScreen(onBack: () -> Unit) {
     }
 }
 
-/** Секция «Волна» ЯМ — заглушка до реализации ротора. */
+/**
+ * Секция «Волна» ЯМ: персональная станция ротора. Старт — первая пачка +
+ * radioStarted; дальше очередь бесконечно дозаправляется пачками ротора, а
+ * дослушивания/скипы обучают станцию (как в официальном клиенте).
+ */
 @Composable
-private fun YandexWaveComingSoon(lc: com.liquidmusicglass.ui.theme.LiquidColors) {
+private fun YandexWaveSection(
+    active: Boolean,
+    starting: Boolean,
+    error: String?,
+    lc: com.liquidmusicglass.ui.theme.LiquidColors,
+    onStart: () -> Unit,
+) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -818,22 +873,50 @@ private fun YandexWaveComingSoon(lc: com.liquidmusicglass.ui.theme.LiquidColors)
             Icon(
                 imageVector = com.liquidmusicglass.ui.icons.LiquidGlyphs.Equalizer,
                 contentDescription = null,
-                tint = YandexYellow.copy(alpha = 0.7f),
+                tint = YandexYellow.copy(alpha = if (active) 1f else 0.7f),
                 modifier = Modifier.size(48.dp)
             )
             Spacer(Modifier.height(14.dp))
             Text(
-                "My Wave — coming soon",
+                "My Wave",
                 color = lc.textPrimary,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.SemiBold
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold
             )
             Spacer(Modifier.height(6.dp))
             Text(
-                "Personal Yandex rotor station will live here.",
+                if (active) "Playing — learns from your skips and full listens"
+                else "Endless personal station from your account",
                 color = lc.textSecondary,
                 fontSize = 13.sp
             )
+            if (error != null) {
+                Spacer(Modifier.height(10.dp))
+                Text(error, color = Color(0xFFFF453A), fontSize = 12.sp)
+            }
+            Spacer(Modifier.height(20.dp))
+            Box(
+                modifier = Modifier
+                    .height(48.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(if (!starting) YandexYellow else YandexYellow.copy(alpha = 0.4f))
+                    .liquidClickable(enabled = !starting, pressedScale = LiquidMotion.PressButton) {
+                        onStart()
+                    }
+                    .padding(horizontal = 28.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                if (starting) {
+                    CircularProgressIndicator(Modifier.size(22.dp), color = Color.Black, strokeWidth = 2.dp)
+                } else {
+                    Text(
+                        if (active) "Restart wave" else "Start My Wave",
+                        color = Color.Black,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 15.sp
+                    )
+                }
+            }
         }
     }
 }

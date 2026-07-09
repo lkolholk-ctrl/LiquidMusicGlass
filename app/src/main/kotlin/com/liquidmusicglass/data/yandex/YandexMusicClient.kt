@@ -1,7 +1,9 @@
 package com.liquidmusicglass.data.yandex
 
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -130,6 +132,61 @@ class YandexMusicClient(
         val trackCount: Int,
         val coverUrl: String?,
     )
+
+    /** Пачка треков ротора (волны): batchId нужен для фидбека обучения. */
+    data class StationBatch(val batchId: String?, val tracks: List<Track>)
+
+    /**
+     * Пачка треков станции ротора («Моя волна» = `user:onyourwave`).
+     * [queue] — id последнего трека очереди: продолжение с учётом контекста.
+     */
+    fun rotorStationTracks(station: String, queue: String? = null): StationBatch {
+        val url = buildString {
+            append("$API/rotor/station/")
+            append(urlEncode(station))
+            append("/tracks?settings2=true")
+            if (!queue.isNullOrBlank()) append("&queue=${urlEncode(queue)}")
+        }
+        val root = getJson(url)
+        val result = root.optJSONObject("result") ?: return StationBatch(null, emptyList())
+        val seq = result.optJSONArray("sequence") ?: JSONArray()
+        val tracks = ArrayList<Track>(seq.length())
+        for (i in 0 until seq.length()) {
+            val t = seq.optJSONObject(i)?.optJSONObject("track") ?: continue
+            parseTrack(t)?.let { tracks += it }
+        }
+        return StationBatch(
+            batchId = result.optString("batchId").takeIf { it.isNotBlank() },
+            tracks = tracks,
+        )
+    }
+
+    /**
+     * Фидбек ротору — то, чем волна обучается: `radioStarted` при старте,
+     * `trackFinished`/`skip` по итогам прослушивания (с batchId пачки).
+     */
+    fun sendRotorFeedback(
+        station: String,
+        type: String,
+        batchId: String? = null,
+        trackId: String? = null,
+        totalPlayedSeconds: Double? = null,
+    ) {
+        val url = buildString {
+            append("$API/rotor/station/")
+            append(urlEncode(station))
+            append("/feedback")
+            if (!batchId.isNullOrBlank()) append("?batch-id=${urlEncode(batchId)}")
+        }
+        val body = JSONObject().apply {
+            put("type", type)
+            put("timestamp", java.time.Instant.now().toString())
+            if (!trackId.isNullOrBlank()) put("trackId", trackId)
+            if (totalPlayedSeconds != null) put("totalPlayedSeconds", totalPlayedSeconds)
+            if (type == "radioStarted") put("from", "mobile-radio-user-onyourwave")
+        }
+        postJson(url, body)
+    }
 
     /** Собственные плейлисты юзера: GET /users/{uid}/playlists/list. */
     fun fetchUserPlaylists(uid: Long): List<Playlist> {
@@ -282,6 +339,27 @@ class YandexMusicClient(
                 throw YandexMusicException("HTTP ${resp.code} for ${safePath(url)}")
             }
             return JSONObject(body)
+        }
+    }
+
+    private fun postJson(url: String, body: JSONObject): JSONObject {
+        val req = Request.Builder()
+            .url(url)
+            .header("Authorization", "OAuth $oauthToken")
+            .header("User-Agent", USER_AGENT)
+            .header("Accept", "application/json")
+            .header("X-Yandex-Music-Client", "YandexMusicAndroid/24023621")
+            .post(body.toString().toRequestBody("application/json; charset=utf-8".toMediaTypeOrNull()))
+            .build()
+        http.newCall(req).execute().use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (resp.code == 401 || resp.code == 403) {
+                throw YandexUnauthorizedException("HTTP ${resp.code}: unauthorized")
+            }
+            if (!resp.isSuccessful) {
+                throw YandexMusicException("HTTP ${resp.code} for ${safePath(url)}")
+            }
+            return if (text.isBlank()) JSONObject() else JSONObject(text)
         }
     }
 
