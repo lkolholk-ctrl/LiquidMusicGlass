@@ -81,6 +81,49 @@ class YandexMusicClient(
         )
     }
 
+    /** Короткая запись лайка: id трека (+ albumId для точной версии релиза). */
+    data class LikedRef(val id: String, val albumId: String?)
+
+    /**
+     * Лайкнутые треки юзера. `/users/{uid}/likes/tracks` отдаёт только id
+     * (без названий/обложек) — метаданные добираются батчами POST /tracks.
+     * Порядок как в ЯМ: свежие лайки первыми.
+     */
+    fun fetchLikedTracks(uid: Long, hydrateChunk: Int = 100): List<Track> {
+        val root = getJson("$API/users/$uid/likes/tracks")
+        val arr = root.optJSONObject("result")
+            ?.optJSONObject("library")
+            ?.optJSONArray("tracks")
+            ?: return emptyList()
+        val refs = ArrayList<LikedRef>(arr.length())
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            val id = o.opt("id")?.toString()?.takeIf { it.isNotBlank() } ?: continue
+            val albumId = o.opt("albumId")?.toString()?.takeIf { it.isNotBlank() }
+            refs += LikedRef(id, albumId)
+        }
+        if (refs.isEmpty()) return emptyList()
+        val out = ArrayList<Track>(refs.size)
+        refs.chunked(hydrateChunk).forEach { chunk ->
+            out += fetchTracksByIds(chunk)
+        }
+        return out
+    }
+
+    /** Полные объекты треков по id: POST /tracks, form `track-ids=id:albumId,…`. */
+    fun fetchTracksByIds(refs: List<LikedRef>): List<Track> {
+        if (refs.isEmpty()) return emptyList()
+        val ids = refs.joinToString(",") { ref ->
+            if (ref.albumId != null) "${ref.id}:${ref.albumId}" else ref.id
+        }
+        val root = postForm(
+            "$API/tracks",
+            mapOf("track-ids" to ids, "with-positions" to "false")
+        )
+        val arr = root.optJSONArray("result") ?: return emptyList()
+        return arr.mapTracks()
+    }
+
     /** Python: `client.search(query, type_="track")` */
     fun searchTracks(query: String, page: Int = 0): List<Track> {
         val q = query.trim()
@@ -178,6 +221,30 @@ class YandexMusicClient(
                 throw YandexMusicException("HTTP ${resp.code} for ${safePath(url)}")
             }
             return JSONObject(body)
+        }
+    }
+
+    private fun postForm(url: String, form: Map<String, String>): JSONObject {
+        val body = okhttp3.FormBody.Builder().apply {
+            form.forEach { (k, v) -> add(k, v) }
+        }.build()
+        val req = Request.Builder()
+            .url(url)
+            .header("Authorization", "OAuth $oauthToken")
+            .header("User-Agent", USER_AGENT)
+            .header("Accept", "application/json")
+            .header("X-Yandex-Music-Client", "YandexMusicAndroid/24023621")
+            .post(body)
+            .build()
+        http.newCall(req).execute().use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (resp.code == 401 || resp.code == 403) {
+                throw YandexUnauthorizedException("HTTP ${resp.code}: unauthorized")
+            }
+            if (!resp.isSuccessful) {
+                throw YandexMusicException("HTTP ${resp.code} for ${safePath(url)}")
+            }
+            return JSONObject(text)
         }
     }
 

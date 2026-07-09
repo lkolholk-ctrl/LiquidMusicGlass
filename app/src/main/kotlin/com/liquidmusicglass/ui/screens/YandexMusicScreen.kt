@@ -55,8 +55,10 @@ import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.ui.glass.liquidClickable
 import com.liquidmusicglass.ui.theme.LiquidMotion
 import com.liquidmusicglass.ui.theme.LiquidTheme
+import kotlin.coroutines.resume
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 
 private val YandexYellow = Color(0xFFFFCC00)
@@ -67,7 +69,9 @@ private val YandexYellow = Color(0xFFFFCC00)
  * остальные детали, а не sheet-оверлеем.
  *
  * Не connected → встроенный вход (WebView, автоперехват токена) или ручной
- * ввод OAuth-токена. Connected → поиск + скачивание в Downloads.
+ * ввод OAuth-токена. Connected → вкладки Search (поиск каталога) и Liked
+ * (лайкнутая фонотека с «Download all»); тап по треку — стриминг, стрелка —
+ * скачивание в Downloads.
  */
 @Composable
 fun YandexMusicScreen(onBack: () -> Unit) {
@@ -133,6 +137,98 @@ fun YandexMusicScreen(onBack: () -> Unit) {
                 searching = false
             }
         }
+    }
+
+    // ── Liked (фонотека ЯМ) ──
+    var tab by remember { mutableStateOf(0) }               // 0=Search, 1=Liked
+    var liked by remember { mutableStateOf<List<YandexMusicClient.Track>>(emptyList()) }
+    var likedLoading by remember { mutableStateOf(false) }
+    var likedError by remember { mutableStateOf<String?>(null) }
+    var bulkActive by remember { mutableStateOf(false) }
+    var bulkDone by remember { mutableStateOf(0) }
+    var bulkTotal by remember { mutableStateOf(0) }
+    var bulkStop by remember { mutableStateOf(false) }
+
+    fun loadLiked(force: Boolean = false) {
+        if (likedLoading || (!force && liked.isNotEmpty())) return
+        likedLoading = true
+        likedError = null
+        scope.launch {
+            try {
+                val list = withContext(Dispatchers.IO) {
+                    val client = YandexAuthRepository.clientOrNull()
+                        ?: throw YandexMusicException("Not connected")
+                    val uid = YandexAuthRepository.uidOrNull()
+                        ?: throw YandexMusicException("No account uid")
+                    client.fetchLikedTracks(uid)
+                }
+                liked = list
+                if (list.isEmpty()) likedError = "No liked tracks in this account"
+            } catch (_: YandexUnauthorizedException) {
+                likedError = "Token expired — reconnect"
+                YandexAuthRepository.disconnect()
+            } catch (_: Exception) {
+                likedError = "Failed to load liked tracks"
+            } finally {
+                likedLoading = false
+            }
+        }
+    }
+
+    LaunchedEffect(tab, connected) {
+        if (connected && tab == 1) loadLiked()
+    }
+
+    /**
+     * «Скачать всё»: строго по одному треку за раз (не залп из сотен
+     * параллельных загрузок) — щадим сеть/CDN, прогресс виден по-трековыми
+     * индикаторами. Повторный тап — стоп после текущего трека.
+     */
+    fun downloadAllLiked() {
+        if (bulkActive) {
+            bulkStop = true
+            return
+        }
+        scope.launch {
+            bulkActive = true
+            bulkStop = false
+            val pending = liked.filter {
+                it.available &&
+                    YandexDownloadManager.storageId(it.bareTrackId) !in offlineIds
+            }
+            bulkTotal = pending.size
+            bulkDone = 0
+            for (track in pending) {
+                if (bulkStop) break
+                val sid = YandexDownloadManager.storageId(track.bareTrackId)
+                if (sid in offlineIds || YandexDownloadManager.isDownloading(sid)) {
+                    bulkDone++
+                    continue
+                }
+                val outcome = suspendCancellableCoroutine<YandexDownloadManager.Outcome> { cont ->
+                    YandexDownloadManager.download(context, track) { out ->
+                        if (cont.isActive) cont.resume(out)
+                    }
+                }
+                if (outcome == YandexDownloadManager.Outcome.DONE) {
+                    offlineIds = offlineIds + sid
+                }
+                bulkDone++
+            }
+            bulkActive = false
+            refreshOffline()
+        }
+    }
+
+    fun doDisconnect() {
+        YandexAuthRepository.disconnect()
+        results = emptyList()
+        query = ""
+        searchError = null
+        liked = emptyList()
+        likedError = null
+        bulkStop = true
+        tab = 0
     }
 
     Box(Modifier.fillMaxSize().background(lc.settingsBackground)) {
@@ -208,92 +304,17 @@ fun YandexMusicScreen(onBack: () -> Unit) {
                     )
                 }
             } else {
-                // Search bar
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(horizontal = 16.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(46.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(inputBg)
-                            .padding(horizontal = 12.dp),
-                        contentAlignment = Alignment.CenterStart
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                Icons.Rounded.Search,
-                                null,
-                                tint = lc.textTertiary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            BasicTextField(
-                                value = query,
-                                onValueChange = { query = it; searchError = null },
-                                textStyle = TextStyle(color = lc.textPrimary, fontSize = 15.sp),
-                                cursorBrush = SolidColor(YandexYellow),
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                                keyboardActions = KeyboardActions(onSearch = { runSearch() }),
-                                modifier = Modifier.weight(1f),
-                                decorationBox = { inner ->
-                                    if (query.isEmpty()) {
-                                        Text(
-                                            "Search tracks…",
-                                            color = lc.textTertiary,
-                                            fontSize = 15.sp
-                                        )
-                                    }
-                                    inner()
-                                }
-                            )
-                        }
-                    }
+                // Вкладки раздела ЯМ: поиск каталога / лайкнутая фонотека
+                Row(modifier = Modifier.padding(horizontal = 16.dp)) {
+                    YandexTab("Search", tab == 0, inputBg, lc) { tab = 0 }
                     Spacer(Modifier.width(8.dp))
-                    Box(
-                        modifier = Modifier
-                            .height(46.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(
-                                if (query.isNotBlank() && !searching) YandexYellow
-                                else YandexYellow.copy(alpha = 0.4f)
-                            )
-                            .liquidClickable(
-                                enabled = query.isNotBlank() && !searching,
-                                pressedScale = LiquidMotion.PressButton
-                            ) { runSearch() }
-                            .padding(horizontal = 16.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (searching) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                color = Color.Black,
-                                strokeWidth = 2.dp
-                            )
-                        } else {
-                            Text("Search", color = Color.Black, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                        }
-                    }
+                    YandexTab("Liked", tab == 1, inputBg, lc) { tab = 1 }
                 }
 
-                if (searchError != null) {
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        searchError!!,
-                        color = Color(0xFFFF453A),
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(horizontal = 16.dp)
-                    )
-                }
-
-                // Скачивание полных треков гейтится подпиской Яндекс Плюс самого
+                // Скачивание полных треков гейтится подпиской Плюс самого
                 // аккаунта — без неё честно предупреждаем вместо «Download failed».
                 if (!hasPlus) {
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(10.dp))
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -312,82 +333,302 @@ fun YandexMusicScreen(onBack: () -> Unit) {
 
                 Spacer(Modifier.height(10.dp))
 
-                // Results + Disconnect последним элементом; 120dp снизу —
-                // просвет под плавающий бар (та же конвенция, что у остальных
-                // экранов Библиотеки).
-                LazyColumn(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 120.dp)
-                ) {
-                    if (results.isEmpty() && !searching && searchError == null) {
-                        item {
+                if (tab == 0) {
+                    // ── Search ──
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(46.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(inputBg)
+                                .padding(horizontal = 12.dp),
+                            contentAlignment = Alignment.CenterStart
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    Icons.Rounded.Search,
+                                    null,
+                                    tint = lc.textTertiary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                BasicTextField(
+                                    value = query,
+                                    onValueChange = { query = it; searchError = null },
+                                    textStyle = TextStyle(color = lc.textPrimary, fontSize = 15.sp),
+                                    cursorBrush = SolidColor(YandexYellow),
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                    keyboardActions = KeyboardActions(onSearch = { runSearch() }),
+                                    modifier = Modifier.weight(1f),
+                                    decorationBox = { inner ->
+                                        if (query.isEmpty()) {
+                                            Text(
+                                                "Search tracks…",
+                                                color = lc.textTertiary,
+                                                fontSize = 15.sp
+                                            )
+                                        }
+                                        inner()
+                                    }
+                                )
+                            }
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .height(46.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(
+                                    if (query.isNotBlank() && !searching) YandexYellow
+                                    else YandexYellow.copy(alpha = 0.4f)
+                                )
+                                .liquidClickable(
+                                    enabled = query.isNotBlank() && !searching,
+                                    pressedScale = LiquidMotion.PressButton
+                                ) { runSearch() }
+                                .padding(horizontal = 16.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (searching) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    color = Color.Black,
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Text("Search", color = Color.Black, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                            }
+                        }
+                    }
+
+                    if (searchError != null) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            searchError!!,
+                            color = Color(0xFFFF453A),
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(horizontal = 16.dp)
+                        )
+                    }
+
+                    Spacer(Modifier.height(10.dp))
+
+                    // Results + Disconnect последним элементом; 120dp снизу —
+                    // просвет под плавающий бар (та же конвенция, что у остальных
+                    // экранов Библиотеки).
+                    LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 120.dp)
+                    ) {
+                        if (results.isEmpty() && !searching && searchError == null) {
+                            item {
+                                Text(
+                                    "Type a query and tap Search.\nTap a track to play it; " +
+                                        "downloads go to Playlists → Downloads.",
+                                    color = lc.textTertiary,
+                                    fontSize = 13.sp,
+                                    modifier = Modifier.padding(vertical = 24.dp)
+                                )
+                            }
+                        }
+                        itemsIndexed(results, key = { _, track -> track.id }) { index, track ->
+                            val sid = YandexDownloadManager.storageId(track.bareTrackId)
+                            val prog = dlProgress[sid]
+                            val saved = sid in offlineIds
+                            YandexTrackRow(
+                                track = track,
+                                progress = prog,
+                                isDownloaded = saved,
+                                inputBg = inputBg,
+                                onPlay = {
+                                    // Стриминг: вся выдача — очередь, тапнутый — старт.
+                                    // Свежая прямая ссылка резолвится плеером на лету;
+                                    // скачанные ym_-треки играются из файла без сети.
+                                    PlayerController.playFromList(
+                                        context = context,
+                                        tracks = results.map { it.toEngineTrack() },
+                                        startIndex = index,
+                                        autoRefillType = "playlist",
+                                        autoRefillId = "yandex_search"
+                                    )
+                                },
+                                onDownload = {
+                                    YandexDownloadManager.download(context, track) { outcome ->
+                                        when (outcome) {
+                                            YandexDownloadManager.Outcome.DONE -> refreshOffline()
+                                            YandexDownloadManager.Outcome.FAILED -> scope.launch {
+                                                searchError = "Download failed: ${track.title}"
+                                            }
+                                            YandexDownloadManager.Outcome.CANCELLED -> Unit
+                                        }
+                                    }
+                                },
+                                onCancel = { YandexDownloadManager.cancel(sid) }
+                            )
+                        }
+                        item { DisconnectRow(onDisconnect = { doDisconnect() }) }
+                    }
+                } else {
+                    // ── Liked (фонотека) ──
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                    ) {
+                        Text(
+                            if (likedLoading && liked.isEmpty()) "Loading likes…"
+                            else "Liked tracks · ${liked.size}",
+                            color = lc.textSecondary,
+                            fontSize = 13.sp,
+                            modifier = Modifier.weight(1f)
+                        )
+                        val pendingCount = liked.count {
+                            it.available &&
+                                YandexDownloadManager.storageId(it.bareTrackId) !in offlineIds
+                        }
+                        val canBulk = hasPlus && !likedLoading && (bulkActive || pendingCount > 0)
+                        Box(
+                            modifier = Modifier
+                                .height(34.dp)
+                                .clip(RoundedCornerShape(17.dp))
+                                .background(
+                                    if (canBulk) YandexYellow else YandexYellow.copy(alpha = 0.35f)
+                                )
+                                .liquidClickable(
+                                    enabled = canBulk,
+                                    pressedScale = LiquidMotion.PressButton
+                                ) { downloadAllLiked() }
+                                .padding(horizontal = 14.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
                             Text(
-                                "Type a query and tap Search.\nTap a track to play it; " +
-                                    "downloads go to Playlists → Downloads.",
-                                color = lc.textTertiary,
-                                fontSize = 13.sp,
-                                modifier = Modifier.padding(vertical = 24.dp)
+                                if (bulkActive) "Stop · $bulkDone/$bulkTotal" else "Download all",
+                                color = Color.Black,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 13.sp
                             )
                         }
                     }
-                    itemsIndexed(results, key = { _, track -> track.id }) { index, track ->
-                        val sid = YandexDownloadManager.storageId(track.bareTrackId)
-                        val prog = dlProgress[sid]
-                        val saved = sid in offlineIds
-                        YandexTrackRow(
-                            track = track,
-                            progress = prog,
-                            isDownloaded = saved,
-                            inputBg = inputBg,
-                            onPlay = {
-                                // Стриминг: вся выдача — очередь, тапнутый — старт.
-                                // Свежая прямая ссылка резолвится плеером на лету;
-                                // скачанные ym_-треки играются из файла без сети.
-                                PlayerController.playFromList(
-                                    context = context,
-                                    tracks = results.map { it.toEngineTrack() },
-                                    startIndex = index,
-                                    autoRefillType = "playlist",
-                                    autoRefillId = "yandex_search"
-                                )
-                            },
-                            onDownload = {
-                                YandexDownloadManager.download(context, track) { outcome ->
-                                    when (outcome) {
-                                        YandexDownloadManager.Outcome.DONE -> refreshOffline()
-                                        YandexDownloadManager.Outcome.FAILED -> scope.launch {
-                                            searchError = "Download failed: ${track.title}"
-                                        }
-                                        YandexDownloadManager.Outcome.CANCELLED -> Unit
-                                    }
-                                }
-                            },
-                            onCancel = { YandexDownloadManager.cancel(sid) }
+
+                    if (likedError != null) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            likedError!!,
+                            color = Color(0xFFFF453A),
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(horizontal = 16.dp)
                         )
                     }
-                    item {
-                        Spacer(Modifier.height(10.dp))
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(42.dp)
-                                .clip(RoundedCornerShape(21.dp))
-                                .background(Color(0xFFFF453A).copy(alpha = 0.12f))
-                                .liquidClickable(pressedScale = LiquidMotion.PressButton) {
-                                    YandexAuthRepository.disconnect()
-                                    results = emptyList()
-                                    query = ""
-                                    searchError = null
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text("Disconnect", color = Color(0xFFFF453A), fontWeight = FontWeight.Medium, fontSize = 14.sp)
+
+                    Spacer(Modifier.height(10.dp))
+
+                    LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 120.dp)
+                    ) {
+                        if (likedLoading && liked.isEmpty()) {
+                            item {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 32.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(28.dp),
+                                        color = YandexYellow,
+                                        strokeWidth = 2.5.dp
+                                    )
+                                }
+                            }
                         }
+                        itemsIndexed(liked, key = { _, track -> track.id }) { index, track ->
+                            val sid = YandexDownloadManager.storageId(track.bareTrackId)
+                            val prog = dlProgress[sid]
+                            val saved = sid in offlineIds
+                            YandexTrackRow(
+                                track = track,
+                                progress = prog,
+                                isDownloaded = saved,
+                                inputBg = inputBg,
+                                onPlay = {
+                                    PlayerController.playFromList(
+                                        context = context,
+                                        tracks = liked.map { it.toEngineTrack() },
+                                        startIndex = index,
+                                        autoRefillType = "playlist",
+                                        autoRefillId = "yandex_likes"
+                                    )
+                                },
+                                onDownload = {
+                                    YandexDownloadManager.download(context, track) { outcome ->
+                                        when (outcome) {
+                                            YandexDownloadManager.Outcome.DONE -> refreshOffline()
+                                            YandexDownloadManager.Outcome.FAILED -> scope.launch {
+                                                likedError = "Download failed: ${track.title}"
+                                            }
+                                            YandexDownloadManager.Outcome.CANCELLED -> Unit
+                                        }
+                                    }
+                                },
+                                onCancel = { YandexDownloadManager.cancel(sid) }
+                            )
+                        }
+                        item { DisconnectRow(onDisconnect = { doDisconnect() }) }
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun YandexTab(
+    label: String,
+    selected: Boolean,
+    inputBg: Color,
+    lc: com.liquidmusicglass.ui.theme.LiquidColors,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .height(34.dp)
+            .clip(RoundedCornerShape(17.dp))
+            .background(if (selected) YandexYellow else inputBg)
+            .liquidClickable(pressedScale = LiquidMotion.PressButton) { onClick() }
+            .padding(horizontal = 16.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            label,
+            color = if (selected) Color.Black else lc.textSecondary,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 13.sp
+        )
+    }
+}
+
+@Composable
+private fun DisconnectRow(onDisconnect: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 10.dp)
+            .height(42.dp)
+            .clip(RoundedCornerShape(21.dp))
+            .background(Color(0xFFFF453A).copy(alpha = 0.12f))
+            .liquidClickable(pressedScale = LiquidMotion.PressButton) { onDisconnect() },
+        contentAlignment = Alignment.Center
+    ) {
+        Text("Disconnect", color = Color(0xFFFF453A), fontWeight = FontWeight.Medium, fontSize = 14.sp)
     }
 }
 

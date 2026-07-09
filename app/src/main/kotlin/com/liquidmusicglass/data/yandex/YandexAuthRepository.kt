@@ -71,6 +71,9 @@ object YandexAuthRepository {
 
     fun hasToken(): Boolean = !readTokenRaw().isNullOrBlank()
 
+    /** uid линкованного аккаунта (для `/users/{uid}/…` ручек), или null. */
+    fun uidOrNull(): Long? = prefs?.getLong(KEY_UID, 0L)?.takeIf { it != 0L }
+
     /**
      * Клиент с текущим токеном или null.
      * Сам токен наружу не отдаём — только готовый [YandexMusicClient].
