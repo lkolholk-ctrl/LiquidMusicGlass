@@ -2,6 +2,7 @@ package com.liquidmusicglass.ui.screens
 
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
+import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -57,6 +58,15 @@ private const val YANDEX_MUSIC_CLIENT_ID = "23cabbbdc6cd418abb4b39c32c41195d"
 
 private const val YANDEX_AUTH_URL =
     "https://oauth.yandex.ru/authorize?response_type=token&client_id=$YANDEX_MUSIC_CLIENT_ID"
+
+/**
+ * Дефолтный UA WebView содержит метку «; wv», по которой Яндекс ID урезает
+ * страницу входа до «только телефон». С UA обычного мобильного Chrome страница
+ * отдаёт полный выбор способов: телефон / почта / логин / QR / соцсети.
+ */
+private const val CHROME_MOBILE_UA =
+    "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 " +
+        "(KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
 
 /**
  * Встроенный вход в Яндекс: официальная страница oauth.yandex.ru в WebView.
@@ -157,6 +167,9 @@ fun YandexWebLoginDialog(
                     WebView(ctx).apply {
                         settings.javaScriptEnabled = true
                         settings.domStorageEnabled = true
+                        settings.userAgentString = CHROME_MOBILE_UA
+                        // Соц-логины (VK/Google/OK) ходят через сторонние домены
+                        CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
                         webViewClient = object : WebViewClient() {
                             override fun shouldOverrideUrlLoading(
                                 view: WebView?,
