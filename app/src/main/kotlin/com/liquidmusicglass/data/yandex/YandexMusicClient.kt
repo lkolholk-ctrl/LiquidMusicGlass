@@ -318,7 +318,9 @@ class YandexMusicClient(
         )
     }
 
-    private fun coverUriToUrl(coverUri: String?, size: String = "200x200"): String? {
+    // 700x700: хватает и для артворка полного плеера, и для Palette;
+    // 200x200 в полном плеере мылилось.
+    private fun coverUriToUrl(coverUri: String?, size: String = "700x700"): String? {
         if (coverUri.isNullOrBlank()) return null
         val path = coverUri.replace("%%", size)
         return if (path.startsWith("http")) path else "https://$path"

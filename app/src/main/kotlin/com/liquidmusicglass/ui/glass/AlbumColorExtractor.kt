@@ -107,10 +107,26 @@ fun rememberAlbumColors(uri: Uri?, coverUrl: String? = null): AlbumColors {
         colors = withContext(Dispatchers.IO) {
             try {
                 val bitmap = when {
+                    // Локальный файл обложки (downloads/.covers/… у ЯМ-загрузок):
+                    // раньше путь уходил в java.net.URL → MalformedURLException →
+                    // фон оставался серым фолбэком.
+                    !coverUrl.isNullOrBlank() &&
+                        (coverUrl.startsWith("/") || coverUrl.startsWith("file://")) -> {
+                        val path = coverUrl.removePrefix("file://")
+                        val options = BitmapFactory.Options().apply {
+                            inSampleSize = 8
+                        }
+                        BitmapFactory.decodeFile(path, options)
+                    }
                     // Online cover: download via HTTP
                     !coverUrl.isNullOrBlank() -> {
-                        val url = java.net.URL(coverUrl)
-                        url.openStream().use { stream ->
+                        val connection = java.net.URL(coverUrl)
+                            .openConnection() as java.net.HttpURLConnection
+                        // Некоторые обложечные CDN режут дефолтный Java-UA
+                        connection.setRequestProperty("User-Agent", "Mozilla/5.0")
+                        connection.connectTimeout = 10_000
+                        connection.readTimeout = 10_000
+                        connection.inputStream.use { stream ->
                             val options = BitmapFactory.Options().apply {
                                 inSampleSize = 8
                             }
