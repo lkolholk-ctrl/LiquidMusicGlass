@@ -3,7 +3,7 @@ package com.liquidmusicglass.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -50,6 +50,8 @@ import com.liquidmusicglass.data.yandex.YandexDownloadManager
 import com.liquidmusicglass.data.yandex.YandexMusicClient
 import com.liquidmusicglass.data.yandex.YandexMusicException
 import com.liquidmusicglass.data.yandex.YandexUnauthorizedException
+import com.liquidmusicglass.data.yandex.toEngineTrack
+import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.ui.glass.liquidClickable
 import com.liquidmusicglass.ui.theme.LiquidMotion
 import com.liquidmusicglass.ui.theme.LiquidTheme
@@ -321,14 +323,15 @@ fun YandexMusicScreen(onBack: () -> Unit) {
                     if (results.isEmpty() && !searching && searchError == null) {
                         item {
                             Text(
-                                "Type a query and tap Search.\nDownloads go to Playlists → Downloads.",
+                                "Type a query and tap Search.\nTap a track to play it; " +
+                                    "downloads go to Playlists → Downloads.",
                                 color = lc.textTertiary,
                                 fontSize = 13.sp,
                                 modifier = Modifier.padding(vertical = 24.dp)
                             )
                         }
                     }
-                    items(results, key = { it.id }) { track ->
+                    itemsIndexed(results, key = { _, track -> track.id }) { index, track ->
                         val sid = YandexDownloadManager.storageId(track.bareTrackId)
                         val prog = dlProgress[sid]
                         val saved = sid in offlineIds
@@ -337,6 +340,18 @@ fun YandexMusicScreen(onBack: () -> Unit) {
                             progress = prog,
                             isDownloaded = saved,
                             inputBg = inputBg,
+                            onPlay = {
+                                // Стриминг: вся выдача — очередь, тапнутый — старт.
+                                // Свежая прямая ссылка резолвится плеером на лету;
+                                // скачанные ym_-треки играются из файла без сети.
+                                PlayerController.playFromList(
+                                    context = context,
+                                    tracks = results.map { it.toEngineTrack() },
+                                    startIndex = index,
+                                    autoRefillType = "playlist",
+                                    autoRefillId = "yandex_search"
+                                )
+                            },
                             onDownload = {
                                 YandexDownloadManager.download(context, track) { outcome ->
                                     when (outcome) {
@@ -546,6 +561,7 @@ private fun YandexTrackRow(
     progress: Float?,
     isDownloaded: Boolean,
     inputBg: Color,
+    onPlay: () -> Unit = {},
     onDownload: () -> Unit,
     onCancel: () -> Unit = {},
 ) {
@@ -557,6 +573,7 @@ private fun YandexTrackRow(
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
             .background(inputBg)
+            .liquidClickable(enabled = track.available) { onPlay() }
             .padding(10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
