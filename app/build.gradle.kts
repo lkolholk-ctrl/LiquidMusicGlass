@@ -226,6 +226,9 @@ dependencies {
     // DataStore (camp preferences)
     implementation("androidx.datastore:datastore-preferences:1.1.1")
 
+    // EncryptedSharedPreferences — OAuth-токен Яндекса (не plaintext)
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+
     // Room (local database)
     val roomVersion = "2.7.0"
     implementation("androidx.room:room-runtime:$roomVersion")

@@ -58,6 +58,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -66,12 +67,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.liquidmusicglass.R
 import com.liquidmusicglass.api.icm.IcmApiFileLogger
 import com.liquidmusicglass.api.icm.IcmAuthRepository
 import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.data.local.db.FavoriteTrackDatabase
 import com.liquidmusicglass.data.local.db.FavoriteTrackEntity
 import com.liquidmusicglass.data.local.db.LibraryRepository
+import com.liquidmusicglass.data.yandex.YandexAuthRepository
 import com.liquidmusicglass.engine.AudioDownloadManager
 import com.liquidmusicglass.engine.PlaybackContext
 import com.liquidmusicglass.engine.PlayerController
@@ -123,6 +126,9 @@ fun LibraryScreen(
     var importedPlaylists by remember { mutableStateOf<List<com.liquidmusicglass.api.icm.IcmUserPlaylist>>(emptyList()) }
     var isPlaylistsLoading by remember { mutableStateOf(false) }
     var showImportDialog by remember { mutableStateOf(false) }
+    var showYandexConnect by remember { mutableStateOf(false) }
+    val yandexConnected by YandexAuthRepository.isConnected.collectAsState()
+    val yandexLabel by YandexAuthRepository.displayLabel.collectAsState()
 
     // Load cloud playlists when entering the Imported view or when logged in
     fun loadImportedPlaylists() {
@@ -258,6 +264,20 @@ fun LibraryScreen(
                                 icon = Icons.Rounded.LibraryMusic,
                                 tint = Color(0xFFFF9F0A),
                                 onClick = onOpenLocalLibrary
+                            )
+                            SystemRowDivider()
+                            // Yandex Music — OAuth token, NOT the import sheet
+                            BrandMenuCard(
+                                title = "Yandex Music",
+                                subtitle = if (yandexConnected) {
+                                    "Connected · ${yandexLabel ?: "account"}"
+                                } else {
+                                    "Add with OAuth token"
+                                },
+                                iconRes = R.drawable.ic_service_yandex,
+                                tint = Color(0xFFFFCC00),
+                                connected = yandexConnected,
+                                onClick = { showYandexConnect = true }
                             )
                         }
                     }
@@ -796,6 +816,10 @@ fun LibraryScreen(
             )
         }
 
+        if (showYandexConnect) {
+            YandexMusicSheet(onDismiss = { showYandexConnect = false })
+        }
+
         // Error Snackbar
         if (errorMessage != null) {
             LaunchedEffect(errorMessage) {
@@ -846,6 +870,57 @@ private fun MenuCard(
         }
 
         trailing()
+
+        Icon(Icons.Rounded.ChevronRight, null, tint = lc.textTertiary, modifier = Modifier.size(24.dp))
+    }
+}
+
+/** Строка сервиса с brand-drawable (Yandex / Spotify / …), не Material-иконка. */
+@Composable
+private fun BrandMenuCard(
+    title: String,
+    subtitle: String,
+    iconRes: Int,
+    tint: Color,
+    connected: Boolean,
+    onClick: () -> Unit
+) {
+    val lc = LiquidTheme.colors
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(72.dp)
+            .liquidClickable(onClick = onClick)
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .background(tint.copy(alpha = 0.14f), CircleShape)
+                .clip(CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                painter = painterResource(iconRes),
+                contentDescription = title,
+                tint = Color.Unspecified,
+                modifier = Modifier.size(26.dp)
+            )
+        }
+
+        Spacer(Modifier.width(14.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, color = lc.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text(
+                subtitle,
+                color = if (connected) Color(0xFF34C759) else lc.textSecondary,
+                fontSize = 13.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
 
         Icon(Icons.Rounded.ChevronRight, null, tint = lc.textTertiary, modifier = Modifier.size(24.dp))
     }

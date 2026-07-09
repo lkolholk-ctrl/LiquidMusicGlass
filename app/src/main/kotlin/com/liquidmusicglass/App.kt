@@ -12,6 +12,7 @@ import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.data.local.HomeCacheManager
 import com.liquidmusicglass.data.local.LocalAuthManager
 import com.liquidmusicglass.data.local.db.LibraryRepository
+import com.liquidmusicglass.data.yandex.YandexAuthRepository
 import com.liquidmusicglass.engine.AppSettings
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.logging.CrashHandler
@@ -204,6 +205,7 @@ class App : Application(), ImageLoaderFactory {
             // Initialize auth repositories
             IcmAuthRepository.init(this@App)
             LocalAuthManager.init(this@App)
+            YandexAuthRepository.init(this@App)
 
             // Initialize local database (SQLite + initial load)
             LibraryRepository.getInstance(this@App)
