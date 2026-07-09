@@ -124,6 +124,67 @@ class YandexMusicClient(
         return arr.mapTracks()
     }
 
+    data class Playlist(
+        val kind: Long,
+        val title: String,
+        val trackCount: Int,
+        val coverUrl: String?,
+    )
+
+    /** Собственные плейлисты юзера: GET /users/{uid}/playlists/list. */
+    fun fetchUserPlaylists(uid: Long): List<Playlist> {
+        val root = getJson("$API/users/$uid/playlists/list")
+        val arr = root.optJSONArray("result") ?: return emptyList()
+        val out = ArrayList<Playlist>(arr.length())
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            val kind = o.optLong("kind", -1L)
+            if (kind < 0) continue
+            out += Playlist(
+                kind = kind,
+                title = o.optString("title").ifBlank { "Playlist $kind" },
+                trackCount = o.optInt("trackCount", 0),
+                coverUrl = playlistCoverUrl(o),
+            )
+        }
+        return out
+    }
+
+    /**
+     * Треки плейлиста: GET /users/{uid}/playlists/{kind}. Обычно объекты
+     * треков вложены целиком; короткие записи (только id) добираются батчем.
+     */
+    fun fetchPlaylistTracks(uid: Long, kind: Long): List<Track> {
+        val root = getJson("$API/users/$uid/playlists/$kind")
+        val arr = root.optJSONObject("result")?.optJSONArray("tracks") ?: return emptyList()
+        val out = ArrayList<Track>(arr.length())
+        val refs = ArrayList<LikedRef>()
+        for (i in 0 until arr.length()) {
+            val item = arr.optJSONObject(i) ?: continue
+            val trackObj = item.optJSONObject("track")
+            if (trackObj != null) {
+                parseTrack(trackObj)?.let { out += it }
+            } else {
+                val id = item.opt("id")?.toString()?.takeIf { it.isNotBlank() } ?: continue
+                val albumId = item.opt("albumId")?.toString()?.takeIf { it.isNotBlank() }
+                refs += LikedRef(id, albumId)
+            }
+        }
+        if (refs.isNotEmpty()) {
+            refs.chunked(100).forEach { chunk -> out += fetchTracksByIds(chunk) }
+        }
+        return out
+    }
+
+    /** Обложка плейлиста: одиночная (`cover.uri`) или мозаика (`itemsUri[0]`). */
+    private fun playlistCoverUrl(o: JSONObject): String? {
+        val cover = o.optJSONObject("cover") ?: return null
+        val uri = cover.optString("uri").ifBlank {
+            cover.optJSONArray("itemsUri")?.optString(0).orEmpty()
+        }
+        return coverUriToUrl(uri.takeIf { it.isNotBlank() }, size = "400x400")
+    }
+
     /** Python: `client.search(query, type_="track")` */
     fun searchTracks(query: String, page: Int = 0): List<Track> {
         val q = query.trim()
