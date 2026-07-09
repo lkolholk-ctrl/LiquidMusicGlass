@@ -178,7 +178,7 @@ fun YandexMusicSheet(onDismiss: () -> Unit) {
                         )
                         Text(
                             if (connected) "Connected · ${label ?: "account"}"
-                            else "Connect with OAuth token",
+                            else "Sign in with your Yandex account",
                             color = if (connected) Color(0xFF34C759) else lc.textSecondary,
                             fontSize = 12.sp,
                             maxLines = 1,
@@ -360,15 +360,71 @@ private fun ConnectBody(
     var showToken by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var showWebLogin by remember { mutableStateOf(false) }
+
+    // Единая точка подключения: токен из встроенного входа и из ручного
+    // поля идут через один и тот же connect() с шифрованным хранением.
+    fun doConnect(raw: String) {
+        if (busy || raw.isBlank()) return
+        busy = true
+        error = null
+        scope.launch {
+            try {
+                YandexAuthRepository.connect(raw)
+                token = "" // не держим plaintext в state после успеха
+                onConnected()
+            } catch (_: YandexUnauthorizedException) {
+                error = "Invalid or expired token"
+            } catch (_: YandexMusicException) {
+                // Не пробрасываем e.message — там не должно быть токена, но UI-текст фиксированный
+                error = "Connection failed"
+            } catch (_: Exception) {
+                error = "Connection failed"
+            } finally {
+                busy = false
+            }
+        }
+    }
 
     Column {
+        // Основной путь: встроенный вход через официальную страницу Яндекса —
+        // токен перехватывается автоматически, вручную добывать не нужно.
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(46.dp)
+                .clip(RoundedCornerShape(23.dp))
+                .background(if (!busy) YandexYellow else YandexYellow.copy(alpha = 0.4f))
+                .liquidClickable(enabled = !busy, pressedScale = LiquidMotion.PressButton) {
+                    error = null
+                    showWebLogin = true
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            if (busy) {
+                CircularProgressIndicator(Modifier.size(22.dp), color = Color.Black, strokeWidth = 2.dp)
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_service_yandex),
+                        contentDescription = null,
+                        tint = Color.Unspecified,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("Sign in with Yandex", color = Color.Black, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                }
+            }
+        }
+
+        Spacer(Modifier.height(14.dp))
         Text(
-            "Paste the OAuth token from the Hikka/Heroku Yandex Music module.\n" +
-                "Guide: github.com/MarshalX/yandex-music-api/discussions/513",
+            "Or paste an OAuth token manually " +
+                "(guide: github.com/MarshalX/yandex-music-api/discussions/513):",
             color = lc.textTertiary,
             fontSize = 12.sp
         )
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
                 modifier = Modifier
@@ -430,44 +486,29 @@ private fun ConnectBody(
                 .fillMaxWidth()
                 .height(46.dp)
                 .clip(RoundedCornerShape(23.dp))
-                .background(if (can) YandexYellow else YandexYellow.copy(alpha = 0.4f))
+                .background(if (can) inputBg else inputBg.copy(alpha = 0.5f))
                 .liquidClickable(enabled = can, pressedScale = LiquidMotion.PressButton) {
-                    busy = true
-                    error = null
-                    scope.launch {
-                        try {
-                            YandexAuthRepository.connect(token)
-                            token = "" // не держим plaintext в state после успеха
-                            onConnected()
-                        } catch (_: YandexUnauthorizedException) {
-                            error = "Invalid or expired token"
-                        } catch (_: YandexMusicException) {
-                            // Не пробрасываем e.message — там не должно быть токена, но UI-текст фиксированный
-                            error = "Connection failed"
-                        } catch (_: Exception) {
-                            error = "Connection failed"
-                        } finally {
-                            busy = false
-                        }
-                    }
+                    doConnect(token)
                 },
             contentAlignment = Alignment.Center
         ) {
-            if (busy) {
-                CircularProgressIndicator(Modifier.size(22.dp), color = Color.Black, strokeWidth = 2.dp)
-            } else {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_service_yandex),
-                        contentDescription = null,
-                        tint = Color.Unspecified,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text("Connect", color = Color.Black, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-                }
-            }
+            Text(
+                "Connect with token",
+                color = if (can) lc.textPrimary else lc.textTertiary,
+                fontWeight = FontWeight.Medium,
+                fontSize = 14.sp
+            )
         }
+    }
+
+    if (showWebLogin) {
+        YandexWebLoginDialog(
+            onToken = { intercepted ->
+                showWebLogin = false
+                doConnect(intercepted)
+            },
+            onDismiss = { showWebLogin = false }
+        )
     }
 }
 
