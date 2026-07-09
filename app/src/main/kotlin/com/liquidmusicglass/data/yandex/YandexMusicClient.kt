@@ -115,34 +115,33 @@ class YandexMusicClient(
     }
 
     /**
-     * Python `__download_track`: до 5 попыток.
-     * Возвращает bytes + метаданные выбранного варианта (codec/bitrate).
+     * Скачать трек стримингом сразу в [dest] — без буферизации всего файла в
+     * памяти, с реальным прогрессом по байтам. До 5 попыток (как в python-порте
+     * `__download_track`). [shouldAbort] проверяется между чанками: отмена
+     * прерывает запись через [YandexDownloadCancelledException] без ретраев.
+     * Возвращает метаданные выбранного варианта (codec/bitrate).
      */
-    fun downloadTrackBytes(trackId: String): Pair<ByteArray, DownloadInfo> {
+    fun downloadTrackToFileStreaming(
+        trackId: String,
+        dest: File,
+        onProgress: (Float) -> Unit = {},
+        shouldAbort: () -> Boolean = { false },
+    ): DownloadInfo {
         var last: Exception? = null
         repeat(5) { attempt ->
             try {
                 val best = getDownloadInfo(trackId).firstOrNull()
                     ?: throw YandexMusicException("No download-info for track $trackId")
-                return downloadUrl(best.directLink) to best
+                downloadUrlToFile(best.directLink, dest, onProgress, shouldAbort)
+                return best
+            } catch (e: YandexDownloadCancelledException) {
+                throw e
             } catch (e: Exception) {
                 last = e
                 if (attempt < 4) Thread.sleep(1000L)
             }
         }
         throw (last ?: YandexMusicException("Download failed for $trackId"))
-    }
-
-    fun downloadTrackToFile(trackId: String, dest: File): File {
-        dest.parentFile?.mkdirs()
-        dest.writeBytes(downloadTrackBytes(trackId).first)
-        return dest
-    }
-
-    fun searchAndDownloadFirst(query: String): Pair<Track, ByteArray> {
-        val track = searchTracks(query).firstOrNull()
-            ?: throw YandexMusicException("Not found: $query")
-        return track to downloadTrackBytes(track.bareTrackId).first
     }
 
     /** Скачать обложку (если URL есть). */
@@ -196,6 +195,42 @@ class YandexMusicClient(
         http.newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) throw YandexMusicException("Download HTTP ${resp.code}")
             return resp.body?.bytes() ?: throw YandexMusicException("Empty body")
+        }
+    }
+
+    /** Стриминг тела ответа в файл чанками по 64 КБ с прогрессом по байтам. */
+    private fun downloadUrlToFile(
+        url: String,
+        dest: File,
+        onProgress: (Float) -> Unit,
+        shouldAbort: () -> Boolean,
+    ) {
+        val req = Request.Builder()
+            .url(url)
+            .header("User-Agent", USER_AGENT)
+            .get()
+            .build()
+        http.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) throw YandexMusicException("Download HTTP ${resp.code}")
+            val body = resp.body ?: throw YandexMusicException("Empty body")
+            val total = body.contentLength()
+            dest.parentFile?.mkdirs()
+            body.byteStream().use { input ->
+                dest.outputStream().use { output ->
+                    val buf = ByteArray(64 * 1024)
+                    var read = 0L
+                    while (true) {
+                        if (shouldAbort()) throw YandexDownloadCancelledException()
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        output.write(buf, 0, n)
+                        read += n
+                        if (total > 0) {
+                            onProgress((read.toDouble() / total).toFloat().coerceIn(0f, 1f))
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -327,3 +362,6 @@ open class YandexMusicException(message: String, cause: Throwable? = null) :
     IOException(message, cause)
 
 class YandexUnauthorizedException(message: String) : YandexMusicException(message)
+
+/** Загрузка прервана пользователем — не ошибка, ретраить не нужно. */
+class YandexDownloadCancelledException : YandexMusicException("Download cancelled")

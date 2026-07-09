@@ -14,6 +14,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Search
@@ -312,15 +313,17 @@ fun YandexMusicScreen(onBack: () -> Unit) {
                             isDownloaded = saved,
                             inputBg = inputBg,
                             onDownload = {
-                                YandexDownloadManager.download(context, track) { ok ->
-                                    if (ok) refreshOffline()
-                                    else {
-                                        scope.launch {
+                                YandexDownloadManager.download(context, track) { outcome ->
+                                    when (outcome) {
+                                        YandexDownloadManager.Outcome.DONE -> refreshOffline()
+                                        YandexDownloadManager.Outcome.FAILED -> scope.launch {
                                             searchError = "Download failed: ${track.title}"
                                         }
+                                        YandexDownloadManager.Outcome.CANCELLED -> Unit
                                     }
                                 }
-                            }
+                            },
+                            onCancel = { YandexDownloadManager.cancel(sid) }
                         )
                     }
                     item {
@@ -519,6 +522,7 @@ private fun YandexTrackRow(
     isDownloaded: Boolean,
     inputBg: Color,
     onDownload: () -> Unit,
+    onCancel: () -> Unit = {},
 ) {
     val lc = LiquidTheme.colors
     val downloading = progress != null
@@ -598,9 +602,9 @@ private fun YandexTrackRow(
                     }
                 )
                 .liquidClickable(
-                    enabled = !isDownloaded && !downloading && track.available,
+                    enabled = !isDownloaded && track.available,
                     pressedScale = LiquidMotion.PressIcon
-                ) { onDownload() },
+                ) { if (downloading) onCancel() else onDownload() },
             contentAlignment = Alignment.Center
         ) {
             when {
@@ -610,11 +614,20 @@ private fun YandexTrackRow(
                     tint = Color(0xFF34C759),
                     modifier = Modifier.size(22.dp)
                 )
-                downloading -> CircularProgressIndicator(
-                    modifier = Modifier.size(20.dp),
-                    color = YandexYellow,
-                    strokeWidth = 2.dp
-                )
+                downloading -> {
+                    // Тап по спиннеру = отмена загрузки
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        color = YandexYellow,
+                        strokeWidth = 2.dp
+                    )
+                    Icon(
+                        Icons.Rounded.Close,
+                        contentDescription = "Cancel download",
+                        tint = YandexYellow,
+                        modifier = Modifier.size(12.dp)
+                    )
+                }
                 else -> Icon(
                     Icons.Rounded.Download,
                     contentDescription = "Download",
