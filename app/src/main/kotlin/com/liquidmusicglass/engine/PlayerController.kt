@@ -397,19 +397,20 @@ object PlayerController {
             }
 
             withContext(Dispatchers.Main) {
-                val player = controller ?: appContext?.let { getPlayer(it) }
-                player?.let { p ->
-                    val mediaItems = fresh.map { track ->
-                        buildMediaItem(track, track.uri)
-                    }
-                    p.addMediaItems(mediaItems)
-                    
-                    // Sync service-scoped solid queue reference
-                    audioServiceRef?.addToQueue(mediaItems)
-                    
-                    // Сразу обновляем плейсхолдеры для свежих элементов
-                    appContext?.let { prefetchAhead(it, currentIndex, depth = 3) }
+                val mediaItems = fresh.map { track ->
+                    buildMediaItem(track, track.uri)
                 }
+                val player = controller ?: appContext?.let { getPlayer(it) }
+                if (player != null) {
+                    // MediaController -> MediaSession.Callback.onAddMediaItems -> AudioService.
+                    // Direct service append is only a fallback; doing both duplicates timeline items.
+                    player.addMediaItems(mediaItems)
+                } else {
+                    audioServiceRef?.addToQueue(mediaItems)
+                }
+
+                // Сразу обновляем плейсхолдеры для свежих элементов
+                appContext?.let { prefetchAhead(it, currentIndex, depth = 3) }
             }
         }
     }
@@ -833,12 +834,7 @@ object PlayerController {
     fun getCurrentIndex(): Int = currentIndex
 
     fun addToQueue(track: Track) {
-        queue = queue + track
-        _queueFlow.value = queue
-        mainScope.launch {
-            val player = controller ?: appContext?.let { getPlayer(it) }
-            player?.addMediaItem(buildMediaItem(track, track.uri))
-        }
+        addTracksToQueue(listOf(track))
     }
 
     /** Вставить трек СЛЕДУЮЩИМ после текущего (контекст-меню «Play next»).

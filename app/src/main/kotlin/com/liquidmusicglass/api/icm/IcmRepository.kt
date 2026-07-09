@@ -1,5 +1,7 @@
 package com.liquidmusicglass.api.icm
 
+import com.liquidmusicglass.api.icm.wave.IcmWaveFeedbackAlias
+import com.liquidmusicglass.api.icm.wave.IcmWaveRepository
 import com.liquidmusicglass.engine.Track
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -780,8 +782,28 @@ object IcmRepository {
         ) DeliveryResult.REJECTED else DeliveryResult.RETRY
     }
 
-    suspend fun deliverWaveFeedback(feedbackType: String, value: String): DeliveryResult =
-        classifyDelivery(api.sendWaveFeedback(feedbackType, value))
+    private fun String.toWaveFeedbackAlias(): IcmWaveFeedbackAlias? {
+        return when (trim().lowercase()) {
+            "more-like-this" -> IcmWaveFeedbackAlias.MoreLikeThis
+            "like-track", "more_track" -> IcmWaveFeedbackAlias.LikeTrack
+            "like-artist", "more_artist" -> IcmWaveFeedbackAlias.LikeArtist
+            "less-like-this" -> IcmWaveFeedbackAlias.LessLikeThis
+            "dislike-track", "less_track" -> IcmWaveFeedbackAlias.DislikeTrack
+            "dislike-artist", "less_artist" -> IcmWaveFeedbackAlias.DislikeArtist
+            "skip" -> IcmWaveFeedbackAlias.Skip
+            else -> null
+        }
+    }
+
+    suspend fun deliverWaveFeedback(feedbackType: String, value: String): DeliveryResult {
+        val alias = feedbackType.toWaveFeedbackAlias()
+        val result: Result<*> = if (alias != null) {
+            IcmWaveRepository.sendFeedbackAlias(alias, value)
+        } else {
+            api.sendWaveFeedback(feedbackType, value)
+        }
+        return classifyDelivery(result)
+    }
 
     suspend fun deliverWavePlayback(
         trackId: String,

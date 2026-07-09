@@ -35,6 +35,8 @@ class WaveRepository(context: Context) {
     private val playbackDao = db.playbackHistoryDao()
     private val personalWaveStateLock = Any()
     private var personalWaveState = WaveSessionState()
+    private val modeWaveStateLock = Any()
+    private val modeWaveStates = LinkedHashMap<String, WaveSessionState>()
 
     companion object {
         private const val TAG = "WaveRepository"
@@ -139,6 +141,7 @@ class WaveRepository(context: Context) {
             artistId = track.primaryArtistStatKey(),
             timestamp = System.currentTimeMillis()
         )
+        markWaveStatePlayed(track)
         Log.d(TAG, "TrackStats: playCount++ for ${track.title}")
     }
 
@@ -151,6 +154,7 @@ class WaveRepository(context: Context) {
             title = track.title,
             artistId = track.primaryArtistStatKey()
         )
+        markWaveStateSkipped(track)
         Log.d(TAG, "TrackStats: skipCount++ for ${track.title}")
     }
 
@@ -410,6 +414,37 @@ class WaveRepository(context: Context) {
         queue
     }
 
+    suspend fun buildWaveModeQueue(
+        mode: WaveMode,
+        count: Int = WAVE_QUEUE_SIZE,
+        exclude: Collection<String> = emptyList()
+    ): List<Track> = withContext(Dispatchers.IO) {
+        when (mode) {
+            is WaveMode.Personal -> buildWaveQueue(count = count, seedTrackId = null, exclude = exclude)
+            is WaveMode.TrackStation -> buildWaveQueue(
+                count = count,
+                seedTrackId = mode.seedTrackId,
+                exclude = exclude
+            )
+            is WaveMode.Session -> fetchPersonalWaveBatch(
+                targetCount = count,
+                excludeIds = exclude.toSet(),
+                recentIds = getRecentTrackIdsSafely(50),
+                resetSession = false
+            )
+            is WaveMode.Genre -> fetchGenreOrMoodWaveBatch(
+                mode = mode,
+                targetCount = count,
+                excludeIds = exclude.toSet()
+            )
+            is WaveMode.Mood -> fetchGenreOrMoodWaveBatch(
+                mode = mode,
+                targetCount = count,
+                excludeIds = exclude.toSet()
+            )
+        }
+    }
+
     private suspend fun fetchPersonalWaveBatch(
         targetCount: Int,
         excludeIds: Set<String>,
@@ -501,6 +536,87 @@ class WaveRepository(context: Context) {
         }
     }
 
+    private suspend fun fetchGenreOrMoodWaveBatch(
+        mode: WaveMode,
+        targetCount: Int,
+        excludeIds: Set<String>
+    ): List<Track> {
+        val key = mode.waveStateKey()
+        val recentIds = getRecentTrackIdsSafely(50)
+        val negativeArtistKeys = getLocallyRejectedArtistKeys()
+        val apiExcludeArtistIds = negativeArtistKeys
+            .filter { artistKey -> artistKey.all { it.isDigit() } }
+        val state = prepareModeWaveState(
+            key = key,
+            mode = mode,
+            excludeIds = excludeIds,
+            recentIds = recentIds,
+            negativeArtistKeys = negativeArtistKeys
+        )
+
+        val response = when (mode) {
+            is WaveMode.Genre -> IcmWaveRepository.genreBatch(
+                genre = mode.genre,
+                limit = (targetCount * 2).coerceIn(1, 50),
+                diversity = mode.diversity,
+                source = mode.source,
+                region = mode.region,
+                excludeTrackIds = state.excludeIds.takeLast(200),
+                excludeArtistIds = apiExcludeArtistIds.take(50),
+                playedTrackIds = state.playedIds.takeLast(120)
+            ).getOrNull()
+            is WaveMode.Mood -> IcmWaveRepository.moodBatch(
+                mood = mode.mood,
+                limit = (targetCount * 2).coerceIn(1, 50),
+                diversity = mode.diversity,
+                source = mode.source,
+                region = mode.region,
+                excludeTrackIds = state.excludeIds.takeLast(200),
+                excludeArtistIds = apiExcludeArtistIds.take(50),
+                playedTrackIds = state.playedIds.takeLast(120)
+            ).getOrNull()
+            else -> null
+        }
+
+        if (response?.status != "ok" || response.tracks.isEmpty()) {
+            Log.w(TAG, "Mode wave ${mode.waveStateKey()} status: ${response?.status ?: "null"}")
+            return emptyList()
+        }
+
+        val statsByTrackId = mutableMapOf<String, WaveCandidateFilter.TrackStats>()
+        for (track in response.tracks) {
+            val stats = playbackDao.getTrackStat(track.id) ?: continue
+            statsByTrackId[track.id] = WaveCandidateFilter.TrackStats(
+                playCount = stats.playCount,
+                skipCount = stats.skippedCount
+            )
+        }
+
+        val filter = WaveCandidateFilter(
+            WaveCandidateFilter.Policy(
+                allowedSources = emptySet(),
+                maxTracksPerArtistWindow = 3,
+                artistWindowSize = 12
+            )
+        )
+        val filtered = filter.filter(
+            candidates = response.tracks.map { it.toWaveCandidate() },
+            state = state,
+            statsByTrackId = statsByTrackId,
+            limit = targetCount
+        )
+        updateModeWaveState(key, filtered.nextState)
+
+        if (filtered.rejected.isNotEmpty()) {
+            Log.d(TAG, "Mode wave ${mode.waveStateKey()} filtered ${filtered.rejected.size}/${response.tracks.size}")
+        }
+
+        val tracksById = response.tracks.associateBy { it.id }
+        return filtered.accepted.mapNotNull { candidate ->
+            tracksById[candidate.id]?.toTrack()
+        }
+    }
+
     private fun preparePersonalWaveState(
         resetSession: Boolean,
         excludeIds: Set<String>,
@@ -513,16 +629,44 @@ class WaveRepository(context: Context) {
                 mode = if (resetSession) WaveMode.Personal() else base.mode,
                 sessionId = if (resetSession) null else base.sessionId,
                 excludeIds = (base.excludeIds + excludeIds)
-                    .mapNotNull { it.trim().takeIf(String::isNotBlank) }
+                    .mapNotNull { it.trim().takeIf { value -> value.isNotBlank() } }
                     .distinct()
                     .takeLast(WaveSessionState.MAX_EXCLUDE_IDS),
                 playedIds = (base.playedIds + recentIds)
-                    .mapNotNull { it.trim().takeIf(String::isNotBlank) }
+                    .mapNotNull { it.trim().takeIf { value -> value.isNotBlank() } }
                     .distinct()
                     .takeLast(WaveSessionState.MAX_PLAYED_IDS),
                 negativeArtistKeys = negativeArtistKeys,
                 updatedAtMs = System.currentTimeMillis()
             ).also { personalWaveState = it }
+        }
+    }
+
+    private fun prepareModeWaveState(
+        key: String,
+        mode: WaveMode,
+        excludeIds: Set<String>,
+        recentIds: List<String>,
+        negativeArtistKeys: List<String>
+    ): WaveSessionState {
+        return synchronized(modeWaveStateLock) {
+            val base = modeWaveStates[key] ?: WaveSessionState(mode = mode)
+            base.copy(
+                mode = mode,
+                excludeIds = (base.excludeIds + excludeIds)
+                    .mapNotNull { it.trim().takeIf { value -> value.isNotBlank() } }
+                    .distinct()
+                    .takeLast(WaveSessionState.MAX_EXCLUDE_IDS),
+                playedIds = (base.playedIds + recentIds)
+                    .mapNotNull { it.trim().takeIf { value -> value.isNotBlank() } }
+                    .distinct()
+                    .takeLast(WaveSessionState.MAX_PLAYED_IDS),
+                negativeArtistKeys = negativeArtistKeys,
+                updatedAtMs = System.currentTimeMillis()
+            ).also {
+                modeWaveStates[key] = it
+                trimModeWaveStates()
+            }
         }
     }
 
@@ -584,6 +728,20 @@ class WaveRepository(context: Context) {
         }
     }
 
+    private fun updateModeWaveState(key: String, state: WaveSessionState) {
+        synchronized(modeWaveStateLock) {
+            modeWaveStates[key] = state
+            trimModeWaveStates()
+        }
+    }
+
+    private fun trimModeWaveStates() {
+        while (modeWaveStates.size > 16) {
+            val oldest = modeWaveStates.minByOrNull { it.value.updatedAtMs }?.key ?: break
+            modeWaveStates.remove(oldest)
+        }
+    }
+
     private fun WaveSessionState.activeSessionId(): String? {
         val sessionMode = mode as? WaveMode.Session
         val expiresAtMs = sessionMode?.expiresAtMs
@@ -611,6 +769,49 @@ class WaveRepository(context: Context) {
         } catch (e: Exception) {
             Log.w(TAG, "Failed to read local skipped artists: ${e.message}")
             emptyList()
+        }
+    }
+
+    private suspend fun getRecentTrackIdsSafely(limit: Int): List<String> {
+        return try {
+            playbackDao.getRecentTrackIds(limit)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to get recent track IDs: ${e.message}")
+            emptyList()
+        }
+    }
+
+    private fun markWaveStatePlayed(track: Track) {
+        val candidate = track.toWaveCandidate()
+        synchronized(personalWaveStateLock) {
+            personalWaveState = personalWaveState.markPlayed(candidate)
+        }
+        synchronized(modeWaveStateLock) {
+            val next = modeWaveStates.mapValues { it.value.markPlayed(candidate) }
+            modeWaveStates.clear()
+            modeWaveStates.putAll(next)
+        }
+    }
+
+    private fun markWaveStateSkipped(track: Track) {
+        val candidate = track.toWaveCandidate()
+        synchronized(personalWaveStateLock) {
+            personalWaveState = personalWaveState.markSkipped(candidate)
+        }
+        synchronized(modeWaveStateLock) {
+            val next = modeWaveStates.mapValues { it.value.markSkipped(candidate) }
+            modeWaveStates.clear()
+            modeWaveStates.putAll(next)
+        }
+    }
+
+    private fun WaveMode.waveStateKey(): String {
+        return when (this) {
+            is WaveMode.Personal -> "personal:${region.orEmpty()}"
+            is WaveMode.TrackStation -> "track:$seedTrackId:${region.orEmpty()}"
+            is WaveMode.Genre -> "genre:${genre.lowercase()}:$source:${region.orEmpty()}"
+            is WaveMode.Mood -> "mood:${mood.lowercase()}:$source:${region.orEmpty()}"
+            is WaveMode.Session -> "session:$sessionId"
         }
     }
 

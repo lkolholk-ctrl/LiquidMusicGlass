@@ -39,9 +39,10 @@ import com.liquidmusicglass.api.icm.IcmAuthRepository
 import com.liquidmusicglass.api.icm.IcmHomeBlock
 import com.liquidmusicglass.api.icm.IcmHomeItem
 import com.liquidmusicglass.api.icm.IcmRepository
-import com.liquidmusicglass.api.icm.IcmWaveTrack
+import com.liquidmusicglass.api.icm.WaveSignalQueue
 import com.liquidmusicglass.api.icm.toTrack
 import com.liquidmusicglass.data.local.WaveRepository
+import com.liquidmusicglass.data.wave.WaveMode
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.Track
 import com.liquidmusicglass.ui.glass.AlbumArtImage
@@ -146,15 +147,6 @@ private val moodCategories = listOf(
     ),
 )
 
-/** Picks a seed track id for a mood, or null if the search returned nothing. */
-private suspend fun resolveMoodSeedTrackId(mood: MoodCategory): String? {
-    for (query in mood.seedQueries) {
-        val tracks = IcmRepository.searchTracks(query, limit = 5)
-        if (tracks.isNotEmpty()) return tracks.first().id
-    }
-    return null
-}
-
 /** Returns a list of tracks for a mood when the personal wave is unavailable. */
 private suspend fun loadMoodFallbackTracks(mood: MoodCategory, count: Int): List<Track> {
     val collected = mutableListOf<Track>()
@@ -213,42 +205,35 @@ fun HomeScreen(
 
     // Wave state - active mood station
     var activeMoodId by remember { mutableStateOf<String?>(null) }
-    var moodTracks by remember { mutableStateOf<Map<String, List<IcmWaveTrack>>>(emptyMap()) }
+    var moodTracks by remember { mutableStateOf<Map<String, List<Track>>>(emptyMap()) }
     var moodLoading by remember { mutableStateOf<Set<String>>(emptySet()) }
     var isPlayingMood by remember { mutableStateOf(false) }
     var showWaveOnboarding by remember { mutableStateOf(false) }
     var pendingMoodId by remember { mutableStateOf<String?>(null) }
 
-    fun waveTrackToTrack(waveTrack: IcmWaveTrack): Track {
-        return waveTrack.toTrack()
-    }
+    fun moodApiTerm(mood: MoodCategory): String =
+        mood.seedQueries.firstOrNull()?.takeIf { it.isNotBlank() } ?: mood.id
 
-    // Cached seed_track_id per mood so wave refills stay on-genre.
-    val moodSeeds = remember { mutableStateMapOf<String, String?>() }
-
-    fun loadMoreMoodTracks(moodId: String, existing: List<IcmWaveTrack>) {
+    fun loadMoreMoodTracks(moodId: String, existing: List<Track>) {
         if (moodId in moodLoading) return
+        val mood = moodCategories.find { it.id == moodId } ?: return
         moodLoading = moodLoading + moodId
         scope.launch {
-            val waveTracks = existing.toMutableList()
-            val seed = moodSeeds[moodId]
-            repeat(5) {
-                val exclude = waveTracks.map { it.id }
-                val response = IcmRepository.getWaveNext(
-                    seedTrackId = seed,
-                    exclude = exclude.takeIf { it.isNotEmpty() },
-                    recentSkips = PlayerController.consecutiveSkips
-                )
-                if (response != null && response.status == "ok" && response.track != null) {
-                    waveTracks.add(response.track)
-                }
-            }
-            moodTracks = moodTracks + (moodId to waveTracks)
-            // Append new tracks to player queue — pre-validate URLs first
-            val newTracks = waveTracks.drop(existing.size)
-                .map { waveTrackToTrack(it) }
+            val repo = WaveRepository.getInstance(context)
+            val newTracks = repo.buildWaveModeQueue(
+                mode = WaveMode.Mood(
+                    mood = moodApiTerm(mood),
+                    displayName = mood.title,
+                    source = "apple",
+                    diversity = 0.5
+                ),
+                count = 10,
+                exclude = existing.map { it.id }
+            )
+            moodTracks = moodTracks + (moodId to (existing + newTracks).distinctBy { it.id })
+            val resolvedNewTracks = newTracks
                 .mapNotNull { resolveWaveTrackUrl(it) }
-            newTracks.forEach { PlayerController.addToQueue(it) }
+            resolvedNewTracks.forEach { PlayerController.addToQueue(it) }
             moodLoading = moodLoading - moodId
         }
     }
@@ -256,10 +241,9 @@ fun HomeScreen(
     fun playMoodStation(moodId: String) {
         val mood = moodCategories.find { it.id == moodId } ?: return
         PlayerController.setAutoRefillContext(
-            type = "wave",
-            id = moodId,
-            name = mood.title,
-            seedTrackId = moodSeeds[moodId]
+            type = if (moodId == "my_wave") "wave" else "mood",
+            id = if (moodId == "my_wave") moodId else moodApiTerm(mood),
+            name = mood.title
         )
         val existing = moodTracks[moodId]
         if (!existing.isNullOrEmpty()) {
@@ -267,9 +251,7 @@ fun HomeScreen(
             activeMoodId = moodId
             isPlayingMood = true
             scope.launch {
-                val tracks = existing.map { waveTrackToTrack(it) }
-                // Resolve all track URLs and filter out those that fail
-                val resolvedTracks = tracks.mapNotNull { resolveWaveTrackUrl(it) }
+                val resolvedTracks = existing.mapNotNull { resolveWaveTrackUrl(it) }
                 if (resolvedTracks.isNotEmpty()) {
                     PlayerController.setQueue(resolvedTracks)
                     PlayerController.playTrack(context, 0)
@@ -311,39 +293,28 @@ fun HomeScreen(
                     showWaveOnboarding = true
                 }
             } else {
-                // === Остальные настроения через seed-based wave ===
-                val seed = moodSeeds.getOrPut(moodId) { resolveMoodSeedTrackId(mood) }
-                // Refresh refill context with the resolved seed so auto-refill stays on-genre.
                 PlayerController.setAutoRefillContext(
-                    type = "wave",
-                    id = moodId,
-                    name = mood.title,
-                    seedTrackId = seed
+                    type = "mood",
+                    id = moodApiTerm(mood),
+                    name = mood.title
                 )
 
-                val waveTracks = mutableListOf<IcmWaveTrack>()
-                var waveStatus: String? = null
-                repeat(5) {
-                    val exclude = waveTracks.map { it.id }
-                    val response = IcmRepository.getWaveNext(
-                        seedTrackId = seed,
-                        exclude = exclude.takeIf { it.isNotEmpty() },
-                        recentSkips = PlayerController.consecutiveSkips
-                    )
-                    if (response != null) {
-                        waveStatus = response.status
-                        if (response.status == "ok" && response.track != null) {
-                            waveTracks.add(response.track)
-                        }
-                    }
-                }
+                val repo = WaveRepository.getInstance(context)
+                val waveTracks = repo.buildWaveModeQueue(
+                    mode = WaveMode.Mood(
+                        mood = moodApiTerm(mood),
+                        displayName = mood.title,
+                        source = "apple",
+                        diversity = 0.5
+                    ),
+                    count = WaveRepository.WAVE_QUEUE_SIZE
+                )
                 moodTracks = moodTracks + (moodId to waveTracks)
                 moodLoading = moodLoading - moodId
 
                 if (waveTracks.isNotEmpty()) {
                     // Resolve all track URLs and filter out those that fail
                     val resolvedTracks = waveTracks
-                        .map { waveTrackToTrack(it) }
                         .mapNotNull { resolveWaveTrackUrl(it) }
                     
                     if (resolvedTracks.isNotEmpty()) {
@@ -397,7 +368,7 @@ fun HomeScreen(
     }
 
     fun sendWaveFeedback(feedbackType: String, value: String) {
-        scope.launch { IcmRepository.sendWaveFeedback(feedbackType, value) }
+        scope.launch { WaveSignalQueue.sendFeedback(feedbackType, value) }
     }
 
     Box(modifier = Modifier.fillMaxSize().background(LiquidTheme.colors.settingsBackground)) {

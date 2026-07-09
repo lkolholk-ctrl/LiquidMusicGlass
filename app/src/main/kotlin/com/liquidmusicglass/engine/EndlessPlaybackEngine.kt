@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.util.UnstableApi
+import com.liquidmusicglass.data.wave.WaveMode
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -54,7 +55,7 @@ class EndlessPlaybackEngine(
         // обратно к артисту вместо транзитивного дрейфа в соседей-соседей.
         val seedPool: List<String> = emptyList()
     ) {
-        enum class Type { WAVE, ARTIST, ALBUM, SEARCH, GENRE, PLAYLIST, LIBRARY }
+        enum class Type { WAVE, ARTIST, ALBUM, SEARCH, GENRE, MOOD, PLAYLIST, LIBRARY }
     }
 
     fun setRefillContext(context: RefillContext?) {
@@ -146,6 +147,39 @@ class EndlessPlaybackEngine(
                         refillCtx.id.isNullOrBlank() &&
                         refillCtx.name.isNullOrBlank() &&
                         seedPool.isEmpty()
+                    val waveRepo = com.liquidmusicglass.data.local.WaveRepository.getInstance(ctx)
+
+                    if (isGlobal && refillCtx?.type == RefillContext.Type.MOOD) {
+                        val mood = refillCtx.id ?: refillCtx.name
+                        if (!mood.isNullOrBlank()) {
+                            return@withContext waveRepo.buildWaveModeQueue(
+                                mode = WaveMode.Mood(
+                                    mood = mood,
+                                    displayName = refillCtx.name,
+                                    source = "apple",
+                                    diversity = 0.5
+                                ),
+                                count = REFILL_BATCH_SIZE,
+                                exclude = (playedIds + queueIds).toList()
+                            )
+                        }
+                    }
+
+                    if (isGlobal && refillCtx?.type == RefillContext.Type.GENRE) {
+                        val genre = refillCtx.genre ?: refillCtx.id ?: refillCtx.name
+                        if (!genre.isNullOrBlank()) {
+                            return@withContext waveRepo.buildWaveModeQueue(
+                                mode = WaveMode.Genre(
+                                    genre = genre,
+                                    displayName = refillCtx.name,
+                                    source = "apple",
+                                    diversity = 0.5
+                                ),
+                                count = REFILL_BATCH_SIZE,
+                                exclude = (playedIds + queueIds).toList()
+                            )
+                        }
+                    }
 
                     // Волна: seed из контекста (мудовая/трековая станция) или null
                     // (личная волна). Не-волна: станция по ПОСЛЕДНЕМУ треку
@@ -176,7 +210,6 @@ class EndlessPlaybackEngine(
                     } else {
                         (playedIds + queueIds).toList()
                     }
-                    val waveRepo = com.liquidmusicglass.data.local.WaveRepository.getInstance(ctx)
                     var tracks = waveRepo.buildWaveQueue(
                         count = REFILL_BATCH_SIZE,
                         seedTrackId = seed,

@@ -10,6 +10,7 @@ import com.liquidmusicglass.api.icm.IcmHomeResponse
 import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.data.local.HomeCacheManager
 import com.liquidmusicglass.data.local.WaveRepository
+import com.liquidmusicglass.data.wave.WaveMode
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.Track
 import kotlinx.coroutines.async
@@ -225,9 +226,7 @@ class HomeViewModel : ViewModel() {
     }
 
     /**
-     * Builds a mood/genre "station": finds a representative seed track for [query]
-     * via search, then builds a wave around it (wave/next?seed_track_id). Auto-refill
-     * continues the same station via the stored seed.
+     * Builds an expanded mood wave through /wave/mood/{mood}.
      */
     fun buildMoodWave(context: Context, query: String, name: String? = null) {
         if (_isBuildingWave.value) return
@@ -236,38 +235,29 @@ class HomeViewModel : ViewModel() {
 
         viewModelScope.launch {
             try {
-                // Репрезентативный seed-трек жанра/настроения.
-                val seedId = try {
-                    IcmRepository.searchTracks(query, limit = 5).firstOrNull()?.id
-                } catch (_: Exception) {
-                    null
-                }
-
                 val repo = WaveRepository(context)
-                // Мгновенный старт станции: первый трек → играем, хвост фоном.
-                repo.buildWaveQueueFast(
-                    seedTrackId = seedId,
-                    onFirst = { tracks ->
-                        if (tracks.isNotEmpty()) {
-                            _waveTracks.value = tracks
-                            PlayerController.playFromList(
-                                context = context,
-                                tracks = tracks,
-                                startIndex = 0,
-                                autoRefillType = "WAVE",
-                                autoRefillName = name,
-                                seedTrackId = seedId
-                            )
-                            _isBuildingWave.value = false
-                        }
-                    },
-                    onTopUp = { rest ->
-                        _waveTracks.value = _waveTracks.value + rest
-                        PlayerController.addTracksToQueue(rest)
-                        // Сразу добить очередь до сытого запаса (порог 8).
-                        PlayerController.ensureWaveRefill()
-                    }
+                val tracks = repo.buildWaveModeQueue(
+                    mode = WaveMode.Mood(
+                        mood = query,
+                        displayName = name,
+                        source = "apple",
+                        diversity = 0.5
+                    ),
+                    count = WaveRepository.WAVE_QUEUE_SIZE
                 )
+                if (tracks.isNotEmpty()) {
+                    _waveTracks.value = tracks
+                    PlayerController.playFromList(
+                        context = context,
+                        tracks = tracks,
+                        startIndex = 0,
+                        autoRefillType = "MOOD",
+                        autoRefillId = query,
+                        autoRefillName = name
+                    )
+                    _isBuildingWave.value = false
+                    PlayerController.ensureWaveRefill()
+                }
             } catch (_: Exception) {
                 _error.value = "Failed to build wave"
             } finally {
