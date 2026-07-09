@@ -44,8 +44,8 @@ class WaveRepository(context: Context) {
         const val MIN_LISTEN_TIME_MS = 30_000L
         /** Сколько дней назад смотрим историю для топ-жанров */
         const val GENRE_ANALYSIS_DAYS = 30
-        /** Максимум треков в очереди волны */
-        const val WAVE_QUEUE_SIZE = 20
+        /** Стартовая пачка волны. Дальше EndlessPlaybackEngine добивает буфер заранее. */
+        const val WAVE_QUEUE_SIZE = 30
         private const val PERSONAL_WAVE_DIVERSITY = 0.0
         private const val SESSION_EXPIRY_MARGIN_MS = 60_000L
 
@@ -184,14 +184,9 @@ class WaveRepository(context: Context) {
     // ─── Wave Queue Building ───
 
     /**
-     * Builds a "My Wave" queue using the ICM /library/wave/next endpoint.
-     *
-     * Uses random favorite seeds, applies ban filters and skipRatio filters, and heuristic genre tagging.
-     */
-    /**
      * Мгновенный старт волны: ПЕРВЫЙ трек отдаётся как только пришёл (музыка
      * стартует через ОДИН сетевой запрос), остальная пачка добирается следом
-     * и доклеивается в очередь. Вместо прежнего «строим волну 5×RTT молча».
+     * и доклеивается в очередь.
      */
     suspend fun buildWaveQueueFast(
         seedTrackId: String? = null,
@@ -257,21 +252,18 @@ class WaveRepository(context: Context) {
             excludeIds.addAll(recentIds)
         }
 
-        // Stage 2: personal wave starts from the expanded batch endpoint.
-        // The old one-by-one /library/wave/* path below stays as a fallback.
+        // Персональная волна больше НЕ ходит в старый one-by-one
+        // /library/wave/next. Новый source of truth — расширенная session wave:
+        // /wave/session/start + /wave/session/{id}/next.
         if (effectiveSeedTrackId == null && count > 0) {
-            val batchQueue = fetchPersonalWaveBatch(
+            return@withContext fetchPersonalWaveBatch(
                 targetCount = count,
                 excludeIds = excludeIds,
                 recentIds = recentIds,
                 resetSession = callerExcludeIsEmpty
             )
-            if (batchQueue.isNotEmpty()) {
-                Log.d(TAG, "Personal wave batch added ${batchQueue.size} tracks")
-                queue.addAll(batchQueue)
-                excludeIds.addAll(batchQueue.map { it.id })
-            }
         }
+        val stationSeedId = effectiveSeedTrackId ?: return@withContext emptyList()
 
         var attempts = 0
         val maxAttempts = count * 6 // Fail-safe boundary limit
@@ -294,44 +286,15 @@ class WaveRepository(context: Context) {
                     kotlinx.coroutines.delay(150)
                 }
 
-                // effectiveSeedTrackId == null → персональная волна (подстраивается под юзера сервером:
-                // лайки / completion / skip-streak). Иначе — станция вокруг seed-трека (мудовая плитка).
-                val recentSkipsVal = com.liquidmusicglass.engine.PlayerController.consecutiveSkips
-
                 // exclude капим ПОСЛЕДНИМИ 80 id (LinkedHashSet держит порядок
                 // вставки → свежие в конце): на длинной сессии полный набор
                 // (до 550 id) раздувал GET-запрос до километрового query-string
                 // с риском 414. Сервер и так ведёт свою playback_history по
                 // нашим wave/playback-событиям — древние эксклюды избыточны.
-                val shouldUseWaveStart = effectiveSeedTrackId == null &&
-                    attempts == 1 &&
-                    queue.isEmpty() &&
-                    callerExcludeIsEmpty
-
-                var response = when {
-                    effectiveSeedTrackId != null -> {
-                        IcmWaveRepository.nextTrackStation(
-                            seedTrackId = effectiveSeedTrackId,
-                            exclude = excludeIds.toList().takeLast(80)
-                        ).getOrNull()
-                    }
-                    shouldUseWaveStart -> IcmWaveRepository.startPersonalWave().getOrNull()
-                    else -> null
-                }
-
-                if (response == null && effectiveSeedTrackId == null) {
-                    response = IcmRepository.getWaveNext(
-                        seedTrackId = null,
-                        exclude = excludeIds.toList().takeLast(80).takeIf { it.isNotEmpty() },
-                        recentSkips = recentSkipsVal,
-                        genre = null
-                    )
-                }
-
-                // Никакого «случайного лайка» как seed (это и была «херня»): по доке
-                // пустая персональная волна = у сервера нет seed-артистов/лайков, и
-                // правильная реакция — ОНБОРДИНГ (его триггерит ViewModel по пустому
-                // результату), а не подмена рандомной станцией.
+                val response = IcmWaveRepository.nextTrackStation(
+                    seedTrackId = stationSeedId,
+                    exclude = excludeIds.toList().takeLast(80)
+                ).getOrNull()
 
                 if (response == null || response.status != "ok") {
                     val code = IcmRepository.getLastHttpCode()
@@ -420,7 +383,12 @@ class WaveRepository(context: Context) {
         exclude: Collection<String> = emptyList()
     ): List<Track> = withContext(Dispatchers.IO) {
         when (mode) {
-            is WaveMode.Personal -> buildWaveQueue(count = count, seedTrackId = null, exclude = exclude)
+            is WaveMode.Personal -> fetchPersonalWaveBatch(
+                targetCount = count,
+                excludeIds = exclude.toSet(),
+                recentIds = getRecentTrackIdsSafely(50),
+                resetSession = exclude.isEmpty()
+            )
             is WaveMode.TrackStation -> buildWaveQueue(
                 count = count,
                 seedTrackId = mode.seedTrackId,
@@ -541,6 +509,16 @@ class WaveRepository(context: Context) {
         targetCount: Int,
         excludeIds: Set<String>
     ): List<Track> {
+        val term = when (mode) {
+            is WaveMode.Genre -> mode.genre
+            is WaveMode.Mood -> mode.mood
+            else -> ""
+        }.trim()
+        if (term.length < 2) {
+            Log.w(TAG, "Mode wave ${mode.waveStateKey()} skipped: invalid term")
+            return emptyList()
+        }
+
         val key = mode.waveStateKey()
         val recentIds = getRecentTrackIdsSafely(50)
         val negativeArtistKeys = getLocallyRejectedArtistKeys()
@@ -554,9 +532,9 @@ class WaveRepository(context: Context) {
             negativeArtistKeys = negativeArtistKeys
         )
 
-        val response = when (mode) {
+        val responseResult = when (mode) {
             is WaveMode.Genre -> IcmWaveRepository.genreBatch(
-                genre = mode.genre,
+                genre = term,
                 limit = (targetCount * 2).coerceIn(1, 50),
                 diversity = mode.diversity,
                 source = mode.source,
@@ -564,9 +542,9 @@ class WaveRepository(context: Context) {
                 excludeTrackIds = state.excludeIds.takeLast(200),
                 excludeArtistIds = apiExcludeArtistIds.take(50),
                 playedTrackIds = state.playedIds.takeLast(120)
-            ).getOrNull()
+            )
             is WaveMode.Mood -> IcmWaveRepository.moodBatch(
-                mood = mode.mood,
+                mood = term,
                 limit = (targetCount * 2).coerceIn(1, 50),
                 diversity = mode.diversity,
                 source = mode.source,
@@ -574,9 +552,13 @@ class WaveRepository(context: Context) {
                 excludeTrackIds = state.excludeIds.takeLast(200),
                 excludeArtistIds = apiExcludeArtistIds.take(50),
                 playedTrackIds = state.playedIds.takeLast(120)
-            ).getOrNull()
-            else -> null
+            )
+            else -> Result.failure(IllegalArgumentException("Unsupported wave mode: $mode"))
         }
+        responseResult.exceptionOrNull()?.let { error ->
+            Log.w(TAG, "Mode wave ${mode.waveStateKey()} failed: ${error.message}")
+        }
+        val response = responseResult.getOrNull()
 
         if (response?.status != "ok" || response.tracks.isEmpty()) {
             Log.w(TAG, "Mode wave ${mode.waveStateKey()} status: ${response?.status ?: "null"}")
@@ -716,7 +698,7 @@ class WaveRepository(context: Context) {
             sessionId = sessionId,
             limit = requestLimit,
             diversity = PERSONAL_WAVE_DIVERSITY,
-            excludeTrackIds = sessionState.excludeIds.takeLast(200),
+            excludeTrackIds = sessionState.excludeIds.takeLast(80),
             excludeArtistIds = apiExcludeArtistIds.take(50),
             playedTrackIds = sessionState.playedIds.takeLast(120)
         )
@@ -754,8 +736,10 @@ class WaveRepository(context: Context) {
     private fun shouldRecreateWaveSession(error: Throwable?): Boolean {
         val apiError = error as? IcmApiException ?: return false
         val serverCode = apiError.errorCode.orEmpty()
-        return apiError.code in setOf(400, 404, 410) ||
-            serverCode.contains("session", ignoreCase = true)
+        if (apiError.code == 503 || serverCode == "wave_session_store_unavailable") return false
+        return apiError.code in setOf(404, 410) ||
+            serverCode == "wave_session_not_found" ||
+            serverCode == "wave_session_belongs_to_another_user"
     }
 
     private suspend fun getLocallyRejectedArtistKeys(limit: Int = 30): List<String> {

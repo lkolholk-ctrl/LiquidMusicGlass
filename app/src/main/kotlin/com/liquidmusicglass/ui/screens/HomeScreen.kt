@@ -95,72 +95,55 @@ private data class MoodCategory(
     val title: String,
     val gradientColors: List<Color>,
     val icon: String,
-    /** Seed queries used to pick a representative track for the wave station. */
-    val seedQueries: List<String>
+    val apiMood: String? = null
 )
 
 private val moodCategories = listOf(
     MoodCategory(
         "my_wave", "My Wave",
-        listOf(Color(0xFFFC3C44), Color(0xFFFF6B6B)), "",
-        listOf("") // Personal wave — no seed queries, uses getWaveNext directly
+        listOf(Color(0xFFFC3C44), Color(0xFFFF6B6B)), ""
     ),
     MoodCategory(
         "melancholy", "Melancholy",
         listOf(Color(0xFF1E3A5F), Color(0xFF2D5A87)), "",
-        listOf("melancholy", "sad indie", "lo-fi sad")
+        apiMood = "sad"
     ),
     MoodCategory(
         "good_mood", "Good Mood",
         listOf(Color(0xFFD4730E), Color(0xFFF5A623)), "",
-        listOf("happy pop hits", "feel good", "summer hits")
+        apiMood = "happy"
     ),
     MoodCategory(
         "broken_heart", "Broken Heart",
         listOf(Color(0xFF8B1538), Color(0xFFC41E3A)), "",
-        listOf("breakup songs", "heartbreak", "sad love songs")
+        apiMood = "sad"
     ),
     MoodCategory(
         "focus", "Focus",
         listOf(Color(0xFF2D5016), Color(0xFF4A7C23)), "",
-        listOf("focus instrumental", "deep focus", "study beats")
+        apiMood = "focus"
     ),
     MoodCategory(
         "energy", "Energy",
         listOf(Color(0xFF8B4513), Color(0xFFD2691E)), "",
-        listOf("high energy", "power hits", "edm energy")
+        apiMood = "energetic"
     ),
     MoodCategory(
         "night", "Night Wave",
         listOf(Color(0xFF1A1A2E), Color(0xFF16213E)), "",
-        listOf("late night", "night drive", "synthwave night")
+        apiMood = "relax"
     ),
     MoodCategory(
         "workout", "Workout",
         listOf(Color(0xFF4A0000), Color(0xFF8B0000)), "",
-        listOf("workout", "gym motivation", "running mix")
+        apiMood = "workout"
     ),
     MoodCategory(
         "chill", "Chill",
         listOf(Color(0xFF483D8B), Color(0xFF6A5ACD)), "",
-        listOf("chillhop", "chill lofi", "ambient chill")
+        apiMood = "chill"
     ),
 )
-
-/** Returns a list of tracks for a mood when the personal wave is unavailable. */
-private suspend fun loadMoodFallbackTracks(mood: MoodCategory, count: Int): List<Track> {
-    val collected = mutableListOf<Track>()
-    val seen = mutableSetOf<String>()
-    for (query in mood.seedQueries) {
-        if (collected.size >= count) break
-        val tracks = IcmRepository.searchTracks(query, limit = count * 2)
-        for (track in tracks) {
-            if (collected.size >= count) break
-            if (seen.add(track.id)) collected.add(track)
-        }
-    }
-    return collected
-}
 
 @Composable
 fun HomeScreen(
@@ -212,7 +195,7 @@ fun HomeScreen(
     var pendingMoodId by remember { mutableStateOf<String?>(null) }
 
     fun moodApiTerm(mood: MoodCategory): String =
-        mood.seedQueries.firstOrNull()?.takeIf { it.isNotBlank() } ?: mood.id
+        mood.apiMood ?: mood.id
 
     fun loadMoreMoodTracks(moodId: String, existing: List<Track>) {
         if (moodId in moodLoading) return
@@ -227,13 +210,11 @@ fun HomeScreen(
                     source = "apple",
                     diversity = 0.5
                 ),
-                count = 10,
+                count = 30,
                 exclude = existing.map { it.id }
             )
             moodTracks = moodTracks + (moodId to (existing + newTracks).distinctBy { it.id })
-            val resolvedNewTracks = newTracks
-                .mapNotNull { resolveWaveTrackUrl(it) }
-            resolvedNewTracks.forEach { PlayerController.addToQueue(it) }
+            PlayerController.addTracksToQueue(newTracks)
             moodLoading = moodLoading - moodId
         }
     }
@@ -251,10 +232,10 @@ fun HomeScreen(
             activeMoodId = moodId
             isPlayingMood = true
             scope.launch {
-                val resolvedTracks = existing.mapNotNull { resolveWaveTrackUrl(it) }
-                if (resolvedTracks.isNotEmpty()) {
-                    PlayerController.setQueue(resolvedTracks)
+                if (existing.isNotEmpty()) {
+                    PlayerController.setQueue(existing)
                     PlayerController.playTrack(context, 0)
+                    PlayerController.ensureWaveRefill()
                 }
                 // Preload more in background
                 loadMoreMoodTracks(moodId, existing)
@@ -270,21 +251,16 @@ fun HomeScreen(
             if (moodId == "my_wave") {
                 // === ICM МОЯ ВОЛНА ===
                 val waveRepo = WaveRepository.getInstance(context)
-                val queue = waveRepo.buildWaveQueue(count = WaveRepository.WAVE_QUEUE_SIZE)
+                val queue = waveRepo.buildWaveModeQueue(
+                    mode = WaveMode.Personal(),
+                    count = WaveRepository.WAVE_QUEUE_SIZE
+                )
                 moodLoading = moodLoading - moodId
 
                 if (queue.isNotEmpty()) {
-                    val resolvedQueue = queue.mapNotNull { resolveWaveTrackUrl(it) }
-                    if (resolvedQueue.isNotEmpty()) {
-                        PlayerController.setQueue(resolvedQueue)
-                        PlayerController.playTrack(context, 0)
-                    } else {
-                        pendingMoodId = moodId
-                        activeMoodId = null
-                        isPlayingMood = false
-                        PlayerController.clearAutoRefillContext()
-                        showWaveOnboarding = true
-                    }
+                    PlayerController.setQueue(queue)
+                    PlayerController.playTrack(context, 0)
+                    PlayerController.ensureWaveRefill()
                 } else {
                     pendingMoodId = moodId
                     activeMoodId = null
@@ -313,55 +289,13 @@ fun HomeScreen(
                 moodLoading = moodLoading - moodId
 
                 if (waveTracks.isNotEmpty()) {
-                    // Resolve all track URLs and filter out those that fail
-                    val resolvedTracks = waveTracks
-                        .mapNotNull { resolveWaveTrackUrl(it) }
-                    
-                    if (resolvedTracks.isNotEmpty()) {
-                        PlayerController.setQueue(resolvedTracks)
-                        PlayerController.playTrack(context, 0)
-                        // Preload next batch
-                        loadMoreMoodTracks(moodId, waveTracks)
-                    } else {
-                        // All wave tracks failed to resolve — fall back to search
-                        val fallback = loadMoodFallbackTracks(mood, count = 12)
-                        if (fallback.isNotEmpty()) {
-                            val fallbackResolved = fallback
-                                .mapNotNull { resolveWaveTrackUrl(it) }
-                            if (fallbackResolved.isNotEmpty()) {
-                                PlayerController.clearAutoRefillContext()
-                                PlayerController.setQueue(fallbackResolved)
-                                PlayerController.playTrack(context, 0)
-                            } else {
-                                activeMoodId = null
-                                isPlayingMood = false
-                                PlayerController.clearAutoRefillContext()
-                            }
-                        } else {
-                            activeMoodId = null
-                            isPlayingMood = false
-                            PlayerController.clearAutoRefillContext()
-                        }
-                    }
+                    PlayerController.setQueue(waveTracks)
+                    PlayerController.playTrack(context, 0)
+                    PlayerController.ensureWaveRefill()
                 } else {
-                    // Wave is empty — fall back to search-driven playlist
-                    val fallback = loadMoodFallbackTracks(mood, count = 12)
-                    if (fallback.isNotEmpty()) {
-                        val resolvedTracks = fallback.mapNotNull { resolveWaveTrackUrl(it) }
-                        if (resolvedTracks.isNotEmpty()) {
-                            PlayerController.clearAutoRefillContext()
-                            PlayerController.setQueue(resolvedTracks)
-                            PlayerController.playTrack(context, 0)
-                        } else {
-                            activeMoodId = null
-                            isPlayingMood = false
-                            PlayerController.clearAutoRefillContext()
-                        }
-                    } else {
-                        activeMoodId = null
-                        isPlayingMood = false
-                        PlayerController.clearAutoRefillContext()
-                    }
+                    activeMoodId = null
+                    isPlayingMood = false
+                    PlayerController.clearAutoRefillContext()
                 }
             }
         }

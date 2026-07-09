@@ -19,30 +19,6 @@ class IcmWaveApi(
         isLenient = true
     }
 
-    suspend fun startPersonalWave(region: String? = null): Result<IcmWaveResponse> {
-        val endpoint = buildString {
-            append("/library/wave/start")
-            appendQuery(queryParam("region", region))
-        }
-        return request(endpoint)
-    }
-
-    suspend fun nextPersonalWave(
-        exclude: List<String> = emptyList(),
-        recentSkips: Int? = null,
-        region: String? = null
-    ): Result<IcmWaveResponse> {
-        val endpoint = buildString {
-            append("/library/wave/next")
-            appendQuery(
-                queryParam("exclude", exclude.toCsvOrNull()),
-                queryParam("recent_skips", recentSkips?.coerceIn(0, 50)?.toString()),
-                queryParam("region", region)
-            )
-        }
-        return request(endpoint)
-    }
-
     suspend fun nextTrackStation(
         seedTrackId: String,
         exclude: List<String> = emptyList(),

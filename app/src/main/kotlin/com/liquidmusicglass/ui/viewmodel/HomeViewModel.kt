@@ -170,7 +170,7 @@ class HomeViewModel : ViewModel() {
     }
 
     /**
-     * Builds the "My Wave" queue with filtering by top genres.
+     * Builds the expanded personal wave through /wave/session/*.
      */
     fun buildWaveQueue(context: Context) {
         if (_isBuildingWave.value) return
@@ -180,33 +180,22 @@ class HomeViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 val repo = WaveRepository(context)
-                var started = false
-                // Мгновенный старт: музыка играет после ПЕРВОГО wave/next,
-                // остальная пачка доклеивается в очередь фоном.
-                repo.buildWaveQueueFast(
-                    topUpCount = WaveRepository.WAVE_QUEUE_SIZE - 1,
-                    onFirst = { tracks ->
-                        if (tracks.isNotEmpty()) {
-                            started = true
-                            _waveTracks.value = tracks
-                            PlayerController.playFromList(
-                                context = context,
-                                tracks = tracks,
-                                startIndex = 0,
-                                autoRefillType = "WAVE"
-                            )
-                            _isBuildingWave.value = false   // спиннер гаснет со стартом музыки
-                        }
-                    },
-                    onTopUp = { rest ->
-                        _waveTracks.value = _waveTracks.value + rest
-                        PlayerController.addTracksToQueue(rest)
-                        // Сразу добить очередь до сытого запаса (порог 8).
-                        PlayerController.ensureWaveRefill()
-                    }
+                val tracks = repo.buildWaveModeQueue(
+                    mode = WaveMode.Personal(),
+                    count = WaveRepository.WAVE_QUEUE_SIZE
                 )
 
-                if (!started) {
+                if (tracks.isNotEmpty()) {
+                    _waveTracks.value = tracks
+                    PlayerController.playFromList(
+                        context = context,
+                        tracks = tracks,
+                        startIndex = 0,
+                        autoRefillType = "WAVE"
+                    )
+                    _isBuildingWave.value = false
+                    PlayerController.ensureWaveRefill()
+                } else {
                     // Пусто → по доке: у сервера нет seed-артистов/лайков. Если онбординг
                     // ещё не пройден — показываем выбор артистов (персонализация стартует
                     // только после него). Иначе просто молчим.

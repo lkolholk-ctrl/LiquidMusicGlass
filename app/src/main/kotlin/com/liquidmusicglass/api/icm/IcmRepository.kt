@@ -387,50 +387,29 @@ object IcmRepository {
     }
     
     /**
-     * Load wave recommendations sequentially (needs exclude tracking).
+     * Load home wave recommendations from the expanded personal wave session.
      */
     private suspend fun loadWaveRecommendations(): List<IcmHomeItem> {
-        val waveItems = mutableListOf<IcmHomeItem>()
-        val excludeIds = mutableListOf<String>()
-        
-        val seedCandidates = mutableListOf<String>()
-        seedCandidates.addAll(com.liquidmusicglass.engine.PlayerController.recentlyPlayed.value.map { it.id })
-        
-        val context = com.liquidmusicglass.engine.PlayerController.context
-        if (context != null) {
-            seedCandidates.addAll(com.liquidmusicglass.data.local.LocalStorage.getHistory(context).map { it.trackId })
-            try {
-                val favs = com.liquidmusicglass.data.local.db.LibraryRepository.getInstance(context).getAllFavoritesAsTracks()
-                seedCandidates.addAll(favs.map { it.id })
-            } catch (_: Exception) {}
-        }
-        val cleanSeeds = seedCandidates.distinct().filter { it.isNotBlank() }
-        
-        repeat(5) { i ->
-            val seedTrackId = cleanSeeds.getOrNull(i % cleanSeeds.size.coerceAtLeast(1))
-            try {
-                val response = getWaveNext(
-                    seedTrackId = seedTrackId,
-                    exclude = excludeIds.takeIf { it.isNotEmpty() },
-                    recentSkips = 0
+        val context = com.liquidmusicglass.engine.PlayerController.context ?: return emptyList()
+        return try {
+            com.liquidmusicglass.data.local.WaveRepository.getInstance(context)
+                .buildWaveModeQueue(
+                    mode = com.liquidmusicglass.data.wave.WaveMode.Personal(),
+                    count = 5
                 )
-                if (response != null && response.status == "ok" && response.track != null) {
-                    val trackId = response.track.id
-                    excludeIds.add(trackId)
-                    waveItems.add(IcmHomeItem(
-                        id = trackId,
-                        title = response.track.title,
-                        artist = response.track.artist ?: "Unknown Artist",
-                        cover = response.track.cover,
-                        duration = response.track.durationMs,
-                        source = response.track.source
-                    ))
+                .map { track ->
+                    IcmHomeItem(
+                        id = track.id,
+                        title = track.title,
+                        artist = track.artist,
+                        cover = track.coverUrl,
+                        duration = track.durationMs,
+                        source = track.source
+                    )
                 }
-            } catch (_: Exception) {
-                // Skip failed wave request
-            }
+        } catch (_: Exception) {
+            emptyList()
         }
-        return waveItems
     }
 
     /**
@@ -735,6 +714,15 @@ object IcmRepository {
      * Stops early when the API reports `status == "empty"` (no more candidates).
      */
     suspend fun buildWaveQueue(count: Int = 5, seedTrackId: String? = null): List<com.liquidmusicglass.engine.Track> {
+        if (seedTrackId.isNullOrBlank()) {
+            val context = com.liquidmusicglass.engine.PlayerController.context ?: return emptyList()
+            return com.liquidmusicglass.data.local.WaveRepository.getInstance(context)
+                .buildWaveModeQueue(
+                    mode = com.liquidmusicglass.data.wave.WaveMode.Personal(),
+                    count = count
+                )
+        }
+
         val tracks = mutableListOf<com.liquidmusicglass.engine.Track>()
         val exclude = mutableListOf<String>()
         for (i in 0 until count) {

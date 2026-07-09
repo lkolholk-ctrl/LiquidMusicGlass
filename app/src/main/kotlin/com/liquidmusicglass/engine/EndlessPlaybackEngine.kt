@@ -27,12 +27,11 @@ class EndlessPlaybackEngine(
 ) {
 
     companion object {
-        // Порог 8 (было 3): очередь держится «сытой» — в Up Next всегда
-        // ~8-18 треков, а не «3 и обрыв» (полевой фидбек: «чтоб не было
-        // пусто»). Частота запросов та же: батч 10 на каждые ~10 сыгранных.
-        const val REFILL_THRESHOLD = 8
-        const val REFILL_BATCH_SIZE = 10
-        const val MIN_REFILL_INTERVAL_MS = 8000L
+        // Держим большой буфер заранее. Пользователь не должен доедать очередь
+        // до 8-10 треков и ждать сеть: initial batch 30, затем добиваем до ~60.
+        const val REFILL_THRESHOLD = 40
+        const val REFILL_BATCH_SIZE = 30
+        const val MIN_REFILL_INTERVAL_MS = 2000L
     }
 
     private val _refillContext = MutableStateFlow<RefillContext?>(null)
@@ -160,7 +159,7 @@ class EndlessPlaybackEngine(
                                     diversity = 0.5
                                 ),
                                 count = REFILL_BATCH_SIZE,
-                                exclude = (playedIds + queueIds).toList()
+                                exclude = queueIds
                             )
                         }
                     }
@@ -176,7 +175,7 @@ class EndlessPlaybackEngine(
                                     diversity = 0.5
                                 ),
                                 count = REFILL_BATCH_SIZE,
-                                exclude = (playedIds + queueIds).toList()
+                                exclude = queueIds
                             )
                         }
                     }
