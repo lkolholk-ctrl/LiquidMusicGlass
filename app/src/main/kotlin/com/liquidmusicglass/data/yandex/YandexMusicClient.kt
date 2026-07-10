@@ -112,6 +112,22 @@ class YandexMusicClient(
         return out
     }
 
+    /** Лайкнуть трек в аккаунте: POST /users/{uid}/likes/tracks/add-multiple. */
+    fun likeTrack(uid: Long, trackId: String) {
+        postForm(
+            "$API/users/$uid/likes/tracks/add-multiple",
+            mapOf("track-ids" to trackId.substringBefore(":"))
+        )
+    }
+
+    /** Снять лайк: POST /users/{uid}/likes/tracks/remove. */
+    fun unlikeTrack(uid: Long, trackId: String) {
+        postForm(
+            "$API/users/$uid/likes/tracks/remove",
+            mapOf("track-ids" to trackId.substringBefore(":"))
+        )
+    }
+
     /** Полные объекты треков по id: POST /tracks, form `track-ids=id:albumId,…`. */
     fun fetchTracksByIds(refs: List<LikedRef>): List<Track> {
         if (refs.isEmpty()) return emptyList()

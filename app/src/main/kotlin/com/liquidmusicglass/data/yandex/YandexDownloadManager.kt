@@ -57,6 +57,20 @@ object YandexDownloadManager {
     }
 
     /**
+     * Записать лайк/снятие лайка Y-трека обратно в аккаунт Яндекса.
+     * [ymTrackId] — engine-id вида `ym_<id>`. Тихо игнорирует, если нет
+     * токена/uid. Блокирующий вызов — звать с IO.
+     */
+    fun writeLike(ymTrackId: String, liked: Boolean) {
+        val client = YandexAuthRepository.clientOrNull() ?: return
+        val uid = YandexAuthRepository.uidOrNull() ?: return
+        val bare = ymTrackId.removePrefix(ID_PREFIX)
+        runCatching {
+            if (liked) client.likeTrack(uid, bare) else client.unlikeTrack(uid, bare)
+        }
+    }
+
+    /**
      * Скачать [track] через текущий токен [YandexAuthRepository] →
      * `filesDir/downloads/ym_….mp3|.m4a` + запись в downloaded_tracks.
      */

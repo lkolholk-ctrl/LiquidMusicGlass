@@ -200,15 +200,21 @@ class LibraryRepository private constructor(context: Context) {
             // Asynchronously push to cloud
             CoroutineScope(Dispatchers.IO).launch {
                 try {
-                    val success = IcmRepository.likeTrack(track.id)
-                    if (success) {
+                    if (com.liquidmusicglass.data.yandex.YandexDownloadManager.isYandexId(track.id)) {
+                        // Y-трек: лайк пишется в аккаунт Яндекса, а не в ICM/волну ICM.
+                        com.liquidmusicglass.data.yandex.YandexDownloadManager.writeLike(track.id, liked = true)
                         db.markSynced(track.id)
-                    }
-                    // Лайк = «больше такого» для волны (more_track + more_artist).
-                    // Через оффлайн-очередь: обрыв сети не теряет сигнал.
-                    com.liquidmusicglass.api.icm.WaveSignalQueue.sendFeedback("more_track", track.id)
-                    track.artists.firstOrNull()?.id?.let {
-                        com.liquidmusicglass.api.icm.WaveSignalQueue.sendFeedback("more_artist", it)
+                    } else {
+                        val success = IcmRepository.likeTrack(track.id)
+                        if (success) {
+                            db.markSynced(track.id)
+                        }
+                        // Лайк = «больше такого» для волны (more_track + more_artist).
+                        // Через оффлайн-очередь: обрыв сети не теряет сигнал.
+                        com.liquidmusicglass.api.icm.WaveSignalQueue.sendFeedback("more_track", track.id)
+                        track.artists.firstOrNull()?.id?.let {
+                            com.liquidmusicglass.api.icm.WaveSignalQueue.sendFeedback("more_artist", it)
+                        }
                     }
                 } catch (_: Exception) {}
             }
@@ -235,12 +241,18 @@ class LibraryRepository private constructor(context: Context) {
             // Asynchronously push delete to cloud
             CoroutineScope(Dispatchers.IO).launch {
                 try {
-                    val success = IcmRepository.unlikeTrack(trackId)
-                    if (success) {
+                    if (com.liquidmusicglass.data.yandex.YandexDownloadManager.isYandexId(trackId)) {
+                        // Y-трек: снятие лайка пишется в аккаунт Яндекса.
+                        com.liquidmusicglass.data.yandex.YandexDownloadManager.writeLike(trackId, liked = false)
                         db.deleteByTrackId(trackId)
+                    } else {
+                        val success = IcmRepository.unlikeTrack(trackId)
+                        if (success) {
+                            db.deleteByTrackId(trackId)
+                        }
+                        // Снятие лайка = «реже такого» в волне (через оффлайн-очередь).
+                        com.liquidmusicglass.api.icm.WaveSignalQueue.sendFeedback("less_track", trackId)
                     }
-                    // Снятие лайка = «реже такого» в волне (через оффлайн-очередь).
-                    com.liquidmusicglass.api.icm.WaveSignalQueue.sendFeedback("less_track", trackId)
                 } catch (_: Exception) {}
             }
 
