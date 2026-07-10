@@ -63,14 +63,16 @@ fun AnimatedPlayerBackground(
 
     Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
         // ── Base palette field. Cheap and deterministic on first frame. ──
+        // Alpha цветных слоёв подняты ~×1.5, а чёрный оверлей ослаблен —
+        // фон из палитры обложки заметно ярче (просьба: «ярче в 2 раза»).
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(
                     Brush.radialGradient(
                         colors = listOf(
-                            boostedLightVibrant.copy(alpha = 0.52f),
-                            boostedVibrant.copy(alpha = 0.36f),
+                            boostedLightVibrant.copy(alpha = 0.80f),
+                            boostedVibrant.copy(alpha = 0.55f),
                             Color.Black
                         )
                     )
@@ -84,10 +86,10 @@ fun AnimatedPlayerBackground(
                 .background(
                     Brush.verticalGradient(
                         colorStops = arrayOf(
-                            0.00f to boostedVibrant.copy(alpha = 0.45f),
-                            0.35f to boostedDominant.copy(alpha = 0.35f),
-                            0.65f to boostedMuted.copy(alpha = 0.45f),
-                            1.00f to boostedVibrant.copy(alpha = 0.35f)
+                            0.00f to boostedVibrant.copy(alpha = 0.68f),
+                            0.35f to boostedDominant.copy(alpha = 0.55f),
+                            0.65f to boostedMuted.copy(alpha = 0.68f),
+                            1.00f to boostedVibrant.copy(alpha = 0.55f)
                         )
                     )
                 )
@@ -100,25 +102,27 @@ fun AnimatedPlayerBackground(
                 .background(
                     Brush.horizontalGradient(
                         colorStops = arrayOf(
-                            0.00f to boostedLightVibrant.copy(alpha = 0.25f),
+                            0.00f to boostedLightVibrant.copy(alpha = 0.38f),
                             0.50f to Color.Transparent,
-                            1.00f to boostedVibrant.copy(alpha = 0.20f)
+                            1.00f to boostedVibrant.copy(alpha = 0.32f)
                         )
                     )
                 )
         )
 
         // ── Dark overlay for readability ──
+        // Верх/середину почти не затемняем (фон должен светиться), низ держим
+        // потемнее — под ним лежат контролы и текст, читаемость важнее.
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(
                     Brush.verticalGradient(
                         colorStops = arrayOf(
-                            0.00f to Color.Black.copy(alpha = 0.25f),
-                            0.40f to Color.Black.copy(alpha = 0.15f),
-                            0.60f to Color.Black.copy(alpha = 0.25f),
-                            1.00f to Color.Black.copy(alpha = 0.55f)
+                            0.00f to Color.Black.copy(alpha = 0.08f),
+                            0.40f to Color.Black.copy(alpha = 0.04f),
+                            0.60f to Color.Black.copy(alpha = 0.12f),
+                            1.00f to Color.Black.copy(alpha = 0.45f)
                         )
                     )
                 )
@@ -126,12 +130,24 @@ fun AnimatedPlayerBackground(
     }
 }
 
+/**
+ * Готовит цвет палитры под фон плеера: усиливает насыщенность И ЯРКОСТЬ.
+ * Раньше бустилась только насыщенность (value не трогался) — тёмные обложки
+ * давали «тухлый» фон. Теперь поднимаем и HSV-value с нижним порогом, чтобы
+ * даже тёмный кавер давал ощутимое свечение.
+ */
 @Composable
-private fun rememberSaturationBoost(color: Color, boost: Float = 2.5f): Color {
+private fun rememberSaturationBoost(
+    color: Color,
+    satBoost: Float = 2.5f,
+    valBoost: Float = 1.9f,
+    valFloor: Float = 0.38f
+): Color {
     return androidx.compose.runtime.remember(color) {
         val hsv = FloatArray(3)
         android.graphics.Color.colorToHSV(color.toArgb(), hsv)
-        hsv[1] = (hsv[1] * boost).coerceIn(0f, 1f)
+        hsv[1] = (hsv[1] * satBoost).coerceIn(0f, 1f)
+        hsv[2] = (hsv[2] * valBoost).coerceAtLeast(valFloor).coerceIn(0f, 1f)
         androidx.compose.ui.graphics.Color(android.graphics.Color.HSVToColor(hsv))
     }
 }

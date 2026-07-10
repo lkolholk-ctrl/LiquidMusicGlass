@@ -273,7 +273,7 @@ fun SettingsScreen(
                             if (key in badKeys) {
                                 android.widget.Toast.makeText(
                                     audioOutCtx,
-                                    "На этом устройстве этот путь известен как нерабочий. Если тишина/шум — вернись на Auto.",
+                                    "This path is known to be broken on this device. If you get silence or noise, switch back to Auto.",
                                     android.widget.Toast.LENGTH_LONG
                                 ).show()
                             }
@@ -566,7 +566,7 @@ fun SettingsScreen(
             PlainCard {
                 SettingsToggleItem(
                     title = "AutoMix",
-                    subtitle = "Модель дирижирует JUCE-сводом между треками (локальные + стриминг) + авто-волна",
+                    subtitle = "Model-driven JUCE blending between tracks (local + streaming) + auto wave",
                     selected = autoMix,
                     onSelect = { PlayerSettings.setAutoMix(it) }
                 )

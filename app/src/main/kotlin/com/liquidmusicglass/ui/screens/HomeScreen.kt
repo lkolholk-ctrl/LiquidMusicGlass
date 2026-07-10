@@ -152,6 +152,7 @@ fun HomeScreen(
     onNavigateToPlaylist: (String) -> Unit = {}
 ) {
     val viewModel = remember { HomeViewModel() }
+    DisposableEffect(viewModel) { onDispose { viewModel.cancelLoads() } }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val scroll = rememberScrollState()

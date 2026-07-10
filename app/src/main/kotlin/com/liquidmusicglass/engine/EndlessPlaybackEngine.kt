@@ -31,6 +31,10 @@ class EndlessPlaybackEngine(
         // до 8-10 треков и ждать сеть: initial batch 30, затем добиваем до ~60.
         const val REFILL_THRESHOLD = 40
         const val REFILL_BATCH_SIZE = 30
+        // Станция по треку — единственный режим без batch-эндпоинта: каждый
+        // трек = отдельный GET /library/wave/next. Пачка 30 давала залп из
+        // 30+ последовательных запросов (риск 429); добираем меньшими дозами.
+        const val STATION_REFILL_BATCH_SIZE = 12
         const val MIN_REFILL_INTERVAL_MS = 2000L
     }
 
@@ -54,7 +58,7 @@ class EndlessPlaybackEngine(
         // обратно к артисту вместо транзитивного дрейфа в соседей-соседей.
         val seedPool: List<String> = emptyList()
     ) {
-        enum class Type { WAVE, ARTIST, ALBUM, SEARCH, GENRE, MOOD, PLAYLIST, LIBRARY }
+        enum class Type { WAVE, ARTIST, ALBUM, SEARCH, GENRE, MOOD, PLAYLIST, LIBRARY, YWAVE }
     }
 
     fun setRefillContext(context: RefillContext?) {
@@ -148,10 +152,16 @@ class EndlessPlaybackEngine(
                         seedPool.isEmpty()
                     val waveRepo = com.liquidmusicglass.data.local.WaveRepository.getInstance(ctx)
 
+                    // Волна ЯМ: дозаправка пачками ротора, минуя ICM-логику ниже.
+                    if (isGlobal && refillCtx?.type == RefillContext.Type.YWAVE) {
+                        return@withContext com.liquidmusicglass.data.yandex.YandexWaveEngine
+                            .nextBatch(excludeIds = (playedIds + queueIds).toSet())
+                    }
+
                     if (isGlobal && refillCtx?.type == RefillContext.Type.MOOD) {
                         val mood = refillCtx.id ?: refillCtx.name
                         if (!mood.isNullOrBlank()) {
-                            return@withContext waveRepo.buildWaveModeQueue(
+                            val moodTracks = waveRepo.buildWaveModeQueue(
                                 mode = WaveMode.Mood(
                                     mood = mood,
                                     displayName = refillCtx.name,
@@ -161,13 +171,18 @@ class EndlessPlaybackEngine(
                                 count = REFILL_BATCH_SIZE,
                                 exclude = queueIds
                             )
+                            // Пул mood-пула кончился → не останавливаемся, продолжаем
+                            // личной волной (бесконечность важнее строгого настроения).
+                            return@withContext moodTracks.ifEmpty {
+                                waveRepo.buildWaveModeQueue(WaveMode.Personal(), REFILL_BATCH_SIZE, queueIds)
+                            }
                         }
                     }
 
                     if (isGlobal && refillCtx?.type == RefillContext.Type.GENRE) {
                         val genre = refillCtx.genre ?: refillCtx.id ?: refillCtx.name
                         if (!genre.isNullOrBlank()) {
-                            return@withContext waveRepo.buildWaveModeQueue(
+                            val genreTracks = waveRepo.buildWaveModeQueue(
                                 mode = WaveMode.Genre(
                                     genre = genre,
                                     displayName = refillCtx.name,
@@ -177,6 +192,9 @@ class EndlessPlaybackEngine(
                                 count = REFILL_BATCH_SIZE,
                                 exclude = queueIds
                             )
+                            return@withContext genreTracks.ifEmpty {
+                                waveRepo.buildWaveModeQueue(WaveMode.Personal(), REFILL_BATCH_SIZE, queueIds)
+                            }
                         }
                     }
 
@@ -200,17 +218,26 @@ class EndlessPlaybackEngine(
                         }
                     } else baseSeed
 
-                    // Для station-by-track по доке достаточно слать текущую клиентскую
-                    // очередь. В PlayerController уже сыгранные треки остаются в queue,
-                    // поэтому берём только current+future, иначе станция высыхает после
-                    // первой пачки примерно на 15 треках.
+                    // Станция по треку: по доке сервер НЕ подмешивает свою
+                    // 4-часовую сессию в этом режиме — анти-повтор целиком наш.
+                    // Шлём текущую+будущую очередь И хвост уже сыгранного (кап 40),
+                    // иначе станция ходит по кругу. Полную историю не шлём — от
+                    // неё узкая станция высыхает (проверено полевым фидбеком).
                     val exclude = if (isStrictTrackStation) {
-                        activeQueueIds.distinct()
+                        val playedPrefix = queueIds
+                            .take(currentIndex.coerceIn(0, queueIds.size))
+                            .takeLast(40)
+                        (playedPrefix + activeQueueIds).distinct()
                     } else {
                         (playedIds + queueIds).toList()
                     }
+                    val batchSize = if (isStrictTrackStation) {
+                        STATION_REFILL_BATCH_SIZE
+                    } else {
+                        REFILL_BATCH_SIZE
+                    }
                     var tracks = waveRepo.buildWaveQueue(
-                        count = REFILL_BATCH_SIZE,
+                        count = batchSize,
                         seedTrackId = seed,
                         exclude = exclude
                     )
@@ -226,18 +253,19 @@ class EndlessPlaybackEngine(
                                 "Track station returned empty (seed=$seed), retrying with relaxed exclude=${relaxedExclude.size}"
                             )
                             tracks = waveRepo.buildWaveQueue(
-                                count = REFILL_BATCH_SIZE,
+                                count = batchSize,
                                 seedTrackId = seed,
                                 exclude = relaxedExclude
                             )
                         }
                     }
-                    // Станция пересохла (похожие на seed кончились) → ДРЕЙФ,
-                    // как у Яндекса: строим станцию вокруг последнего трека
-                    // очереди (похожие-на-похожие — пул расширяется транзитивно,
-                    // «подобных очень много»). Seed в контексте обновляем, чтобы
-                    // следующие рефиллы не молотили сухую станцию.
-                    if (tracks.isEmpty() && seed != null && !isStrictTrackStation) {
+                    // Станция реально пересохла (пусто ДАЖЕ после relaxed-retry) →
+                    // ДРЕЙФ: станция вокруг последнего трека очереди (похожие-на-
+                    // похожие, пул расширяется транзитивно). Работает и для строгой
+                    // станции по треку — она обязана быть бесконечной: во время
+                    // нормальной работы сюда не заходим (tracks непусты, seed держится),
+                    // а на сухом пуле дрейфуем на соседний трек и ре-якоримся на нём.
+                    if (tracks.isEmpty() && seed != null) {
                         val driftSeed = queueIds.lastOrNull()?.takeIf { it != seed }
                         if (driftSeed != null) {
                             android.util.Log.w("EndlessEngine", "Station dried up (seed=$seed) — drifting to seed=$driftSeed")
@@ -253,8 +281,8 @@ class EndlessPlaybackEngine(
                         }
                     }
                     // Дрейфовать некуда/нечем → личная волна: музыка не должна
-                    // останавливаться и идти по кругу.
-                    if (tracks.isEmpty() && seed != null && !isStrictTrackStation) {
+                    // останавливаться. Терминальный рубеж для ЛЮБОЙ станции.
+                    if (tracks.isEmpty() && seed != null) {
                         android.util.Log.w("EndlessEngine", "Drift dried up too — falling back to personal wave")
                         tracks = waveRepo.buildWaveQueue(
                             count = REFILL_BATCH_SIZE,

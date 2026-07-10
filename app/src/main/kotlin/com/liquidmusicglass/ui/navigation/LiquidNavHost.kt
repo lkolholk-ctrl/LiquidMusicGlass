@@ -27,6 +27,7 @@ import com.liquidmusicglass.ui.screens.NewScreen
 import com.liquidmusicglass.ui.screens.PlaylistDetailScreen
 import com.liquidmusicglass.ui.screens.SearchScreen
 import com.liquidmusicglass.ui.screens.WaveHomeScreen
+import com.liquidmusicglass.ui.screens.YandexMusicScreen
 import com.liquidmusicglass.ui.theme.ForceDarkContent
 
 /**
@@ -106,10 +107,15 @@ fun LiquidNavHost(
                     onNavigateToArtist = { navController.navigate(NavRoutes.artist(NavRoutes.TAB_LIBRARY, it)) },
                     onOpenPlaylist = { navController.navigate(NavRoutes.playlist(NavRoutes.TAB_LIBRARY, it)) },
                     onOpenLocalLibrary = { navController.navigate(NavRoutes.LOCAL_LIBRARY) },
+                    onOpenYandex = { navController.navigate(NavRoutes.YANDEX_MUSIC) },
                     backdrop = backdrop
                 )
             }
             musicDetailDestinations(NavRoutes.TAB_LIBRARY, navController)
+
+            composable(NavRoutes.YANDEX_MUSIC) {
+                YandexMusicScreen(onBack = { navController.popBackStack() })
+            }
 
             composable(NavRoutes.LOCAL_LIBRARY) {
                 LocalLibraryScreen(

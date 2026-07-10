@@ -121,11 +121,11 @@ fun MarkupPreviewView(
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, tint = Color.White,
                             modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("К разметке", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Back to sync", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                     }
                 }
                 Spacer(Modifier.weight(1f))
-                Text("ТЕСТ", color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text("TEST", color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp, fontWeight = FontWeight.Bold)
             }
 
             // ── Строки с подсветкой ──
@@ -173,8 +173,8 @@ fun MarkupPreviewView(
                     PlayerController.seekTo(t)
                 }
                 Text(
-                    if (isWordLevel) "Пословно — проверь, вовремя ли загораются слова"
-                    else "Построчно — проверь тайминг строк",
+                    if (isWordLevel) "Word-by-word — check that words light up on time"
+                    else "Line-by-line — check the line timing",
                     color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp
                 )
             }
@@ -186,7 +186,7 @@ fun MarkupPreviewView(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Скорость:", color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp)
+                Text("Speed:", color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp)
                 for (i in 10 downTo 1) {
                     val v = i / 10f
                     val sel = kotlin.math.abs(speed - v) < 0.01f
@@ -211,21 +211,21 @@ fun MarkupPreviewView(
                         .windowInsetsPadding(WindowInsets.navigationBars)
                         .padding(horizontal = 20.dp, vertical = 12.dp)
                 ) {
-                    Text("Эффект перетекания", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+                    Text("Fill effect", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
                     Spacer(Modifier.height(6.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        EffectChip("Заливка", effect == LyricsFxController.WordEffect.FILL, accent) {
+                        EffectChip("Fill", effect == LyricsFxController.WordEffect.FILL, accent) {
                             LyricsFxController.setEffect(LyricsFxController.WordEffect.FILL)
                         }
-                        EffectChip("Затухание", effect == LyricsFxController.WordEffect.FADE, accent) {
+                        EffectChip("Fade", effect == LyricsFxController.WordEffect.FADE, accent) {
                             LyricsFxController.setEffect(LyricsFxController.WordEffect.FADE)
                         }
-                        EffectChip("Бегущий", effect == LyricsFxController.WordEffect.RUNNING, accent) {
+                        EffectChip("Running", effect == LyricsFxController.WordEffect.RUNNING, accent) {
                             LyricsFxController.setEffect(LyricsFxController.WordEffect.RUNNING)
                         }
                     }
                     Spacer(Modifier.height(8.dp))
-                    Text("Плавность: ${(smooth * 100).toInt()}%", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+                    Text("Smoothness: ${(smooth * 100).toInt()}%", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
                     Slider(
                         value = smooth,
                         onValueChange = { LyricsFxController.setSmoothness(it) },

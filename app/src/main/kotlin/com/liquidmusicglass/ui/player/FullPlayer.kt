@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.AudioManager
 import android.net.Uri
 import android.widget.Toast
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
@@ -13,6 +14,9 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -650,12 +654,20 @@ fun FullPlayer(
                         }
                     }
                     // 👍 More like this — wave/feedback (more_track + more_artist).
+                    val thumbUpBounce = remember { Animatable(1f) }
                     Box(
                         modifier = Modifier
                             .size(44.dp)
                             .pressScale {
                                 currentTrackObj?.let { track ->
                                     waveFeedback = true
+                                    scope.launch {
+                                        thumbUpBounce.snapTo(1.35f)
+                                        thumbUpBounce.animateTo(
+                                            targetValue = 1f,
+                                            animationSpec = spring(dampingRatio = 0.30f, stiffness = 480f)
+                                        )
+                                    }
                                     scope.launch {
                                         WaveSignalQueue.sendFeedback("more_track", track.id)
                                         track.artists.firstOrNull()?.id?.let {
@@ -676,16 +688,29 @@ fun FullPlayer(
                             imageVector = Icons.Rounded.ThumbUp,
                             contentDescription = "More like this",
                             tint = thumbUpTint,
-                            modifier = Modifier.size(24.dp)
+                            modifier = Modifier
+                                .size(24.dp)
+                                .graphicsLayer {
+                                    scaleX = thumbUpBounce.value
+                                    scaleY = thumbUpBounce.value
+                                }
                         )
                     }
                     // 👎 Less like this — wave/feedback (less_track + less_artist).
+                    val thumbDownBounce = remember { Animatable(1f) }
                     Box(
                         modifier = Modifier
                             .size(44.dp)
                             .pressScale {
                                 currentTrackObj?.let { track ->
                                     waveFeedback = false
+                                    scope.launch {
+                                        thumbDownBounce.snapTo(1.35f)
+                                        thumbDownBounce.animateTo(
+                                            targetValue = 1f,
+                                            animationSpec = spring(dampingRatio = 0.30f, stiffness = 480f)
+                                        )
+                                    }
                                     scope.launch {
                                         WaveSignalQueue.sendFeedback("less_track", track.id)
                                         track.artists.firstOrNull()?.id?.let {
@@ -706,7 +731,12 @@ fun FullPlayer(
                             imageVector = Icons.Rounded.ThumbDown,
                             contentDescription = "Less like this",
                             tint = thumbDownTint,
-                            modifier = Modifier.size(24.dp)
+                            modifier = Modifier
+                                .size(24.dp)
+                                .graphicsLayer {
+                                    scaleX = thumbDownBounce.value
+                                    scaleY = thumbDownBounce.value
+                                }
                         )
                     }
                     Box(
@@ -1164,7 +1194,7 @@ fun FullPlayer(
                             )
                             Spacer(modifier = Modifier.width(16.dp))
                             Text(
-                                text = "Редактировать теги",
+                                text = "Edit tags",
                                 color = Color.White,
                                 fontSize = 17.sp,
                                 modifier = Modifier.weight(1f)
@@ -1291,12 +1321,27 @@ private fun AnimatedTransportButton(
             ) { onClick() },
         contentAlignment = Alignment.Center
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            modifier = Modifier.size(iconSize),
-            tint = Color.White
-        )
+        // Смена иконки (play ↔ pause) — не мгновенный свап, а морф: новая
+        // иконка «выпрыгивает» с пружиной + fade, старая ужимается и гаснет.
+        // Для prev/next иконка не меняется → AnimatedContent простаивает.
+        AnimatedContent(
+            targetState = icon,
+            transitionSpec = {
+                (scaleIn(
+                    initialScale = 0.55f,
+                    animationSpec = spring(dampingRatio = 0.45f, stiffness = 550f)
+                ) + fadeIn(tween(130)))
+                    .togetherWith(scaleOut(targetScale = 0.55f, animationSpec = tween(110)) + fadeOut(tween(110)))
+            },
+            label = "transportIcon"
+        ) { targetIcon ->
+            Icon(
+                imageVector = targetIcon,
+                contentDescription = null,
+                modifier = Modifier.size(iconSize),
+                tint = Color.White
+            )
+        }
     }
 }
 

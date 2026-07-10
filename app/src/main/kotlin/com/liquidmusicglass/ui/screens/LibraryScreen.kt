@@ -101,6 +101,7 @@ fun LibraryScreen(
     onNavigateToArtist: (String) -> Unit = {},
     onOpenPlaylist: (String) -> Unit = {},
     onOpenLocalLibrary: () -> Unit = {},
+    onOpenYandex: () -> Unit = {},
     backdrop: LayerBackdrop? = null
 ) {
     val lc = LiquidTheme.colors
@@ -126,7 +127,6 @@ fun LibraryScreen(
     var importedPlaylists by remember { mutableStateOf<List<com.liquidmusicglass.api.icm.IcmUserPlaylist>>(emptyList()) }
     var isPlaylistsLoading by remember { mutableStateOf(false) }
     var showImportDialog by remember { mutableStateOf(false) }
-    var showYandexConnect by remember { mutableStateOf(false) }
     val yandexConnected by YandexAuthRepository.isConnected.collectAsState()
     val yandexLabel by YandexAuthRepository.displayLabel.collectAsState()
 
@@ -260,24 +260,24 @@ fun LibraryScreen(
                             SystemRowDivider()
                             MenuCard(
                                 title = "On this device",
-                                subtitle = "Артисты · Альбомы · Треки · Поиск",
+                                subtitle = "Artists · Albums · Tracks · Search",
                                 icon = Icons.Rounded.LibraryMusic,
                                 tint = Color(0xFFFF9F0A),
                                 onClick = onOpenLocalLibrary
                             )
                             SystemRowDivider()
-                            // Yandex Music — OAuth token, NOT the import sheet
+                            // Yandex Music — полноэкранный экран (не sheet)
                             BrandMenuCard(
                                 title = "Yandex Music",
                                 subtitle = if (yandexConnected) {
                                     "Connected · ${yandexLabel ?: "account"}"
                                 } else {
-                                    "Add with OAuth token"
+                                    "Sign in with Yandex"
                                 },
                                 iconRes = R.drawable.ic_service_yandex,
                                 tint = Color(0xFFFFCC00),
                                 connected = yandexConnected,
-                                onClick = { showYandexConnect = true }
+                                onClick = onOpenYandex
                             )
                         }
                     }
@@ -814,10 +814,6 @@ fun LibraryScreen(
                         .importPlaylist(url, context)
                 }
             )
-        }
-
-        if (showYandexConnect) {
-            YandexMusicSheet(onDismiss = { showYandexConnect = false })
         }
 
         // Error Snackbar

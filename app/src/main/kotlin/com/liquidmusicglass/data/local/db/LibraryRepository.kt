@@ -3,6 +3,7 @@ package com.liquidmusicglass.data.local.db
 import android.content.Context
 import android.net.Uri
 import com.liquidmusicglass.api.icm.IcmApi
+import com.liquidmusicglass.api.icm.IcmAuthRepository
 import com.liquidmusicglass.api.icm.IcmLibraryTrack
 import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.engine.PlayerController
@@ -66,6 +67,12 @@ class LibraryRepository private constructor(context: Context) {
      * Call on app launch or when user pulls to refresh.
      */
     suspend fun syncWithCloud(): Result<Unit> = withContext(Dispatchers.IO) {
+        // Без залинкованного partner_user_id облачной библиотеки нет: /library/likes
+        // вернёт 401 partner_user_required. В ANR-логе Xiaomi это был повторяющийся
+        // 401-шум на старте — не дёргаем сеть вообще, пока юзер не залинкован.
+        if (IcmAuthRepository.partnerUserId.value.isNullOrBlank()) {
+            return@withContext Result.success(Unit)
+        }
         try {
             // 1. Pull cloud likes
             val cloudLikes = mutableListOf<IcmLibraryTrack>()
@@ -200,15 +207,21 @@ class LibraryRepository private constructor(context: Context) {
             // Asynchronously push to cloud
             CoroutineScope(Dispatchers.IO).launch {
                 try {
-                    val success = IcmRepository.likeTrack(track.id)
-                    if (success) {
+                    if (com.liquidmusicglass.data.yandex.YandexDownloadManager.isYandexId(track.id)) {
+                        // Y-трек: лайк пишется в аккаунт Яндекса, а не в ICM/волну ICM.
+                        com.liquidmusicglass.data.yandex.YandexDownloadManager.writeLike(track.id, liked = true)
                         db.markSynced(track.id)
-                    }
-                    // Лайк = «больше такого» для волны (more_track + more_artist).
-                    // Через оффлайн-очередь: обрыв сети не теряет сигнал.
-                    com.liquidmusicglass.api.icm.WaveSignalQueue.sendFeedback("more_track", track.id)
-                    track.artists.firstOrNull()?.id?.let {
-                        com.liquidmusicglass.api.icm.WaveSignalQueue.sendFeedback("more_artist", it)
+                    } else {
+                        val success = IcmRepository.likeTrack(track.id)
+                        if (success) {
+                            db.markSynced(track.id)
+                        }
+                        // Лайк = «больше такого» для волны (more_track + more_artist).
+                        // Через оффлайн-очередь: обрыв сети не теряет сигнал.
+                        com.liquidmusicglass.api.icm.WaveSignalQueue.sendFeedback("more_track", track.id)
+                        track.artists.firstOrNull()?.id?.let {
+                            com.liquidmusicglass.api.icm.WaveSignalQueue.sendFeedback("more_artist", it)
+                        }
                     }
                 } catch (_: Exception) {}
             }
@@ -235,12 +248,18 @@ class LibraryRepository private constructor(context: Context) {
             // Asynchronously push delete to cloud
             CoroutineScope(Dispatchers.IO).launch {
                 try {
-                    val success = IcmRepository.unlikeTrack(trackId)
-                    if (success) {
+                    if (com.liquidmusicglass.data.yandex.YandexDownloadManager.isYandexId(trackId)) {
+                        // Y-трек: снятие лайка пишется в аккаунт Яндекса.
+                        com.liquidmusicglass.data.yandex.YandexDownloadManager.writeLike(trackId, liked = false)
                         db.deleteByTrackId(trackId)
+                    } else {
+                        val success = IcmRepository.unlikeTrack(trackId)
+                        if (success) {
+                            db.deleteByTrackId(trackId)
+                        }
+                        // Снятие лайка = «реже такого» в волне (через оффлайн-очередь).
+                        com.liquidmusicglass.api.icm.WaveSignalQueue.sendFeedback("less_track", trackId)
                     }
-                    // Снятие лайка = «реже такого» в волне (через оффлайн-очередь).
-                    com.liquidmusicglass.api.icm.WaveSignalQueue.sendFeedback("less_track", trackId)
                 } catch (_: Exception) {}
             }
 

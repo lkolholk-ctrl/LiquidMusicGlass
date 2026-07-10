@@ -18,6 +18,8 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.launch
 
 /**
@@ -71,6 +73,16 @@ class HomeViewModel : ViewModel() {
 
     private val _topGenres = MutableStateFlow<List<String>>(emptyList())
     val topGenres: StateFlow<List<String>> = _topGenres
+
+    /**
+     * Отменить все текущие загрузки этой вью-модели. Зовётся из DisposableEffect
+     * хост-экрана при уходе с вкладки: `remember { HomeViewModel() }` оставлял
+     * viewModelScope работать (его никто не clear()-ит), и быстрое переключение
+     * вкладок копило параллельные загрузки/поиски → перегрузка main → ANR (Xiaomi).
+     */
+    fun cancelLoads() {
+        viewModelScope.coroutineContext[Job]?.cancelChildren()
+    }
 
     /**
      * Load home content — offline first.
@@ -160,7 +172,7 @@ class HomeViewModel : ViewModel() {
     fun loadTopGenres(context: Context) {
         viewModelScope.launch {
             try {
-                val repo = WaveRepository(context)
+                val repo = WaveRepository.getInstance(context)
                 val genres = repo.getTopGenres(limit = 5)
                 _topGenres.value = genres
             } catch (_: Exception) {
@@ -170,7 +182,9 @@ class HomeViewModel : ViewModel() {
     }
 
     /**
-     * Builds the expanded personal wave through the wave session endpoints.
+     * Builds the expanded personal wave. Fast start: a small one-shot batch
+     * starts the music after a single request; EndlessPlaybackEngine tops the
+     * queue up through the session that WaveRepository warms up in parallel.
      */
     fun buildWaveQueue(context: Context) {
         if (_isBuildingWave.value) return
@@ -179,11 +193,8 @@ class HomeViewModel : ViewModel() {
 
         viewModelScope.launch {
             try {
-                val repo = WaveRepository(context)
-                val tracks = repo.buildWaveModeQueue(
-                    mode = WaveMode.Personal(),
-                    count = WaveRepository.WAVE_QUEUE_SIZE
-                )
+                val repo = WaveRepository.getInstance(context)
+                val tracks = repo.startPersonalWave()
 
                 if (tracks.isNotEmpty()) {
                     _waveTracks.value = tracks
@@ -224,7 +235,9 @@ class HomeViewModel : ViewModel() {
 
         viewModelScope.launch {
             try {
-                val repo = WaveRepository(context)
+                val repo = WaveRepository.getInstance(context)
+                // Стартуем с маленькой пачки (1 быстрый запрос) — до полного
+                // буфера очередь добивает EndlessPlaybackEngine.
                 val tracks = repo.buildWaveModeQueue(
                     mode = WaveMode.Mood(
                         mood = query,
@@ -232,7 +245,7 @@ class HomeViewModel : ViewModel() {
                         source = "apple",
                         diversity = 0.5
                     ),
-                    count = WaveRepository.WAVE_QUEUE_SIZE
+                    count = WaveRepository.FAST_START_COUNT
                 )
                 if (tracks.isNotEmpty()) {
                     _waveTracks.value = tracks

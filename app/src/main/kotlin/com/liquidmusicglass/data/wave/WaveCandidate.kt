@@ -33,6 +33,22 @@ internal fun String?.normalizedIdKey(): String? =
     this?.trim()
         ?.takeIf { it.isNotBlank() }
 
+/**
+ * Маппинг негативного фидбека волны («реже»/дизлайк) в кандидата для
+ * локального бана. Сервер учитывает сигнал с 30-дневным decay, а клиент
+ * через это перестаёт предлагать трек/артиста сразу. Позитивные и жанровые
+ * сигналы локально не баним — их обрабатывает только сервер.
+ */
+fun negativeWaveCandidate(feedbackType: String, value: String): WaveCandidate? {
+    val clean = value.trim()
+    if (clean.isEmpty()) return null
+    return when (feedbackType.trim().lowercase()) {
+        "less_track", "dislike-track", "less-like-this" -> WaveCandidate(id = clean)
+        "less_artist", "dislike-artist" -> WaveCandidate(id = "", artistId = clean)
+        else -> null
+    }
+}
+
 fun IcmWaveTrack.toWaveCandidate(): WaveCandidate =
     WaveCandidate(
         id = id,

@@ -115,6 +115,10 @@ object PlayerController {
     // кэша на 10-й минуте, протухала при старте воспроизведения (спасал только
     // handleExpiredUrl с лишним round-trip и паузой).
     private const val STREAM_CACHE_TTL_MS = 8 * 60 * 1000L
+    // Прямые ссылки ЯМ живут заметно меньше подписанных ICM-URL и TTL в них
+    // не приходит — кэшируем коротко, только чтобы схлопнуть повторные резолвы
+    // одного трека (префетч + загрузчик).
+    private const val YM_STREAM_CACHE_TTL_MS = 60_000L
 
     // In-flight резолвы: один и тот же трек резолвится максимум ОДНОЙ корутиной,
     // остальные ждут тот же результат — без дублирующих POST /track (их раньше
@@ -439,6 +443,12 @@ object PlayerController {
 
         val startTrack = tracks[startIndex]
         DebugLog.add("PC.playFromList(EXO) n=${tracks.size} start=$startIndex online=${startTrack.isOnlineTrack} | ${DebugLog.caller()}")
+
+        // Любой НЕ-YWAVE плейбек завершает волну ЯМ: её дозаправка/фидбек
+        // не должны продолжаться под чужой очередью.
+        if (!autoRefillType.equals("YWAVE", ignoreCase = true)) {
+            com.liquidmusicglass.data.yandex.YandexWaveEngine.stop()
+        }
 
         // ── Determine playback context BEFORE any async work ──
         val newContext = when {
@@ -959,6 +969,11 @@ object PlayerController {
             return cached.uri
         }
 
+        // ym_-треки резолвятся через ЯМ API, а не через ICM
+        if (com.liquidmusicglass.data.yandex.YandexDownloadManager.isYandexId(trackId)) {
+            return resolveYandexStreamUrl(trackId)
+        }
+
         return try {
             val quality = getEffectiveQuality(trackId)
             val trackInfo = IcmRepository.getTrackInfoSync(trackId, quality = quality)
@@ -1012,6 +1027,15 @@ object PlayerController {
     }
 
     private suspend fun doResolveStreamUrl(trackId: String): StreamResult {
+        // ym_-треки: прямая ссылка через ЯМ API (блокирующий вызов — мы на ioScope)
+        if (com.liquidmusicglass.data.yandex.YandexDownloadManager.isYandexId(trackId)) {
+            val uri = resolveYandexStreamUrl(trackId)
+            return if (uri != null) {
+                StreamResult.Success(uri)
+            } else {
+                StreamResult.Error("yandex_unavailable", "Failed to resolve ym stream url")
+            }
+        }
         return try {
             withTimeout(15_000) {
                 val quality = getEffectiveQuality(trackId)
@@ -1053,6 +1077,30 @@ object PlayerController {
         } catch (e: Exception) {
             StreamResult.Error("network_error", e.message)
         }
+    }
+
+    /**
+     * Свежая прямая ссылка для ЯМ-трека (`ym_<id>`): download-info → лучший
+     * битрейт → подписанный get-mp3 URL. Блокирующий сетевой вызов — звать
+     * только с IO-потока (Media3 loader / ioScope). Токен и URL не логируются.
+     */
+    private fun resolveYandexStreamUrl(trackId: String): Uri? {
+        val client = com.liquidmusicglass.data.yandex.YandexAuthRepository.clientOrNull() ?: return null
+        val bare = trackId.removePrefix(com.liquidmusicglass.data.yandex.YandexDownloadManager.ID_PREFIX)
+        val quality = com.liquidmusicglass.data.yandex.YandexAuthRepository.effectiveQuality()
+        val direct = try {
+            client.getStreamInfo(bare, quality)?.directLink
+        } catch (e: Exception) {
+            android.util.Log.w("PlayerController", "ym stream resolve failed (${e.javaClass.simpleName})")
+            null
+        } ?: return null
+        val uri = Uri.parse(direct)
+        streamUrlCache[trackId] = CachedStreamUrl(
+            uri = uri,
+            expiresAtMs = System.currentTimeMillis() + YM_STREAM_CACHE_TTL_MS,
+            fileId = null
+        )
+        return uri
     }
 
     private fun cacheAndReturn(trackId: String, trackInfo: IcmTrackResponse): StreamResult {
@@ -1178,6 +1226,20 @@ object PlayerController {
                     skipped = isSkippedForServer && isWaveContext
                 )
             } catch (_: Exception) {}
+        }
+
+        // Обучение волны ЯМ: ym_-треки шлют trackFinished/skip в ротор,
+        // пока волна активна (внутри движка это гейтится isActive).
+        if (com.liquidmusicglass.data.yandex.YandexDownloadManager.isYandexId(track.id)) {
+            ioScope.launch {
+                try {
+                    com.liquidmusicglass.data.yandex.YandexWaveEngine.onPlaybackLogged(
+                        trackId = track.id,
+                        playedSeconds = playedSec.toDouble(),
+                        skipped = isSkippedForServer
+                    )
+                } catch (_: Exception) {}
+            }
         }
     }
 

@@ -104,7 +104,7 @@ object LogcatReader {
                 }
             }, "lmg-logcat").apply { isDaemon = true }.start()
         } catch (t: Throwable) {
-            synchronized(lock) { buf.addLast("!! logcat недоступен: $t") }
+            synchronized(lock) { buf.addLast("!! logcat unavailable: $t") }
             scheduleBump()
         }
     }
@@ -164,7 +164,7 @@ object LogcatReader {
                     w.appendLine("== DebugLog ==")
                     debugLines.forEach { w.appendLine(it) }
                     w.appendLine()
-                    w.appendLine("== logcat (собственный процесс) ==")
+                    w.appendLine("== logcat (own process) ==")
                     (if (running) snapshot() else dumpOnce()).forEach { w.appendLine(it) }
                 }
                 val uri = FileProvider.getUriForFile(
@@ -178,10 +178,10 @@ object LogcatReader {
                 main.post {
                     runCatching {
                         appCtx.startActivity(
-                            Intent.createChooser(send, "Экспорт логов")
+                            Intent.createChooser(send, "Export logs")
                                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         )
-                        DebugLog.add("LOG export: ${file.name} (${file.length() / 1024} КБ)")
+                        DebugLog.add("LOG export: ${file.name} (${file.length() / 1024} KB)")
                     }
                 }
             }.onFailure { DebugLog.add("LOG export FAILED: $it") }
@@ -314,7 +314,7 @@ fun LogcatScreen(onClose: () -> Unit) {
         ) {
             if (query.isEmpty()) {
                 Text(
-                    "фильтр (текст/тег)…", color = Color(0x66FFFFFF),
+                    "filter (text/tag)…", color = Color(0x66FFFFFF),
                     fontSize = 11.sp, fontFamily = FontFamily.Monospace
                 )
             }
@@ -349,12 +349,12 @@ fun LogcatScreen(onClose: () -> Unit) {
         }
 
         Text(
-            "${lines.size} строк${if (query.isNotBlank() || (!showDebug && levelIdx != 0)) " (фильтр)" else ""} · " +
+            "${lines.size} lines${if (query.isNotBlank() || (!showDebug && levelIdx != 0)) " (filtered)" else ""} · " +
                 when {
                     showDebug && autoSwitched ->
-                        "внутренний журнал (вендор порезал logcat — Honor/Huawei)"
-                    showDebug -> "внутренний журнал (DBG)"
-                    else -> "только логи этого приложения"
+                        "internal log (vendor throttled logcat — Honor/Huawei)"
+                    showDebug -> "internal log (DBG)"
+                    else -> "only this app's logs"
                 },
             color = Color(0x88FFFFFF), fontSize = 9.sp, fontFamily = FontFamily.Monospace,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)

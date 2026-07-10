@@ -96,6 +96,11 @@ fun AppRoot() {
         else -> 0
     }
     val onWaveHome = currentRoute == NavRoutes.WAVE_HOME
+    // Раздел ЯМ — «приложение в приложении»: пока открыт его экран и юзер
+    // подключён, основной бар прячется, а внизу — собственный бар ЯМ.
+    val onYandexScreen = currentRoute == NavRoutes.YANDEX_MUSIC
+    val yandexConnected by com.liquidmusicglass.data.yandex.YandexAuthRepository.isConnected.collectAsState()
+    val showYandexBar = onYandexScreen && yandexConnected
 
     fun switchTab(index: Int) {
         val graph = when (index) {
@@ -325,12 +330,13 @@ fun AppRoot() {
                         translationY = bottomBarTranslateY +
                             waveHideFrac * 160.dp.toPx()   // автоскрытие на Wave
                         alpha = bottomBarAlpha
-                    }
-                    .background(barBackground),
+                    },
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 // Мини-плеер (стиль ЯМ, плоский — без стекла): только на вкладках,
                 // где включают музыку. На Wave-главной не нужен — экран сам плеер.
+                // Фон-подложку под ним НЕ рисуем — карточка «висит в воздухе» над
+                // контентом (заливка barBackground — только у самого бара ниже).
                 val miniTrack = currentTrack
                 if (selectedIndex != 0 && miniTrack != null) {
                     val miniLibraryRepo = remember {
@@ -358,20 +364,42 @@ fun AppRoot() {
                 // Wave-контент всегда тёмный → на дымном фоне иконки бара тоже
                 // должны быть «тёмной темы» (белые), даже если тема приложения светлая.
                 val barContent: @Composable () -> Unit = {
-                    BottomBar(
-                        selectedIndex = selectedIndex,
-                        onItemSelected = { index ->
-                            com.liquidmusicglass.debug.DebugLog.add("TAB -> $index")
-                            waveBarPokes++                 // взаимодействие — перезапуск таймера
-                            switchTab(index)
+                    when {
+                        showYandexBar -> {
+                            // Свой бар раздела ЯМ вместо основного (пять иконок).
+                            val ySection by com.liquidmusicglass.ui.screens.YandexSection
+                                .current.collectAsState()
+                            com.liquidmusicglass.ui.screens.YandexBottomBar(
+                                selected = ySection,
+                                onSelect = { com.liquidmusicglass.ui.screens.YandexSection.set(it) }
+                            )
                         }
+                        // ЯМ открыт, но не подключён → фокусный экран входа без бара.
+                        onYandexScreen -> Unit
+                        else -> BottomBar(
+                            selectedIndex = selectedIndex,
+                            onItemSelected = { index ->
+                                com.liquidmusicglass.debug.DebugLog.add("TAB -> $index")
+                                waveBarPokes++                 // взаимодействие — перезапуск таймера
+                                switchTab(index)
+                            }
+                        )
+                    }
+                }
+                // Заливку баром ограничиваем самим баром + navbar-инсетом, чтобы
+                // серый прямоугольник не выступал из-под «висящего» мини-плеера.
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(barBackground),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    if (onWaveTab) ForceDarkContent { barContent() } else barContent()
+
+                    Spacer(
+                        modifier = Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)
                     )
                 }
-                if (onWaveTab) ForceDarkContent { barContent() } else barContent()
-
-                Spacer(
-                    modifier = Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)
-                )
             }
 
             // Невидимая тап-зона внизу: пока бар скрыт, тап возвращает его

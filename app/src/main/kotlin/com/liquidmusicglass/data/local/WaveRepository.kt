@@ -13,11 +13,17 @@ import com.liquidmusicglass.data.local.db.ListeningHistory
 import com.liquidmusicglass.data.wave.WaveCandidateFilter
 import com.liquidmusicglass.data.wave.WaveMode
 import com.liquidmusicglass.data.wave.WaveSessionState
+import com.liquidmusicglass.data.wave.negativeWaveCandidate
 import com.liquidmusicglass.data.wave.toWaveCandidate
 import com.liquidmusicglass.engine.Track
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
@@ -37,6 +43,11 @@ class WaveRepository(context: Context) {
     private var personalWaveState = WaveSessionState()
     private val modeWaveStateLock = Any()
     private val modeWaveStates = LinkedHashMap<String, WaveSessionState>()
+    // Фоновая работа репозитория (прогрев wave-сессии). Синглтон — живёт с процессом.
+    private val repoScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    // Сериализует создание серверной сессии: фоновый прогрев и первый рефилл
+    // не должны открыть две сессии параллельно.
+    private val personalSessionMutex = Mutex()
 
     companion object {
         private const val TAG = "WaveRepository"
@@ -44,9 +55,22 @@ class WaveRepository(context: Context) {
         const val MIN_LISTEN_TIME_MS = 30_000L
         /** Сколько дней назад смотрим историю для топ-жанров */
         const val GENRE_ANALYSIS_DAYS = 30
-        /** Стартовая пачка волны. Дальше EndlessPlaybackEngine добивает буфер заранее. */
+        /** Пачка дозаправки волны. EndlessPlaybackEngine добивает буфер заранее. */
         const val WAVE_QUEUE_SIZE = 30
-        private const val PERSONAL_WAVE_DIVERSITY = 0.0
+        /**
+         * Быстрый старт: маленькая стартовая пачка, которую отдаёт ОДИН
+         * one-shot запрос POST /wave/next — музыка начинается без ожидания
+         * session/start + тяжёлого батча на 50 треков. Остальное добирает
+         * EndlessPlaybackEngine через прогретую фоном сессию.
+         */
+        const val FAST_START_COUNT = 10
+        private const val FAST_START_REQUEST_LIMIT = 15
+        /**
+         * По доке diversity ≥0.33 → максимум 2 трека артиста в пачке. Держим
+         * серверную выдачу согласованной с клиентским WaveCandidateFilter
+         * (3 на окно из 12), чтобы не выбрасывать кандидатов зря.
+         */
+        private const val PERSONAL_WAVE_DIVERSITY = 0.35
         private const val SESSION_EXPIRY_MARGIN_MS = 60_000L
 
         @Volatile
@@ -182,42 +206,6 @@ class WaveRepository(context: Context) {
     }
 
     // ─── Wave Queue Building ───
-
-    /**
-     * Мгновенный старт волны: ПЕРВЫЙ трек отдаётся как только пришёл (музыка
-     * стартует через ОДИН сетевой запрос), остальная пачка добирается следом
-     * и доклеивается в очередь.
-     */
-    suspend fun buildWaveQueueFast(
-        seedTrackId: String? = null,
-        exclude: Collection<String> = emptyList(),
-        topUpCount: Int = 5,
-        onFirst: suspend (List<Track>) -> Unit,
-        onTopUp: suspend (List<Track>) -> Unit
-    ) {
-        if (seedTrackId == null) {
-            val tracks = buildWaveQueue(
-                count = (topUpCount + 1).coerceAtLeast(1),
-                seedTrackId = null,
-                exclude = exclude
-            )
-            val first = tracks.take(1)
-            onFirst(first)
-            val rest = tracks.drop(1)
-            if (rest.isNotEmpty()) onTopUp(rest)
-            return
-        }
-
-        val first = buildWaveQueue(count = 1, seedTrackId = seedTrackId, exclude = exclude)
-        onFirst(first)
-        if (first.isEmpty()) return
-        val rest = buildWaveQueue(
-            count = topUpCount,
-            seedTrackId = seedTrackId,
-            exclude = exclude + first.map { it.id }
-        )
-        if (rest.isNotEmpty()) onTopUp(rest)
-    }
 
     suspend fun buildWaveQueue(
         count: Int = 5,
@@ -454,53 +442,258 @@ class WaveRepository(context: Context) {
 
             val response = responseResult.getOrNull()
 
+            // Пул сессии выжат (сервер авто-исключает уже отданное → рано или
+            // поздно "empty"). Волна ДОЛЖНА быть бесконечной: зацикливаем пул.
+            if (response?.status == "empty" ||
+                (response?.status == "ok" && response.tracks.isEmpty())
+            ) {
+                return loopPersonalWavePool(
+                    requestLimit = requestLimit,
+                    negativeArtistKeys = negativeArtistKeys,
+                    apiExcludeArtistIds = apiExcludeArtistIds,
+                    targetCount = targetCount,
+                    fallbackState = sessionState
+                )
+            }
+
             if (response?.status != "ok" || response.tracks.isEmpty()) {
                 Log.w(TAG, "Personal wave batch status: ${response?.status ?: "null"}")
                 return emptyList()
             }
 
-            val statsByTrackId = mutableMapOf<String, WaveCandidateFilter.TrackStats>()
-            for (track in response.tracks) {
-                val stats = playbackDao.getTrackStat(track.id) ?: continue
-                statsByTrackId[track.id] = WaveCandidateFilter.TrackStats(
-                    playCount = stats.playCount,
-                    skipCount = stats.skippedCount
-                )
-            }
-
-            val filter = WaveCandidateFilter(
-                WaveCandidateFilter.Policy(
-                    // Expanded personal wave is Apple-only per API docs. Leaving
-                    // sources open avoids dropping legacy responses that omit it.
-                    allowedSources = emptySet(),
-                    maxTracksPerArtistWindow = 3,
-                    artistWindowSize = 12
-                )
+            acceptPersonalWaveTracks(
+                tracks = response.tracks,
+                sessionState = sessionState,
+                responseSessionId = response.sessionId,
+                targetCount = targetCount,
+                label = "Personal wave batch"
             )
-            val filtered = filter.filter(
-                candidates = response.tracks.map { it.toWaveCandidate() },
-                state = sessionState.withSessionId(response.sessionId ?: sessionState.sessionId),
-                statsByTrackId = statsByTrackId,
-                limit = targetCount
-            )
-            updatePersonalWaveState(
-                filtered.nextState.withSessionId(response.sessionId ?: sessionState.sessionId)
-            )
-
-            if (filtered.rejected.isNotEmpty()) {
-                Log.d(
-                    TAG,
-                    "Personal wave batch filtered ${filtered.rejected.size}/${response.tracks.size}"
-                )
-            }
-
-            val tracksById = response.tracks.associateBy { it.id }
-            filtered.accepted.mapNotNull { candidate ->
-                tracksById[candidate.id]?.toTrack()
-            }
         } catch (e: Exception) {
             Log.w(TAG, "Personal wave batch failed, falling back to sequential: ${e.message}")
             emptyList()
+        }
+    }
+
+    /**
+     * Пул личной волны кончился (status "empty") — зацикливаем, чтобы волна
+     * была бесконечной:
+     * 1) свежая сессия с МАЛЕНЬКИМ окном exclude (сброс накопленных исключений
+     *    возвращает треки в оборот; клиентский фильтр не даёт повтора подряд);
+     * 2) аварийно — one-shot POST /wave/next без сессии с минимальным exclude.
+     */
+    private suspend fun loopPersonalWavePool(
+        requestLimit: Int,
+        negativeArtistKeys: List<String>,
+        apiExcludeArtistIds: List<String>,
+        targetCount: Int,
+        fallbackState: WaveSessionState
+    ): List<Track> {
+        Log.w(TAG, "Personal wave pool drained — looping with a fresh session")
+        val recentWindow = getRecentTrackIdsSafely(30)
+        val loopedBase = preparePersonalWaveState(
+            resetSession = true,
+            excludeIds = emptySet(),
+            recentIds = recentWindow,
+            negativeArtistKeys = negativeArtistKeys
+        )
+        val looped = ensurePersonalWaveSession(loopedBase.withSessionId(null), forceNew = true)
+        if (looped != null) {
+            val retry = requestPersonalSessionBatch(looped, requestLimit, apiExcludeArtistIds).getOrNull()
+            if (retry?.status == "ok" && retry.tracks.isNotEmpty()) {
+                return acceptPersonalWaveTracks(
+                    retry.tracks, looped, retry.sessionId, targetCount, "Personal wave loop"
+                )
+            }
+        }
+        val oneShot = IcmWaveRepository.nextBatch(
+            limit = requestLimit,
+            diversity = PERSONAL_WAVE_DIVERSITY,
+            excludeTrackIds = recentWindow.takeLast(30),
+            excludeArtistIds = apiExcludeArtistIds.take(50)
+        ).getOrNull()
+        if (oneShot?.status == "ok" && oneShot.tracks.isNotEmpty()) {
+            return acceptPersonalWaveTracks(
+                oneShot.tracks, looped ?: fallbackState, oneShot.sessionId, targetCount, "Personal wave one-shot loop"
+            )
+        }
+        return emptyList()
+    }
+
+    /**
+     * Быстрый старт личной волны: музыка должна пойти с ОДНОГО сетевого
+     * запроса. Порядок:
+     * 1) one-shot POST /wave/next (без сессии) — маленькая пачка сразу;
+     * 2) фолбэк: обычный session-путь (/wave/session/start + next);
+     * 3) аварийный фолбэк: легаси /library/wave/start + /library/wave/next,
+     *    чтобы волна жила даже при недоступном сторе расширенных сессий.
+     * Серверная сессия для дальнейших дозаправок прогревается параллельно.
+     */
+    suspend fun startPersonalWave(count: Int = FAST_START_COUNT): List<Track> = withContext(Dispatchers.IO) {
+        val recentIds = getRecentTrackIdsSafely(50)
+        val negativeArtistKeys = getLocallyRejectedArtistKeys()
+        val apiExcludeArtistIds = negativeArtistKeys.filter { key -> key.all { it.isDigit() } }
+        val state = preparePersonalWaveState(
+            resetSession = true,
+            excludeIds = emptySet(),
+            recentIds = recentIds,
+            negativeArtistKeys = negativeArtistKeys
+        )
+        warmUpPersonalWaveSession()
+
+        try {
+            val oneShot = IcmWaveRepository.nextBatch(
+                limit = FAST_START_REQUEST_LIMIT,
+                diversity = PERSONAL_WAVE_DIVERSITY,
+                excludeTrackIds = state.excludeIds.takeLast(80),
+                excludeArtistIds = apiExcludeArtistIds.take(50),
+                playedTrackIds = state.playedIds.takeLast(120)
+            ).getOrNull()
+            if (oneShot?.status == "ok" && oneShot.tracks.isNotEmpty()) {
+                val accepted = acceptPersonalWaveTracks(
+                    tracks = oneShot.tracks,
+                    sessionState = state,
+                    responseSessionId = null,
+                    targetCount = count,
+                    label = "Personal wave fast start"
+                )
+                if (accepted.isNotEmpty()) return@withContext accepted
+            } else {
+                Log.w(TAG, "Personal wave fast start status: ${oneShot?.status ?: "null"}")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Personal wave fast start failed: ${e.message}")
+        }
+
+        // One-shot не дал треков → session-путь (state уже подготовлен выше).
+        val viaSession = fetchPersonalWaveBatch(
+            targetCount = count,
+            excludeIds = emptySet(),
+            recentIds = recentIds,
+            resetSession = false
+        )
+        if (viaSession.isNotEmpty()) return@withContext viaSession
+
+        fetchLegacyPersonalWave(count.coerceAtMost(5))
+    }
+
+    /**
+     * Общий приём батча личной волны: стата скипов из Room,
+     * WaveCandidateFilter, обновление in-memory состояния.
+     */
+    private suspend fun acceptPersonalWaveTracks(
+        tracks: List<com.liquidmusicglass.api.icm.IcmWaveTrack>,
+        sessionState: WaveSessionState,
+        responseSessionId: String?,
+        targetCount: Int,
+        label: String
+    ): List<Track> {
+        val statsByTrackId = mutableMapOf<String, WaveCandidateFilter.TrackStats>()
+        for (track in tracks) {
+            val stats = playbackDao.getTrackStat(track.id) ?: continue
+            statsByTrackId[track.id] = WaveCandidateFilter.TrackStats(
+                playCount = stats.playCount,
+                skipCount = stats.skippedCount
+            )
+        }
+
+        val filter = WaveCandidateFilter(
+            WaveCandidateFilter.Policy(
+                // Expanded personal wave is Apple-only per API docs. Leaving
+                // sources open avoids dropping legacy responses that omit it.
+                allowedSources = emptySet(),
+                maxTracksPerArtistWindow = 3,
+                artistWindowSize = 12
+            )
+        )
+        val effectiveSessionId = responseSessionId ?: sessionState.sessionId
+        val filtered = filter.filter(
+            candidates = tracks.map { it.toWaveCandidate() },
+            state = sessionState.withSessionId(effectiveSessionId),
+            statsByTrackId = statsByTrackId,
+            limit = targetCount
+        )
+        updatePersonalWaveState(filtered.nextState.withSessionId(effectiveSessionId))
+
+        if (filtered.rejected.isNotEmpty()) {
+            Log.d(TAG, "$label filtered ${filtered.rejected.size}/${tracks.size}")
+        }
+
+        val tracksById = tracks.associateBy { it.id }
+        return filtered.accepted.mapNotNull { candidate ->
+            tracksById[candidate.id]?.toTrack()
+        }
+    }
+
+    /**
+     * Аварийный путь личной волны: /library/wave/start + /library/wave/next
+     * по одному треку. Используется, только когда расширенная волна недоступна
+     * (например, 503 wave_session_store_unavailable) — музыка всё равно идёт.
+     */
+    private suspend fun fetchLegacyPersonalWave(count: Int): List<Track> {
+        val tracks = mutableListOf<Track>()
+        val exclude = mutableListOf<String>()
+        try {
+            val first = IcmWaveRepository.startWave().getOrNull()
+            if (first?.status == "ok") {
+                first.track?.let {
+                    tracks += it.toTrack()
+                    exclude += it.id
+                }
+            }
+            while (tracks.size < count) {
+                kotlinx.coroutines.delay(150)
+                val next = IcmRepository.getWaveNext(
+                    seedTrackId = null,
+                    exclude = exclude.takeIf { it.isNotEmpty() }
+                ) ?: break
+                if (next.status != "ok") break
+                val track = next.track ?: break
+                tracks += track.toTrack()
+                exclude += track.id
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Legacy personal wave fallback failed: ${e.message}")
+        }
+        if (tracks.isNotEmpty()) {
+            Log.w(TAG, "Personal wave served by legacy fallback: ${tracks.size} tracks")
+            synchronized(personalWaveStateLock) {
+                personalWaveState = personalWaveState.markQueued(
+                    tracks.map { it.toWaveCandidate() }
+                )
+            }
+        }
+        return tracks
+    }
+
+    /**
+     * Прогревает серверную wave-сессию фоном: старт волны её не ждёт, а
+     * первая дозаправка получает готовый session_id без лишнего round-trip.
+     */
+    private fun warmUpPersonalWaveSession() {
+        repoScope.launch {
+            try {
+                val state = synchronized(personalWaveStateLock) { personalWaveState }
+                ensurePersonalWaveSession(state)
+            } catch (e: Exception) {
+                Log.w(TAG, "Personal wave session warm-up failed: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Мгновенный локальный отклик на «реже»/дизлайк: сервер учтёт сигнал со
+     * своим decay, а клиентские состояния волны сразу перестают предлагать
+     * этот трек/артиста (свежие батчи режутся WaveCandidateFilter).
+     */
+    fun noteNegativeFeedback(feedbackType: String, value: String) {
+        val candidate = negativeWaveCandidate(feedbackType, value) ?: return
+        synchronized(personalWaveStateLock) {
+            personalWaveState = personalWaveState.markNegativeFeedback(candidate)
+        }
+        synchronized(modeWaveStateLock) {
+            val next = modeWaveStates.mapValues { it.value.markNegativeFeedback(candidate) }
+            modeWaveStates.clear()
+            modeWaveStates.putAll(next)
         }
     }
 
@@ -661,30 +854,46 @@ class WaveRepository(context: Context) {
             if (activeSessionId != null) return state.withSessionId(activeSessionId)
         }
 
-        val started = IcmWaveRepository.startSession(
-            source = "apple",
-            diversity = PERSONAL_WAVE_DIVERSITY
-        ).getOrElse { error ->
-            Log.w(TAG, "Failed to start personal wave session: ${error.message}")
-            return null
-        }
+        return personalSessionMutex.withLock {
+            // Пока ждали лок, сессию мог открыть параллельный прогрев/рефилл.
+            if (!forceNew) {
+                val fresh = synchronized(personalWaveStateLock) { personalWaveState }
+                val freshSessionId = fresh.activeSessionId()
+                if (freshSessionId != null) {
+                    return@withLock state
+                        .withMode(fresh.mode)
+                        .withSessionId(freshSessionId)
+                }
+            }
 
-        val now = System.currentTimeMillis()
-        val expiresAtMs = started.expiresIn?.let { now + it.coerceAtLeast(1) * 1000L }
-        val nextState = state
-            .withSessionId(started.sessionId)
-            .withMode(
-                WaveMode.Session(
-                    sessionId = started.sessionId,
-                    source = started.source ?: "apple",
-                    region = started.region,
-                    diversity = started.diversity ?: PERSONAL_WAVE_DIVERSITY,
-                    expiresAtMs = expiresAtMs
-                )
+            val started = IcmWaveRepository.startSession(
+                source = "apple",
+                diversity = PERSONAL_WAVE_DIVERSITY
+            ).getOrElse { error ->
+                Log.w(TAG, "Failed to start personal wave session: ${error.message}")
+                return@withLock null
+            }
+
+            val now = System.currentTimeMillis()
+            val expiresAtMs = started.expiresIn?.let { now + it.coerceAtLeast(1) * 1000L }
+            val sessionMode = WaveMode.Session(
+                sessionId = started.sessionId,
+                source = started.source ?: "apple",
+                region = started.region,
+                diversity = started.diversity ?: PERSONAL_WAVE_DIVERSITY,
+                expiresAtMs = expiresAtMs
             )
-        updatePersonalWaveState(nextState)
-        Log.d(TAG, "Started personal wave session ${started.sessionId}")
-        return nextState
+            // Сессию подшиваем к АКТУАЛЬНОМУ состоянию: пока шёл session/start,
+            // параллельный fast-start мог дописать exclude/played.
+            val nextState = synchronized(personalWaveStateLock) {
+                personalWaveState = personalWaveState
+                    .withSessionId(started.sessionId)
+                    .withMode(sessionMode)
+                personalWaveState
+            }
+            Log.d(TAG, "Started personal wave session ${started.sessionId}")
+            nextState
+        }
     }
 
     private suspend fun requestPersonalSessionBatch(
@@ -706,7 +915,14 @@ class WaveRepository(context: Context) {
 
     private fun updatePersonalWaveState(state: WaveSessionState) {
         synchronized(personalWaveStateLock) {
-            personalWaveState = state
+            val current = personalWaveState
+            // Не теряем сессию, прогретую параллельно: снапшот без session_id
+            // не должен затирать свежесозданную сессию.
+            personalWaveState = if (state.sessionId == null && current.sessionId != null) {
+                state.withSessionId(current.sessionId).withMode(current.mode)
+            } else {
+                state
+            }
         }
     }
 

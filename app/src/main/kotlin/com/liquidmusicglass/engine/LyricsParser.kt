@@ -137,7 +137,7 @@ object LyricsParser {
     /**
      * Полный поиск.
      * ЛОКАЛЬНОЕ аудио → LRCLIB (синхро-текст) + локальный кэш, потом embedded.
-     * СТРИМИНГ/ICM → как было (ICM API, потом embedded). LRCLIB для стриминга НЕ трогаем.
+     * Y-трек → текст из Яндекса. СТРИМИНГ/ICM → как было.
      */
     suspend fun loadLyrics(
         context: Context,
@@ -166,6 +166,22 @@ object LyricsParser {
                 if (embedded.lines.isNotEmpty()) return embedded
             }
             return Lyrics.EMPTY
+        }
+
+        // ── Y-трек (ym_…): синхро-текст из LRCLIB. У Яндекса тексты от Musixmatch
+        //    отдаются только как plain (без таймкодов) — LRCLIB даёт синхро-LRC,
+        //    поэтому для Y-треков берём именно его (по названию/артисту/длительности). ──
+        if (!trackId.isNullOrBlank() &&
+            com.liquidmusicglass.data.yandex.YandexDownloadManager.isYandexId(trackId)
+        ) {
+            return fetchLrcLib(
+                context = context,
+                uri = null,
+                title = title,
+                artist = artist,
+                durationMs = durationMs,
+                trackId = trackId
+            )
         }
 
         // ── СТРИМИНГ/ICM: без изменений ──

@@ -115,7 +115,7 @@ fun LrcPublishScreen(track: Track, onBack: () -> Unit) {
                 hasMine = true
                 wordTaggingMode = false
                 resultOk = true
-                resultMsg = "Пословная разметка сохранена ✓ (показывается ваш текст)"
+                resultMsg = "Word-by-word sync saved ✓ (your version is now shown)"
             },
             onCancel = { wordTaggingMode = false }
         )
@@ -134,19 +134,19 @@ fun LrcPublishScreen(track: Track, onBack: () -> Unit) {
                 Spacer(Modifier.width(16.dp))
                 Text("Publish lyrics", color = lc.textPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
             }
-            Text("Вклад в открытую базу LRCLIB для этого трека.",
+            Text("Contribution to the open LRCLIB database for this track.",
                 color = lc.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
             Spacer(Modifier.height(18.dp))
 
             // ── Метаданные ──
             Card(lc) {
-                LabeledField("Название", trackName, { trackName = it }, lc, placeholder = "Track name")
+                LabeledField("Title", trackName, { trackName = it }, lc, placeholder = "Track name")
                 Spacer(Modifier.height(10.dp))
-                LabeledField("Артист", artistName, { artistName = it }, lc, placeholder = "Artist")
+                LabeledField("Artist", artistName, { artistName = it }, lc, placeholder = "Artist")
                 Spacer(Modifier.height(10.dp))
-                LabeledField("Альбом", albumName, { albumName = it }, lc, placeholder = "Album")
+                LabeledField("Album", albumName, { albumName = it }, lc, placeholder = "Album")
                 Spacer(Modifier.height(10.dp))
-                Text("Длительность: ${durationSec}s (из файла)", color = lc.textSecondary, fontSize = 12.sp)
+                Text("Duration: ${durationSec}s (from file)", color = lc.textSecondary, fontSize = 12.sp)
             }
             Spacer(Modifier.height(14.dp))
 
@@ -158,23 +158,23 @@ fun LrcPublishScreen(track: Track, onBack: () -> Unit) {
             ) {
                 CheckMark(instrumental, lc)
                 Spacer(Modifier.width(12.dp))
-                Text("Инструментальный трек (без текста)", color = lc.textPrimary, fontSize = 15.sp)
+                Text("Instrumental track (no lyrics)", color = lc.textPrimary, fontSize = 15.sp)
             }
             Spacer(Modifier.height(8.dp))
 
             if (!instrumental) {
                 Card(lc) {
-                    LabeledField("Обычный текст", plainLyrics, { plainLyrics = it }, lc,
-                        singleLine = false, minHeight = 120.dp, placeholder = "Строки песни…")
+                    LabeledField("Plain lyrics", plainLyrics, { plainLyrics = it }, lc,
+                        singleLine = false, minHeight = 120.dp, placeholder = "Song lines…")
                 }
                 Spacer(Modifier.height(12.dp))
                 Card(lc) {
                     val canTag = plainLyrics.lines().any { it.isNotBlank() }
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                        Text("Синхронизированный (LRC)", color = lc.textSecondary, fontSize = 12.sp,
+                        Text("Synced (LRC)", color = lc.textSecondary, fontSize = 12.sp,
                             modifier = Modifier.weight(1f))
                         Text(
-                            "По строкам ▶",
+                            "By line ▶",
                             color = if (canTag) lc.accent else lc.textSecondary,
                             fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.clip(RoundedCornerShape(8.dp))
@@ -184,7 +184,7 @@ fun LrcPublishScreen(track: Track, onBack: () -> Unit) {
                     }
                     Spacer(Modifier.height(8.dp))
                     LabeledField("", syncedLyrics, { syncedLyrics = it }, lc,
-                        singleLine = false, minHeight = 100.dp, placeholder = "[mm:ss.xx] строка …")
+                        singleLine = false, minHeight = 100.dp, placeholder = "[mm:ss.xx] line …")
                 }
                 Spacer(Modifier.height(12.dp))
 
@@ -192,17 +192,17 @@ fun LrcPublishScreen(track: Track, onBack: () -> Unit) {
                 Card(lc) {
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("Пословная разметка (караоке)", color = lc.textPrimary, fontSize = 14.sp,
+                            Text("Word-by-word sync (karaoke)", color = lc.textPrimary, fontSize = 14.sp,
                                 fontWeight = FontWeight.SemiBold)
                             Text(
-                                if (hasMine) "Сохранена — показывается ваш текст (замещает LRCLIB)."
-                                else "Тап по каждому слову. Хранится локально, выше LRCLIB.",
+                                if (hasMine) "Saved — your version is shown (overrides LRCLIB)."
+                                else "Tap each word. Stored locally, takes priority over LRCLIB.",
                                 color = lc.textSecondary, fontSize = 12.sp
                             )
                         }
                         val canWord = plainLyrics.lines().any { it.isNotBlank() }
                         Text(
-                            "По словам ▶",
+                            "By word ▶",
                             color = if (canWord) lc.accent else lc.textSecondary,
                             fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.clip(RoundedCornerShape(8.dp))
@@ -213,13 +213,13 @@ fun LrcPublishScreen(track: Track, onBack: () -> Unit) {
                     if (hasMine) {
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            "Удалить мою разметку",
+                            "Delete my sync",
                             color = lc.accentRed, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.clip(RoundedCornerShape(8.dp))
                                 .clickable {
                                     LyricsParser.deleteMyWordLyrics(context, track.artist, track.title, track.durationMs, track.id)
                                     hasMine = false
-                                    resultOk = true; resultMsg = "Пословная разметка удалена"
+                                    resultOk = true; resultMsg = "Word-by-word sync deleted"
                                 }
                                 .padding(horizontal = 8.dp, vertical = 4.dp)
                         )
@@ -234,7 +234,7 @@ fun LrcPublishScreen(track: Track, onBack: () -> Unit) {
                 modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
                     .background(if (publishing) lc.cardSurface else lc.accent)
                     .clickable(enabled = !publishing) {
-                        publishing = true; resultMsg = null; status = "Запрос задачи…"
+                        publishing = true; resultMsg = null; status = "Requesting task…"
                         scope.launch {
                             val meta = LrcLibPublisher.Meta(
                                 trackName.trim(), artistName.trim(), albumName.trim(), durationSec
@@ -246,7 +246,7 @@ fun LrcPublishScreen(track: Track, onBack: () -> Unit) {
                             when (res) {
                                 is LrcLibPublisher.Result.Success -> {
                                     resultOk = true
-                                    resultMsg = "Текст опубликован ✓"
+                                    resultMsg = "Lyrics published ✓"
                                     val lrc = synced.ifBlank { plain }
                                     if (lrc.isNotBlank()) runCatching {
                                         LyricsParser.cachePublishedLyrics(
@@ -272,7 +272,7 @@ fun LrcPublishScreen(track: Track, onBack: () -> Unit) {
                         Text(status, color = lc.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                     }
                 } else {
-                    Text("Опубликовать", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text("Publish", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 }
             }
 
@@ -329,14 +329,14 @@ private fun SyncTaggingMode(
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                 CircleBack(lc) { PlayerController.setPlaybackSpeed(1f); onCancel() }
                 Spacer(Modifier.width(16.dp))
-                Text("Разметка", color = lc.textPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold,
+                Text("Sync", color = lc.textPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f))
-                Text("Готово", color = lc.accent, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                Text("Done", color = lc.accent, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.clip(RoundedCornerShape(8.dp))
                         .clickable { PlayerController.setPlaybackSpeed(1f); onDone(buildLrc(lines, times)) }
                         .padding(horizontal = 10.dp, vertical = 6.dp))
             }
-            Text("Тапни по строке в момент звучания. Долгий тап по строке — тест с неё.",
+            Text("Tap the line as it plays. Long-press a line to test from there.",
                 color = lc.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(vertical = 6.dp))
 
             // транспорт
@@ -347,13 +347,13 @@ private fun SyncTaggingMode(
                 Spacer(Modifier.width(12.dp))
                 RoundIcon(Icons.Rounded.Replay, lc) { PlayerController.seekTo(0) }
                 Spacer(Modifier.width(12.dp))
-                Text("ТЕСТ", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                Text("TEST", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
                     modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(lc.accentGreen)
                         .clickable { previewFrom = (nextIndex - 1).coerceAtLeast(0) }
                         .padding(horizontal = 12.dp, vertical = 10.dp))
                 Spacer(Modifier.width(12.dp))
                 Text(
-                    "TAP (строка ${(nextIndex + 1).coerceAtMost(lines.size)})",
+                    "TAP (line ${(nextIndex + 1).coerceAtMost(lines.size)})",
                     color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(lc.accent)
                         .clickable(enabled = nextIndex < lines.size) {
@@ -455,14 +455,14 @@ private fun SyncWordTaggingMode(
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                 CircleBack(lc) { PlayerController.setPlaybackSpeed(1f); onCancel() }
                 Spacer(Modifier.width(16.dp))
-                Text("По словам", color = lc.textPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold,
+                Text("By word", color = lc.textPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f))
-                Text("Готово", color = lc.accent, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                Text("Done", color = lc.accent, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.clip(RoundedCornerShape(8.dp))
                         .clickable { PlayerController.setPlaybackSpeed(1f); onDone(buildEnhancedLrc(wordRows, lineStart, times)) }
                         .padding(horizontal = 10.dp, vertical = 6.dp))
             }
-            Text("Тапни по каждому слову в момент звучания. Долгий тап по слову — тест с его строки.",
+            Text("Tap each word as it plays. Long-press a word to test from its line.",
                 color = lc.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(vertical = 6.dp))
 
             // транспорт + большой TAP
@@ -473,13 +473,13 @@ private fun SyncWordTaggingMode(
                 Spacer(Modifier.width(12.dp))
                 RoundIcon(Icons.Rounded.Replay, lc) { PlayerController.seekTo(0) }
                 Spacer(Modifier.width(12.dp))
-                Text("ТЕСТ", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                Text("TEST", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
                     modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(lc.accentGreen)
                         .clickable { previewFrom = lineOf((nextIndex - 1).coerceAtLeast(0)) }
                         .padding(horizontal = 12.dp, vertical = 10.dp))
                 Spacer(Modifier.width(12.dp))
                 Text(
-                    "TAP (слово ${(nextIndex + 1).coerceAtMost(total)}/$total)",
+                    "TAP (word ${(nextIndex + 1).coerceAtMost(total)}/$total)",
                     color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(lc.accent)
                         .clickable(enabled = nextIndex < total) {
@@ -584,7 +584,7 @@ private fun SpeedRow(lc: LiquidColors) {
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text("Скорость:", color = lc.textSecondary, fontSize = 12.sp)
+        Text("Speed:", color = lc.textSecondary, fontSize = 12.sp)
         for (i in 10 downTo 1) {
             val v = i / 10f
             val sel = kotlin.math.abs(speed - v) < 0.01f

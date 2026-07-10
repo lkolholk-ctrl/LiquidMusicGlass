@@ -19,6 +19,19 @@ class IcmWaveApi(
         isLenient = true
     }
 
+    /**
+     * Явный старт личной волны: GET /library/wave/start — алиас
+     * /library/wave/next без exclude/seed. Один лёгкий запрос → первый трек,
+     * серверная 4-часовая сессия показов учитывается.
+     */
+    suspend fun startWave(region: String? = null): Result<IcmWaveResponse> {
+        val endpoint = buildString {
+            append("/library/wave/start")
+            appendQuery(queryParam("region", region))
+        }
+        return request(endpoint)
+    }
+
     suspend fun nextTrackStation(
         seedTrackId: String,
         exclude: List<String> = emptyList(),

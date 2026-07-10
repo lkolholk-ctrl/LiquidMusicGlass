@@ -46,6 +46,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
@@ -127,6 +128,7 @@ fun WaveHomeScreen(
 ) {
     val context = LocalContext.current
     val viewModel = remember { HomeViewModel() }
+    DisposableEffect(viewModel) { onDispose { viewModel.cancelLoads() } }
 
     LaunchedEffect(Unit) { viewModel.loadHomeContent() }
 
