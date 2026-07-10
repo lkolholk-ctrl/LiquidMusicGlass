@@ -104,6 +104,8 @@ fun YandexMusicScreen(onBack: () -> Unit) {
     var searchArtists by remember { mutableStateOf<List<YandexMusicClient.ArtistBrief>>(emptyList()) }
     var searchAlbums by remember { mutableStateOf<List<YandexMusicClient.AlbumBrief>>(emptyList()) }
     var searchPlaylists by remember { mutableStateOf<List<YandexMusicClient.PlaylistBrief>>(emptyList()) }
+    // Discovery (чарт + новинки) в пустом состоянии поиска.
+    var discovery by remember { mutableStateOf<YandexMusicClient.Discovery?>(null) }
     // trackIds already in offline DB (ym_…)
     var offlineIds by remember { mutableStateOf<Set<String>>(emptySet()) }
 
@@ -256,6 +258,7 @@ fun YandexMusicScreen(onBack: () -> Unit) {
             YandexSection.LIKED -> loadLiked()
             YandexSection.PLAYLISTS -> loadPlaylists()
             YandexSection.WAVE -> loadStations()
+            YandexSection.SEARCH -> loadDiscovery()
             else -> Unit
         }
     }
@@ -350,6 +353,16 @@ fun YandexMusicScreen(onBack: () -> Unit) {
     fun startTrackRadio(track: YandexMusicClient.Track) {
         val station = com.liquidmusicglass.data.yandex.YandexWaveEngine.trackStation(track.bareTrackId)
         startStation(station) { /* тихо: радио по треку — вторичное действие */ }
+    }
+
+    fun loadDiscovery() {
+        if (discovery != null) return
+        scope.launch {
+            val d = withContext(Dispatchers.IO) {
+                runCatching { YandexAuthRepository.clientOrNull()?.fetchDiscovery() }.getOrNull()
+            }
+            if (d != null) discovery = d
+        }
     }
 
     // ── Каталог станций ротора (жанр/настроение) ──
@@ -637,18 +650,50 @@ fun YandexMusicScreen(onBack: () -> Unit) {
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 120.dp)
                     ) {
-                        if (results.isEmpty() && searchArtists.isEmpty() &&
+                        val noSearch = results.isEmpty() && searchArtists.isEmpty() &&
                             searchAlbums.isEmpty() && searchPlaylists.isEmpty() &&
                             !searching && searchError == null
-                        ) {
-                            item {
-                                Text(
-                                    "Type a query and tap Search.\nTap a track to play it; " +
-                                        "downloads go to Library → Downloads.",
-                                    color = lc.textTertiary,
-                                    fontSize = 13.sp,
-                                    modifier = Modifier.padding(vertical = 24.dp)
-                                )
+                        // Пустой поиск → discovery (чарт + новинки).
+                        if (noSearch) {
+                            val disc = discovery
+                            if (disc != null && disc.newReleases.isNotEmpty()) {
+                                item { SectionLabel("New releases", lc) }
+                                items(disc.newReleases.take(10), key = { "nr${it.id}" }) { al ->
+                                    AlbumRow(al, inputBg, lc) { openAlbum(al.id) }
+                                }
+                            }
+                            if (disc != null && disc.chart.isNotEmpty()) {
+                                item { SectionLabel("Chart", lc) }
+                                itemsIndexed(disc.chart, key = { _, t -> "ch${t.id}" }) { index, track ->
+                                    val sid = YandexDownloadManager.storageId(track.bareTrackId)
+                                    YandexTrackRow(
+                                        track = track,
+                                        progress = dlProgress[sid],
+                                        isDownloaded = sid in offlineIds,
+                                        inputBg = inputBg,
+                                        onPlay = { playYList(disc.chart, index, "yandex_chart") },
+                                        onRadio = { startTrackRadio(track) },
+                                        onOpenAlbum = track.id.substringAfter(":", "").toLongOrNull()
+                                            ?.let { alb -> { openAlbum(alb) } },
+                                        onDownload = {
+                                            YandexDownloadManager.download(context, track) { out ->
+                                                if (out == YandexDownloadManager.Outcome.DONE) refreshOffline()
+                                            }
+                                        },
+                                        onCancel = { YandexDownloadManager.cancel(sid) }
+                                    )
+                                }
+                            }
+                            if (disc == null) {
+                                item {
+                                    Text(
+                                        "Type a query and tap Search.\nTap a track to play it; " +
+                                            "downloads go to Library → Downloads.",
+                                        color = lc.textTertiary,
+                                        fontSize = 13.sp,
+                                        modifier = Modifier.padding(vertical = 24.dp)
+                                    )
+                                }
                             }
                         }
                         // Артисты

@@ -480,6 +480,34 @@ class YandexMusicClient(
         return results.mapTracks()
     }
 
+    /** Блок «что послушать»: чарт (треки) + новинки (альбомы). */
+    data class Discovery(val chart: List<Track>, val newReleases: List<AlbumBrief>)
+
+    /** Чарт + новинки одним запросом: GET /landing3?blocks=chart,new-releases. */
+    fun fetchDiscovery(): Discovery {
+        val result = try {
+            getJson("$API/landing3?blocks=chart,new-releases").optJSONObject("result")
+        } catch (_: Exception) {
+            null
+        } ?: return Discovery(emptyList(), emptyList())
+        val blocks = result.optJSONArray("blocks") ?: return Discovery(emptyList(), emptyList())
+        val chart = ArrayList<Track>()
+        val releases = ArrayList<AlbumBrief>()
+        for (b in 0 until blocks.length()) {
+            val block = blocks.optJSONObject(b) ?: continue
+            val type = block.optString("type")
+            val entities = block.optJSONArray("entities") ?: continue
+            for (e in 0 until entities.length()) {
+                val data = entities.optJSONObject(e)?.optJSONObject("data") ?: continue
+                when (type) {
+                    "chart" -> parseTrack(data.optJSONObject("track") ?: data)?.let { chart += it }
+                    "new-releases" -> parseAlbumBrief(data)?.let { releases += it }
+                }
+            }
+        }
+        return Discovery(chart, releases)
+    }
+
     /** Плейлист в выдаче поиска: чужой публичный (нужны owner uid + kind). */
     data class PlaylistBrief(
         val ownerUid: Long,
