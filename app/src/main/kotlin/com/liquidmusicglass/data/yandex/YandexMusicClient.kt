@@ -480,6 +480,76 @@ class YandexMusicClient(
         return results.mapTracks()
     }
 
+    /** Плейлист в выдаче поиска: чужой публичный (нужны owner uid + kind). */
+    data class PlaylistBrief(
+        val ownerUid: Long,
+        val kind: Long,
+        val title: String,
+        val trackCount: Int,
+        val coverUrl: String?,
+    )
+
+    data class SearchResults(
+        val tracks: List<Track>,
+        val artists: List<ArtistBrief>,
+        val albums: List<AlbumBrief>,
+        val playlists: List<PlaylistBrief>,
+    )
+
+    /** Поиск по всем типам: GET /search?type=all. */
+    fun searchAll(query: String): SearchResults {
+        val q = query.trim()
+        if (q.isEmpty()) return SearchResults(emptyList(), emptyList(), emptyList(), emptyList())
+        val result = getJson("$API/search?text=${urlEncode(q)}&type=all&page=0&nocorrect=false")
+            .optJSONObject("result")
+            ?: return SearchResults(emptyList(), emptyList(), emptyList(), emptyList())
+
+        val tracks = result.optJSONObject("tracks")?.optJSONArray("results")?.mapTracks() ?: emptyList()
+
+        val artists = ArrayList<ArtistBrief>()
+        result.optJSONObject("artists")?.optJSONArray("results")?.let { arr ->
+            for (i in 0 until arr.length()) {
+                val a = arr.optJSONObject(i) ?: continue
+                val id = a.optLong("id", -1L)
+                if (id < 0) continue
+                artists += ArtistBrief(
+                    id = id,
+                    name = a.optString("name").ifBlank { "Artist" },
+                    coverUrl = coverUriToUrl(
+                        a.optJSONObject("cover")?.optString("uri")?.takeIf { it.isNotBlank() },
+                        size = "200x200"
+                    ),
+                )
+            }
+        }
+
+        val albums = ArrayList<AlbumBrief>()
+        result.optJSONObject("albums")?.optJSONArray("results")?.let { arr ->
+            for (i in 0 until arr.length()) {
+                parseAlbumBrief(arr.optJSONObject(i) ?: continue)?.let { albums += it }
+            }
+        }
+
+        val playlists = ArrayList<PlaylistBrief>()
+        result.optJSONObject("playlists")?.optJSONArray("results")?.let { arr ->
+            for (i in 0 until arr.length()) {
+                val p = arr.optJSONObject(i) ?: continue
+                val kind = p.optLong("kind", -1L)
+                val uid = p.optJSONObject("owner")?.optLong("uid", -1L) ?: -1L
+                if (kind < 0 || uid < 0) continue
+                playlists += PlaylistBrief(
+                    ownerUid = uid,
+                    kind = kind,
+                    title = p.optString("title").ifBlank { "Playlist" },
+                    trackCount = p.optInt("trackCount", 0),
+                    coverUrl = playlistCoverUrl(p),
+                )
+            }
+        }
+
+        return SearchResults(tracks, artists, albums, playlists)
+    }
+
     /**
      * Python: `tracks_download_info(id, get_direct_links=True)`.
      * Лучший битрейт — первым. Это lossy-путь (mp3/aac); FLAC — отдельно

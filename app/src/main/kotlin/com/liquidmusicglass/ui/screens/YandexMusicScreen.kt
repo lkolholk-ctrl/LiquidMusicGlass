@@ -101,6 +101,9 @@ fun YandexMusicScreen(onBack: () -> Unit) {
     var searching by remember { mutableStateOf(false) }
     var searchError by remember { mutableStateOf<String?>(null) }
     var results by remember { mutableStateOf<List<YandexMusicClient.Track>>(emptyList()) }
+    var searchArtists by remember { mutableStateOf<List<YandexMusicClient.ArtistBrief>>(emptyList()) }
+    var searchAlbums by remember { mutableStateOf<List<YandexMusicClient.AlbumBrief>>(emptyList()) }
+    var searchPlaylists by remember { mutableStateOf<List<YandexMusicClient.PlaylistBrief>>(emptyList()) }
     // trackIds already in offline DB (ym_…)
     var offlineIds by remember { mutableStateOf<Set<String>>(emptySet()) }
 
@@ -127,21 +130,28 @@ fun YandexMusicScreen(onBack: () -> Unit) {
         searchError = null
         scope.launch {
             try {
-                val list = withContext(Dispatchers.IO) {
+                val res = withContext(Dispatchers.IO) {
                     val client = YandexAuthRepository.clientOrNull()
                         ?: throw YandexMusicException("Not connected")
-                    client.searchTracks(q)
+                    client.searchAll(q)
                 }
-                results = list
-                if (list.isEmpty()) searchError = "Nothing found"
+                results = res.tracks
+                searchArtists = res.artists
+                searchAlbums = res.albums
+                searchPlaylists = res.playlists
+                val empty = res.tracks.isEmpty() && res.artists.isEmpty() &&
+                    res.albums.isEmpty() && res.playlists.isEmpty()
+                if (empty) searchError = "Nothing found"
             } catch (_: YandexUnauthorizedException) {
                 searchError = "Token expired — reconnect"
                 YandexAuthRepository.disconnect()
-                results = emptyList()
+                results = emptyList(); searchArtists = emptyList()
+                searchAlbums = emptyList(); searchPlaylists = emptyList()
             } catch (_: Exception) {
                 // Без e.message: сеть/API могут отдавать шум; токен туда не должен попадать
                 searchError = "Search failed"
-                results = emptyList()
+                results = emptyList(); searchArtists = emptyList()
+                searchAlbums = emptyList(); searchPlaylists = emptyList()
             } finally {
                 searching = false
             }
@@ -356,19 +366,27 @@ fun YandexMusicScreen(onBack: () -> Unit) {
         }
     }
 
-    // ── Детали артиста/альбома (стек навигации поверх секции) ──
-    var detailStack by remember { mutableStateOf<List<Pair<String, Long>>>(emptyList()) }
+    // ── Детали артиста/альбома/плейлиста (стек навигации поверх секции) ──
+    // extra нужен только плейлисту (kind); artist/album используют только id.
+    var detailStack by remember { mutableStateOf<List<Triple<String, Long, Long>>>(emptyList()) }
     var artistPage by remember { mutableStateOf<YandexMusicClient.ArtistPage?>(null) }
     var albumPage by remember { mutableStateOf<YandexMusicClient.AlbumPage?>(null) }
+    var playlistDetail by remember { mutableStateOf<Pair<String, List<YandexMusicClient.Track>>?>(null) }
     var detailLoading by remember { mutableStateOf(false) }
     val currentDetail = detailStack.lastOrNull()
 
-    fun openArtist(id: Long) { detailStack = detailStack + ("artist" to id) }
-    fun openAlbum(id: Long) { detailStack = detailStack + ("album" to id) }
+    fun openArtist(id: Long) { detailStack = detailStack + Triple("artist", id, 0L) }
+    fun openAlbum(id: Long) { detailStack = detailStack + Triple("album", id, 0L) }
+    fun openSearchPlaylist(pl: YandexMusicClient.PlaylistBrief) {
+        playlistDetail = pl.title to emptyList()
+        detailStack = detailStack + Triple("playlist", pl.ownerUid, pl.kind)
+    }
     fun popDetail() { detailStack = detailStack.dropLast(1) }
 
     LaunchedEffect(currentDetail) {
-        val d = currentDetail ?: run { artistPage = null; albumPage = null; return@LaunchedEffect }
+        val d = currentDetail ?: run {
+            artistPage = null; albumPage = null; playlistDetail = null; return@LaunchedEffect
+        }
         detailLoading = true
         artistPage = null
         albumPage = null
@@ -378,6 +396,10 @@ fun YandexMusicScreen(onBack: () -> Unit) {
                 when (d.first) {
                     "artist" -> artistPage = client?.fetchArtist(d.second)
                     "album" -> albumPage = client?.fetchAlbum(d.second)
+                    "playlist" -> {
+                        val tracks = client?.fetchPlaylistTracks(d.second, d.third) ?: emptyList()
+                        playlistDetail = (playlistDetail?.first ?: "Playlist") to tracks
+                    }
                 }
             }
         }
@@ -400,6 +422,10 @@ fun YandexMusicScreen(onBack: () -> Unit) {
         com.liquidmusicglass.data.yandex.YandexWaveEngine.stop()
         YandexAuthRepository.disconnect()
         results = emptyList()
+        searchArtists = emptyList()
+        searchAlbums = emptyList()
+        searchPlaylists = emptyList()
+        detailStack = emptyList()
         query = ""
         searchError = null
         liked = emptyList()
@@ -611,7 +637,10 @@ fun YandexMusicScreen(onBack: () -> Unit) {
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 120.dp)
                     ) {
-                        if (results.isEmpty() && !searching && searchError == null) {
+                        if (results.isEmpty() && searchArtists.isEmpty() &&
+                            searchAlbums.isEmpty() && searchPlaylists.isEmpty() &&
+                            !searching && searchError == null
+                        ) {
                             item {
                                 Text(
                                     "Type a query and tap Search.\nTap a track to play it; " +
@@ -621,6 +650,30 @@ fun YandexMusicScreen(onBack: () -> Unit) {
                                     modifier = Modifier.padding(vertical = 24.dp)
                                 )
                             }
+                        }
+                        // Артисты
+                        if (searchArtists.isNotEmpty()) {
+                            item { SectionLabel("Artists", lc) }
+                            items(searchArtists.take(5), key = { "sa${it.id}" }) { a ->
+                                SimilarArtistRow(a, inputBg, lc) { openArtist(a.id) }
+                            }
+                        }
+                        // Альбомы
+                        if (searchAlbums.isNotEmpty()) {
+                            item { SectionLabel("Albums", lc) }
+                            items(searchAlbums.take(5), key = { "sal${it.id}" }) { al ->
+                                AlbumRow(al, inputBg, lc) { openAlbum(al.id) }
+                            }
+                        }
+                        // Плейлисты
+                        if (searchPlaylists.isNotEmpty()) {
+                            item { SectionLabel("Playlists", lc) }
+                            items(searchPlaylists.take(5), key = { "sp${it.ownerUid}:${it.kind}" }) { p ->
+                                SearchPlaylistRow(p, inputBg, lc) { openSearchPlaylist(p) }
+                            }
+                        }
+                        if (results.isNotEmpty()) {
+                            item { SectionLabel("Tracks", lc) }
                         }
                         itemsIndexed(results, key = { _, track -> track.id }) { index, track ->
                             val sid = YandexDownloadManager.storageId(track.bareTrackId)
@@ -926,12 +979,13 @@ fun YandexMusicScreen(onBack: () -> Unit) {
             }
         }
 
-        // Оверлей деталей артиста/альбома поверх секции (свой back-стек).
+        // Оверлей деталей артиста/альбома/плейлиста поверх секции (свой back-стек).
         if (currentDetail != null) {
             YandexDetailOverlay(
                 kind = currentDetail.first,
                 artist = artistPage,
                 album = albumPage,
+                playlist = playlistDetail,
                 loading = detailLoading,
                 dlProgress = dlProgress,
                 offlineIds = offlineIds,
@@ -1607,6 +1661,7 @@ private fun YandexDetailOverlay(
     kind: String,
     artist: YandexMusicClient.ArtistPage?,
     album: YandexMusicClient.AlbumPage?,
+    playlist: Pair<String, List<YandexMusicClient.Track>>?,
     loading: Boolean,
     dlProgress: Map<String, Float>,
     offlineIds: Set<String>,
@@ -1651,7 +1706,11 @@ private fun YandexDetailOverlay(
                 }
                 Spacer(Modifier.width(12.dp))
                 Text(
-                    if (kind == "artist") artist?.name ?: "Artist" else album?.title ?: "Album",
+                    when (kind) {
+                        "artist" -> artist?.name ?: "Artist"
+                        "album" -> album?.title ?: "Album"
+                        else -> playlist?.first ?: "Playlist"
+                    },
                     color = lc.textPrimary,
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
@@ -1715,6 +1774,15 @@ private fun YandexDetailOverlay(
                         items(artist.similar, key = { "s${it.id}" }) { sim ->
                             SimilarArtistRow(sim, inputBg, lc) { onOpenArtist(sim.id) }
                         }
+                    }
+                } else if (kind == "playlist" && playlist != null) {
+                    val tracks = playlist.second
+                    itemsIndexed(tracks, key = { i, t -> "p$i:${t.id}" }) { index, track ->
+                        DetailTrackRow(track, dlProgress, offlineIds, inputBg,
+                            onPlay = { onPlay(tracks, index) },
+                            onRadio = { onRadio(track) },
+                            onDownload = { onDownload(track) },
+                            onCancel = onCancel)
                     }
                 }
             }
@@ -1837,6 +1905,48 @@ private fun AlbumRow(
                     .joinToString(" · "),
                 color = lc.textSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
             )
+        }
+        Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = lc.textTertiary,
+            modifier = Modifier.size(22.dp))
+    }
+}
+
+@Composable
+private fun SearchPlaylistRow(
+    playlist: YandexMusicClient.PlaylistBrief,
+    inputBg: Color,
+    lc: com.liquidmusicglass.ui.theme.LiquidColors,
+    onOpen: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(inputBg)
+            .liquidClickable { onOpen() }
+            .padding(10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier.size(48.dp).clip(RoundedCornerShape(10.dp))
+                .background(Color.Black.copy(alpha = 0.2f))
+        ) {
+            if (!playlist.coverUrl.isNullOrBlank()) {
+                AsyncImage(playlist.coverUrl, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            } else {
+                Icon(
+                    painter = painterResource(R.drawable.ic_service_yandex),
+                    contentDescription = null,
+                    tint = Color.Unspecified,
+                    modifier = Modifier.align(Alignment.Center).size(24.dp)
+                )
+            }
+        }
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(playlist.title, color = lc.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("${playlist.trackCount} tracks", color = lc.textSecondary, fontSize = 12.sp)
         }
         Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = lc.textTertiary,
             modifier = Modifier.size(22.dp))
