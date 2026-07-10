@@ -2,6 +2,8 @@ package com.liquidmusicglass.api.icm
 
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
@@ -9,14 +11,19 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.CertificatePinner
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.TimeUnit
+import java.io.IOException
+import kotlin.coroutines.resumeWithException
 
 /**
  * Internal file logger for IcmApi — writes to app cache dir so logs survive
@@ -220,6 +227,28 @@ class IcmApi private constructor() {
         return response.header("X-Request-Id")
     }
 
+    /** Links a coroutine cancellation to the underlying OkHttp call. */
+    private suspend fun Call.awaitResponse(endpoint: String): Response = suspendCancellableCoroutine { continuation ->
+        IcmApiFileLogger.log("D", "IcmApi", "Request started $endpoint")
+        continuation.invokeOnCancellation {
+            IcmApiFileLogger.log("D", "IcmApi", "Request cancelled; Call.cancel() $endpoint")
+            cancel()
+        }
+        enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                if (!continuation.isCancelled) continuation.resumeWithException(e)
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                if (continuation.isCancelled) {
+                    response.close()
+                } else {
+                    continuation.resume(response) { _, value, _ -> value.close() }
+                }
+            }
+        })
+    }
+
     private fun buildRequest(url: String, method: String = "GET", body: String? = null, fast: Boolean = false): Request {
         val builder = Request.Builder()
             .url(url)
@@ -281,6 +310,8 @@ class IcmApi private constructor() {
         if (e is IcmApiException && e.code == 401 && sessionToken != null) {
             val fresh = try {
                 sessionRefresher?.invoke()
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {
                 null
             }
@@ -324,6 +355,8 @@ class IcmApi private constructor() {
         if (e is IcmApiException && e.code == 401 && sessionToken != null) {
             val fresh = try {
                 sessionRefresher?.invoke()
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {
                 null
             }
@@ -352,22 +385,23 @@ class IcmApi private constructor() {
                     IcmRateGate.throttle()
                     val url = if (async) "$BASE_URL$endpoint?async=1" else "$BASE_URL$endpoint"
                     val request = buildRequest(url, method, body)
-                    val response = client.newCall(request).execute()
+                    val response = client.newCall(request).awaitResponse(endpoint)
+                    try {
                     IcmRateGate.recordSuccess()
                     com.liquidmusicglass.engine.NetworkVitality.onRequestSuccess()
 
                     val requestId = extractRequestId(response)
                     requestId?.let { onRequestId?.invoke(it) }
 
-                    when {
+                    return@withContext when {
                         response.isSuccessful -> {
                             val bodyText = response.body?.string() ?: ""
-                            IcmApiFileLogger.log("D", "IcmApi", "Success ${response.code} on $endpoint, body: ${bodyText.take(500)}")
+                            IcmApiFileLogger.log("D", "IcmApi", "Success ${response.code} on $endpoint")
                             Result.success(bodyText)
                         }
                         else -> {
                             val errorText = response.body?.string() ?: "HTTP ${response.code}"
-                            IcmApiFileLogger.log("E", "IcmApi", "API error: ${response.code} on $endpoint rid=${requestId ?: "-"}, body: $errorText")
+                            IcmApiFileLogger.log("E", "IcmApi", "API error: ${response.code} on $endpoint rid=${requestId ?: "-"}")
                             if (response.code != 429) {
                                 com.liquidmusicglass.debug.DebugLog.add(
                                     "ICM ${response.code} $endpoint rid=${requestId ?: "-"}"
@@ -398,6 +432,12 @@ class IcmApi private constructor() {
                             )
                         }
                     }
+                    } finally {
+                        response.close()
+                        IcmApiFileLogger.log("D", "IcmApi", "Request finished $endpoint")
+                    }
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     IcmRateGate.recordFailure()
                     com.liquidmusicglass.engine.NetworkVitality.onRequestNetworkError()
@@ -435,14 +475,15 @@ class IcmApi private constructor() {
                 IcmRateGate.throttle()
                 val url = if (async) "$BASE_URL$endpoint?async=1" else "$BASE_URL$endpoint"
                 val request = buildRequest(url, method, body)
-                val response = client.newCall(request).execute()
+                val response = client.newCall(request).awaitResponse(endpoint)
+                try {
                 IcmRateGate.recordSuccess()   // ответ получен → хост жив, сбрасываем счётчик фейлов
                 com.liquidmusicglass.engine.NetworkVitality.onRequestSuccess()
 
                 val requestId = extractRequestId(response)
                 requestId?.let { onRequestId?.invoke(it) }
 
-                when {
+                return@withContext when {
                     response.code == 202 && endpoint.contains("/track") -> {
                         // Async track pending — parse as pending response
                         val pending = parseResponse<IcmAsyncTrackPending>(response.body)
@@ -450,11 +491,11 @@ class IcmApi private constructor() {
                     }
                     response.isSuccessful -> {
                         val bodyText = response.body?.string() ?: ""
-                        IcmApiFileLogger.log("D", "IcmApi", "Success ${response.code} on $endpoint, body: ${bodyText.take(500)}")
+                        IcmApiFileLogger.log("D", "IcmApi", "Success ${response.code} on $endpoint")
                         try {
                             Result.success(json.decodeFromString(bodyText))
                         } catch (e: Exception) {
-                            IcmApiFileLogger.log("E", "IcmApi", "Parse error on $endpoint: ${e.message}, body: $bodyText")
+                            IcmApiFileLogger.log("E", "IcmApi", "Parse error on $endpoint: ${e.message}")
                             Result.failure(e)
                         }
                     }
@@ -462,7 +503,7 @@ class IcmApi private constructor() {
                         val errorText = response.body?.string() ?: "HTTP ${response.code}"
                         // rid — X-Request-Id сервера: по нему саппорт ICM находит
                         // конкретный запрос в своих логах за секунды.
-                        IcmApiFileLogger.log("E", "IcmApi", "API error: ${response.code} on $endpoint rid=${requestId ?: "-"}, body: $errorText")
+                        IcmApiFileLogger.log("E", "IcmApi", "API error: ${response.code} on $endpoint rid=${requestId ?: "-"}")
                         if (response.code != 429) {
                             com.liquidmusicglass.debug.DebugLog.add(
                                 "ICM ${response.code} $endpoint rid=${requestId ?: "-"}"
@@ -493,6 +534,12 @@ class IcmApi private constructor() {
                         ))
                     }
                 }
+                } finally {
+                    response.close()
+                    IcmApiFileLogger.log("D", "IcmApi", "Request finished $endpoint")
+                }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 IcmRateGate.recordFailure()   // сетевой фейл без ответа → копим к circuit-breaker
                 // Fail-streak детект: N таких подряд = маршрут протух тихо
@@ -527,7 +574,9 @@ class IcmApi private constructor() {
             IcmRateGate.throttleBlocking()
             val url = if (async) "$BASE_URL$endpoint?async=1" else "$BASE_URL$endpoint"
             val request = buildRequest(url, method, body, fast = true)
+            IcmApiFileLogger.log("D", "IcmApi", "Sync request started $endpoint")
             val response = client.newCall(request).execute()
+            try {
             IcmRateGate.recordSuccess()
 
             extractRequestId(response)?.let { onRequestId?.invoke(it) }
@@ -542,7 +591,7 @@ class IcmApi private constructor() {
                 }
                 else -> {
                     val errorText = response.body?.string() ?: "HTTP ${response.code}"
-                    IcmApiFileLogger.log("E", "IcmApi", "API error (sync): ${response.code} on $endpoint, body: $errorText")
+                    IcmApiFileLogger.log("E", "IcmApi", "API error (sync): ${response.code} on $endpoint")
                     val error = try {
                         json.decodeFromString<IcmErrorWrapper>(errorText).detail
                     } catch (_: Exception) {
@@ -565,6 +614,10 @@ class IcmApi private constructor() {
                         error?.source
                     ))
                 }
+            }
+            } finally {
+                response.close()
+                IcmApiFileLogger.log("D", "IcmApi", "Sync request finished $endpoint")
             }
         } catch (e: Exception) {
             IcmRateGate.recordFailure()

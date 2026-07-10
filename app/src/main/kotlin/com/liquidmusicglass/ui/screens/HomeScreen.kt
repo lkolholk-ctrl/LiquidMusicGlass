@@ -52,6 +52,7 @@ import com.liquidmusicglass.ui.glass.rememberAlbumColors
 import com.liquidmusicglass.ui.player.AuraBackground
 import com.liquidmusicglass.ui.theme.LiquidTheme
 import com.liquidmusicglass.ui.viewmodel.HomeViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 private val AppleRed = Color(0xFFFC3C44)
@@ -67,6 +68,8 @@ private suspend fun resolveWaveTrackUrl(track: Track?): Track? {
             android.util.Log.w("HomeScreen", "Wave track ${track.id} (${track.title}) failed URL resolution, skipping")
             null
         }
+    } catch (e: CancellationException) {
+        throw e
     } catch (e: Exception) {
         android.util.Log.w("HomeScreen", "Wave track ${track.id} (${track.title}) URL resolve exception: ${e.message}")
         null
@@ -147,12 +150,17 @@ private val moodCategories = listOf(
 
 @Composable
 fun HomeScreen(
+    viewModel: HomeViewModel,
     onNavigateToAlbum: (String) -> Unit = {},
     onNavigateToArtist: (String) -> Unit = {},
     onNavigateToPlaylist: (String) -> Unit = {}
 ) {
-    val viewModel = remember { HomeViewModel() }
-    DisposableEffect(viewModel) { onDispose { viewModel.cancelLoads() } }
+    DisposableEffect(viewModel) {
+        onDispose {
+            viewModel.cancelHomeLoad()
+            viewModel.cancelChartsLoad()
+        }
+    }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val scroll = rememberScrollState()
@@ -166,6 +174,7 @@ fun HomeScreen(
     val allTracks by PlayerController.queueFlow.collectAsState()
     val recentlyPlayed by PlayerController.recentlyPlayed.collectAsState()
     val currentTrack by PlayerController.currentTrack.collectAsState()
+    val isPlaying by PlayerController.isPlaying.collectAsState()
     // Цвета для фона-ауры — из обложки текущего трека (подстраивается под трек).
     val auraColors = rememberAlbumColors(uri = null, coverUrl = currentTrack?.coverUrl)
     val favoriteIds by PlayerController.favoriteIds.collectAsState()
@@ -311,6 +320,7 @@ fun HomeScreen(
         AuraBackground(
             albumColors = auraColors,
             modifier = Modifier.fillMaxSize(),
+            playing = isPlaying,
             smokeSaturation = 1.22f,
             smokeContrast = 1.16f
         )

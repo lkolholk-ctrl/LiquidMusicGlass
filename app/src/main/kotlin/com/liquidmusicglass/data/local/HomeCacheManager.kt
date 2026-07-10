@@ -6,6 +6,7 @@ import com.liquidmusicglass.api.icm.IcmHomeBlock
 import com.liquidmusicglass.api.icm.IcmHomeItem
 import com.liquidmusicglass.api.icm.IcmHomeResponse
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -74,17 +75,14 @@ object HomeCacheManager {
      * Load cached home response.
      * @return Cached response or null if expired/missing.
      */
-    fun load(): IcmHomeResponse? {
-        val p = prefs ?: return null
-        val jsonStr = p.getString(KEY_BLOCKS, null) ?: return null
-        val cachedAt = p.getLong(KEY_TIMESTAMP, 0)
-        
-        // Check TTL
-        if (System.currentTimeMillis() - cachedAt > CACHE_TTL_MS) {
-            return null
-        }
+    suspend fun load(): IcmHomeResponse? = withContext(Dispatchers.IO) {
+        val startedAt = System.currentTimeMillis()
+        try {
+            val p = prefs ?: return@withContext null
+            val jsonStr = p.getString(KEY_BLOCKS, null) ?: return@withContext null
+            val cachedAt = p.getLong(KEY_TIMESTAMP, 0)
+            if (System.currentTimeMillis() - cachedAt > CACHE_TTL_MS) return@withContext null
 
-        return try {
             val json = JSONObject(jsonStr)
             val blocksArray = json.getJSONArray("blocks")
             val blocks = mutableListOf<IcmHomeBlock>()
@@ -121,8 +119,13 @@ object HomeCacheManager {
             }
             
             IcmHomeResponse(blocks = blocks)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
+            android.util.Log.e("HomeCacheManager", "Failed to load home cache", e)
             null
+        } finally {
+            android.util.Log.d("HomeCacheManager", "load finished in ${System.currentTimeMillis() - startedAt}ms")
         }
     }
 

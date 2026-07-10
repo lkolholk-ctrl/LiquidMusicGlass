@@ -13,13 +13,12 @@ import com.liquidmusicglass.data.local.WaveRepository
 import com.liquidmusicglass.data.wave.WaveMode
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.Track
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
+import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.launch
 
 /**
@@ -29,6 +28,15 @@ import kotlinx.coroutines.launch
  * Uses WaveRepository for "My Wave" analytics and queue building.
  */
 class HomeViewModel : ViewModel() {
+
+    private var homeLoadJob: Job? = null
+    private var chartsLoadJob: Job? = null
+    private var genresLoadJob: Job? = null
+    private var waveLoadJob: Job? = null
+
+    init {
+        Log.d("HomeViewModel", "HomeViewModel created")
+    }
 
     // ─── Home Content ───
 
@@ -74,74 +82,93 @@ class HomeViewModel : ViewModel() {
     private val _topGenres = MutableStateFlow<List<String>>(emptyList())
     val topGenres: StateFlow<List<String>> = _topGenres
 
-    /**
-     * Отменить все текущие загрузки этой вью-модели. Зовётся из DisposableEffect
-     * хост-экрана при уходе с вкладки: `remember { HomeViewModel() }` оставлял
-     * viewModelScope работать (его никто не clear()-ит), и быстрое переключение
-     * вкладок копило параллельные загрузки/поиски → перегрузка main → ANR (Xiaomi).
-     */
-    fun cancelLoads() {
-        viewModelScope.coroutineContext[Job]?.cancelChildren()
+    private fun activeLoadCount(): Int = listOf(homeLoadJob, chartsLoadJob, genresLoadJob, waveLoadJob).count { it?.isActive == true }
+
+    fun cancelHomeLoad() {
+        if (homeLoadJob?.isActive == true) Log.d("HomeViewModel", "homeLoadJob cancelled; active=${activeLoadCount()}")
+        homeLoadJob?.cancel()
+        homeLoadJob = null
+        _isLoading.value = false
+    }
+
+    fun cancelChartsLoad() {
+        if (chartsLoadJob?.isActive == true) Log.d("HomeViewModel", "chartsLoadJob cancelled; active=${activeLoadCount()}")
+        chartsLoadJob?.cancel()
+        chartsLoadJob = null
+        _isLoadingCharts.value = false
     }
 
     /**
      * Load home content — offline first.
      */
-    fun loadHomeContent() {
-        if (_isLoading.value) return
+    fun loadHomeContent(force: Boolean = false) {
+        if (!force && homeLoadJob?.isActive == true) {
+            Log.d("HomeViewModel", "loadHomeContent ignored: already active; active=${activeLoadCount()}")
+            return
+        }
+        homeLoadJob?.cancel()
         _isLoading.value = true
         _error.value = null
+        homeLoadJob = viewModelScope.launch {
+            Log.d("HomeViewModel", "homeLoadJob started; active=${activeLoadCount()}")
+            try {
+                val cached = HomeCacheManager.load()
+                if (cached != null && _homeContent.value == null) _homeContent.value = cached
 
-        viewModelScope.launch {
-            // Step 1: Load from cache immediately
-            val cached = HomeCacheManager.load()
-            if (cached != null && _homeContent.value == null) {
-                _homeContent.value = cached
-            }
-
-            // Step 2: Fetch fresh data from API
-            var lastException: Exception? = null
-            repeat(3) { attempt ->
-                try {
-                    val response = IcmRepository.loadHomeContent()
-                    _homeContent.value = response
-                    _error.value = null
-                    HomeCacheManager.save(response)
-                    _isLoading.value = false
-                    return@launch
-                } catch (e: Exception) {
-                    lastException = e
-                    if (attempt < 2) {
-                        delay(1000L * (attempt + 1))
+                var lastException: Exception? = null
+                repeat(3) { attempt ->
+                    try {
+                        val response = IcmRepository.loadHomeContent()
+                        _homeContent.value = response
+                        _error.value = null
+                        HomeCacheManager.save(response)
+                        // The home response already contains its charts block. Do not issue
+                        // another chart search unless that block is genuinely absent.
+                        if (response.blocks.none { it.type == "charts" }) loadCharts()
+                        return@launch
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        lastException = e
+                        if (attempt < 2) delay(1000L * (attempt + 1))
                     }
                 }
+                _error.value = com.liquidmusicglass.api.icm.icmUserMessage(lastException)
+                if (_homeContent.value == null) _homeContent.value = IcmHomeResponse(blocks = emptyList())
+            } catch (e: CancellationException) {
+                Log.d("HomeViewModel", "homeLoadJob cancelled")
+                throw e
+            } finally {
+                if (homeLoadJob === coroutineContext[Job]) {
+                    _isLoading.value = false
+                    homeLoadJob = null
+                    Log.d("HomeViewModel", "homeLoadJob finished; active=${activeLoadCount()}")
+                }
             }
-
-            _error.value = com.liquidmusicglass.api.icm.icmUserMessage(lastException)
-            if (_homeContent.value == null) {
-                _homeContent.value = IcmHomeResponse(blocks = emptyList())
-            }
-            _isLoading.value = false
         }
-
-        loadCharts()
     }
 
     /**
      * Load charts (top charts from Apple Music).
      */
     fun loadCharts() {
-        if (_isLoadingCharts.value) return
+        if (chartsLoadJob?.isActive == true) return
         _isLoadingCharts.value = true
-
-        viewModelScope.launch {
+        chartsLoadJob = viewModelScope.launch {
+            Log.d("HomeViewModel", "chartsLoadJob started; active=${activeLoadCount()}")
             try {
                 val charts = IcmRepository.loadCharts()
                 _charts.value = charts
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {
                 // Silently fail — charts are decorative
             } finally {
-                _isLoadingCharts.value = false
+                if (chartsLoadJob === coroutineContext[Job]) {
+                    _isLoadingCharts.value = false
+                    chartsLoadJob = null
+                    Log.d("HomeViewModel", "chartsLoadJob finished; active=${activeLoadCount()}")
+                }
             }
         }
     }
@@ -154,7 +181,7 @@ class HomeViewModel : ViewModel() {
     fun refresh() {
         _homeContent.value = null
         HomeCacheManager.clear()
-        loadHomeContent()
+        loadHomeContent(force = true)
     }
 
     /**
@@ -170,13 +197,18 @@ class HomeViewModel : ViewModel() {
      * Loads the user's top genres from their playback history.
      */
     fun loadTopGenres(context: Context) {
-        viewModelScope.launch {
+        if (genresLoadJob?.isActive == true) return
+        genresLoadJob = viewModelScope.launch {
             try {
                 val repo = WaveRepository.getInstance(context)
                 val genres = repo.getTopGenres(limit = 5)
                 _topGenres.value = genres
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {
                 // Silently fail — genres are optional
+            } finally {
+                if (genresLoadJob === coroutineContext[Job]) genresLoadJob = null
             }
         }
     }
@@ -187,11 +219,11 @@ class HomeViewModel : ViewModel() {
      * queue up through the session that WaveRepository warms up in parallel.
      */
     fun buildWaveQueue(context: Context) {
-        if (_isBuildingWave.value) return
+        if (waveLoadJob?.isActive == true) return
         if (!isLinked()) { _needsLink.value = true; return }
         _isBuildingWave.value = true
 
-        viewModelScope.launch {
+        waveLoadJob = viewModelScope.launch {
             try {
                 val repo = WaveRepository.getInstance(context)
                 val tracks = repo.startPersonalWave()
@@ -212,15 +244,22 @@ class HomeViewModel : ViewModel() {
                     // только после него). Иначе просто молчим.
                     val onboarded = try {
                         IcmRepository.getWaveOnboarding()?.completed ?: false
+                    } catch (e: CancellationException) {
+                        throw e
                     } catch (_: Exception) {
                         false
                     }
                     if (!onboarded) _needsOnboarding.value = true
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {
                 _error.value = "Failed to build wave"
             } finally {
-                _isBuildingWave.value = false
+                if (waveLoadJob === coroutineContext[Job]) {
+                    _isBuildingWave.value = false
+                    waveLoadJob = null
+                }
             }
         }
     }
@@ -229,11 +268,11 @@ class HomeViewModel : ViewModel() {
      * Builds an expanded mood wave through /wave/mood/{mood}.
      */
     fun buildMoodWave(context: Context, query: String, name: String? = null) {
-        if (_isBuildingWave.value) return
+        if (waveLoadJob?.isActive == true) return
         if (!isLinked()) { _needsLink.value = true; return }
         _isBuildingWave.value = true
 
-        viewModelScope.launch {
+        waveLoadJob = viewModelScope.launch {
             try {
                 val repo = WaveRepository.getInstance(context)
                 // Стартуем с маленькой пачки (1 быстрый запрос) — до полного
@@ -260,10 +299,15 @@ class HomeViewModel : ViewModel() {
                     _isBuildingWave.value = false
                     PlayerController.ensureWaveRefill()
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {
                 _error.value = "Failed to build wave"
             } finally {
-                _isBuildingWave.value = false
+                if (waveLoadJob === coroutineContext[Job]) {
+                    _isBuildingWave.value = false
+                    waveLoadJob = null
+                }
             }
         }
     }
@@ -280,4 +324,9 @@ class HomeViewModel : ViewModel() {
      */
     val isPremium: Boolean
         get() = IcmAuthRepository.isPremium.value
+
+    override fun onCleared() {
+        Log.d("HomeViewModel", "HomeViewModel onCleared")
+        super.onCleared()
+    }
 }

@@ -149,6 +149,7 @@ fun WaveMoodTiles(
     onSelect: (WaveMood) -> Unit,
     modifier: Modifier = Modifier,
     animate: Boolean = true,
+    playing: Boolean = false,
     albumColors: AlbumColors? = null,
     /** Сглаженный бас 0..1 — кромка карточек слегка пульсирует в такт (стриминг). */
     bassLevel: State<Float>? = null,
@@ -161,8 +162,8 @@ fun WaveMoodTiles(
     // через кадр (~30 Гц) — узоры/переливы медленные, разницы не видно, а
     // перерисовка всех видимых плиток вдвое дешевле.
     val liteTier = com.liquidmusicglass.ui.DeviceTier.lite
-    val timeSec = produceState(0f, animate) {
-        if (!animate) return@produceState
+    val timeSec = produceState(0f, animate, playing) {
+        if (!animate || !playing) return@produceState
         var skip = false
         while (true) {
             withInfiniteAnimationFrameMillis {

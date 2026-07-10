@@ -189,7 +189,11 @@ private fun advanceBass(current: Float, target: Float): Float {
  * ~30 Гц вместо 60, GPU-нагрузка вдвое ниже, визуально неотличимо.
  */
 @Composable
-private fun rememberSmoothedBass(halfRate: Boolean = false): State<Float> = produceState(0f, halfRate) {
+private fun rememberSmoothedBass(playing: Boolean, halfRate: Boolean = false): State<Float> = produceState(0f, playing, halfRate) {
+    if (!playing) {
+        value = 0f
+        return@produceState
+    }
     var s1 = 0f
     var s2 = 0f
     var skip = false
@@ -220,6 +224,7 @@ fun AuraBackground(
     modifier: Modifier = Modifier,
     intensity: Float = 0.78f,
     animate: Boolean = true,
+    playing: Boolean = false,
     smokeSaturation: Float = 1.0f,
     smokeContrast: Float = 1.0f,
 ) {
@@ -259,12 +264,13 @@ fun AuraBackground(
                     albumColors, intensity,
                     Modifier.graphicsLayer { alpha = fade },
                     animate,
+                    playing,
                     smokeSaturation,
                     smokeContrast
                 )
             }
         }
-        heavyArmed -> AuraGradientFallback(albumColors, modifier, smokeContrast)
+        heavyArmed -> AuraGradientFallback(albumColors, modifier, playing, smokeContrast)
         else -> AuraStaticBackground(albumColors, modifier)
     }
 }
@@ -288,6 +294,7 @@ private fun AuraShaderBackground(
     intensity: Float,
     modifier: Modifier,
     animate: Boolean = true,
+    playing: Boolean,
     smokeSaturation: Float = 1.0f,
     smokeContrast: Float = 1.0f,
 ) {
@@ -315,8 +322,8 @@ private fun AuraShaderBackground(
     // возврате фаза ПРОДОЛЖАЕТСЯ с того же места, а не сбрасывается в 0. Это
     // убирает «прыжок» дыма при переключении на главный (resume из phaseHolder).
     val phaseHolder = remember { floatArrayOf(0f) }
-    val timeSec by produceState(phaseHolder[0], animate) {
-        if (!animate) return@produceState
+    val timeSec by produceState(phaseHolder[0], animate, playing) {
+        if (!animate || !playing) return@produceState
         var phase = phaseHolder[0]
         var s1 = 0f
         var s2 = 0f
@@ -339,7 +346,7 @@ private fun AuraShaderBackground(
     }
 
     // одно сглаженное число баса в шейдер — дыхание/яркость (узко, безопасно)
-    val bass by rememberSmoothedBass(halfRate = liteTier)
+    val bass by rememberSmoothedBass(playing, halfRate = liteTier)
 
     Box(
         modifier
@@ -364,7 +371,7 @@ private fun AuraShaderBackground(
 
 /** Фолбэк для Android < 13: мягкий дрейфующий радиальный градиент на тех же цветах (без шейдера). */
 @Composable
-private fun AuraGradientFallback(albumColors: AlbumColors, modifier: Modifier, smokeContrast: Float = 1.0f) {
+private fun AuraGradientFallback(albumColors: AlbumColors, modifier: Modifier, playing: Boolean, smokeContrast: Float = 1.0f) {
     val bg by animateColorAsState(albumColors.darkMuted, tween(900), label = "fbBg")
     val a by animateColorAsState(albumColors.vibrant, tween(900), label = "fbA")
     val b by animateColorAsState(albumColors.dominant, tween(900), label = "fbB")
@@ -378,7 +385,8 @@ private fun AuraGradientFallback(albumColors: AlbumColors, modifier: Modifier, s
         com.liquidmusicglass.ui.DeviceTier.lite -> 2
         else -> 1
     }
-    val phase by produceState(0f, divider) {
+    val phase by produceState(0f, divider, playing) {
+        if (!playing) return@produceState
         var frame = 0
         while (true) {
             withInfiniteAnimationFrameMillis {
@@ -389,7 +397,7 @@ private fun AuraGradientFallback(albumColors: AlbumColors, modifier: Modifier, s
     }
 
     // та же сглаженная огибающая баса — мягкое дыхание, без вспышек
-    val bass by rememberSmoothedBass(halfRate = divider > 1)
+    val bass by rememberSmoothedBass(playing, halfRate = divider > 1)
 
     Box(
         modifier

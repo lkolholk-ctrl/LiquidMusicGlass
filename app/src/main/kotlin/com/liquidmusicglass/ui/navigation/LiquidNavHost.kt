@@ -8,6 +8,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.ViewModelProvider
 import androidx.navigation.NavGraphBuilder
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
@@ -75,10 +76,14 @@ fun LiquidNavHost(
     ) {
         // ═══════════ Граф ВОЛНЫ ═══════════
         navigation(startDestination = NavRoutes.WAVE_HOME, route = NavRoutes.GRAPH_WAVE) {
-            composable(NavRoutes.WAVE_HOME) {
+            composable(NavRoutes.WAVE_HOME) { entry ->
+                // This VM belongs to this destination's NavBackStackEntry. Android now
+                // clears it when the entry is removed instead of leaving a remembered VM alive.
+                val homeViewModel = ViewModelProvider(entry)[com.liquidmusicglass.ui.viewmodel.HomeViewModel::class.java]
                 // Волна всегда тёмная — эффекты завязаны на тёмный фон.
                 ForceDarkContent {
                     WaveHomeScreen(
+                        viewModel = homeViewModel,
                         onNavigateToSearch = { navController.navigate(NavRoutes.WAVE_SEARCH) },
                         onOpenPlayer = onOpenPlayer,
                         onNavigateToAlbum = { navController.navigate(NavRoutes.album(NavRoutes.TAB_WAVE, it)) },
@@ -154,8 +159,10 @@ fun LiquidNavHost(
 
         // ═══════════ Граф NEW ═══════════
         navigation(startDestination = NavRoutes.NEW_HOME, route = NavRoutes.GRAPH_NEW) {
-            composable(NavRoutes.NEW_HOME) {
+            composable(NavRoutes.NEW_HOME) { entry ->
+                val homeViewModel = ViewModelProvider(entry)[com.liquidmusicglass.ui.viewmodel.HomeViewModel::class.java]
                 NewScreen(
+                    viewModel = homeViewModel,
                     onNavigateToAlbum = { navController.navigate(NavRoutes.album(NavRoutes.TAB_NEW, it)) },
                     onNavigateToArtist = { navController.navigate(NavRoutes.artist(NavRoutes.TAB_NEW, it)) }
                 )

@@ -117,6 +117,7 @@ import kotlinx.coroutines.withContext
  */
 @Composable
 fun WaveHomeScreen(
+    viewModel: HomeViewModel,
     onNavigateToSearch: () -> Unit = {},
     onOpenPlayer: () -> Unit = {},
     onNavigateToAlbum: (String) -> Unit = {},
@@ -127,10 +128,14 @@ fun WaveHomeScreen(
     animationsActive: Boolean = true,
 ) {
     val context = LocalContext.current
-    val viewModel = remember { HomeViewModel() }
-    DisposableEffect(viewModel) { onDispose { viewModel.cancelLoads() } }
+    DisposableEffect(viewModel) {
+        onDispose {
+            viewModel.cancelHomeLoad()
+            viewModel.cancelChartsLoad()
+        }
+    }
 
-    LaunchedEffect(Unit) { viewModel.loadHomeContent() }
+    LaunchedEffect(viewModel) { viewModel.loadHomeContent() }
 
     val currentTrack by PlayerController.currentTrack.collectAsState()
     val isPlaying by PlayerController.isPlaying.collectAsState()
@@ -193,6 +198,7 @@ fun WaveHomeScreen(
             albumColors = albumColors,
             modifier = Modifier.fillMaxSize(),
             animate = animationsActive,
+            playing = isPlaying,
             smokeSaturation = 1.22f,
             smokeContrast = 1.16f
         )

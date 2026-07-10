@@ -64,15 +64,21 @@ import kotlinx.coroutines.withContext
  */
 @Composable
 fun NewScreen(
+    viewModel: HomeViewModel,
     onNavigateToAlbum: (String) -> Unit = {},
     onNavigateToArtist: (String) -> Unit = {},
 ) {
     val context = LocalContext.current
-    val viewModel = remember { HomeViewModel() }
-    DisposableEffect(viewModel) { onDispose { viewModel.cancelLoads() } }
-    LaunchedEffect(Unit) { viewModel.loadHomeContent() }
+    DisposableEffect(viewModel) {
+        onDispose {
+            viewModel.cancelHomeLoad()
+            viewModel.cancelChartsLoad()
+        }
+    }
+    LaunchedEffect(viewModel) { viewModel.loadHomeContent() }
 
     val recentlyPlayed by PlayerController.recentlyPlayed.collectAsState()
+    val isPlaying by PlayerController.isPlaying.collectAsState()
     val homeContent by viewModel.homeContent.collectAsState()
     val charts by viewModel.charts.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
@@ -120,6 +126,7 @@ fun NewScreen(
                 NewSectionHeader("Waves by mood")
                 WaveMoodTiles(
                     onSelect = { mood -> viewModel.buildMoodWave(context, mood.query, mood.label) },
+                    playing = isPlaying,
                     onPreview = { mood -> previewMood = mood }
                 )
                 Spacer(Modifier.height(28.dp))

@@ -5,6 +5,7 @@ import com.liquidmusicglass.api.icm.wave.IcmWaveRepository
 import com.liquidmusicglass.engine.Track
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -240,6 +241,8 @@ object IcmRepository {
                 val dao = db.playbackHistoryDao()
                 topArtists = dao.getTopArtists(5)
                 topGenres = dao.getTopGenres(3)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 android.util.Log.e("IcmRepository", "Failed to query personalization data from Room", e)
             }
@@ -379,6 +382,8 @@ object IcmRepository {
                         items.add(homeItem)
                     }
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {
                 // Skip failed query, continue with next
             }
@@ -407,6 +412,8 @@ object IcmRepository {
                         source = track.source
                     )
                 }
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             emptyList()
         }
@@ -441,6 +448,8 @@ object IcmRepository {
                         )
                     )
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {}
         }
         return charts
@@ -682,6 +691,8 @@ object IcmRepository {
                 val db = com.liquidmusicglass.data.local.db.AppDatabase.getInstance(ctx)
                 db.playbackHistoryDao().getRecentTrackIds(historyLimit)
             } else emptyList()
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             android.util.Log.w("IcmRepository", "Failed to read Room exclude list: ${e.message}")
             emptyList()
@@ -1395,6 +1406,8 @@ object IcmRepository {
                     genre = genre // присваиваем жанр из запроса
                 )
             }?.take(limit) ?: emptyList()
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             _lastException = e
             _lastError.value = e.message
