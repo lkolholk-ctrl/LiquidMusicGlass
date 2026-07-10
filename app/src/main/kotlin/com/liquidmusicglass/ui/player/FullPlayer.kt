@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.AudioManager
 import android.net.Uri
 import android.widget.Toast
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
@@ -13,6 +14,9 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -1291,12 +1295,27 @@ private fun AnimatedTransportButton(
             ) { onClick() },
         contentAlignment = Alignment.Center
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            modifier = Modifier.size(iconSize),
-            tint = Color.White
-        )
+        // Смена иконки (play ↔ pause) — не мгновенный свап, а морф: новая
+        // иконка «выпрыгивает» с пружиной + fade, старая ужимается и гаснет.
+        // Для prev/next иконка не меняется → AnimatedContent простаивает.
+        AnimatedContent(
+            targetState = icon,
+            transitionSpec = {
+                (scaleIn(
+                    initialScale = 0.55f,
+                    animationSpec = spring(dampingRatio = 0.45f, stiffness = 550f)
+                ) + fadeIn(tween(130)))
+                    .togetherWith(scaleOut(targetScale = 0.55f, animationSpec = tween(110)) + fadeOut(tween(110)))
+            },
+            label = "transportIcon"
+        ) { targetIcon ->
+            Icon(
+                imageVector = targetIcon,
+                contentDescription = null,
+                modifier = Modifier.size(iconSize),
+                tint = Color.White
+            )
+        }
     }
 }
 
