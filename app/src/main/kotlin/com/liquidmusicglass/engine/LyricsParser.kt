@@ -135,40 +135,6 @@ object LyricsParser {
     }
 
     /**
-     * Текст Y-трека (ym_…): синхро-LRC или обычный из Яндекса, через уже
-     * подключённый токен. Кэшируется по trackId (в т.ч. негатив), как ICM.
-     */
-    suspend fun fetchYandexLyrics(
-        trackId: String,
-        title: String,
-        artist: String
-    ): Lyrics = withContext(Dispatchers.IO) {
-        getCachedLyrics(trackId)?.let { return@withContext it }
-        val client = com.liquidmusicglass.data.yandex.YandexAuthRepository.clientOrNull()
-            ?: return@withContext Lyrics.EMPTY
-        val bare = trackId.removePrefix(
-            com.liquidmusicglass.data.yandex.YandexDownloadManager.ID_PREFIX
-        )
-        val raw = try {
-            kotlinx.coroutines.withTimeout(12_000) { client.fetchLyrics(bare) }
-        } catch (_: Exception) {
-            null
-        }
-        if (raw.isNullOrBlank()) {
-            cacheLyrics(trackId, Lyrics.EMPTY)
-            return@withContext Lyrics.EMPTY
-        }
-        val parsed = parseLyrics(raw)
-        if (parsed.lines.isEmpty()) {
-            cacheLyrics(trackId, Lyrics.EMPTY)
-            return@withContext Lyrics.EMPTY
-        }
-        val result = parsed.copy(title = title, artist = artist, source = "yandex")
-        cacheLyrics(trackId, result)
-        result
-    }
-
-    /**
      * Полный поиск.
      * ЛОКАЛЬНОЕ аудио → LRCLIB (синхро-текст) + локальный кэш, потом embedded.
      * Y-трек → текст из Яндекса. СТРИМИНГ/ICM → как было.
@@ -202,11 +168,20 @@ object LyricsParser {
             return Lyrics.EMPTY
         }
 
-        // ── Y-трек (ym_…): текст из Яндекса, НЕ из ICM (ym-id для ICM бессмыслен). ──
+        // ── Y-трек (ym_…): синхро-текст из LRCLIB. У Яндекса тексты от Musixmatch
+        //    отдаются только как plain (без таймкодов) — LRCLIB даёт синхро-LRC,
+        //    поэтому для Y-треков берём именно его (по названию/артисту/длительности). ──
         if (!trackId.isNullOrBlank() &&
             com.liquidmusicglass.data.yandex.YandexDownloadManager.isYandexId(trackId)
         ) {
-            return fetchYandexLyrics(trackId, title, artist)
+            return fetchLrcLib(
+                context = context,
+                uri = null,
+                title = title,
+                artist = artist,
+                durationMs = durationMs,
+                trackId = trackId
+            )
         }
 
         // ── СТРИМИНГ/ICM: без изменений ──

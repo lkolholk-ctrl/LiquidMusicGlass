@@ -412,60 +412,8 @@ class YandexMusicClient(
         return coverUriToUrl(uri.takeIf { it.isNotBlank() }, size = "400x400")
     }
 
-    /**
-     * Текст трека: сначала синхронизированный LRC (подписанный
-     * /tracks/{id}/lyrics → downloadUrl), затем обычный текст из
-     * /tracks/{id}/supplement. Возвращает сырой LRC/plain или null.
-     */
-    fun fetchLyrics(trackId: String): String? {
-        val bare = trackId.substringBefore(":")
-        fetchSyncedLyrics(bare)?.let { return it }
-        return fetchSupplementLyrics(bare)
-    }
-
-    /** Подписанный синхро-LRC: sign = base64(HMAC(secret, ts+trackId))[:-1]. */
-    private fun fetchSyncedLyrics(trackId: String): String? {
-        val ts = System.currentTimeMillis() / 1000
-        val sign = hmacSha256Base64(SIGN_SECRET, "$ts$trackId").dropLast(1)
-        val url = "$API/tracks/$trackId/lyrics?format=LRC&timeStamp=$ts&sign=${urlEncode(sign)}"
-        val result = try {
-            getJson(url).optJSONObject("result")
-        } catch (_: Exception) {
-            null
-        } ?: return null
-        val downloadUrl = result.optString("downloadUrl").takeIf { it.isNotBlank() } ?: return null
-        return downloadPlainText(downloadUrl)
-    }
-
-    /** Обычный (не синхронизированный) текст из supplement. */
-    private fun fetchSupplementLyrics(trackId: String): String? {
-        val root = try {
-            getJson("$API/tracks/$trackId/supplement")
-        } catch (_: Exception) {
-            return null
-        }
-        return root.optJSONObject("result")
-            ?.optJSONObject("lyrics")
-            ?.optString("fullLyrics")
-            ?.takeIf { it.isNotBlank() }
-    }
-
-    /** GET текстового тела без авторизации (downloadUrl — уже подписанная ссылка). */
-    private fun downloadPlainText(url: String): String? {
-        val req = Request.Builder()
-            .url(url)
-            .header("User-Agent", USER_AGENT)
-            .get()
-            .build()
-        return try {
-            http.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) null
-                else resp.body?.string()?.takeIf { it.isNotBlank() }
-            }
-        } catch (_: Exception) {
-            null
-        }
-    }
+    // Текст Y-треков берём из LRCLIB (синхро-LRC), а не из Яндекса — у него
+    // тексты от Musixmatch отдаются только plain. См. LyricsParser.loadLyrics.
 
     /** Python: `client.search(query, type_="track")` */
     fun searchTracks(query: String, page: Int = 0): List<Track> {
