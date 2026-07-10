@@ -1194,7 +1194,7 @@ fun FullPlayer(
                             )
                             Spacer(modifier = Modifier.width(16.dp))
                             Text(
-                                text = "Редактировать теги",
+                                text = "Edit tags",
                                 color = Color.White,
                                 fontSize = 17.sp,
                                 modifier = Modifier.weight(1f)

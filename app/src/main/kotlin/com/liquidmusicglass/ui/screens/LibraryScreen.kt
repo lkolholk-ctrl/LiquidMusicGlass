@@ -260,7 +260,7 @@ fun LibraryScreen(
                             SystemRowDivider()
                             MenuCard(
                                 title = "On this device",
-                                subtitle = "Артисты · Альбомы · Треки · Поиск",
+                                subtitle = "Artists · Albums · Tracks · Search",
                                 icon = Icons.Rounded.LibraryMusic,
                                 tint = Color(0xFFFF9F0A),
                                 onClick = onOpenLocalLibrary

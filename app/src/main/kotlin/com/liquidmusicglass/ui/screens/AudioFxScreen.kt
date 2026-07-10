@@ -122,7 +122,7 @@ private fun PreampSection(lc: LiquidColors, enabled: Boolean) {
     Section("Preamp", lc, valueText = "${db.roundToInt()} dB") {
         FxSlider(value = v, range = 0f..1f, enabled = enabled,
             onChange = { AudioFxController.setPreamp01(it) }, lc = lc)
-        Text("Логарифмическая громкость — равномерно по всей шкале.",
+        Text("Logarithmic volume — even across the whole range.",
             color = lc.textSecondary, fontSize = 12.sp)
     }
 }
@@ -192,11 +192,11 @@ private fun BassSection(lc: LiquidColors, master: Boolean) {
     SectionWithToggle("Bass Boost", lc, on, { AudioFxController.setBassEnabled(it) }, master) {
         Box(Modifier.alpha(if (active) 1f else 0.4f)) {
             Column {
-                LabelValue("Частота", "${freq.roundToInt()} Hz", lc)
+                LabelValue("Frequency", "${freq.roundToInt()} Hz", lc)
                 FxSlider(freq, AudioFxController.BASS_FREQ_MIN..AudioFxController.BASS_FREQ_MAX, active,
                     { AudioFxController.setBassFreq(it) }, lc)
                 Spacer(Modifier.height(8.dp))
-                LabelValue("Усиление", "+${gain.roundToInt()} dB", lc)
+                LabelValue("Gain", "+${gain.roundToInt()} dB", lc)
                 FxSlider(gain, 0f..12f, active, { AudioFxController.setBassGain(it) }, lc)
             }
         }
@@ -207,7 +207,7 @@ private fun BassSection(lc: LiquidColors, master: Boolean) {
 private fun LoudnessSection(lc: LiquidColors, master: Boolean) {
     val on by AudioFxController.loudnessEnabled.collectAsState()
     SectionWithToggle("Loudness Compensation", lc, on, { AudioFxController.setLoudnessEnabled(it) }, master) {
-        Text("Поднимает бас (и чуть верхи) на тихой громкости — ровный звук на любом уровне.",
+        Text("Boosts bass (and slightly the highs) at low volume — even sound at any level.",
             color = lc.textSecondary, fontSize = 12.sp)
     }
 }
@@ -217,7 +217,7 @@ private fun StereoSection(lc: LiquidColors, master: Boolean) {
     val w by AudioFxController.stereoWidth.collectAsState()
     Section("Stereo Width", lc, valueText = "${(w * 100).roundToInt()}%") {
         FxSlider(w, 0f..2f, master, { AudioFxController.setStereoWidth(it) }, lc)
-        Text("0% — моно, 100% — норма, 200% — широко.", color = lc.textSecondary, fontSize = 12.sp)
+        Text("0% — mono, 100% — normal, 200% — wide.", color = lc.textSecondary, fontSize = 12.sp)
     }
 }
 
@@ -292,7 +292,7 @@ private fun LimiterSection(lc: LiquidColors, master: Boolean) {
     SectionWithToggle("Limiter", lc, on, { AudioFxController.setLimEnabled(it) }, master) {
         Box(Modifier.alpha(if (active) 1f else 0.4f)) {
             Column {
-                LabelValue("Порог", "${"%.1f".format(thr)} dB", lc)
+                LabelValue("Threshold", "${"%.1f".format(thr)} dB", lc)
                 FxSlider(
                     thr,
                     AudioFxController.LIM_THRESH_MIN_DB..AudioFxController.LIM_THRESH_MAX_DB,
@@ -309,7 +309,7 @@ private fun LimiterSection(lc: LiquidColors, master: Boolean) {
                     { AudioFxController.setLimRelease(it) },
                     lc
                 )
-                Text("Защита от клиппинга на громком звуке. Рекомендуется ВКЛ.",
+                Text("Protects against clipping on loud audio. Recommended: ON.",
                     color = lc.textSecondary, fontSize = 12.sp)
             }
         }
