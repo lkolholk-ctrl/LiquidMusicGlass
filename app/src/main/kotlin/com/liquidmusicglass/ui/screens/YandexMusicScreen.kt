@@ -252,17 +252,6 @@ fun YandexMusicScreen(onBack: () -> Unit) {
         }
     }
 
-    LaunchedEffect(section, connected) {
-        if (!connected) return@LaunchedEffect
-        when (section) {
-            YandexSection.LIKED -> loadLiked()
-            YandexSection.PLAYLISTS -> loadPlaylists()
-            YandexSection.WAVE -> loadStations()
-            YandexSection.SEARCH -> loadDiscovery()
-            else -> Unit
-        }
-    }
-
     // Системный «назад» из открытого плейлиста возвращает к списку
     BackHandler(enabled = openPlaylist != null) {
         openPlaylist = null
@@ -376,6 +365,19 @@ fun YandexMusicScreen(onBack: () -> Unit) {
                 }.getOrDefault(emptyList())
             }
             stations = list
+        }
+    }
+
+    // Ленивая подгрузка данных активной секции. Объявлена ПОСЛЕ всех load*-
+    // функций: локальные fun должны быть видны до вызова (иначе Unresolved).
+    LaunchedEffect(section, connected) {
+        if (!connected) return@LaunchedEffect
+        when (section) {
+            YandexSection.LIKED -> loadLiked()
+            YandexSection.PLAYLISTS -> loadPlaylists()
+            YandexSection.WAVE -> loadStations()
+            YandexSection.SEARCH -> loadDiscovery()
+            else -> Unit
         }
     }
 
