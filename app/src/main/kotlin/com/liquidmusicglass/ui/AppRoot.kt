@@ -330,12 +330,13 @@ fun AppRoot() {
                         translationY = bottomBarTranslateY +
                             waveHideFrac * 160.dp.toPx()   // автоскрытие на Wave
                         alpha = bottomBarAlpha
-                    }
-                    .background(barBackground),
+                    },
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 // Мини-плеер (стиль ЯМ, плоский — без стекла): только на вкладках,
                 // где включают музыку. На Wave-главной не нужен — экран сам плеер.
+                // Фон-подложку под ним НЕ рисуем — карточка «висит в воздухе» над
+                // контентом (заливка barBackground — только у самого бара ниже).
                 val miniTrack = currentTrack
                 if (selectedIndex != 0 && miniTrack != null) {
                     val miniLibraryRepo = remember {
@@ -385,11 +386,20 @@ fun AppRoot() {
                         )
                     }
                 }
-                if (onWaveTab) ForceDarkContent { barContent() } else barContent()
+                // Заливку баром ограничиваем самим баром + navbar-инсетом, чтобы
+                // серый прямоугольник не выступал из-под «висящего» мини-плеера.
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(barBackground),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    if (onWaveTab) ForceDarkContent { barContent() } else barContent()
 
-                Spacer(
-                    modifier = Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)
-                )
+                    Spacer(
+                        modifier = Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars)
+                    )
+                }
             }
 
             // Невидимая тап-зона внизу: пока бар скрыт, тап возвращает его
