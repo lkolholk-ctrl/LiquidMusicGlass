@@ -356,6 +356,46 @@ fun YandexMusicScreen(onBack: () -> Unit) {
         }
     }
 
+    // ── Детали артиста/альбома (стек навигации поверх секции) ──
+    var detailStack by remember { mutableStateOf<List<Pair<String, Long>>>(emptyList()) }
+    var artistPage by remember { mutableStateOf<YandexMusicClient.ArtistPage?>(null) }
+    var albumPage by remember { mutableStateOf<YandexMusicClient.AlbumPage?>(null) }
+    var detailLoading by remember { mutableStateOf(false) }
+    val currentDetail = detailStack.lastOrNull()
+
+    fun openArtist(id: Long) { detailStack = detailStack + ("artist" to id) }
+    fun openAlbum(id: Long) { detailStack = detailStack + ("album" to id) }
+    fun popDetail() { detailStack = detailStack.dropLast(1) }
+
+    LaunchedEffect(currentDetail) {
+        val d = currentDetail ?: run { artistPage = null; albumPage = null; return@LaunchedEffect }
+        detailLoading = true
+        artistPage = null
+        albumPage = null
+        val client = YandexAuthRepository.clientOrNull()
+        withContext(Dispatchers.IO) {
+            runCatching {
+                when (d.first) {
+                    "artist" -> artistPage = client?.fetchArtist(d.second)
+                    "album" -> albumPage = client?.fetchAlbum(d.second)
+                }
+            }
+        }
+        detailLoading = false
+    }
+
+    BackHandler(enabled = currentDetail != null) { popDetail() }
+
+    fun playYList(tracks: List<YandexMusicClient.Track>, index: Int, refillId: String) {
+        PlayerController.playFromList(
+            context = context,
+            tracks = tracks.map { it.toEngineTrack() },
+            startIndex = index,
+            autoRefillType = "playlist",
+            autoRefillId = refillId
+        )
+    }
+
     fun doDisconnect() {
         com.liquidmusicglass.data.yandex.YandexWaveEngine.stop()
         YandexAuthRepository.disconnect()
@@ -604,6 +644,7 @@ fun YandexMusicScreen(onBack: () -> Unit) {
                                     )
                                 },
                                 onRadio = { startTrackRadio(track) },
+                                onOpenAlbum = track.id.substringAfter(":", "").toLongOrNull()?.let { alb -> { openAlbum(alb) } },
                                 onDownload = {
                                     YandexDownloadManager.download(context, track) { outcome ->
                                         when (outcome) {
@@ -699,6 +740,7 @@ fun YandexMusicScreen(onBack: () -> Unit) {
                                     )
                                 },
                                 onRadio = { startTrackRadio(track) },
+                                onOpenAlbum = track.id.substringAfter(":", "").toLongOrNull()?.let { alb -> { openAlbum(alb) } },
                                 onDownload = {
                                     YandexDownloadManager.download(context, track) { outcome ->
                                         when (outcome) {
@@ -851,6 +893,7 @@ fun YandexMusicScreen(onBack: () -> Unit) {
                                         )
                                     },
                                     onRadio = { startTrackRadio(track) },
+                                onOpenAlbum = track.id.substringAfter(":", "").toLongOrNull()?.let { alb -> { openAlbum(alb) } },
                                     onDownload = {
                                         YandexDownloadManager.download(context, track) { outcome ->
                                             when (outcome) {
@@ -881,6 +924,31 @@ fun YandexMusicScreen(onBack: () -> Unit) {
                     }
                 }
             }
+        }
+
+        // Оверлей деталей артиста/альбома поверх секции (свой back-стек).
+        if (currentDetail != null) {
+            YandexDetailOverlay(
+                kind = currentDetail.first,
+                artist = artistPage,
+                album = albumPage,
+                loading = detailLoading,
+                dlProgress = dlProgress,
+                offlineIds = offlineIds,
+                inputBg = inputBg,
+                lc = lc,
+                onBack = { popDetail() },
+                onOpenArtist = { openArtist(it) },
+                onOpenAlbum = { openAlbum(it) },
+                onPlay = { list, i -> playYList(list, i, "yandex_detail") },
+                onRadio = { startTrackRadio(it) },
+                onDownload = { t ->
+                    YandexDownloadManager.download(context, t) { out ->
+                        if (out == YandexDownloadManager.Outcome.DONE) refreshOffline()
+                    }
+                },
+                onCancel = { sid -> YandexDownloadManager.cancel(sid) }
+            )
         }
     }
 }
@@ -1401,6 +1469,7 @@ private fun YandexTrackRow(
     onRadio: () -> Unit = {},
     onDownload: () -> Unit,
     onCancel: () -> Unit = {},
+    onOpenAlbum: (() -> Unit)? = null,
 ) {
     val lc = LiquidTheme.colors
     val downloading = progress != null
@@ -1424,6 +1493,12 @@ private fun YandexTrackRow(
                 .size(48.dp)
                 .clip(RoundedCornerShape(10.dp))
                 .background(Color.Black.copy(alpha = 0.2f))
+                .then(
+                    // Тап по обложке → открыть альбом трека (если доступно).
+                    if (onOpenAlbum != null) {
+                        Modifier.liquidClickable(pressedScale = LiquidMotion.PressIcon) { onOpenAlbum() }
+                    } else Modifier
+                )
         ) {
             if (!track.coverUrl.isNullOrBlank()) {
                 AsyncImage(
@@ -1520,5 +1595,282 @@ private fun YandexTrackRow(
                 )
             }
         }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Детали артиста/альбома (оверлей поверх секции)
+// ═══════════════════════════════════════════════════════════
+
+@Composable
+private fun YandexDetailOverlay(
+    kind: String,
+    artist: YandexMusicClient.ArtistPage?,
+    album: YandexMusicClient.AlbumPage?,
+    loading: Boolean,
+    dlProgress: Map<String, Float>,
+    offlineIds: Set<String>,
+    inputBg: Color,
+    lc: com.liquidmusicglass.ui.theme.LiquidColors,
+    onBack: () -> Unit,
+    onOpenArtist: (Long) -> Unit,
+    onOpenAlbum: (Long) -> Unit,
+    onPlay: (List<YandexMusicClient.Track>, Int) -> Unit,
+    onRadio: (YandexMusicClient.Track) -> Unit,
+    onDownload: (YandexMusicClient.Track) -> Unit,
+    onCancel: (String) -> Unit,
+) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(lc.settingsBackground)
+    ) {
+        Column(Modifier.fillMaxSize()) {
+            Spacer(Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
+            Spacer(Modifier.height(12.dp))
+
+            // Хедер: назад + заголовок
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(inputBg)
+                        .liquidClickable(pressedScale = LiquidMotion.PressIcon) { onBack() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Rounded.ArrowBack,
+                        contentDescription = "Back",
+                        tint = lc.textPrimary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    if (kind == "artist") artist?.name ?: "Artist" else album?.title ?: "Album",
+                    color = lc.textPrimary,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            if (loading) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = YandexYellow, strokeWidth = 2.5.dp)
+                }
+                return@Column
+            }
+
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 120.dp)
+            ) {
+                if (kind == "album" && album != null) {
+                    item { DetailHeaderArt(album.coverUrl, album.artistName, album.year?.toString()) }
+                    // Название артиста альбома → открыть артиста (если id известен из первого трека)
+                    val artistId = album.tracks.firstOrNull()?.artists?.firstOrNull()?.id
+                    if (artistId != null && !album.artistName.isNullOrBlank()) {
+                        item {
+                            LinkRow("Artist: ${album.artistName}", lc) { onOpenArtist(artistId) }
+                        }
+                    }
+                    itemsIndexed(album.tracks, key = { i, t -> "$i:${t.id}" }) { index, track ->
+                        DetailTrackRow(track, dlProgress, offlineIds, inputBg,
+                            onPlay = { onPlay(album.tracks, index) },
+                            onRadio = { onRadio(track) },
+                            onDownload = { onDownload(track) },
+                            onCancel = onCancel)
+                    }
+                } else if (kind == "artist" && artist != null) {
+                    if (!artist.coverUrl.isNullOrBlank()) {
+                        item { DetailHeaderArt(artist.coverUrl, null, null) }
+                    }
+                    if (artist.topTracks.isNotEmpty()) {
+                        item { SectionLabel("Popular", lc) }
+                        itemsIndexed(artist.topTracks, key = { i, t -> "t$i:${t.id}" }) { index, track ->
+                            DetailTrackRow(track, dlProgress, offlineIds, inputBg,
+                                onPlay = { onPlay(artist.topTracks, index) },
+                                onRadio = { onRadio(track) },
+                                onDownload = { onDownload(track) },
+                                onCancel = onCancel)
+                        }
+                    }
+                    if (artist.albums.isNotEmpty()) {
+                        item { SectionLabel("Albums", lc) }
+                        items(artist.albums, key = { "a${it.id}" }) { alb ->
+                            AlbumRow(alb, inputBg, lc) { onOpenAlbum(alb.id) }
+                        }
+                    }
+                    if (artist.similar.isNotEmpty()) {
+                        item { SectionLabel("Similar artists", lc) }
+                        items(artist.similar, key = { "s${it.id}" }) { sim ->
+                            SimilarArtistRow(sim, inputBg, lc) { onOpenArtist(sim.id) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DetailHeaderArt(coverUrl: String?, subtitle: String?, year: String?) {
+    val lc = LiquidTheme.colors
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            modifier = Modifier
+                .size(160.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Color.Black.copy(alpha = 0.2f))
+        ) {
+            if (!coverUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = coverUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
+        if (!subtitle.isNullOrBlank() || !year.isNullOrBlank()) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                listOfNotNull(subtitle?.takeIf { it.isNotBlank() }, year?.takeIf { it.isNotBlank() })
+                    .joinToString(" · "),
+                color = lc.textSecondary,
+                fontSize = 13.sp
+            )
+        }
+    }
+}
+
+@Composable
+private fun SectionLabel(text: String, lc: com.liquidmusicglass.ui.theme.LiquidColors) {
+    Text(
+        text,
+        color = lc.textSecondary,
+        fontSize = 13.sp,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.padding(start = 4.dp, top = 10.dp, bottom = 2.dp)
+    )
+}
+
+@Composable
+private fun LinkRow(text: String, lc: com.liquidmusicglass.ui.theme.LiquidColors, onClick: () -> Unit) {
+    Text(
+        text,
+        color = YandexYellow,
+        fontSize = 13.sp,
+        fontWeight = FontWeight.Medium,
+        modifier = Modifier
+            .padding(start = 4.dp, top = 2.dp, bottom = 4.dp)
+            .liquidClickable { onClick() }
+    )
+}
+
+@Composable
+private fun DetailTrackRow(
+    track: YandexMusicClient.Track,
+    dlProgress: Map<String, Float>,
+    offlineIds: Set<String>,
+    inputBg: Color,
+    onPlay: () -> Unit,
+    onRadio: () -> Unit,
+    onDownload: () -> Unit,
+    onCancel: (String) -> Unit,
+) {
+    val sid = YandexDownloadManager.storageId(track.bareTrackId)
+    YandexTrackRow(
+        track = track,
+        progress = dlProgress[sid],
+        isDownloaded = sid in offlineIds,
+        inputBg = inputBg,
+        onPlay = onPlay,
+        onRadio = onRadio,
+        onDownload = onDownload,
+        onCancel = { onCancel(sid) }
+    )
+}
+
+@Composable
+private fun AlbumRow(
+    album: YandexMusicClient.AlbumBrief,
+    inputBg: Color,
+    lc: com.liquidmusicglass.ui.theme.LiquidColors,
+    onOpen: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(inputBg)
+            .liquidClickable { onOpen() }
+            .padding(10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier.size(48.dp).clip(RoundedCornerShape(10.dp))
+                .background(Color.Black.copy(alpha = 0.2f))
+        ) {
+            if (!album.coverUrl.isNullOrBlank()) {
+                AsyncImage(album.coverUrl, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            }
+        }
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(album.title, color = lc.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                listOfNotNull(album.artistName?.takeIf { it.isNotBlank() }, album.year?.toString())
+                    .joinToString(" · "),
+                color = lc.textSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
+            )
+        }
+        Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = lc.textTertiary,
+            modifier = Modifier.size(22.dp))
+    }
+}
+
+@Composable
+private fun SimilarArtistRow(
+    artist: YandexMusicClient.ArtistBrief,
+    inputBg: Color,
+    lc: com.liquidmusicglass.ui.theme.LiquidColors,
+    onOpen: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(inputBg)
+            .liquidClickable { onOpen() }
+            .padding(10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier.size(44.dp).clip(CircleShape)
+                .background(Color.Black.copy(alpha = 0.2f))
+        ) {
+            if (!artist.coverUrl.isNullOrBlank()) {
+                AsyncImage(artist.coverUrl, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            }
+        }
+        Spacer(Modifier.width(10.dp))
+        Text(artist.name, color = lc.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = lc.textTertiary,
+            modifier = Modifier.size(22.dp))
     }
 }

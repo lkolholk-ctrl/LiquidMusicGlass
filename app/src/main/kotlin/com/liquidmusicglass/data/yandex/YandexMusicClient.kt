@@ -149,6 +149,135 @@ class YandexMusicClient(
         val coverUrl: String?,
     )
 
+    data class AlbumBrief(
+        val id: Long,
+        val title: String,
+        val artistName: String?,
+        val coverUrl: String?,
+        val year: Int?,
+    )
+
+    data class ArtistBrief(val id: Long, val name: String, val coverUrl: String?)
+
+    data class ArtistPage(
+        val id: Long,
+        val name: String,
+        val coverUrl: String?,
+        val topTracks: List<Track>,
+        val albums: List<AlbumBrief>,
+        val similar: List<ArtistBrief>,
+    )
+
+    data class AlbumPage(
+        val id: Long,
+        val title: String,
+        val artistName: String?,
+        val coverUrl: String?,
+        val year: Int?,
+        val tracks: List<Track>,
+    )
+
+    /** Страница артиста одним запросом: GET /artists/{id}/brief-info. */
+    fun fetchArtist(artistId: Long): ArtistPage? {
+        val result = try {
+            getJson("$API/artists/$artistId/brief-info").optJSONObject("result")
+        } catch (_: Exception) {
+            null
+        } ?: return null
+        val artist = result.optJSONObject("artist") ?: return null
+        val name = artist.optString("name").ifBlank { "Artist" }
+        val cover = coverUriToUrl(
+            artist.optJSONObject("cover")?.optString("uri")?.takeIf { it.isNotBlank() },
+            size = "400x400"
+        )
+
+        val topTracks = ArrayList<Track>()
+        val trackRefs = ArrayList<LikedRef>()
+        result.optJSONArray("popularTracks")?.let { arr ->
+            for (i in 0 until arr.length()) {
+                val el = arr.optJSONObject(i) ?: continue
+                val tObj = el.optJSONObject("track") ?: el.takeIf { it.has("title") }
+                if (tObj != null) {
+                    parseTrack(tObj)?.let { topTracks += it }
+                } else {
+                    el.opt("id")?.toString()?.takeIf { it.isNotBlank() }?.let {
+                        trackRefs += LikedRef(it, el.opt("albumId")?.toString())
+                    }
+                }
+            }
+        }
+        if (topTracks.isEmpty() && trackRefs.isNotEmpty()) {
+            topTracks += fetchTracksByIds(trackRefs.take(30))
+        }
+
+        val albums = ArrayList<AlbumBrief>()
+        result.optJSONArray("albums")?.let { arr ->
+            for (i in 0 until arr.length()) {
+                parseAlbumBrief(arr.optJSONObject(i) ?: continue)?.let { albums += it }
+            }
+        }
+
+        val similar = ArrayList<ArtistBrief>()
+        result.optJSONArray("similarArtists")?.let { arr ->
+            for (i in 0 until arr.length()) {
+                val a = arr.optJSONObject(i) ?: continue
+                val id = a.optLong("id", -1L)
+                if (id < 0) continue
+                similar += ArtistBrief(
+                    id = id,
+                    name = a.optString("name").ifBlank { "Artist" },
+                    coverUrl = coverUriToUrl(
+                        a.optJSONObject("cover")?.optString("uri")?.takeIf { it.isNotBlank() },
+                        size = "200x200"
+                    ),
+                )
+            }
+        }
+
+        return ArtistPage(artistId, name, cover, topTracks, albums, similar)
+    }
+
+    /** Альбом с треками: GET /albums/{id}/with-tracks. */
+    fun fetchAlbum(albumId: Long): AlbumPage? {
+        val result = try {
+            getJson("$API/albums/$albumId/with-tracks").optJSONObject("result")
+        } catch (_: Exception) {
+            null
+        } ?: return null
+        val tracks = ArrayList<Track>()
+        result.optJSONArray("volumes")?.let { vols ->
+            for (v in 0 until vols.length()) {
+                val disc = vols.optJSONArray(v) ?: continue
+                for (i in 0 until disc.length()) {
+                    parseTrack(disc.optJSONObject(i) ?: continue)?.let { tracks += it }
+                }
+            }
+        }
+        return AlbumPage(
+            id = albumId,
+            title = result.optString("title").ifBlank { "Album" },
+            artistName = result.optJSONArray("artists")?.optJSONObject(0)?.optString("name"),
+            coverUrl = coverUriToUrl(
+                result.optString("coverUri").takeIf { it.isNotBlank() },
+                size = "400x400"
+            ),
+            year = result.optInt("year", 0).takeIf { it > 0 },
+            tracks = tracks,
+        )
+    }
+
+    private fun parseAlbumBrief(o: JSONObject): AlbumBrief? {
+        val id = o.optLong("id", -1L)
+        if (id < 0) return null
+        return AlbumBrief(
+            id = id,
+            title = o.optString("title").ifBlank { "Album" },
+            artistName = o.optJSONArray("artists")?.optJSONObject(0)?.optString("name"),
+            coverUrl = coverUriToUrl(o.optString("coverUri").takeIf { it.isNotBlank() }, size = "300x300"),
+            year = o.optInt("year", 0).takeIf { it > 0 },
+        )
+    }
+
     /** Пачка треков ротора (волны): batchId нужен для фидбека обучения. */
     data class StationBatch(val batchId: String?, val tracks: List<Track>)
 
