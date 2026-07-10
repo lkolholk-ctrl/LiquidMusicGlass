@@ -19,32 +19,42 @@ import kotlinx.coroutines.flow.asStateFlow
 object YandexWaveEngine {
 
     private const val TAG = "YandexWave"
-    private const val STATION = "user:onyourwave"
+    const val PERSONAL_STATION = "user:onyourwave"
+
+    /** id станции «радио по треку» для Apple/Y numeric id. */
+    fun trackStation(bareTrackId: String) = "track:$bareTrackId"
 
     private val _isActive = MutableStateFlow(false)
     val isActive: StateFlow<Boolean> = _isActive.asStateFlow()
 
+    @Volatile private var station: String = PERSONAL_STATION
     @Volatile private var batchId: String? = null
     @Volatile private var lastQueueId: String? = null
 
+    /** Активна ли ПЕРСОНАЛЬНАЯ волна (для подсветки кнопки «Моя волна»). */
+    val isPersonalActive: Boolean
+        get() = _isActive.value && station == PERSONAL_STATION
+
     /**
-     * Старт волны: первая пачка ротора + сигнал `radioStarted`.
+     * Старт станции: первая пачка ротора + сигнал `radioStarted`.
+     * [station] — `user:onyourwave` (личная волна) или `track:<id>` (радио по треку).
      * Возвращает треки в модели плеера (пустой список = не удалось).
      */
-    fun start(): List<Track> {
+    fun start(station: String = PERSONAL_STATION): List<Track> {
         val client = YandexAuthRepository.clientOrNull() ?: return emptyList()
-        val batch = client.rotorStationTracks(STATION)
+        val batch = client.rotorStationTracks(station)
         if (batch.tracks.isEmpty()) return emptyList()
 
+        this.station = station
         batchId = batch.batchId
         lastQueueId = batch.tracks.last().bareTrackId
         _isActive.value = true
 
         runCatching {
-            client.sendRotorFeedback(STATION, "radioStarted", batchId)
+            client.sendRotorFeedback(station, "radioStarted", batchId)
         }.onFailure { Log.w(TAG, "radioStarted feedback failed (${it.javaClass.simpleName})") }
 
-        Log.i(TAG, "wave started: ${batch.tracks.size} tracks, batch=${batchId != null}")
+        Log.i(TAG, "station '$station' started: ${batch.tracks.size} tracks, batch=${batchId != null}")
         return batch.tracks.map { it.toEngineTrack() }
     }
 
@@ -56,7 +66,7 @@ object YandexWaveEngine {
         if (!_isActive.value) return emptyList()
         val client = YandexAuthRepository.clientOrNull() ?: return emptyList()
         val batch = try {
-            client.rotorStationTracks(STATION, queue = lastQueueId)
+            client.rotorStationTracks(station, queue = lastQueueId)
         } catch (e: Exception) {
             Log.w(TAG, "nextBatch failed (${e.javaClass.simpleName})")
             return emptyList()
@@ -76,6 +86,7 @@ object YandexWaveEngine {
     fun stop() {
         if (!_isActive.value) return
         _isActive.value = false
+        station = PERSONAL_STATION
         batchId = null
         lastQueueId = null
         Log.i(TAG, "wave stopped")
@@ -95,7 +106,7 @@ object YandexWaveEngine {
         val bare = trackId.removePrefix(YandexDownloadManager.ID_PREFIX)
         runCatching {
             client.sendRotorFeedback(
-                station = STATION,
+                station = station,
                 type = if (skipped) "skip" else "trackFinished",
                 batchId = batchId,
                 trackId = bare,

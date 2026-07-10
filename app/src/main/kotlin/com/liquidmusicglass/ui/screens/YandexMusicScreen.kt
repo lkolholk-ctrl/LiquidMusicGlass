@@ -1,7 +1,9 @@
 package com.liquidmusicglass.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -298,17 +300,17 @@ fun YandexMusicScreen(onBack: () -> Unit) {
     var waveStarting by remember { mutableStateOf(false) }
     var waveError by remember { mutableStateOf<String?>(null) }
 
-    fun startYWave() {
+    fun startStation(station: String, onFail: (String) -> Unit) {
         if (waveStarting) return
         waveStarting = true
         waveError = null
         scope.launch {
             try {
                 val tracks = withContext(Dispatchers.IO) {
-                    com.liquidmusicglass.data.yandex.YandexWaveEngine.start()
+                    com.liquidmusicglass.data.yandex.YandexWaveEngine.start(station)
                 }
                 if (tracks.isEmpty()) {
-                    waveError = "Failed to start the wave"
+                    onFail("Couldn't start the station")
                 } else {
                     PlayerController.playFromList(
                         context = context,
@@ -319,14 +321,23 @@ fun YandexMusicScreen(onBack: () -> Unit) {
                     PlayerController.ensureWaveRefill()
                 }
             } catch (_: YandexUnauthorizedException) {
-                waveError = "Token expired — reconnect"
+                onFail("Token expired — reconnect")
                 YandexAuthRepository.disconnect()
             } catch (_: Exception) {
-                waveError = "Failed to start the wave"
+                onFail("Couldn't start the station")
             } finally {
                 waveStarting = false
             }
         }
+    }
+
+    fun startYWave() {
+        startStation(com.liquidmusicglass.data.yandex.YandexWaveEngine.PERSONAL_STATION) { waveError = it }
+    }
+
+    fun startTrackRadio(track: YandexMusicClient.Track) {
+        val station = com.liquidmusicglass.data.yandex.YandexWaveEngine.trackStation(track.bareTrackId)
+        startStation(station) { /* тихо: радио по треку — вторичное действие */ }
     }
 
     fun doDisconnect() {
@@ -574,6 +585,7 @@ fun YandexMusicScreen(onBack: () -> Unit) {
                                         autoRefillId = "yandex_search"
                                     )
                                 },
+                                onRadio = { startTrackRadio(track) },
                                 onDownload = {
                                     YandexDownloadManager.download(context, track) { outcome ->
                                         when (outcome) {
@@ -668,6 +680,7 @@ fun YandexMusicScreen(onBack: () -> Unit) {
                                         autoRefillId = "yandex_likes"
                                     )
                                 },
+                                onRadio = { startTrackRadio(track) },
                                 onDownload = {
                                     YandexDownloadManager.download(context, track) { outcome ->
                                         when (outcome) {
@@ -819,6 +832,7 @@ fun YandexMusicScreen(onBack: () -> Unit) {
                                             autoRefillId = "yandex_playlist_${pl.kind}"
                                         )
                                     },
+                                    onRadio = { startTrackRadio(track) },
                                     onDownload = {
                                         YandexDownloadManager.download(context, track) { outcome ->
                                             when (outcome) {
@@ -1298,6 +1312,7 @@ private fun ConnectBody(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun YandexTrackRow(
     track: YandexMusicClient.Track,
@@ -1305,6 +1320,7 @@ private fun YandexTrackRow(
     isDownloaded: Boolean,
     inputBg: Color,
     onPlay: () -> Unit = {},
+    onRadio: () -> Unit = {},
     onDownload: () -> Unit,
     onCancel: () -> Unit = {},
 ) {
@@ -1316,7 +1332,12 @@ private fun YandexTrackRow(
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
             .background(inputBg)
-            .liquidClickable(enabled = track.available) { onPlay() }
+            // Тап — играть; долгое нажатие — радио по этому треку (станция ротора).
+            .combinedClickable(
+                enabled = track.available,
+                onClick = { onPlay() },
+                onLongClick = { onRadio() }
+            )
             .padding(10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
