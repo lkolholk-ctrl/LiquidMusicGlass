@@ -282,10 +282,17 @@ class AudioService : MediaSessionService() {
             val isExpiredUrl = error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS
                 && error.message?.contains("403") == true
 
-            if (isExpiredUrl && currentTrackId != null) {
-                // Не каждый 403 — протухшая подпись: source_not_allowed/региональный
-                // 403 вернётся снова с тем же источником. Раньше re-resolve шёл в обход
-                // счётчика и зацикливался. Ограничиваем число пере-резолвов на трек.
+            // Y-трек (ym_…): прямые CDN-ссылки Яндекса короткоживущие и не всегда
+            // резюмируются, а рвутся не только 403-м (таймаут, обрыв, 410…). Обычный
+            // soft-retry делает prepare(), который берёт ТУ ЖЕ протухшую ссылку из
+            // 60-сек кэша → трек «сам» встаёт и уходит из медиасессии. Поэтому ЛЮБУЮ
+            // ошибку Y-трека лечим форсированным пере-резолвом (сброс кэша + свежая
+            // ссылка + продолжение с той же позиции).
+            val isYandex = currentTrackId?.startsWith("ym_") == true
+
+            if ((isExpiredUrl || isYandex) && currentTrackId != null) {
+                // Ограничиваем число пере-резолвов на трек, чтобы не зациклиться
+                // на действительно недоступном треке.
                 if (currentTrackId != lastErrorTrackId) {
                     lastErrorTrackId = currentTrackId
                     errorRetryCount = 0
