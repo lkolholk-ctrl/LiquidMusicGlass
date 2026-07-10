@@ -18,6 +18,8 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.launch
 
 /**
@@ -71,6 +73,16 @@ class HomeViewModel : ViewModel() {
 
     private val _topGenres = MutableStateFlow<List<String>>(emptyList())
     val topGenres: StateFlow<List<String>> = _topGenres
+
+    /**
+     * Отменить все текущие загрузки этой вью-модели. Зовётся из DisposableEffect
+     * хост-экрана при уходе с вкладки: `remember { HomeViewModel() }` оставлял
+     * viewModelScope работать (его никто не clear()-ит), и быстрое переключение
+     * вкладок копило параллельные загрузки/поиски → перегрузка main → ANR (Xiaomi).
+     */
+    fun cancelLoads() {
+        viewModelScope.coroutineContext[Job]?.cancelChildren()
+    }
 
     /**
      * Load home content — offline first.

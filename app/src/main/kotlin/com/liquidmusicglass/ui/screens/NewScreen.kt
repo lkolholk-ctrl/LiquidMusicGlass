@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -68,6 +69,7 @@ fun NewScreen(
 ) {
     val context = LocalContext.current
     val viewModel = remember { HomeViewModel() }
+    DisposableEffect(viewModel) { onDispose { viewModel.cancelLoads() } }
     LaunchedEffect(Unit) { viewModel.loadHomeContent() }
 
     val recentlyPlayed by PlayerController.recentlyPlayed.collectAsState()

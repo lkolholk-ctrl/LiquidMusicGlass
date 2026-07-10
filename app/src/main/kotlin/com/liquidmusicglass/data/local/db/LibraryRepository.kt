@@ -3,6 +3,7 @@ package com.liquidmusicglass.data.local.db
 import android.content.Context
 import android.net.Uri
 import com.liquidmusicglass.api.icm.IcmApi
+import com.liquidmusicglass.api.icm.IcmAuthRepository
 import com.liquidmusicglass.api.icm.IcmLibraryTrack
 import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.engine.PlayerController
@@ -66,6 +67,12 @@ class LibraryRepository private constructor(context: Context) {
      * Call on app launch or when user pulls to refresh.
      */
     suspend fun syncWithCloud(): Result<Unit> = withContext(Dispatchers.IO) {
+        // Без залинкованного partner_user_id облачной библиотеки нет: /library/likes
+        // вернёт 401 partner_user_required. В ANR-логе Xiaomi это был повторяющийся
+        // 401-шум на старте — не дёргаем сеть вообще, пока юзер не залинкован.
+        if (IcmAuthRepository.partnerUserId.value.isNullOrBlank()) {
+            return@withContext Result.success(Unit)
+        }
         try {
             // 1. Pull cloud likes
             val cloudLikes = mutableListOf<IcmLibraryTrack>()
