@@ -654,12 +654,20 @@ fun FullPlayer(
                         }
                     }
                     // 👍 More like this — wave/feedback (more_track + more_artist).
+                    val thumbUpBounce = remember { Animatable(1f) }
                     Box(
                         modifier = Modifier
                             .size(44.dp)
                             .pressScale {
                                 currentTrackObj?.let { track ->
                                     waveFeedback = true
+                                    scope.launch {
+                                        thumbUpBounce.snapTo(1.35f)
+                                        thumbUpBounce.animateTo(
+                                            targetValue = 1f,
+                                            animationSpec = spring(dampingRatio = 0.30f, stiffness = 480f)
+                                        )
+                                    }
                                     scope.launch {
                                         WaveSignalQueue.sendFeedback("more_track", track.id)
                                         track.artists.firstOrNull()?.id?.let {
@@ -680,16 +688,29 @@ fun FullPlayer(
                             imageVector = Icons.Rounded.ThumbUp,
                             contentDescription = "More like this",
                             tint = thumbUpTint,
-                            modifier = Modifier.size(24.dp)
+                            modifier = Modifier
+                                .size(24.dp)
+                                .graphicsLayer {
+                                    scaleX = thumbUpBounce.value
+                                    scaleY = thumbUpBounce.value
+                                }
                         )
                     }
                     // 👎 Less like this — wave/feedback (less_track + less_artist).
+                    val thumbDownBounce = remember { Animatable(1f) }
                     Box(
                         modifier = Modifier
                             .size(44.dp)
                             .pressScale {
                                 currentTrackObj?.let { track ->
                                     waveFeedback = false
+                                    scope.launch {
+                                        thumbDownBounce.snapTo(1.35f)
+                                        thumbDownBounce.animateTo(
+                                            targetValue = 1f,
+                                            animationSpec = spring(dampingRatio = 0.30f, stiffness = 480f)
+                                        )
+                                    }
                                     scope.launch {
                                         WaveSignalQueue.sendFeedback("less_track", track.id)
                                         track.artists.firstOrNull()?.id?.let {
@@ -710,7 +731,12 @@ fun FullPlayer(
                             imageVector = Icons.Rounded.ThumbDown,
                             contentDescription = "Less like this",
                             tint = thumbDownTint,
-                            modifier = Modifier.size(24.dp)
+                            modifier = Modifier
+                                .size(24.dp)
+                                .graphicsLayer {
+                                    scaleX = thumbDownBounce.value
+                                    scaleY = thumbDownBounce.value
+                                }
                         )
                     }
                     Box(

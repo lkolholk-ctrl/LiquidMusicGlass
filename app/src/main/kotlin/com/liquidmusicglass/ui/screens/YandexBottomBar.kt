@@ -1,6 +1,8 @@
 package com.liquidmusicglass.ui.screens
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -16,6 +18,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import com.liquidmusicglass.ui.glass.liquidClickable
@@ -94,6 +97,13 @@ private fun YandexBarTab(
         animationSpec = tween(180),
         label = "yandexTabColor"
     )
+    // Активная секция пружинисто «подпрыгивает» при выборе (низкий damping →
+    // overshoot), как и в основном баре приложения.
+    val iconScale by animateFloatAsState(
+        targetValue = if (selected) 1.15f else 1f,
+        animationSpec = spring(dampingRatio = 0.42f, stiffness = 520f),
+        label = "yandexTabScale"
+    )
     Box(
         modifier = modifier
             .height(60.dp)
@@ -104,7 +114,9 @@ private fun YandexBarTab(
         Icon(
             imageVector = item.icon,
             contentDescription = item.label,
-            modifier = Modifier.size(30.dp),
+            modifier = Modifier
+                .size(30.dp)
+                .graphicsLayer { scaleX = iconScale; scaleY = iconScale },
             tint = color
         )
     }
