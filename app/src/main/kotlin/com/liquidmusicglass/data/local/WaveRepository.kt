@@ -442,6 +442,20 @@ class WaveRepository(context: Context) {
 
             val response = responseResult.getOrNull()
 
+            // Пул сессии выжат (сервер авто-исключает уже отданное → рано или
+            // поздно "empty"). Волна ДОЛЖНА быть бесконечной: зацикливаем пул.
+            if (response?.status == "empty" ||
+                (response?.status == "ok" && response.tracks.isEmpty())
+            ) {
+                return loopPersonalWavePool(
+                    requestLimit = requestLimit,
+                    negativeArtistKeys = negativeArtistKeys,
+                    apiExcludeArtistIds = apiExcludeArtistIds,
+                    targetCount = targetCount,
+                    fallbackState = sessionState
+                )
+            }
+
             if (response?.status != "ok" || response.tracks.isEmpty()) {
                 Log.w(TAG, "Personal wave batch status: ${response?.status ?: "null"}")
                 return emptyList()
@@ -458,6 +472,51 @@ class WaveRepository(context: Context) {
             Log.w(TAG, "Personal wave batch failed, falling back to sequential: ${e.message}")
             emptyList()
         }
+    }
+
+    /**
+     * Пул личной волны кончился (status "empty") — зацикливаем, чтобы волна
+     * была бесконечной:
+     * 1) свежая сессия с МАЛЕНЬКИМ окном exclude (сброс накопленных исключений
+     *    возвращает треки в оборот; клиентский фильтр не даёт повтора подряд);
+     * 2) аварийно — one-shot POST /wave/next без сессии с минимальным exclude.
+     */
+    private suspend fun loopPersonalWavePool(
+        requestLimit: Int,
+        negativeArtistKeys: List<String>,
+        apiExcludeArtistIds: List<String>,
+        targetCount: Int,
+        fallbackState: WaveSessionState
+    ): List<Track> {
+        Log.w(TAG, "Personal wave pool drained — looping with a fresh session")
+        val recentWindow = getRecentTrackIdsSafely(30)
+        val loopedBase = preparePersonalWaveState(
+            resetSession = true,
+            excludeIds = emptySet(),
+            recentIds = recentWindow,
+            negativeArtistKeys = negativeArtistKeys
+        )
+        val looped = ensurePersonalWaveSession(loopedBase.withSessionId(null), forceNew = true)
+        if (looped != null) {
+            val retry = requestPersonalSessionBatch(looped, requestLimit, apiExcludeArtistIds).getOrNull()
+            if (retry?.status == "ok" && retry.tracks.isNotEmpty()) {
+                return acceptPersonalWaveTracks(
+                    retry.tracks, looped, retry.sessionId, targetCount, "Personal wave loop"
+                )
+            }
+        }
+        val oneShot = IcmWaveRepository.nextBatch(
+            limit = requestLimit,
+            diversity = PERSONAL_WAVE_DIVERSITY,
+            excludeTrackIds = recentWindow.takeLast(30),
+            excludeArtistIds = apiExcludeArtistIds.take(50)
+        ).getOrNull()
+        if (oneShot?.status == "ok" && oneShot.tracks.isNotEmpty()) {
+            return acceptPersonalWaveTracks(
+                oneShot.tracks, looped ?: fallbackState, oneShot.sessionId, targetCount, "Personal wave one-shot loop"
+            )
+        }
+        return emptyList()
     }
 
     /**

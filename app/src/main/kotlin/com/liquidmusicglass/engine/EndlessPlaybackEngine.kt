@@ -161,7 +161,7 @@ class EndlessPlaybackEngine(
                     if (isGlobal && refillCtx?.type == RefillContext.Type.MOOD) {
                         val mood = refillCtx.id ?: refillCtx.name
                         if (!mood.isNullOrBlank()) {
-                            return@withContext waveRepo.buildWaveModeQueue(
+                            val moodTracks = waveRepo.buildWaveModeQueue(
                                 mode = WaveMode.Mood(
                                     mood = mood,
                                     displayName = refillCtx.name,
@@ -171,13 +171,18 @@ class EndlessPlaybackEngine(
                                 count = REFILL_BATCH_SIZE,
                                 exclude = queueIds
                             )
+                            // Пул mood-пула кончился → не останавливаемся, продолжаем
+                            // личной волной (бесконечность важнее строгого настроения).
+                            return@withContext moodTracks.ifEmpty {
+                                waveRepo.buildWaveModeQueue(WaveMode.Personal(), REFILL_BATCH_SIZE, queueIds)
+                            }
                         }
                     }
 
                     if (isGlobal && refillCtx?.type == RefillContext.Type.GENRE) {
                         val genre = refillCtx.genre ?: refillCtx.id ?: refillCtx.name
                         if (!genre.isNullOrBlank()) {
-                            return@withContext waveRepo.buildWaveModeQueue(
+                            val genreTracks = waveRepo.buildWaveModeQueue(
                                 mode = WaveMode.Genre(
                                     genre = genre,
                                     displayName = refillCtx.name,
@@ -187,6 +192,9 @@ class EndlessPlaybackEngine(
                                 count = REFILL_BATCH_SIZE,
                                 exclude = queueIds
                             )
+                            return@withContext genreTracks.ifEmpty {
+                                waveRepo.buildWaveModeQueue(WaveMode.Personal(), REFILL_BATCH_SIZE, queueIds)
+                            }
                         }
                     }
 
@@ -251,12 +259,13 @@ class EndlessPlaybackEngine(
                             )
                         }
                     }
-                    // Станция пересохла (похожие на seed кончились) → ДРЕЙФ,
-                    // как у Яндекса: строим станцию вокруг последнего трека
-                    // очереди (похожие-на-похожие — пул расширяется транзитивно,
-                    // «подобных очень много»). Seed в контексте обновляем, чтобы
-                    // следующие рефиллы не молотили сухую станцию.
-                    if (tracks.isEmpty() && seed != null && !isStrictTrackStation) {
+                    // Станция реально пересохла (пусто ДАЖЕ после relaxed-retry) →
+                    // ДРЕЙФ: станция вокруг последнего трека очереди (похожие-на-
+                    // похожие, пул расширяется транзитивно). Работает и для строгой
+                    // станции по треку — она обязана быть бесконечной: во время
+                    // нормальной работы сюда не заходим (tracks непусты, seed держится),
+                    // а на сухом пуле дрейфуем на соседний трек и ре-якоримся на нём.
+                    if (tracks.isEmpty() && seed != null) {
                         val driftSeed = queueIds.lastOrNull()?.takeIf { it != seed }
                         if (driftSeed != null) {
                             android.util.Log.w("EndlessEngine", "Station dried up (seed=$seed) — drifting to seed=$driftSeed")
@@ -272,8 +281,8 @@ class EndlessPlaybackEngine(
                         }
                     }
                     // Дрейфовать некуда/нечем → личная волна: музыка не должна
-                    // останавливаться и идти по кругу.
-                    if (tracks.isEmpty() && seed != null && !isStrictTrackStation) {
+                    // останавливаться. Терминальный рубеж для ЛЮБОЙ станции.
+                    if (tracks.isEmpty() && seed != null) {
                         android.util.Log.w("EndlessEngine", "Drift dried up too — falling back to personal wave")
                         tracks = waveRepo.buildWaveQueue(
                             count = REFILL_BATCH_SIZE,
