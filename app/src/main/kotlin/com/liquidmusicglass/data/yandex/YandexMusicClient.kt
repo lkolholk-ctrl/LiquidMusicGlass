@@ -152,6 +152,31 @@ class YandexMusicClient(
     /** Пачка треков ротора (волны): batchId нужен для фидбека обучения. */
     data class StationBatch(val batchId: String?, val tracks: List<Track>)
 
+    /** Готовая станция ротора (жанр/настроение/активность). [id] = `type:tag`. */
+    data class Station(val id: String, val name: String, val bgColor: String?)
+
+    /** Каталог станций ротора: GET /rotor/stations/list. */
+    fun rotorStations(): List<Station> {
+        val root = getJson("$API/rotor/stations/list")
+        val arr = root.optJSONArray("result") ?: return emptyList()
+        val out = ArrayList<Station>(arr.length())
+        for (i in 0 until arr.length()) {
+            val st = arr.optJSONObject(i)?.optJSONObject("station") ?: continue
+            val idObj = st.optJSONObject("id") ?: continue
+            val type = idObj.optString("type")
+            val tag = idObj.optString("tag")
+            if (type.isBlank() || tag.isBlank()) continue
+            // Личную волну не дублируем — она отдельной кнопкой.
+            if (type == "user" && tag == "onyourwave") continue
+            out += Station(
+                id = "$type:$tag",
+                name = st.optString("name").ifBlank { tag },
+                bgColor = st.optJSONObject("icon")?.optString("backgroundColor")?.takeIf { it.isNotBlank() },
+            )
+        }
+        return out
+    }
+
     /**
      * Пачка треков станции ротора («Моя волна» = `user:onyourwave`).
      * [queue] — id последнего трека очереди: продолжение с учётом контекста.

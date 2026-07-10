@@ -245,6 +245,8 @@ fun YandexMusicScreen(onBack: () -> Unit) {
         when (section) {
             YandexSection.LIKED -> loadLiked()
             YandexSection.PLAYLISTS -> loadPlaylists()
+            YandexSection.WAVE -> loadStations()
+            else -> Unit
         }
     }
 
@@ -338,6 +340,20 @@ fun YandexMusicScreen(onBack: () -> Unit) {
     fun startTrackRadio(track: YandexMusicClient.Track) {
         val station = com.liquidmusicglass.data.yandex.YandexWaveEngine.trackStation(track.bareTrackId)
         startStation(station) { /* тихо: радио по треку — вторичное действие */ }
+    }
+
+    // ── Каталог станций ротора (жанр/настроение) ──
+    var stations by remember { mutableStateOf<List<YandexMusicClient.Station>>(emptyList()) }
+    fun loadStations() {
+        if (stations.isNotEmpty()) return
+        scope.launch {
+            val list = withContext(Dispatchers.IO) {
+                runCatching {
+                    YandexAuthRepository.clientOrNull()?.rotorStations() ?: emptyList()
+                }.getOrDefault(emptyList())
+            }
+            stations = list
+        }
     }
 
     fun doDisconnect() {
@@ -456,8 +472,10 @@ fun YandexMusicScreen(onBack: () -> Unit) {
                             active = yWaveActive,
                             starting = waveStarting,
                             error = waveError,
+                            stations = stations,
                             lc = lc,
-                            onStart = { startYWave() }
+                            onStart = { startYWave() },
+                            onStation = { startStation(it.id) { e -> waveError = e } }
                         )
                     }
                     YandexSection.SEARCH -> {
@@ -877,65 +895,125 @@ private fun YandexWaveSection(
     active: Boolean,
     starting: Boolean,
     error: String?,
+    stations: List<YandexMusicClient.Station>,
     lc: com.liquidmusicglass.ui.theme.LiquidColors,
     onStart: () -> Unit,
+    onStation: (YandexMusicClient.Station) -> Unit,
 ) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 24.dp, vertical = 40.dp),
-        contentAlignment = Alignment.Center
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(
-                imageVector = com.liquidmusicglass.ui.icons.LiquidGlyphs.Equalizer,
-                contentDescription = null,
-                tint = YandexYellow.copy(alpha = if (active) 1f else 0.7f),
-                modifier = Modifier.size(48.dp)
-            )
-            Spacer(Modifier.height(14.dp))
-            Text(
-                "My Wave",
-                color = lc.textPrimary,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                if (active) "Playing — learns from your skips and full listens"
-                else "Endless personal station from your account",
-                color = lc.textSecondary,
-                fontSize = 13.sp
-            )
-            if (error != null) {
-                Spacer(Modifier.height(10.dp))
-                Text(error, color = Color(0xFFFF453A), fontSize = 12.sp)
-            }
-            Spacer(Modifier.height(20.dp))
-            Box(
+        // Герой: «Моя волна»
+        item {
+            Column(
                 modifier = Modifier
-                    .height(48.dp)
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(if (!starting) YandexYellow else YandexYellow.copy(alpha = 0.4f))
-                    .liquidClickable(enabled = !starting, pressedScale = LiquidMotion.PressButton) {
-                        onStart()
-                    }
-                    .padding(horizontal = 28.dp),
-                contentAlignment = Alignment.Center
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(YandexYellow.copy(alpha = 0.12f))
+                    .padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                if (starting) {
-                    CircularProgressIndicator(Modifier.size(22.dp), color = Color.Black, strokeWidth = 2.dp)
-                } else {
-                    Text(
-                        if (active) "Restart wave" else "Start My Wave",
-                        color = Color.Black,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 15.sp
-                    )
+                Icon(
+                    imageVector = com.liquidmusicglass.ui.icons.LiquidGlyphs.Equalizer,
+                    contentDescription = null,
+                    tint = YandexYellow.copy(alpha = if (active) 1f else 0.8f),
+                    modifier = Modifier.size(40.dp)
+                )
+                Spacer(Modifier.height(12.dp))
+                Text("My Wave", color = lc.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    if (active) "Playing — learns from your skips and full listens"
+                    else "Endless personal station from your account",
+                    color = lc.textSecondary,
+                    fontSize = 12.sp
+                )
+                if (error != null) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(error, color = Color(0xFFFF453A), fontSize = 12.sp)
+                }
+                Spacer(Modifier.height(16.dp))
+                Box(
+                    modifier = Modifier
+                        .height(46.dp)
+                        .clip(RoundedCornerShape(23.dp))
+                        .background(if (!starting) YandexYellow else YandexYellow.copy(alpha = 0.4f))
+                        .liquidClickable(enabled = !starting, pressedScale = LiquidMotion.PressButton) { onStart() }
+                        .padding(horizontal = 28.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (starting) {
+                        CircularProgressIndicator(Modifier.size(22.dp), color = Color.Black, strokeWidth = 2.dp)
+                    } else {
+                        Text(
+                            if (active) "Restart wave" else "Start My Wave",
+                            color = Color.Black,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 15.sp
+                        )
+                    }
                 }
             }
         }
+
+        if (stations.isNotEmpty()) {
+            item {
+                Text(
+                    "Stations",
+                    color = lc.textSecondary,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(start = 4.dp, top = 6.dp)
+                )
+            }
+            items(stations, key = { it.id }) { st ->
+                StationRow(station = st, lc = lc, onClick = { onStation(st) })
+            }
+        }
     }
+}
+
+@Composable
+private fun StationRow(
+    station: YandexMusicClient.Station,
+    lc: com.liquidmusicglass.ui.theme.LiquidColors,
+    onClick: () -> Unit,
+) {
+    val accent = remember(station.bgColor) { parseHexColor(station.bgColor) ?: YandexYellow }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(accent.copy(alpha = 0.16f))
+            .liquidClickable(pressedScale = LiquidMotion.PressCard) { onClick() }
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(10.dp)
+                .clip(CircleShape)
+                .background(accent)
+        )
+        Spacer(Modifier.width(12.dp))
+        Text(
+            station.name,
+            color = lc.textPrimary,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+/** "#rrggbb" → Compose Color, или null. */
+private fun parseHexColor(hex: String?): Color? {
+    val s = hex?.trim()?.removePrefix("#") ?: return null
+    if (s.length != 6) return null
+    return runCatching { Color(("ff$s").toLong(16)) }.getOrNull()
 }
 
 /** Секция «Аккаунт»: имя, статус Плюса, кнопка выхода. */
