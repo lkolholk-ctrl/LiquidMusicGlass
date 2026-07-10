@@ -37,6 +37,7 @@ object YandexAuthRepository {
     private const val KEY_LOGIN = "account_login"
     private const val KEY_DISPLAY = "account_display_name"
     private const val KEY_PLUS = "account_has_plus"
+    private const val KEY_QUALITY = "stream_quality"
 
     private var prefs: SharedPreferences? = null
     private var appContext: Context? = null
@@ -52,6 +53,21 @@ object YandexAuthRepository {
     /** Активная подписка Яндекс Плюс — скачивание полных треков без неё не работает. */
     val hasPlus: StateFlow<Boolean> = _hasPlus.asStateFlow()
 
+    private val _quality = MutableStateFlow(YandexQuality.HIGH)
+    /** Выбранное качество стрима/скачивания (персистентно). */
+    val quality: StateFlow<YandexQuality> = _quality.asStateFlow()
+
+    fun setQuality(q: YandexQuality) {
+        _quality.value = q
+        prefs?.edit()?.putString(KEY_QUALITY, q.name)?.apply()
+    }
+
+    /** Эффективное качество: LOSSLESS доступен только с Плюсом, иначе HIGH. */
+    fun effectiveQuality(): YandexQuality {
+        val q = _quality.value
+        return if (q == YandexQuality.LOSSLESS && !_hasPlus.value) YandexQuality.HIGH else q
+    }
+
     fun init(context: Context) {
         appContext = context.applicationContext
         prefs = openSecurePrefs(context.applicationContext)
@@ -65,6 +81,9 @@ object YandexAuthRepository {
         _isConnected.value = has
         _displayLabel.value = if (has) readLabel() else null
         _hasPlus.value = has && prefs?.getBoolean(KEY_PLUS, false) == true
+        _quality.value = prefs?.getString(KEY_QUALITY, null)
+            ?.let { runCatching { YandexQuality.valueOf(it) }.getOrNull() }
+            ?: YandexQuality.HIGH
         // Только факт наличия — без значения токена
         Log.i(TAG, if (has) "session restored (encrypted)" else "no saved session")
     }

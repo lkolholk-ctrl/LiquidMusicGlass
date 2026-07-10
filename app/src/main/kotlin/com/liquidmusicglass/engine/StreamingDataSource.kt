@@ -111,9 +111,11 @@ class StreamingDataSource private constructor(
             // Check downloaded offline files first (regardless of premium status)
             val offlineMp3 = File(context.filesDir, "downloads/$trackId.mp3")
             val offlineM4a = File(context.filesDir, "downloads/$trackId.m4a")
+            val offlineFlac = File(context.filesDir, "downloads/$trackId.flac")
             when {
                 offlineMp3.exists() && offlineMp3.length() > 0 -> return Uri.fromFile(offlineMp3)
                 offlineM4a.exists() && offlineM4a.length() > 0 -> return Uri.fromFile(offlineM4a)
+                offlineFlac.exists() && offlineFlac.length() > 0 -> return Uri.fromFile(offlineFlac)
             }
 
             val cachedUri = PlayerController.getValidCachedUri(trackId)

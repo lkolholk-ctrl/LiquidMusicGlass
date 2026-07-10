@@ -87,6 +87,7 @@ fun YandexMusicScreen(onBack: () -> Unit) {
     val connected by YandexAuthRepository.isConnected.collectAsState()
     val label by YandexAuthRepository.displayLabel.collectAsState()
     val hasPlus by YandexAuthRepository.hasPlus.collectAsState()
+    val quality by YandexAuthRepository.quality.collectAsState()
     val dlProgress by YandexDownloadManager.progress.collectAsState()
     // Активная секция задаётся нижним баром ЯМ (его рисует AppRoot).
     val section by YandexSection.current.collectAsState()
@@ -839,8 +840,10 @@ fun YandexMusicScreen(onBack: () -> Unit) {
                         AccountSection(
                             label = label,
                             hasPlus = hasPlus,
+                            quality = quality,
                             inputBg = inputBg,
                             lc = lc,
+                            onQuality = { YandexAuthRepository.setQuality(it) },
                             onDisconnect = { doDisconnect() }
                         )
                     }
@@ -926,8 +929,10 @@ private fun YandexWaveSection(
 private fun AccountSection(
     label: String?,
     hasPlus: Boolean,
+    quality: com.liquidmusicglass.data.yandex.YandexQuality,
     inputBg: Color,
     lc: com.liquidmusicglass.ui.theme.LiquidColors,
+    onQuality: (com.liquidmusicglass.data.yandex.YandexQuality) -> Unit,
     onDisconnect: () -> Unit,
 ) {
     Column(
@@ -957,7 +962,41 @@ private fun AccountSection(
                 fontSize = 13.sp
             )
         }
+
         Spacer(Modifier.height(16.dp))
+
+        // Качество стрима и скачивания
+        Text(
+            "Quality",
+            color = lc.textSecondary,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+        )
+        Row {
+            QualityChip("Normal", "192 kbps", quality == com.liquidmusicglass.data.yandex.YandexQuality.NORMAL, inputBg, lc, Modifier.weight(1f)) {
+                onQuality(com.liquidmusicglass.data.yandex.YandexQuality.NORMAL)
+            }
+            Spacer(Modifier.width(8.dp))
+            QualityChip("High", "320 kbps", quality == com.liquidmusicglass.data.yandex.YandexQuality.HIGH, inputBg, lc, Modifier.weight(1f)) {
+                onQuality(com.liquidmusicglass.data.yandex.YandexQuality.HIGH)
+            }
+            Spacer(Modifier.width(8.dp))
+            QualityChip("Lossless", "FLAC", quality == com.liquidmusicglass.data.yandex.YandexQuality.LOSSLESS, inputBg, lc, Modifier.weight(1f)) {
+                onQuality(com.liquidmusicglass.data.yandex.YandexQuality.LOSSLESS)
+            }
+        }
+        if (quality == com.liquidmusicglass.data.yandex.YandexQuality.LOSSLESS && !hasPlus) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "FLAC needs Yandex Plus — High (320) is used without it.",
+                color = lc.textTertiary,
+                fontSize = 11.sp,
+                modifier = Modifier.padding(start = 4.dp)
+            )
+        }
+
+        Spacer(Modifier.height(20.dp))
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -969,6 +1008,38 @@ private fun AccountSection(
         ) {
             Text("Disconnect", color = Color(0xFFFF453A), fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
         }
+    }
+}
+
+@Composable
+private fun QualityChip(
+    title: String,
+    subtitle: String,
+    selected: Boolean,
+    inputBg: Color,
+    lc: com.liquidmusicglass.ui.theme.LiquidColors,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (selected) YandexYellow else inputBg)
+            .liquidClickable(pressedScale = LiquidMotion.PressButton) { onClick() }
+            .padding(vertical = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            title,
+            color = if (selected) Color.Black else lc.textPrimary,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+        Text(
+            subtitle,
+            color = if (selected) Color.Black.copy(alpha = 0.7f) else lc.textTertiary,
+            fontSize = 11.sp
+        )
     }
 }
 

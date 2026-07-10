@@ -115,6 +115,7 @@ object YandexDownloadManager {
             client.downloadTrackToFileStreaming(
                 trackId = track.bareTrackId,
                 dest = tmp,
+                quality = YandexAuthRepository.effectiveQuality(),
                 onProgress = { p -> setProgress(sid, 0.02f + p * 0.88f) },
                 shouldAbort = { cancelled.get() },
             )
@@ -124,10 +125,15 @@ object YandexDownloadManager {
         }
 
         val ext = when {
+            info.codec.equals("flac", ignoreCase = true) -> ".flac"
             info.codec.equals("aac", ignoreCase = true) -> ".m4a"
             else -> ".mp3"
         }
-        val quality = "${info.bitrateInKbps}kbps"
+        val quality = if (info.codec.equals("flac", ignoreCase = true)) {
+            "flac"
+        } else {
+            "${info.bitrateInKbps}kbps"
+        }
 
         val audioFile = File(dir, "$sid$ext")
         try {

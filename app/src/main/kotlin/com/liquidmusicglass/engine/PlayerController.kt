@@ -1087,8 +1087,9 @@ object PlayerController {
     private fun resolveYandexStreamUrl(trackId: String): Uri? {
         val client = com.liquidmusicglass.data.yandex.YandexAuthRepository.clientOrNull() ?: return null
         val bare = trackId.removePrefix(com.liquidmusicglass.data.yandex.YandexDownloadManager.ID_PREFIX)
+        val quality = com.liquidmusicglass.data.yandex.YandexAuthRepository.effectiveQuality()
         val direct = try {
-            client.getDownloadInfo(bare).firstOrNull()?.directLink
+            client.getStreamInfo(bare, quality)?.directLink
         } catch (e: Exception) {
             android.util.Log.w("PlayerController", "ym stream resolve failed (${e.javaClass.simpleName})")
             null

@@ -257,7 +257,8 @@ class YandexMusicClient(
 
     /**
      * Python: `tracks_download_info(id, get_direct_links=True)`.
-     * Лучший битрейт — первым.
+     * Лучший битрейт — первым. Это lossy-путь (mp3/aac); FLAC — отдельно
+     * через [getLosslessInfo].
      */
     fun getDownloadInfo(trackId: String): List<DownloadInfo> {
         val bare = trackId.substringBefore(":")
@@ -279,6 +280,63 @@ class YandexMusicClient(
     }
 
     /**
+     * Прямая ссылка выбранного качества:
+     *  - LOSSLESS → FLAC через /get-file-info (при неудаче — best lossy);
+     *  - HIGH     → лучший битрейт из download-info (mp3 320 / aac 256);
+     *  - NORMAL   → mp3 ближе к 192 (экономия трафика/места).
+     * FLAC требует активной подписки Плюс — сервер иначе не отдаёт lossless.
+     */
+    fun getStreamInfo(trackId: String, quality: YandexQuality): DownloadInfo? {
+        if (quality == YandexQuality.LOSSLESS) {
+            getLosslessInfo(trackId)?.let { return it }
+            // Нет lossless (нет Плюса / трек без FLAC) — деградируем в best lossy.
+        }
+        val infos = getDownloadInfo(trackId)
+        return when (quality) {
+            YandexQuality.NORMAL ->
+                infos.filter { it.codec.equals("mp3", ignoreCase = true) }
+                    .minByOrNull { kotlin.math.abs(it.bitrateInKbps - 192) }
+                    ?: infos.firstOrNull()
+            else -> infos.firstOrNull() // HIGH или LOSSLESS-фолбэк = лучший доступный
+        }
+    }
+
+    /**
+     * FLAC lossless: /get-file-info с HMAC-подписью параметров.
+     *
+     * Схема (реверс официального мобильного клиента, как md5-соль у lossy):
+     * sign = base64(HMAC_SHA256(SIGN_SECRET, ts+trackId+quality+codecs_без_запятых+transports))
+     * без последнего символа. transports=raw → в ответе прямая (не зашифрованная)
+     * ссылка на файл. Возвращает null, если lossless недоступен.
+     */
+    private fun getLosslessInfo(trackId: String): DownloadInfo? {
+        val bare = trackId.substringBefore(":")
+        val ts = System.currentTimeMillis() / 1000
+        val quality = "lossless"
+        val codecs = "flac,aac,he-aac,mp3,aac-preview,mp3-preview"
+        val transports = "raw"
+        val message = "$ts$bare$quality${codecs.replace(",", "")}$transports"
+        val sign = hmacSha256Base64(SIGN_SECRET, message).dropLast(1)
+        val url = "$API/get-file-info?ts=$ts&trackId=${urlEncode(bare)}" +
+            "&quality=$quality&codecs=${urlEncode(codecs)}" +
+            "&transports=$transports&sign=${urlEncode(sign)}"
+        val di = try {
+            getJson(url).optJSONObject("result")?.optJSONObject("downloadInfo")
+        } catch (_: Exception) {
+            null
+        } ?: return null
+        val direct = di.optString("url").ifBlank {
+            di.optJSONArray("urls")?.optString(0).orEmpty()
+        }
+        if (direct.isBlank()) return null
+        return DownloadInfo(
+            codec = di.optString("codec", "flac"),
+            bitrateInKbps = di.optInt("bitrate", 0),
+            directLink = direct,
+        )
+    }
+
+    /**
      * Скачать трек стримингом сразу в [dest] — без буферизации всего файла в
      * памяти, с реальным прогрессом по байтам. До 5 попыток (как в python-порте
      * `__download_track`). [shouldAbort] проверяется между чанками: отмена
@@ -288,13 +346,14 @@ class YandexMusicClient(
     fun downloadTrackToFileStreaming(
         trackId: String,
         dest: File,
+        quality: YandexQuality = YandexQuality.HIGH,
         onProgress: (Float) -> Unit = {},
         shouldAbort: () -> Boolean = { false },
     ): DownloadInfo {
         var last: Exception? = null
         repeat(5) { attempt ->
             try {
-                val best = getDownloadInfo(trackId).firstOrNull()
+                val best = getStreamInfo(trackId, quality)
                     ?: throw YandexMusicException("No download-info for track $trackId")
                 downloadUrlToFile(best.directLink, dest, onProgress, shouldAbort)
                 return best
@@ -538,6 +597,16 @@ class YandexMusicClient(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
         private const val SALT = "XGRlBW9FXlekgbPrRHuSiA"
+        // Ключ подписи /get-file-info (FLAC). Реверс мобильного клиента —
+        // тот же класс «известной константы», что и SALT для lossy-ссылок.
+        private const val SIGN_SECRET = "kzqU4XhfCaY6B6JTHODeq5"
+
+        private fun hmacSha256Base64(secret: String, message: String): String {
+            val mac = javax.crypto.Mac.getInstance("HmacSHA256")
+            mac.init(javax.crypto.spec.SecretKeySpec(secret.toByteArray(Charsets.UTF_8), "HmacSHA256"))
+            val digest = mac.doFinal(message.toByteArray(Charsets.UTF_8))
+            return java.util.Base64.getEncoder().encodeToString(digest)
+        }
 
         fun defaultHttpClient(): OkHttpClient =
             OkHttpClient.Builder()
@@ -568,6 +637,9 @@ class YandexMusicClient(
         }
     }
 }
+
+/** Пресет качества стрима/скачивания Y. FLAC требует подписки Плюс. */
+enum class YandexQuality { NORMAL, HIGH, LOSSLESS }
 
 open class YandexMusicException(message: String, cause: Throwable? = null) :
     IOException(message, cause)
