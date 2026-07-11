@@ -40,9 +40,6 @@ object IcmRepository {
     // Сбрасываются при новой сессии (логин).
     @Volatile private var preferencesBlocked = false
     @Volatile private var likesBlocked = false
-    // Чтение лайков (GET) всегда работало — ОТДЕЛЬНЫЙ гейт, чтобы сбой ЗАПИСИ не
-    // травил чтение (раньше поле было общее: одна 405 на write рубила и чтение).
-    @Volatile private var likesReadBlocked = false
 
     // Per-track мьютексы лайка: POST /library/likes — TOGGLE (не идемпотентный),
     // а лайк дёргается из двух мест (мгновенный пуш при тапе + пуш pending-inserts
@@ -55,7 +52,6 @@ object IcmRepository {
     fun resetBusinessGates() {
         preferencesBlocked = false
         likesBlocked = false
-        likesReadBlocked = false
     }
 
     /** Default region */
@@ -619,15 +615,19 @@ object IcmRepository {
         limit: Int? = null,
         offset: Int? = null
     ): IcmLibraryLikesResponse? {
-        // Чтение (GET) всегда работало; гейт взводится только на 403 (нет
-        // подписки). 405 здесь недостижим — write-toggle теперь отвечает 200.
-        if (likesReadBlocked) return null
+        // Чтение лайков (GET) НЕ гейтим — это единственный путь подтянуть веб-лайки
+        // (down-sync). Раньше likesReadBlocked, взведённый разовой 403 (напр.
+        // user_not_linked на старте до готовности линка), НАВСЕГДА блокировал
+        // чтение → syncWithCloud падал на шаге 1 (getLibraryLikes==null) → шаг 2
+        // (подтянуть облачные лайки) не выполнялся, и веб-лайки не появлялись,
+        // хотя up-sync (мгновенный пуш при тапе) работал. syncWithCloud и так
+        // гейтит по partnerUserId, а чтение зовётся на дискретных событиях (старт/
+        // открытие Медиатеки/смена сети/ручной рефреш), не в цикле — шторма нет,
+        // поэтому просто пробуем каждый раз.
         val result = api.getLibraryLikes(source, limit, offset)
         result.exceptionOrNull()?.let {
             _lastException = it as? Exception
             _lastError.value = it.message
-            val code = (it as? IcmApiException)?.code
-            if (code == 403) likesReadBlocked = true
         }
         return result.getOrNull()
     }
