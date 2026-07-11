@@ -251,19 +251,23 @@ class HomeViewModel : ViewModel() {
                     // EndlessPlaybackEngine) держит её бесконечной.
                     val fallback = buildGenreFallbackQueue(repo)
                     if (fallback != null) {
-                        val (genre, genreTracks) = fallback
+                        val (genres, genreTracks) = fallback
                         com.liquidmusicglass.api.icm.IcmApiFileLogger.log(
                             "D", "Wave",
-                            "buildWaveQueue: personal empty -> genre fallback '$genre' -> ${genreTracks.size} tracks"
+                            "buildWaveQueue: personal empty -> search genre fallback $genres -> ${genreTracks.size} tracks"
                         )
                         _waveTracks.value = genreTracks
+                        // autoRefillType=SEARCH + seedPool=жанры → EndlessPlaybackEngine
+                        // дозаправляет волну поиском по этим жанрам (см. SEARCH-ветку),
+                        // минуя висящий /wave/genre. Волна остаётся бесконечной.
                         PlayerController.playFromList(
                             context = context,
                             tracks = genreTracks,
                             startIndex = 0,
-                            autoRefillType = "GENRE",
-                            autoRefillId = genre,
-                            autoRefillName = genre
+                            autoRefillType = "SEARCH",
+                            autoRefillId = genres.firstOrNull(),
+                            autoRefillName = genres.firstOrNull(),
+                            seedPool = genres
                         )
                         _isBuildingWave.value = false
                         PlayerController.ensureWaveRefill()
@@ -294,15 +298,16 @@ class HomeViewModel : ViewModel() {
     }
 
     /**
-     * Fallback для пустой персональной волны: перебирает топ-жанры юзера и
-     * возвращает ПЕРВЫЙ жанр, давший треки (вместе с пачкой). Жанр нужен, чтобы
-     * завести GENRE-дозаправку и держать волну бесконечной. getTopGenres сам
-     * отдаёт дефолты (Electronic/Techno…), если истории нет — так что даже у
-     * нового юзера жанровая волна заведётся.
+     * Fallback для пустой персональной волны. Берёт топ-жанры юзера и набирает
+     * очередь ПОИСКОМ (buildGenreSearchQueue), а не через /wave/genre — тот
+     * висит на сервере (12с таймаут, треков нет). Возвращает список жанров (для
+     * SEARCH-дозаправки через seedPool) и стартовую пачку. getTopGenres сам
+     * отдаёт дефолты (Electronic/Techno…), если истории нет — так что волна
+     * заведётся даже у нового юзера.
      */
     private suspend fun buildGenreFallbackQueue(
         repo: WaveRepository
-    ): Pair<String, List<Track>>? {
+    ): Pair<List<String>, List<Track>>? {
         val genres = try {
             repo.getTopGenres(limit = 5)
         } catch (e: CancellationException) {
@@ -310,20 +315,18 @@ class HomeViewModel : ViewModel() {
         } catch (_: Exception) {
             emptyList()
         }
-        for (genre in genres) {
-            val tracks = try {
-                repo.buildWaveModeQueue(
-                    mode = WaveMode.Genre(genre = genre, source = "apple", diversity = 0.5),
-                    count = WaveRepository.FAST_START_COUNT
-                )
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Exception) {
-                emptyList()
-            }
-            if (tracks.isNotEmpty()) return genre to tracks
+        if (genres.isEmpty()) return null
+        val tracks = try {
+            repo.buildGenreSearchQueue(
+                genres = genres,
+                count = WaveRepository.WAVE_QUEUE_SIZE
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            emptyList()
         }
-        return null
+        return if (tracks.isNotEmpty()) genres to tracks else null
     }
 
     /**

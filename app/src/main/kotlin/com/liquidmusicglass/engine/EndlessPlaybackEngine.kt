@@ -198,6 +198,22 @@ class EndlessPlaybackEngine(
                         }
                     }
 
+                    // SEARCH-волна: fallback пустой personal-волны. Дозаправка идёт
+                    // ПОИСКОМ по топ-жанрам (seedPool), минуя висящий /wave/genre.
+                    // Ротация жанров + вычитание сыгранного держат её бесконечной.
+                    if (isGlobal && refillCtx?.type == RefillContext.Type.SEARCH) {
+                        val genres = refillCtx.seedPool.ifEmpty {
+                            listOfNotNull(refillCtx.id ?: refillCtx.name)
+                        }
+                        if (genres.isNotEmpty()) {
+                            return@withContext waveRepo.buildGenreSearchQueue(
+                                genres = genres,
+                                count = REFILL_BATCH_SIZE,
+                                exclude = (playedIds + queueIds).toList()
+                            )
+                        }
+                    }
+
                     // Волна: seed из контекста (мудовая/трековая станция) или null
                     // (личная волна). Не-волна: станция по ПОСЛЕДНЕМУ треку
                     // очереди — альбом кончился, продолжаем «по мотивам».

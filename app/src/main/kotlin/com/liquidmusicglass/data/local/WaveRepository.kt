@@ -16,6 +16,7 @@ import com.liquidmusicglass.data.wave.WaveSessionState
 import com.liquidmusicglass.data.wave.negativeWaveCandidate
 import com.liquidmusicglass.data.wave.toWaveCandidate
 import com.liquidmusicglass.engine.Track
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -399,6 +400,67 @@ class WaveRepository(context: Context) {
                 excludeIds = exclude.toSet()
             )
         }
+    }
+
+    /**
+     * Fallback-очередь волны через ПОИСК, а не через волновые эндпоинты.
+     *
+     * Зачем: personal-волна ICM для этого аккаунта пуста (она Apple-only, а
+     * apple-сидов нет — лайки Y/кастомные), а /wave/genre/{genre} ВИСИТ на
+     * сервере (12с callTimeout, тело ответа не приходит). При этом /search
+     * работает стабильно и быстро. Поэтому «жанровую волну» набираем поиском по
+     * топ-жанрам юзера.
+     *
+     * Ротация по жанрам (round-robin) + вычитание exclude на каждой дозаправке
+     * держат выдачу свежей: с 5 жанрами это сотни треков, т.е. волна фактически
+     * бесконечна на сессию. /search кешируется на 60с, так что повтор поиска по
+     * жанру внутри окна бесплатен.
+     */
+    suspend fun buildGenreSearchQueue(
+        genres: List<String>,
+        count: Int,
+        exclude: Collection<String> = emptyList()
+    ): List<Track> = withContext(Dispatchers.IO) {
+        if (genres.isEmpty() || count <= 0) return@withContext emptyList()
+        val excludeSet = exclude.toSet()
+        // Каждый жанр ищем один раз, кандидатов сразу чистим от exclude.
+        val perGenre: Map<String, List<Track>> = genres.associateWith { genre ->
+            val found = try {
+                IcmRepository.searchTracksByGenre(genre, limit = 30)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "Genre search '$genre' failed: ${e.message}")
+                emptyList()
+            }
+            found.filter { it.id.isNotBlank() && it.id !in excludeSet }
+        }
+        // Round-robin по жанрам: [g0[0], g1[0], …, g0[1], g1[1], …] — так в начале
+        // очереди намешаны все топ-жанры, а не только первый.
+        val out = LinkedHashMap<String, Track>()
+        var idx = 0
+        var addedThisPass = true
+        while (out.size < count && addedThisPass) {
+            addedThisPass = false
+            for (genre in genres) {
+                val list = perGenre[genre] ?: continue
+                if (idx < list.size) {
+                    val track = list[idx]
+                    if (!out.containsKey(track.id)) {
+                        out[track.id] = track
+                        addedThisPass = true
+                    }
+                    if (out.size >= count) break
+                }
+            }
+            idx++
+        }
+        val result = out.values.toList()
+        com.liquidmusicglass.api.icm.IcmApiFileLogger.log(
+            "D", "Wave",
+            "buildGenreSearchQueue: genres=$genres exclude=${excludeSet.size} -> ${result.size} tracks"
+        )
+        result
     }
 
     private suspend fun fetchPersonalWaveBatch(
