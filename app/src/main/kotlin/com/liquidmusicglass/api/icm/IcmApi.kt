@@ -34,7 +34,11 @@ object IcmApiFileLogger {
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
 
     fun init(context: Context) {
-        val dir = File(context.getExternalFilesDir(null), "icm_logs")
+        // filesDir (внутреннее, всегда смонтировано), а НЕ getExternalFilesDir:
+        // первый getExternalFilesDir делает binder-IPC в StorageManager + FUSE-
+        // резолв тома, что на Honor/HyperOS холодным стартом висит на потоке. Для
+        // «Copy ICM logs» внутреннего app-private хранилища достаточно.
+        val dir = File(context.filesDir, "icm_logs")
         dir.mkdirs()
         logFile = File(dir, "icm_api.log")
     }

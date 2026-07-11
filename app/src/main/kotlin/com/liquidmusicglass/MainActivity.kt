@@ -67,15 +67,30 @@ class MainActivity : ComponentActivity() {
         // Сетевой колбэк переехал на уровень App (NetworkVitality): живёт весь
         // срок процесса, а не только пока открыта Activity.
 
-        // Initialize ICM API with native key (or BuildConfig fallback)
-        val apiKey = try {
-            IcmKeyProvider.getApiKey(this)
-        } catch (_: Throwable) { "" }.ifBlank { BuildConfig.ICM_API_KEY }
-        if (apiKey.isNotBlank()) {
-            IcmRepository.init(apiKey, IcmAuthRepository.partnerUserId.value)
-            // Restore session token if we have one (survives app updates)
-            IcmAuthRepository.getSessionToken()?.let { token ->
-                IcmRepository.setSessionToken(token)
+        // Инициализация ICM API — в ФОНЕ (главная причина стартового ANR была тут).
+        // IcmKeyProvider.getApiKey() грузит нативную .so (libicmkey) и гоняет
+        // анти-тампер проверку APK — это дорого и раньше висело на главном потоке
+        // ДО setContent. Ключ нужен только сетевому слою, не первому кадру, поэтому
+        // уносим весь блок в IO. Домашний экран грузит данные с ретраями, короткое
+        // окно «репозиторий ещё не готов» переживается.
+        authScope.launch {
+            val apiKey = try {
+                IcmKeyProvider.getApiKey(this@MainActivity)
+            } catch (_: Throwable) { "" }.ifBlank { BuildConfig.ICM_API_KEY }
+            if (apiKey.isNotBlank()) {
+                IcmRepository.init(apiKey, IcmAuthRepository.partnerUserId.value)
+                // Restore session token if we have one (survives app updates)
+                IcmAuthRepository.getSessionToken()?.let { token ->
+                    IcmRepository.setSessionToken(token)
+                }
+                // Стартовые сетевые задачи — опциональны и ограничены по времени:
+                // приложение показывается и работает без них, не вися на сети.
+                if (IcmAuthRepository.isLoggedIn.value) {
+                    kotlinx.coroutines.withTimeoutOrNull(5_000) {
+                        IcmAuthRepository.refreshTokenIfNeeded(apiKey)
+                        IcmAuthRepository.fetchUserData()
+                    }
+                }
             }
         }
 
@@ -84,25 +99,6 @@ class MainActivity : ComponentActivity() {
 
     // Handle notification tap (open large player)
     handleNotificationTap(intent)
-
-    // Refresh profile on app start if user is logged in
-        if (IcmAuthRepository.isLoggedIn.value) {
-            authScope.launch {
-                // Стартовые сетевые задачи — опциональны и ограничены по времени:
-                // приложение показывается и работает без них, не вися на сети.
-                kotlinx.coroutines.withTimeoutOrNull(5_000) {
-                    val apiKey = try {
-                        IcmKeyProvider.getApiKey(this@MainActivity)
-                    } catch (_: Throwable) { "" }.ifBlank { BuildConfig.ICM_API_KEY }
-
-                    if (apiKey.isNotBlank()) {
-                        IcmAuthRepository.refreshTokenIfNeeded(apiKey)
-                    }
-                    // Always refresh profile data on startup
-                    IcmAuthRepository.fetchUserData()
-                }
-            }
-        }
 
         val isSecurityCompromised = mutableStateOf(false)
         val compromiseReason = mutableStateOf("")

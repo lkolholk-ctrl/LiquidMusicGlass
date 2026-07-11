@@ -127,9 +127,16 @@ class App : Application(), ImageLoaderFactory {
 
     override fun onCreate() {
         super.onCreate()
-        CrashHandler.install(this) // Java крэши
+        CrashHandler.install(this) // Java крэши (синхронно и ПЕРВЫМ — Fishnet ниже
+        // подшивается к уже установленному дефолтному хендлеру)
         val logDir = File(filesDir, "crash_logs").apply { mkdirs() }
-        Fishnet.init(this, logDir.absolutePath) // Native/ANR крэши
+        // Fishnet.init грузит первую в процессе нативную .so (libfishnet), делает
+        // синхронный getPackageInfo(SIGNING_CERTIFICATES) binder-IPC к холодному
+        // system_server и ставит sigaction/вачдог — на главном потоке это часть
+        // стартового ANR-бюджета. Уносим в отдельный поток: хендлеры встают через
+        // пару мс, а критический путь первого кадра свободен.
+        Thread { Fishnet.init(this@App, logDir.absolutePath) } // Native/ANR крэши
+            .apply { name = "fishnet-init"; start() }
 
         // Ловушка зависаний UI: Fishnet-дампы ANR приходят БЕЗ стека main —
         // вачдог сам пишет полный Java-дамп в crash_logs/ui_freeze_*.txt,
