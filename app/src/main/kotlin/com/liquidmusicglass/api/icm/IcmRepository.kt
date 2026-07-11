@@ -37,11 +37,15 @@ object IcmRepository {
     // Сбрасываются при новой сессии (логин).
     @Volatile private var preferencesBlocked = false
     @Volatile private var likesBlocked = false
+    // Чтение лайков (GET) всегда работало — ОТДЕЛЬНЫЙ гейт, чтобы сбой ЗАПИСИ не
+    // травил чтение (раньше поле было общее: одна 405 на write рубила и чтение).
+    @Volatile private var likesReadBlocked = false
 
     /** Сбросить бизнес-гейты (на новый логин/сессию — состояние подписки могло измениться). */
     fun resetBusinessGates() {
         preferencesBlocked = false
         likesBlocked = false
+        likesReadBlocked = false
     }
 
     /** Default region */
@@ -605,14 +609,15 @@ object IcmRepository {
         limit: Int? = null,
         offset: Int? = null
     ): IcmLibraryLikesResponse? {
-        // Терминально: 405 (метод не поддержан) / 403 → эндпоинт недоступен, не зовём.
-        if (likesBlocked) return null
+        // Чтение (GET) всегда работало; гейт взводится только на 403 (нет
+        // подписки). 405 здесь недостижим — write-toggle теперь отвечает 200.
+        if (likesReadBlocked) return null
         val result = api.getLibraryLikes(source, limit, offset)
         result.exceptionOrNull()?.let {
             _lastException = it as? Exception
             _lastError.value = it.message
             val code = (it as? IcmApiException)?.code
-            if (code == 405 || code == 403) likesBlocked = true
+            if (code == 403) likesReadBlocked = true
         }
         return result.getOrNull()
     }
@@ -620,34 +625,46 @@ object IcmRepository {
     /**
      * Like a track in cloud library.
      */
-    suspend fun likeTrack(trackId: String): Boolean {
-        // Тот же терминальный гейт, что и у пула: 405/403 → эндпоинт недоступен,
-        // больше не флудим. Раньше пуш-сторона гейт игнорировала — при 405 на
-        // /library/likes(/local:*) уходил runaway-шторм из сотен запросов подряд.
-        if (likesBlocked) return false
-        val result = api.likeTrack(trackId)
-        result.exceptionOrNull()?.let {
-            _lastException = it as? Exception
-            _lastError.value = it.message
-            val code = (it as? IcmApiException)?.code
-            if (code == 405 || code == 403) likesBlocked = true
-        }
-        return result.isSuccess
-    }
+    suspend fun likeTrack(trackId: String): Boolean = setLikeState(trackId, desired = true)
 
     /**
      * Unlike a track in cloud library.
      */
-    suspend fun unlikeTrack(trackId: String): Boolean {
+    suspend fun unlikeTrack(trackId: String): Boolean = setLikeState(trackId, desired = false)
+
+    /**
+     * Приводит облачный лайк трека к ЖЕЛАЕМОМУ состоянию.
+     *
+     * POST /library/likes теперь TOGGLE (changelog ICM 2026-07-11): один POST
+     * переключает состояние, в ответе liked = итог. Поэтому «слепой» POST может
+     * увести не туда, если клиент и сервер рассинхронены. Приводим к desired:
+     * один POST; если сервер уже был в desired и toggle увёл прочь — ровно ОДИН
+     * доповторный POST (без цикла). likesBlocked оставлен как транзиентный
+     * анти-шторм предохранитель (сбрасывается на новом логине); при рабочем 200
+     * он больше не взводится. Идемпотентность у вызова обеспечивает
+     * LibraryRepository (гейт по db.isFavorite): unlike летит только на реальном
+     * переходе liked→unliked, like — на unliked→liked.
+     */
+    private suspend fun setLikeState(trackId: String, desired: Boolean): Boolean {
         if (likesBlocked) return false
-        val result = api.unlikeTrack(trackId)
-        result.exceptionOrNull()?.let {
+        val first = api.likeTrack(trackId) // POST /library/likes = toggle (обе стороны)
+        first.exceptionOrNull()?.let {
             _lastException = it as? Exception
             _lastError.value = it.message
             val code = (it as? IcmApiException)?.code
             if (code == 405 || code == 403) likesBlocked = true
+            return false
         }
-        return result.isSuccess
+        val liked = first.getOrNull()?.liked ?: return first.isSuccess // старый сервер: liked нет → 2xx=успех
+        if (liked == desired) return true
+        // Сервер уже был в desired → первый toggle увёл прочь. Ровно один доповтор.
+        val second = api.likeTrack(trackId)
+        second.exceptionOrNull()?.let {
+            _lastException = it as? Exception
+            _lastError.value = it.message
+            return false
+        }
+        return second.getOrNull()?.liked?.let { it == desired } ?: second.isSuccess
     }
 
     /**

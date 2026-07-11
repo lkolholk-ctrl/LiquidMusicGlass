@@ -983,23 +983,24 @@ suspend fun search(
     }
 
     /**
-     * Like a track.
+     * Toggle-лайк трека. POST /library/likes — теперь TOGGLE (changelog ICM
+     * 2026-07-11): первый вызов с track_id ставит лайк, повторный снимает; в
+     * ответе liked = итоговое состояние. Раньше write отдавал 405 (тогда стоял
+     * предохранитель likesBlocked) — теперь эндпоинт рабочий.
      */
-    // ВНИМАНИЕ (аудит по доке): POST/DELETE на /library/likes в партнёрской
-    // доке НЕ описаны (документирован только GET), сервер отвечает 405 —
-    // IcmRepository.likesBlocked гасит повторы. Лайк до волны доходит через
-    // документированный wave/feedback more_track. Вопрос о write-эндпоинте
-    // задан менеджеру ICM; до ответа код оставлен под предохранителем.
     suspend fun likeTrack(trackId: String): Result<IcmLikeResponse> {
         val body = json.encodeToString(IcmLikeRequest(trackIdSnake = trackId, trackIdCamel = trackId))
         return execute("/library/likes", method = "POST", body = body)
     }
 
     /**
-     * Unlike a track.
+     * Снять лайк — тот же POST-toggle. Changelog гарантирует только POST;
+     * DELETE /library/likes/{id} может по-прежнему отдавать 405, поэтому не
+     * используем его. Итоговое состояние — в ответе liked.
      */
     suspend fun unlikeTrack(trackId: String): Result<IcmLikeResponse> {
-        return execute("/library/likes/$trackId", method = "DELETE")
+        val body = json.encodeToString(IcmLikeRequest(trackIdSnake = trackId, trackIdCamel = trackId))
+        return execute("/library/likes", method = "POST", body = body)
     }
 
     /**
