@@ -7,8 +7,12 @@ import kotlin.test.assertTrue
 class WaveCandidateFilterTest {
 
     @Test
-    fun `filter rejects tracks already present in session state`() {
+    fun `filter hard-rejects in-run excluded tracks but not seeded recent history`() {
         val filter = WaveCandidateFilter()
+        // excludeIds = in-run anti-repeat (hard reject). playedIds = the soft
+        // played_track_ids signal sent to the server — NOT a client hard-reject:
+        // personal wave legitimately returns tracks close to recent listening, and
+        // banning them client-side reduced whole 200-batches to zero (the wave-loop bug).
         val state = WaveSessionState(excludeIds = listOf("1"), playedIds = listOf("2"))
 
         val result = filter.filter(
@@ -20,15 +24,32 @@ class WaveCandidateFilterTest {
             state = state
         )
 
-        assertEquals(listOf("3"), result.accepted.map { it.id })
+        // "1" is in the in-run exclude set → DuplicateTrack. "2" (recent history)
+        // is now allowed. "3" is new.
+        assertEquals(listOf("2", "3"), result.accepted.map { it.id })
         assertEquals(
-            listOf(
-                WaveCandidateFilter.RejectReason.DuplicateTrack,
-                WaveCandidateFilter.RejectReason.DuplicateTrack
-            ),
+            listOf(WaveCandidateFilter.RejectReason.DuplicateTrack),
             result.rejected.map { it.reason }
         )
         assertTrue("3" in result.nextState.excludeIds)
+    }
+
+    @Test
+    fun `filter never empties a non-empty batch (infinite-wave floor)`() {
+        val filter = WaveCandidateFilter()
+        // Every candidate would be a DuplicateTrack under the strict pass — the
+        // relaxation floor must still yield playable tracks so the wave never dies.
+        val state = WaveSessionState(excludeIds = listOf("1", "2"))
+
+        val result = filter.filter(
+            candidates = listOf(
+                WaveCandidate(id = "1", artistId = "a"),
+                WaveCandidate(id = "2", artistId = "b")
+            ),
+            state = state
+        )
+
+        assertTrue(result.accepted.isNotEmpty())
     }
 
     @Test
