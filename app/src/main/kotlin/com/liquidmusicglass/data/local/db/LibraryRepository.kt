@@ -14,7 +14,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Repository for the Library (liked tracks).
@@ -29,13 +28,6 @@ class LibraryRepository private constructor(context: Context) {
 
     private val db = FavoriteTrackDatabase.getInstance(context)
     private val api = IcmApi.getInstance()
-
-    // Свежие лайки: trackId → когда лайкнули (мс). syncWithCloud НЕ удаляет лайк,
-    // сделанный в последние LIKE_GRACE_MS — иначе устаревший снапшот облака
-    // (запаздывание чтения / toggle-гонка) сносил только что поставленное
-    // сердечко. Через grace серверное состояние уже отражает лайк, и
-    // кросс-девайс анлайк снова работает.
-    private val recentlyLikedAt = ConcurrentHashMap<String, Long>()
 
     /** Reactive flow of all favorite tracks — drives Compose UI */
     val favoritesFlow: Flow<List<FavoriteTrackEntity>> = db.favoritesFlow
@@ -108,7 +100,6 @@ class LibraryRepository private constructor(context: Context) {
 
             val cloudIds = cloudLikes.map { it.id }.toSet()
             val localEntities = db.getAllFavorites()
-            val localActiveIds = localEntities.filter { !it.pendingDelete }.map { it.trackId }.toSet()
             val localPendingDeleteIds = localEntities.filter { it.pendingDelete }.map { it.trackId }.toSet()
 
             // 2. Add cloud likes that are not in local DB (or were pending delete)
@@ -137,19 +128,14 @@ class LibraryRepository private constructor(context: Context) {
                 }
             }
 
-            // 3. Remove local likes that were removed on cloud
-            // (but not those that are pending insert locally — they need cloud sync first,
-            //  and not those liked within the grace window — cloud may not reflect them yet)
-            val nowMs = System.currentTimeMillis()
-            for (localId in localActiveIds) {
-                val localEntity = localEntities.find { it.trackId == localId }
-                val recentlyLiked = recentlyLikedAt[localId]?.let { nowMs - it < LIKE_GRACE_MS } == true
-                if (localId !in cloudIds && localEntity?.isSynced != false && !recentlyLiked) {
-                    db.deleteByTrackId(localId)
-                }
-                // Облако подтвердило лайк → grace больше не нужен.
-                if (localId in cloudIds) recentlyLikedAt.remove(localId)
-            }
+            // 3. НАМЕРЕННО НЕ удаляем локальные лайки, которых нет в облачном
+            //    снимке. Раньше здесь был delete-loop «нет в облаке → снести» (для
+            //    кросс-девайс анлайка). Из-за toggle-семантики /library/likes +
+            //    запаздывания чтения он раз за разом сносил ТОЛЬКО ЧТО поставленное
+            //    сердечко («лайки исчезают»). Локальный лайк теперь убирается ТОЛЬКО
+            //    явным анлайком пользователя (unlikeTrack). Единственный компромисс:
+            //    анлайк, сделанный на ВЕБЕ, сам не пропадёт в приложении (сними в
+            //    приложении — пропадёт везде). Стабильность сердечка важнее.
 
             // 4. Clear any pending deletes that are already gone from cloud
             for (pendingId in localPendingDeleteIds) {
@@ -214,9 +200,6 @@ class LibraryRepository private constructor(context: Context) {
                 )
             )
 
-            // Свежий лайк защищаем от удаления синком (шаг 3) на время grace.
-            recentlyLikedAt[track.id] = System.currentTimeMillis()
-
             // Update PlayerController favorite IDs for reactive UI
             updatePlayerControllerFavorites()
 
@@ -232,8 +215,7 @@ class LibraryRepository private constructor(context: Context) {
                         if (success) {
                             // markSynced ОБЯЗАТЕЛЕН: без него лайк остаётся pending и
                             // syncWithCloud (шаг 5) РЕ-ПУШИТ его через toggle, а toggle
-                            // снимает уже поставленный лайк → «опять исчезает». От гонки
-                            // с шагом 3 защищает grace (recentlyLikedAt), а не pending.
+                            // снимает уже поставленный лайк → «опять исчезает».
                             db.markSynced(track.id)
                         }
                         // Лайк = «больше такого» для волны (more_track + more_artist).
@@ -261,7 +243,6 @@ class LibraryRepository private constructor(context: Context) {
 
             // Soft delete: mark pendingDelete, actual removal after cloud sync
             db.update(existing.copy(pendingDelete = true, isSynced = false))
-            recentlyLikedAt.remove(trackId) // снятый лайк не защищаем grace'ом
 
             // Update PlayerController favorite IDs for reactive UI
             updatePlayerControllerFavorites()
@@ -367,10 +348,6 @@ class LibraryRepository private constructor(context: Context) {
     }
 
     companion object {
-        /** Свежий лайк не удаляется синком в течение этого окна (снапшот облака
-         *  мог не успеть его отразить). */
-        private const val LIKE_GRACE_MS = 120_000L
-
         @Volatile
         private var INSTANCE: LibraryRepository? = null
 
