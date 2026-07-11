@@ -258,8 +258,9 @@ class HomeViewModel : ViewModel() {
                         )
                         _waveTracks.value = genreTracks
                         // autoRefillType=SEARCH + seedPool=жанры → EndlessPlaybackEngine
-                        // дозаправляет волну поиском по этим жанрам (см. SEARCH-ветку),
-                        // минуя висящий /wave/genre. Волна остаётся бесконечной.
+                        // дозаправляет волну поиском по этим жанрам (см. SEARCH-ветку).
+                        // Персональная волна пуста (Apple-only), поэтому идём поиском;
+                        // /wave/genre ICM починил (2026-07-11). Волна бесконечна.
                         PlayerController.playFromList(
                             context = context,
                             tracks = genreTracks,
@@ -299,8 +300,9 @@ class HomeViewModel : ViewModel() {
 
     /**
      * Fallback для пустой персональной волны. Берёт топ-жанры юзера и набирает
-     * очередь ПОИСКОМ (buildGenreSearchQueue), а не через /wave/genre — тот
-     * висит на сервере (12с таймаут, треков нет). Возвращает список жанров (для
+     * очередь ПОИСКОМ (buildGenreSearchQueue): персональная волна пуста (Apple-
+     * only), а поиск стабилен. (/wave/genre ICM починил 2026-07-11 — раньше он
+     * висел; теперь это просто наш fallback.) Возвращает список жанров (для
      * SEARCH-дозаправки через seedPool) и стартовую пачку. getTopGenres сам
      * отдаёт дефолты (Electronic/Techno…), если истории нет — так что волна
      * заведётся даже у нового юзера.
@@ -372,9 +374,9 @@ class HomeViewModel : ViewModel() {
                     _isBuildingWave.value = false
                     PlayerController.ensureWaveRefill()
                 } else {
-                    // /wave/mood висит на сервере → муд-волна не стартовала бы вообще
-                    // (молчаливый тупик). Падаем в SEARCH по терму настроения (как
-                    // buildWaveQueue при пустой персональной): волна и заведётся, и
+                    // Реальный /wave/mood (его ICM починил 2026-07-11) вернул пусто →
+                    // страховка от молчаливого тупика: падаем в SEARCH по терму
+                    // настроения (как buildWaveQueue при пустой персональной): волна и заведётся, и
                     // будет бесконечной через SEARCH-дозаправку.
                     val fallback = try {
                         repo.buildGenreSearchQueue(

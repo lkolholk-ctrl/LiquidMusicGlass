@@ -173,7 +173,7 @@ class EndlessPlaybackEngine(
                             )
                             // Пул mood кончился → личной волной; а она у Apple-only
                             // аккаунта ПУСТА, поэтому терминально — жанровый поиск
-                            // (единственный рабочий источник). Иначе муд-волна встаёт.
+                            // (рабочий источник, когда personal пуст). Иначе муд-волна встаёт.
                             if (moodTracks.isNotEmpty()) return@withContext moodTracks
                             val personal = waveRepo.buildWaveModeQueue(WaveMode.Personal(), REFILL_BATCH_SIZE, queueIds)
                             if (personal.isNotEmpty()) return@withContext personal
@@ -212,8 +212,9 @@ class EndlessPlaybackEngine(
                     }
 
                     // SEARCH-волна: fallback пустой personal-волны. Дозаправка идёт
-                    // ПОИСКОМ по топ-жанрам (seedPool), минуя висящий /wave/genre.
-                    // Ротация жанров + вычитание сыгранного держат её бесконечной.
+                    // ПОИСКОМ по топ-жанрам (seedPool) — персональная волна у Apple-
+                    // only аккаунта пуста. Ротация жанров + вычитание сыгранного
+                    // держат её бесконечной.
                     if (isGlobal && refillCtx?.type == RefillContext.Type.SEARCH) {
                         val genres = refillCtx.seedPool.ifEmpty {
                             listOfNotNull(refillCtx.id ?: refillCtx.name)
