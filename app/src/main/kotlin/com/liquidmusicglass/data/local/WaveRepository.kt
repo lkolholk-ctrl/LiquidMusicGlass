@@ -619,9 +619,16 @@ class WaveRepository(context: Context) {
         }
 
         val tracksById = tracks.associateBy { it.id }
-        return filtered.accepted.mapNotNull { candidate ->
+        val result = filtered.accepted.mapNotNull { candidate ->
             tracksById[candidate.id]?.toTrack()
         }
+        // DIAG (wave-diag build): видно в «Copy ICM logs». server=сколько отдал ICM,
+        // filterAccepted=сколько прошло WaveCandidateFilter, mapped=сколько стало Track.
+        com.liquidmusicglass.api.icm.IcmApiFileLogger.log(
+            "D", "Wave",
+            "$label: server=${tracks.size} filterAccepted=${filtered.accepted.size} mapped=${result.size}"
+        )
+        return result
     }
 
     /**

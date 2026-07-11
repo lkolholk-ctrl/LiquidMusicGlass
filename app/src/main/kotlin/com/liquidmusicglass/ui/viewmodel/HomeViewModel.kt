@@ -227,6 +227,9 @@ class HomeViewModel : ViewModel() {
             try {
                 val repo = WaveRepository.getInstance(context)
                 val tracks = repo.startPersonalWave()
+                com.liquidmusicglass.api.icm.IcmApiFileLogger.log(
+                    "D", "Wave", "buildWaveQueue: startPersonalWave -> ${tracks.size} tracks"
+                )
 
                 if (tracks.isNotEmpty()) {
                     _waveTracks.value = tracks
