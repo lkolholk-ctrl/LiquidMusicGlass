@@ -426,7 +426,12 @@ class WaveRepository(context: Context) {
         // Каждый жанр ищем один раз, кандидатов сразу чистим от exclude.
         val perGenre: Map<String, List<Track>> = genres.associateWith { genre ->
             val found = try {
-                IcmRepository.searchTracksByGenre(genre, limit = 30)
+                // source="apple" + searchTracks (не searchTracksByGenre):
+                //  • apple-каталог стабильно стримится; source=all тянул VK/кастом,
+                //    часть которых у этого юзера не играла («не все треки работают»);
+                //  • searchTracks фильтрует isTrack — searchTracksByGenre мапил в
+                //    «треки» И альбомы/артистов, которые физически не проигрываются.
+                IcmRepository.searchTracks(query = genre, source = "apple", limit = 30)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
