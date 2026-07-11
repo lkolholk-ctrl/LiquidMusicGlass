@@ -242,17 +242,43 @@ class HomeViewModel : ViewModel() {
                     _isBuildingWave.value = false
                     PlayerController.ensureWaveRefill()
                 } else {
-                    // Пусто → по доке: у сервера нет seed-артистов/лайков. Если онбординг
-                    // ещё не пройден — показываем выбор артистов (персонализация стартует
-                    // только после него). Иначе просто молчим.
-                    val onboarded = try {
-                        IcmRepository.getWaveOnboarding()?.completed ?: false
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (_: Exception) {
-                        false
+                    // Персональная волна ICM пуста НА СЕРВЕРЕ: он Apple-only и у
+                    // аккаунта нет apple-сидов (лайки Y/кастомные), поэтому на все
+                    // /wave/* приходит status:"empty", tracks:[]. Чтобы «Моя волна»
+                    // не молчала и не откатывалась — падаем в бесконечную ЖАНРОВУЮ
+                    // волну по топ-жанрам юзера: /wave/genre/{genre} это Apple-каталог,
+                    // не зависит от персональных сидов. GENRE-дозаправка (см.
+                    // EndlessPlaybackEngine) держит её бесконечной.
+                    val fallback = buildGenreFallbackQueue(repo)
+                    if (fallback != null) {
+                        val (genre, genreTracks) = fallback
+                        com.liquidmusicglass.api.icm.IcmApiFileLogger.log(
+                            "D", "Wave",
+                            "buildWaveQueue: personal empty -> genre fallback '$genre' -> ${genreTracks.size} tracks"
+                        )
+                        _waveTracks.value = genreTracks
+                        PlayerController.playFromList(
+                            context = context,
+                            tracks = genreTracks,
+                            startIndex = 0,
+                            autoRefillType = "GENRE",
+                            autoRefillId = genre,
+                            autoRefillName = genre
+                        )
+                        _isBuildingWave.value = false
+                        PlayerController.ensureWaveRefill()
+                    } else {
+                        // Даже жанровая волна пуста → по доке нужен онбординг (выбор
+                        // seed-артистов). Если он ещё не пройден — показываем выбор.
+                        val onboarded = try {
+                            IcmRepository.getWaveOnboarding()?.completed ?: false
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (_: Exception) {
+                            false
+                        }
+                        if (!onboarded) _needsOnboarding.value = true
                     }
-                    if (!onboarded) _needsOnboarding.value = true
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -265,6 +291,39 @@ class HomeViewModel : ViewModel() {
                 }
             }
         }
+    }
+
+    /**
+     * Fallback для пустой персональной волны: перебирает топ-жанры юзера и
+     * возвращает ПЕРВЫЙ жанр, давший треки (вместе с пачкой). Жанр нужен, чтобы
+     * завести GENRE-дозаправку и держать волну бесконечной. getTopGenres сам
+     * отдаёт дефолты (Electronic/Techno…), если истории нет — так что даже у
+     * нового юзера жанровая волна заведётся.
+     */
+    private suspend fun buildGenreFallbackQueue(
+        repo: WaveRepository
+    ): Pair<String, List<Track>>? {
+        val genres = try {
+            repo.getTopGenres(limit = 5)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            emptyList()
+        }
+        for (genre in genres) {
+            val tracks = try {
+                repo.buildWaveModeQueue(
+                    mode = WaveMode.Genre(genre = genre, source = "apple", diversity = 0.5),
+                    count = WaveRepository.FAST_START_COUNT
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                emptyList()
+            }
+            if (tracks.isNotEmpty()) return genre to tracks
+        }
+        return null
     }
 
     /**
