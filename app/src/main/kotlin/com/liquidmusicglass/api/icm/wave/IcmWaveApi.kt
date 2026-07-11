@@ -160,6 +160,15 @@ class IcmWaveApi(
         body: String? = null
     ): Result<T> {
         return api.requestJson(endpoint, method, body).mapCatching { bodyText ->
+            // DIAG (wave-diag build): сырой ответ волны в «Copy ICM logs», обрезан.
+            // TolerantListSerializer молча выкидывает треки, не совпавшие с
+            // IcmWaveTrack (→ tracks=[] без ошибки). Нужен реальный JSON, чтобы
+            // увидеть форму треков и почему сервер 200, а клиент — ноль.
+            if (endpoint.contains("/wave/")) {
+                com.liquidmusicglass.api.icm.IcmApiFileLogger.log(
+                    "D", "WaveBody", "$endpoint => ${bodyText.take(700)}"
+                )
+            }
             json.decodeFromString<T>(bodyText)
         }
     }
