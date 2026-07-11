@@ -316,7 +316,7 @@ class HomeViewModel : ViewModel() {
             emptyList()
         }
         if (genres.isEmpty()) return null
-        val tracks = try {
+        suspend fun search(): List<Track> = try {
             repo.buildGenreSearchQueue(
                 genres = genres,
                 count = WaveRepository.WAVE_QUEUE_SIZE
@@ -325,6 +325,14 @@ class HomeViewModel : ViewModel() {
             throw e
         } catch (_: Exception) {
             emptyList()
+        }
+        var tracks = search()
+        if (tracks.isEmpty()) {
+            // Первый заход мог совпасть со сменой сети на старте (OkHttp сбрасывает
+            // пулы — «NET revive»), из-за чего волна не стартовала с первого раза.
+            // Один повтор после короткой паузы обычно уже попадает в живые пулы.
+            delay(600)
+            tracks = search()
         }
         return if (tracks.isNotEmpty()) genres to tracks else null
     }

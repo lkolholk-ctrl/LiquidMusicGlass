@@ -49,6 +49,12 @@ class WaveRepository(context: Context) {
     // Сериализует создание серверной сессии: фоновый прогрев и первый рефилл
     // не должны открыть две сессии параллельно.
     private val personalSessionMutex = Mutex()
+    // ICM-волна Apple-only; у аккаунтов без apple-сидов ВСЕ её эндпоинты отдают
+    // empty. Пробить их (~7 запросов) на КАЖДЫЙ тап «Моей волны» — чистый сетевой
+    // шторм (→ ANR/«не с первого раза»/медленный старт). Подтвердив пустоту один
+    // раз, коротко-замыкаем на TTL: следующие старты идут сразу в поиск-fallback.
+    @Volatile
+    private var personalWaveEmptyUntilMs = 0L
 
     companion object {
         private const val TAG = "WaveRepository"
@@ -73,6 +79,8 @@ class WaveRepository(context: Context) {
          */
         private const val PERSONAL_WAVE_DIVERSITY = 0.35
         private const val SESSION_EXPIRY_MARGIN_MS = 60_000L
+        /** Сколько держим вердикт «ICM-волна пуста», не пробивая её заново. */
+        private const val PERSONAL_EMPTY_TTL_MS = 10 * 60_000L
 
         @Volatile
         private var instance: WaveRepository? = null
@@ -596,6 +604,12 @@ class WaveRepository(context: Context) {
      * Серверная сессия для дальнейших дозаправок прогревается параллельно.
      */
     suspend fun startPersonalWave(count: Int = FAST_START_COUNT): List<Track> = withContext(Dispatchers.IO) {
+        // Короткое замыкание: ICM-волну недавно подтвердили пустой — не пробиваем
+        // все её эндпоинты снова (сетевой шторм → ANR/«не с первого раза»). Сразу
+        // отдаём пусто, ViewModel уходит в поиск-fallback.
+        if (System.currentTimeMillis() < personalWaveEmptyUntilMs) {
+            return@withContext emptyList()
+        }
         val recentIds = getRecentTrackIdsSafely(50)
         val negativeArtistKeys = getLocallyRejectedArtistKeys()
         val apiExcludeArtistIds = negativeArtistKeys.filter { key -> key.all { it.isDigit() } }
@@ -640,7 +654,13 @@ class WaveRepository(context: Context) {
         )
         if (viaSession.isNotEmpty()) return@withContext viaSession
 
-        fetchLegacyPersonalWave(count.coerceAtMost(5))
+        val legacy = fetchLegacyPersonalWave(count.coerceAtMost(5))
+        if (legacy.isEmpty()) {
+            // Все пути ICM-волны пусты → фиксируем вердикт на TTL, чтобы следующие
+            // тапы «Моей волны» шли сразу в поиск без повторного ICM-шторма.
+            personalWaveEmptyUntilMs = System.currentTimeMillis() + PERSONAL_EMPTY_TTL_MS
+        }
+        legacy
     }
 
     /**
