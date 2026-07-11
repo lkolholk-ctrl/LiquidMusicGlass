@@ -371,6 +371,37 @@ class HomeViewModel : ViewModel() {
                     )
                     _isBuildingWave.value = false
                     PlayerController.ensureWaveRefill()
+                } else {
+                    // /wave/mood висит на сервере → муд-волна не стартовала бы вообще
+                    // (молчаливый тупик). Падаем в SEARCH по терму настроения (как
+                    // buildWaveQueue при пустой персональной): волна и заведётся, и
+                    // будет бесконечной через SEARCH-дозаправку.
+                    val fallback = try {
+                        repo.buildGenreSearchQueue(
+                            genres = listOf(query),
+                            count = WaveRepository.WAVE_QUEUE_SIZE
+                        )
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        emptyList()
+                    }
+                    if (fallback.isNotEmpty()) {
+                        _waveTracks.value = fallback
+                        PlayerController.playFromList(
+                            context = context,
+                            tracks = fallback,
+                            startIndex = 0,
+                            autoRefillType = "SEARCH",
+                            autoRefillId = query,
+                            autoRefillName = name,
+                            seedPool = listOf(query)
+                        )
+                        _isBuildingWave.value = false
+                        PlayerController.ensureWaveRefill()
+                    } else {
+                        _error.value = "Failed to build wave"
+                    }
                 }
             } catch (e: CancellationException) {
                 throw e

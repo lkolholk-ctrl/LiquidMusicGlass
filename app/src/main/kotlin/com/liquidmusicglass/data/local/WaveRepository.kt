@@ -431,8 +431,10 @@ class WaveRepository(context: Context) {
     ): List<Track> = withContext(Dispatchers.IO) {
         if (genres.isEmpty() || count <= 0) return@withContext emptyList()
         val excludeSet = exclude.toSet()
-        // Каждый жанр ищем один раз, кандидатов сразу чистим от exclude.
-        val perGenre: Map<String, List<Track>> = genres.associateWith { genre ->
+        // Каждый жанр ищем один раз. Держим СЫРЫХ кандидатов (только пустые id
+        // отсеиваем); exclude применяем отдельным проходом, чтобы при исчерпании
+        // конечного пула можно было повторно раздать уже игранное, а не отдать пусто.
+        val rawPerGenre: Map<String, List<Track>> = genres.associateWith { genre ->
             val found = try {
                 // source="apple" + searchTracks (не searchTracksByGenre):
                 //  • apple-каталог стабильно стримится; source=all тянул VK/кастом,
@@ -446,29 +448,38 @@ class WaveRepository(context: Context) {
                 Log.w(TAG, "Genre search '$genre' failed: ${e.message}")
                 emptyList()
             }
-            found.filter { it.id.isNotBlank() && it.id !in excludeSet }
+            found.filter { it.id.isNotBlank() }
         }
         // Round-robin по жанрам: [g0[0], g1[0], …, g0[1], g1[1], …] — так в начале
         // очереди намешаны все топ-жанры, а не только первый.
-        val out = LinkedHashMap<String, Track>()
-        var idx = 0
-        var addedThisPass = true
-        while (out.size < count && addedThisPass) {
-            addedThisPass = false
-            for (genre in genres) {
-                val list = perGenre[genre] ?: continue
-                if (idx < list.size) {
-                    val track = list[idx]
-                    if (!out.containsKey(track.id)) {
-                        out[track.id] = track
-                        addedThisPass = true
+        fun roundRobin(pools: Map<String, List<Track>>): List<Track> {
+            val out = LinkedHashMap<String, Track>()
+            var idx = 0
+            var addedThisPass = true
+            while (out.size < count && addedThisPass) {
+                addedThisPass = false
+                for (genre in genres) {
+                    val list = pools[genre] ?: continue
+                    if (idx < list.size) {
+                        val track = list[idx]
+                        if (!out.containsKey(track.id)) {
+                            out[track.id] = track
+                            addedThisPass = true
+                        }
+                        if (out.size >= count) break
                     }
-                    if (out.size >= count) break
                 }
+                idx++
             }
-            idx++
+            return out.values.toList()
         }
-        val result = out.values.toList()
+        val filtered = rawPerGenre.mapValues { (_, v) -> v.filter { it.id !in excludeSet } }
+        // ГАРАНТИЯ БЕСКОНЕЧНОСТИ: пул поиска КОНЕЧЕН (≈жанры×30). engine.playedIds
+        // копится и рано или поздно исключает ВЕСЬ пул → раньше здесь возвращался
+        // emptyList и волна МОЛЧА умирала (≈после 150 треков). Теперь: если exclude
+        // выел всё — зацикливаем, повторно раздаём уже игранное (переслушать лучше
+        // тишины; анти-повтор очереди не даёт повтора подряд).
+        val result = roundRobin(filtered).ifEmpty { roundRobin(rawPerGenre) }
         com.liquidmusicglass.api.icm.IcmApiFileLogger.log(
             "D", "Wave",
             "buildGenreSearchQueue: genres=$genres exclude=${excludeSet.size} -> ${result.size} tracks"

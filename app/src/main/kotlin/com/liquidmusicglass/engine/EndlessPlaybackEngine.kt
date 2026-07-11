@@ -171,11 +171,17 @@ class EndlessPlaybackEngine(
                                 count = REFILL_BATCH_SIZE,
                                 exclude = queueIds
                             )
-                            // Пул mood-пула кончился → не останавливаемся, продолжаем
-                            // личной волной (бесконечность важнее строгого настроения).
-                            return@withContext moodTracks.ifEmpty {
-                                waveRepo.buildWaveModeQueue(WaveMode.Personal(), REFILL_BATCH_SIZE, queueIds)
-                            }
+                            // Пул mood кончился → личной волной; а она у Apple-only
+                            // аккаунта ПУСТА, поэтому терминально — жанровый поиск
+                            // (единственный рабочий источник). Иначе муд-волна встаёт.
+                            if (moodTracks.isNotEmpty()) return@withContext moodTracks
+                            val personal = waveRepo.buildWaveModeQueue(WaveMode.Personal(), REFILL_BATCH_SIZE, queueIds)
+                            if (personal.isNotEmpty()) return@withContext personal
+                            return@withContext waveRepo.buildGenreSearchQueue(
+                                genres = refillCtx.seedPool.ifEmpty { listOf(mood) },
+                                count = REFILL_BATCH_SIZE,
+                                exclude = (playedIds + queueIds).toList()
+                            )
                         }
                     }
 
@@ -192,9 +198,16 @@ class EndlessPlaybackEngine(
                                 count = REFILL_BATCH_SIZE,
                                 exclude = queueIds
                             )
-                            return@withContext genreTracks.ifEmpty {
-                                waveRepo.buildWaveModeQueue(WaveMode.Personal(), REFILL_BATCH_SIZE, queueIds)
-                            }
+                            // Пул genre кончился → личная волна пуста (Apple-only) →
+                            // терминально жанровый поиск, иначе жанр-волна встаёт.
+                            if (genreTracks.isNotEmpty()) return@withContext genreTracks
+                            val personal = waveRepo.buildWaveModeQueue(WaveMode.Personal(), REFILL_BATCH_SIZE, queueIds)
+                            if (personal.isNotEmpty()) return@withContext personal
+                            return@withContext waveRepo.buildGenreSearchQueue(
+                                genres = refillCtx.seedPool.ifEmpty { listOf(genre) },
+                                count = REFILL_BATCH_SIZE,
+                                exclude = (playedIds + queueIds).toList()
+                            )
                         }
                     }
 
@@ -308,6 +321,34 @@ class EndlessPlaybackEngine(
                         if (tracks.isNotEmpty() && isGlobal && refillCtx?.seedTrackId != null) {
                             _refillContext.value = refillCtx.copy(seedTrackId = null)
                             com.liquidmusicglass.debug.DebugLog.add("WAVE station -> personal (dried up)")
+                        }
+                    }
+                    // Терминальный рубеж ЛЮБОЙ WAVE-дозаправки: если после всех
+                    // попыток пусто (station/drift/personal — а personal у Apple-only
+                    // аккаунта пуст; либо seed вообще не-apple → сразу null) → жанровый
+                    // поиск по топ-жанрам, как у «Моей волны». Без него WAVE-ветка не
+                    // имеет fall-through в buildGenreSearchQueue (та достижима только
+                    // из SEARCH) и станция молча встаёт. Гард — просто tracks пуст:
+                    // покрывает и «станция пересохла» (seed!=null), и не-apple seed
+                    // (seed==null, радио по Y/локальному треку — иначе 1 трек и стоп).
+                    if (tracks.isEmpty()) {
+                        val genres = waveRepo.getTopGenres(limit = 5)
+                        if (genres.isNotEmpty()) {
+                            tracks = waveRepo.buildGenreSearchQueue(
+                                genres = genres,
+                                count = REFILL_BATCH_SIZE,
+                                exclude = (playedIds + queueIds).toList()
+                            )
+                            if (tracks.isNotEmpty() && isGlobal && refillCtx != null) {
+                                // Переводим станцию в SEARCH: следующие рефиллы идут
+                                // сразу в рабочую ветку, а не упираются снова в пустое.
+                                _refillContext.value = refillCtx.copy(
+                                    type = RefillContext.Type.SEARCH,
+                                    seedTrackId = null,
+                                    seedPool = genres
+                                )
+                                com.liquidmusicglass.debug.DebugLog.add("WAVE station -> genre search (dried up)")
+                            }
                         }
                     }
                     tracks
