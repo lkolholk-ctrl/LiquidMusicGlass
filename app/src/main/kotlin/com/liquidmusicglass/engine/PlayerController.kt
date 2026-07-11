@@ -369,6 +369,13 @@ object PlayerController {
                     val result = resolveStreamUrl(track.id)
                     if (result is StreamResult.Success) {
                         ok = MediaCacheManager.preCacheTrack(track.id, result.uri)
+                    } else if (result is StreamResult.Error && result.code in TERMINAL_RESOLVE_ERRORS) {
+                        // Терминальная ошибка (404 track_not_found / 403 source_not_allowed /
+                        // 451 region / early_access): ретраить бессмысленно — трек не
+                        // появится. Не жжём 3 попытки с бэкоффом (это и был «провал
+                        // (3 попыт.)» в логе на битых треках волны); плеер такой трек
+                        // авто-скипнет при проигрывании.
+                        break
                     }
                 }
                 if (isActive || ok) {
@@ -953,6 +960,12 @@ object PlayerController {
         data class Success(val uri: Uri) : StreamResult()
         data class Error(val code: String, val message: String?) : StreamResult()
     }
+
+    // Коды резолва стрима, при которых повтор бесполезен — трек не появится.
+    // Используются предзагрузкой, чтобы не жечь 3 попытки на битом треке.
+    private val TERMINAL_RESOLVE_ERRORS = setOf(
+        "track_not_found", "source_not_allowed", "region_unavailable", "early_access"
+    )
 
     private data class CachedStreamUrl(
         val uri: Uri,
