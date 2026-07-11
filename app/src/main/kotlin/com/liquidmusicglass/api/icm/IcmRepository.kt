@@ -621,10 +621,16 @@ object IcmRepository {
      * Like a track in cloud library.
      */
     suspend fun likeTrack(trackId: String): Boolean {
+        // Тот же терминальный гейт, что и у пула: 405/403 → эндпоинт недоступен,
+        // больше не флудим. Раньше пуш-сторона гейт игнорировала — при 405 на
+        // /library/likes(/local:*) уходил runaway-шторм из сотен запросов подряд.
+        if (likesBlocked) return false
         val result = api.likeTrack(trackId)
         result.exceptionOrNull()?.let {
             _lastException = it as? Exception
             _lastError.value = it.message
+            val code = (it as? IcmApiException)?.code
+            if (code == 405 || code == 403) likesBlocked = true
         }
         return result.isSuccess
     }
@@ -633,10 +639,13 @@ object IcmRepository {
      * Unlike a track in cloud library.
      */
     suspend fun unlikeTrack(trackId: String): Boolean {
+        if (likesBlocked) return false
         val result = api.unlikeTrack(trackId)
         result.exceptionOrNull()?.let {
             _lastException = it as? Exception
             _lastError.value = it.message
+            val code = (it as? IcmApiException)?.code
+            if (code == 405 || code == 403) likesBlocked = true
         }
         return result.isSuccess
     }
