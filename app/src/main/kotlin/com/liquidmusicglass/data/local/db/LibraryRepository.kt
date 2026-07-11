@@ -212,10 +212,14 @@ class LibraryRepository private constructor(context: Context) {
                         com.liquidmusicglass.data.yandex.YandexDownloadManager.writeLike(track.id, liked = true)
                         db.markSynced(track.id)
                     } else {
-                        val success = IcmRepository.likeTrack(track.id)
-                        if (success) {
-                            db.markSynced(track.id)
-                        }
+                        // НЕ markSynced здесь: POST /library/likes — TOGGLE, и лайк
+                        // может быть ещё не отражён на чтении. Ранний markSynced делал
+                        // свежий лайк удаляемым синком (шаг 3 сносил его по устаревшему
+                        // снапшоту облака) → «поставил сердечко — оно исчезло». Оставляем
+                        // лайк pending (isSynced=false): syncWithCloud НЕ трогает pending
+                        // (шаг 3 их пропускает) и сам подтвердит (markSynced в шаге 2),
+                        // когда облако реально вернёт трек.
+                        IcmRepository.likeTrack(track.id)
                         // Лайк = «больше такого» для волны (more_track + more_artist).
                         // Через оффлайн-очередь: обрыв сети не теряет сигнал.
                         com.liquidmusicglass.api.icm.WaveSignalQueue.sendFeedback("more_track", track.id)
