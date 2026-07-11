@@ -432,9 +432,27 @@ class WaveRepository(context: Context) {
     ): List<Track> = withContext(Dispatchers.IO) {
         if (genres.isEmpty() || count <= 0) return@withContext emptyList()
         val excludeSet = exclude.toSet()
-        // Каждый жанр ищем один раз. Держим СЫРЫХ кандидатов (только пустые id
-        // отсеиваем); exclude применяем отдельным проходом, чтобы при исчерпании
-        // конечного пула можно было повторно раздать уже игранное, а не отдать пусто.
+        // Негативный фидбек («реже»/дизлайк) поиск-fallback обязан чтить сам: он
+        // ходит мимо волновых эндпоинтов, поэтому серверный decay-сигнал сюда не
+        // долетает — забаненный трек/артист вернулся бы снова. Снимаем снапшот
+        // банов из личного состояния волны и режем их ПРЯМО в сыром пуле, чтобы
+        // бан соблюдался в ОБОИХ проходах (и exclude-фильтр, и аварийный relaxed-
+        // повтор), а бесконечность держалась на переигрывании НЕ-забаненного.
+        val negTrackSet: Set<String>
+        val negArtistSet: Set<String>
+        synchronized(personalWaveStateLock) {
+            negTrackSet = personalWaveState.negativeTrackSet
+            negArtistSet = personalWaveState.negativeArtistSet
+        }
+        fun Track.isLocallyRejected(): Boolean {
+            val candidate = toWaveCandidate()
+            if (negTrackSet.isNotEmpty() && candidate.normalizedId in negTrackSet) return true
+            return negArtistSet.isNotEmpty() && candidate.artistKeys.any { it in negArtistSet }
+        }
+        // Каждый жанр ищем один раз. Держим СЫРЫХ кандидатов (пустые id и
+        // дизлайкнутое отсеиваем сразу); exclude применяем отдельным проходом,
+        // чтобы при исчерпании конечного пула можно было повторно раздать уже
+        // игранное (но не забаненное), а не отдать пусто.
         val rawPerGenre: Map<String, List<Track>> = genres.associateWith { genre ->
             val found = try {
                 // source="apple" + searchTracks (не searchTracksByGenre):
@@ -449,7 +467,7 @@ class WaveRepository(context: Context) {
                 Log.w(TAG, "Genre search '$genre' failed: ${e.message}")
                 emptyList()
             }
-            found.filter { it.id.isNotBlank() }
+            found.filter { it.id.isNotBlank() && !it.isLocallyRejected() }
         }
         // Round-robin по жанрам: [g0[0], g1[0], …, g0[1], g1[1], …] — так в начале
         // очереди намешаны все топ-жанры, а не только первый.
@@ -483,7 +501,8 @@ class WaveRepository(context: Context) {
         val result = roundRobin(filtered).ifEmpty { roundRobin(rawPerGenre) }
         com.liquidmusicglass.api.icm.IcmApiFileLogger.log(
             "D", "Wave",
-            "buildGenreSearchQueue: genres=$genres exclude=${excludeSet.size} -> ${result.size} tracks"
+            "buildGenreSearchQueue: genres=$genres exclude=${excludeSet.size} " +
+                "negTracks=${negTrackSet.size} negArtists=${negArtistSet.size} -> ${result.size} tracks"
         )
         result
     }
