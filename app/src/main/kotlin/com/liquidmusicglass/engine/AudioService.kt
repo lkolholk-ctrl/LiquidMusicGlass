@@ -465,13 +465,17 @@ class AudioService : MediaSessionService() {
         startPositionPolling()
         ensureNotificationChannel()
 
-        // Observe current track and favorites to update notification button dynamically
-        serviceScope.launch {
+        // Observe current track and favorites to update notification button dynamically.
+        // mainScope, НЕ serviceScope(IO) (P0, аудит): updateNotificationLayout зовёт
+        // session.setCustomLayout — методы MediaSession обязаны вызываться на
+        // application-потоке плеера (main); с IO это wrong-thread/UB media3,
+        // причём на КАЖДУЮ смену трека и каждое изменение избранного.
+        mainScope.launch {
             PlayerController.favoriteIds.collect {
                 updateNotificationLayout()
             }
         }
-        serviceScope.launch {
+        mainScope.launch {
             PlayerController.currentTrack.collect {
                 updateNotificationLayout()
             }

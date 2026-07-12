@@ -521,11 +521,7 @@ object PlayerController {
 
             when (startStreamResult) {
                 is StreamResult.Success -> {
-                    // Set queue BEFORE building MediaItems so resolveStreamUrlSync can find tracks
                     val immutableTracks = tracks.toList()
-                    queue = immutableTracks
-                    _queueFlow.value = immutableTracks
-                    currentIndex = startIndex
 
                     val mediaItems = tracks.mapIndexed { i, track ->
                         // Start track gets resolved URL, others use trackId (resolved on demand)
@@ -534,6 +530,17 @@ object PlayerController {
                     }
 
                     withContext(Dispatchers.Main) {
+                        // Мутации queue/currentIndex — ТОЛЬКО на main (P0, аудит):
+                        // раньше писались здесь с IO, а addTracksToQueue/move/remove
+                        // мутируют с main — plain var без синхронизации давал lost
+                        // update (треки рефилла волны исчезали) и битую видимость.
+                        // Инвариант «queue до prepare» сохранён: setMediaItems ниже
+                        // дергает resolveStreamUrlSync только при реальном открытии
+                        // источника, к этому моменту queue уже выставлена.
+                        queue = immutableTracks
+                        _queueFlow.value = immutableTracks
+                        currentIndex = startIndex
+
                         _currentTrack.value = startTrack
                         _durationMs.value = startTrack.durationMs
                         _currentPositionMs.value = 0L
@@ -606,13 +613,15 @@ object PlayerController {
             endlessEngine.reset()
 
             val immutableTracks = tracks.toList()
-            queue = immutableTracks
-            _queueFlow.value = immutableTracks
-            currentIndex = startIndex
 
             val mediaItems = immutableTracks.map { track -> buildMediaItem(track, track.uri) }
 
             withContext(Dispatchers.Main) {
+                // Мутации queue/currentIndex — только на main (см. playFromList).
+                queue = immutableTracks
+                _queueFlow.value = immutableTracks
+                currentIndex = startIndex
+
                 _currentTrack.value = startTrack
                 _durationMs.value = startTrack.durationMs
                 _currentPositionMs.value = 0L

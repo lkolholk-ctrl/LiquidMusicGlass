@@ -41,7 +41,12 @@ class EndlessPlaybackEngine(
     private val _refillContext = MutableStateFlow<RefillContext?>(null)
     val refillContext: StateFlow<RefillContext?> = _refillContext
 
-    private val playedIds = mutableSetOf<String>()
+    // Потокобезопасный set (аудит): registerTracks зовётся и с main
+    // (addTracksToQueue), и с IO (playFromList), а рефилл на IO итерирует
+    // playedIds — обычный LinkedHashSet давал ConcurrentModificationException
+    // внутри try рефилла → рефилл молча фейлился, волна вставала.
+    private val playedIds: MutableSet<String> =
+        java.util.concurrent.ConcurrentHashMap.newKeySet()
     private val isRefilling = AtomicBoolean(false)
     private val lastRefillTime = AtomicLong(0L)
     private var refillCounter = 0
@@ -78,7 +83,16 @@ class EndlessPlaybackEngine(
     fun registerTracks(trackIds: List<String>) {
         playedIds.addAll(trackIds)
         if (playedIds.size > 500) {
-            playedIds.take(400).toMutableSet().also { playedIds.clear(); playedIds.addAll(it) }
+            // Кап размера. У concurrent-сета нет порядка вставки, поэтому срез
+            // приблизительный — это осознанно: прежний LinkedHashSet.take(400)
+            // и так резал НЕ то (оставлял старейшие, выбрасывая свежесыгранное),
+            // а главное — не переживал конкурентную итерацию рефилла (CME).
+            // Свежие id тут же регистрируются заново из очереди — анти-повтор
+            // для недавних треков сохраняется.
+            val excess = playedIds.size - 400
+            val it = playedIds.iterator()
+            var removed = 0
+            while (removed < excess && it.hasNext()) { it.next(); it.remove(); removed++ }
         }
     }
 
