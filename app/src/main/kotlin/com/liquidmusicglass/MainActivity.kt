@@ -5,6 +5,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,6 +47,12 @@ class MainActivity : ComponentActivity() {
 
     private val authScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    // POST_NOTIFICATIONS (Android 13+) — рантайм-разрешение. Регистрируем лаунчер
+    // на этапе конструирования Activity (иначе registerForActivityResult падает).
+    // Результат нам не важен (медиа-уведомление появится при воспроизведении).
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* no-op */ }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -57,6 +64,11 @@ class MainActivity : ComponentActivity() {
             finish()
             return
         }
+
+        // Разрешение на уведомления запрашиваем САМИ на первом запуске — чтобы юзер
+        // не выдавал его вручную через настройки (полевой фидбек: «разрешения не
+        // запрашивает»). Без POST_NOTIFICATIONS медиа-уведомление плеера не видно.
+        maybeRequestNotificationPermission()
 
         enableEdgeToEdge()
 
@@ -380,6 +392,27 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         handleTelegramAuth(intent)
         handleNotificationTap(intent)
+    }
+
+    /**
+     * Запрашивает POST_NOTIFICATIONS ОДИН раз на первом запуске (Android 13+).
+     * До 13 разрешение не рантайм — ничего не делаем. Если уже выдано — не дёргаем.
+     * Флаг в prefs гарантирует ровно один показ диалога: без него холодный старт
+     * либо спамил бы диалогом, либо впустую дёргал систему на «навсегда отклонено».
+     */
+    private fun maybeRequestNotificationPermission() {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU) return
+        if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+            == android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) return
+        val prefs = getSharedPreferences("permissions", android.content.Context.MODE_PRIVATE)
+        if (prefs.getBoolean("post_notif_requested", false)) return
+        prefs.edit().putBoolean("post_notif_requested", true).apply()
+        try {
+            notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        } catch (_: Throwable) {
+            // Отдельные прошивки могут кинуть на launch — не роняем старт.
+        }
     }
 
     private fun handleNotificationTap(intent: Intent?) {

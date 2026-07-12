@@ -143,7 +143,8 @@ class App : Application(), ImageLoaderFactory {
             .apply { name = "fishnet-init"; start() }
 
         // Ловушка зависаний UI: Fishnet-дампы ANR приходят БЕЗ стека main —
-        // вачдог сам пишет полный Java-дамп в crash_logs/ui_freeze_*.txt,
+        // вачдог сам пишет полный Java-дамп в watchdog_diag/ (ТОЛЬКО файл, НЕ
+        // экран краша: фриз ≠ крэш; экран краша — только Fishnet/CrashHandler),
         // когда main-лупер молчит > 6с (полевой кейс: тап по поиску).
         com.liquidmusicglass.debug.UiWatchdog.start(this)
 
