@@ -386,7 +386,7 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         // Джобы старой Activity не должны переживать её (утечка this; P2, аудит).
-        runCatching { kotlinx.coroutines.cancel(authScope) }
+        runCatching { authScope.coroutineContext[kotlinx.coroutines.Job]?.cancel() }
         com.liquidmusicglass.engine.automix.JuceContextHolder.clear(this)
     }
 
