@@ -23,7 +23,10 @@ class FavoriteTrackDatabase private constructor(context: Context) : SQLiteOpenHe
     private val _favoriteIdsFlow = MutableStateFlow<Set<String>>(emptySet())
     val favoriteIdsFlow: Flow<Set<String>> = _favoriteIdsFlow
 
-    private val _favoriteStatusFlows = mutableMapOf<String, MutableStateFlow<Boolean>>()
+    // ConcurrentHashMap (P0/P1, аудит): getOrPut дёргается с main (composition в
+    // FullPlayer/QueueSheet/мини-плеере), а forEach в reloadFavorites — с IO.
+    // Обычная HashMap давала гонку (CME/потерянные записи).
+    private val _favoriteStatusFlows = java.util.concurrent.ConcurrentHashMap<String, MutableStateFlow<Boolean>>()
 
     // --- Downloaded Tracks flows ---
     private val _downloadsFlow = MutableStateFlow<List<DownloadedTrackEntity>>(emptyList())
@@ -32,7 +35,7 @@ class FavoriteTrackDatabase private constructor(context: Context) : SQLiteOpenHe
     private val _downloadedIdsFlow = MutableStateFlow<Set<String>>(emptySet())
     val downloadedIdsFlow: Flow<Set<String>> = _downloadedIdsFlow
 
-    private val _downloadStatusFlows = mutableMapOf<String, MutableStateFlow<Boolean>>()
+    private val _downloadStatusFlows = java.util.concurrent.ConcurrentHashMap<String, MutableStateFlow<Boolean>>()
 
     @Volatile
     private var isLoaded = false
@@ -213,7 +216,13 @@ class FavoriteTrackDatabase private constructor(context: Context) : SQLiteOpenHe
 
     fun isFavoriteFlow(trackId: String): Flow<Boolean> {
         return _favoriteStatusFlows.getOrPut(trackId) {
-            MutableStateFlow(isFavorite(trackId))
+            // P0 (аудит): раньше здесь был isFavorite(trackId) — СИНХРОННЫЙ
+            // SQLite-запрос на потоке вызова, а вызов идёт из composition (main);
+            // самый первый ещё и открывал БД на main. Берём снапшот из памяти:
+            // _favoriteIdsFlow всегда актуален (каждая мутация зовёт
+            // reloadFavorites), а до loadAsync значение само поправится —
+            // reloadFavorites обновляет все пер-трековые flows.
+            MutableStateFlow(trackId in _favoriteIdsFlow.value)
         }
     }
 
@@ -363,7 +372,8 @@ class FavoriteTrackDatabase private constructor(context: Context) : SQLiteOpenHe
 
     fun isDownloadedFlow(trackId: String): Flow<Boolean> {
         return _downloadStatusFlows.getOrPut(trackId) {
-            MutableStateFlow(isDownloaded(trackId))
+            // См. isFavoriteFlow: без синхронного SQLite на потоке вызова (main).
+            MutableStateFlow(trackId in _downloadedIdsFlow.value)
         }
     }
 

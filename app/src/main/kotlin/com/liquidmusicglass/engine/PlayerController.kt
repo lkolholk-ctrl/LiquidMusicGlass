@@ -1302,11 +1302,14 @@ object PlayerController {
 
         try {
             val serviceIntent = android.content.Intent(context.applicationContext, AudioService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.applicationContext.startForegroundService(serviceIntent)
-            } else {
-                context.applicationContext.startService(serviceIntent)
-            }
+            // startService, НЕ startForegroundService (P0, аудит): FGS-старт вешает
+            // контракт «startForeground за 5-10с», а media3 зовёт startForeground
+            // только когда музыка РЕАЛЬНО заиграла. Медленный сетевой резолв (>10с),
+            // ошибка резолва (Toast без плейбека) или шаффл-тумблер без плейбека →
+            // ForegroundServiceDidNotStartInTimeException убивал ВСЁ приложение.
+            // Обычный startService контракта не вешает; MediaController тут же
+            // биндит сервис, а FGS-промоушен media3 делает сам при старте плейбека.
+            context.applicationContext.startService(serviceIntent)
         } catch (_: Exception) {}
 
         while (isConnectingController) {
