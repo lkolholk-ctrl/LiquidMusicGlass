@@ -5,6 +5,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,6 +47,12 @@ class MainActivity : ComponentActivity() {
 
     private val authScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    // POST_NOTIFICATIONS (Android 13+) — рантайм-разрешение. Регистрируем лаунчер
+    // на этапе конструирования Activity (иначе registerForActivityResult падает).
+    // Результат нам не важен (медиа-уведомление появится при воспроизведении).
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* no-op */ }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -58,6 +65,11 @@ class MainActivity : ComponentActivity() {
             return
         }
 
+        // Разрешение на уведомления запрашиваем САМИ на первом запуске — чтобы юзер
+        // не выдавал его вручную через настройки (полевой фидбек: «разрешения не
+        // запрашивает»). Без POST_NOTIFICATIONS медиа-уведомление плеера не видно.
+        maybeRequestNotificationPermission()
+
         enableEdgeToEdge()
 
         // Детектор просадки FPS → деградация тяжёлых эффектов (аура/лирика/мудкарточки)
@@ -67,15 +79,30 @@ class MainActivity : ComponentActivity() {
         // Сетевой колбэк переехал на уровень App (NetworkVitality): живёт весь
         // срок процесса, а не только пока открыта Activity.
 
-        // Initialize ICM API with native key (or BuildConfig fallback)
-        val apiKey = try {
-            IcmKeyProvider.getApiKey(this)
-        } catch (_: Throwable) { "" }.ifBlank { BuildConfig.ICM_API_KEY }
-        if (apiKey.isNotBlank()) {
-            IcmRepository.init(apiKey, IcmAuthRepository.partnerUserId.value)
-            // Restore session token if we have one (survives app updates)
-            IcmAuthRepository.getSessionToken()?.let { token ->
-                IcmRepository.setSessionToken(token)
+        // Инициализация ICM API — в ФОНЕ (главная причина стартового ANR была тут).
+        // IcmKeyProvider.getApiKey() грузит нативную .so (libicmkey) и гоняет
+        // анти-тампер проверку APK — это дорого и раньше висело на главном потоке
+        // ДО setContent. Ключ нужен только сетевому слою, не первому кадру, поэтому
+        // уносим весь блок в IO. Домашний экран грузит данные с ретраями, короткое
+        // окно «репозиторий ещё не готов» переживается.
+        authScope.launch {
+            val apiKey = try {
+                IcmKeyProvider.getApiKey(this@MainActivity)
+            } catch (_: Throwable) { "" }.ifBlank { BuildConfig.ICM_API_KEY }
+            if (apiKey.isNotBlank()) {
+                IcmRepository.init(apiKey, IcmAuthRepository.partnerUserId.value)
+                // Restore session token if we have one (survives app updates)
+                IcmAuthRepository.getSessionToken()?.let { token ->
+                    IcmRepository.setSessionToken(token)
+                }
+                // Стартовые сетевые задачи — опциональны и ограничены по времени:
+                // приложение показывается и работает без них, не вися на сети.
+                if (IcmAuthRepository.isLoggedIn.value) {
+                    kotlinx.coroutines.withTimeoutOrNull(5_000) {
+                        IcmAuthRepository.refreshTokenIfNeeded(apiKey)
+                        IcmAuthRepository.fetchUserData()
+                    }
+                }
             }
         }
 
@@ -84,25 +111,6 @@ class MainActivity : ComponentActivity() {
 
     // Handle notification tap (open large player)
     handleNotificationTap(intent)
-
-    // Refresh profile on app start if user is logged in
-        if (IcmAuthRepository.isLoggedIn.value) {
-            authScope.launch {
-                // Стартовые сетевые задачи — опциональны и ограничены по времени:
-                // приложение показывается и работает без них, не вися на сети.
-                kotlinx.coroutines.withTimeoutOrNull(5_000) {
-                    val apiKey = try {
-                        IcmKeyProvider.getApiKey(this@MainActivity)
-                    } catch (_: Throwable) { "" }.ifBlank { BuildConfig.ICM_API_KEY }
-
-                    if (apiKey.isNotBlank()) {
-                        IcmAuthRepository.refreshTokenIfNeeded(apiKey)
-                    }
-                    // Always refresh profile data on startup
-                    IcmAuthRepository.fetchUserData()
-                }
-            }
-        }
 
         val isSecurityCompromised = mutableStateOf(false)
         val compromiseReason = mutableStateOf("")
@@ -377,6 +385,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        // Джобы старой Activity не должны переживать её (утечка this; P2, аудит).
+        runCatching { authScope.coroutineContext[kotlinx.coroutines.Job]?.cancel() }
         com.liquidmusicglass.engine.automix.JuceContextHolder.clear(this)
     }
 
@@ -384,6 +394,29 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         handleTelegramAuth(intent)
         handleNotificationTap(intent)
+    }
+
+    /**
+     * Запрашивает POST_NOTIFICATIONS ОДИН раз на первом запуске (Android 13+).
+     * До 13 разрешение не рантайм — ничего не делаем. Если уже выдано — не дёргаем.
+     * Флаг в prefs гарантирует ровно один показ диалога: без него холодный старт
+     * либо спамил бы диалогом, либо впустую дёргал систему на «навсегда отклонено».
+     */
+    private fun maybeRequestNotificationPermission() {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU) return
+        if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+            == android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) return
+        val prefs = getSharedPreferences("permissions", android.content.Context.MODE_PRIVATE)
+        if (prefs.getBoolean("post_notif_requested", false)) return
+        try {
+            notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+            // Флаг — ПОСЛЕ успешного launch (P2, аудит): если прошивка кинула на
+            // launch, диалог не показан — не сжигаем единственную попытку.
+            prefs.edit().putBoolean("post_notif_requested", true).apply()
+        } catch (_: Throwable) {
+            // Отдельные прошивки могут кинуть на launch — не роняем старт.
+        }
     }
 
     private fun handleNotificationTap(intent: Intent?) {
@@ -449,28 +482,33 @@ class MainActivity : ComponentActivity() {
             // Try to issue a Bearer session token so /me/* endpoints work
             // without S2S API key. Best-effort — wave already works via
             // X-Partner-Key + X-Partner-User-Id even if this fails.
-            val apiKey = try {
-                IcmKeyProvider.getApiKey(this)
-            } catch (_: Throwable) { "" }
-                .ifBlank { BuildConfig.ICM_API_KEY }
-            if (apiKey.isNotBlank() && apiKey.startsWith("pk_")) {
-                authScope.launch {
+            //
+            // ВЕСЬ блок в authScope (P1, аудит): IcmKeyProvider.getApiKey грузит
+            // нативную .so + анти-тампер проверку APK — «дорого» (см. коммент в
+            // onCreate, из-за этого был стартовый ANR), а тут он оставался
+            // СИНХРОННЫМ на main в deeplink-пути (возврат из Telegram = фриз).
+            authScope.launch {
+                val apiKey = try {
+                    IcmKeyProvider.getApiKey(this@MainActivity)
+                } catch (_: Throwable) { "" }
+                    .ifBlank { BuildConfig.ICM_API_KEY }
+                if (apiKey.isNotBlank() && apiKey.startsWith("pk_")) {
                     val loginResult = runCatching {
                         IcmAuthRepository.issueSessionAfterTelegramAuth(apiKey)
                     }
                     if (loginResult.isSuccess) {
-                        // Fetch profile & preferences, then refresh UI on main thread
-                        val dataResult = IcmAuthRepository.fetchUserData()
-                        if (dataResult.isSuccess) {
-                            withContext(Dispatchers.Main) {
-                                // Trigger UI refresh — StateFlows will update automatically
-                                // but if profile screen is already open, force recreate
-                                recreate()
-                            }
-                        }
+                        // UI обновится сам через StateFlow. recreate() УДАЛЁН (P1):
+                        // он перезапускал Activity, onCreate снова обрабатывал ТОТ ЖЕ
+                        // oauth-intent, а oauth_state уже удалён → юзер видел ложный
+                        // тост «Auth failed: invalid state» СРАЗУ после успешного
+                        // входа (+ повторный getApiKey).
+                        IcmAuthRepository.fetchUserData()
                     }
                 }
             }
+            // Гасим обработанный oauth-intent: при recreate/config-change
+            // onCreate не должен переигрывать его заново.
+            intent?.data = null
 
             android.widget.Toast.makeText(
                 this,

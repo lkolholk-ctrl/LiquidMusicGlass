@@ -36,6 +36,7 @@ class WaveCandidateFilter(
         BlankId,
         DuplicateTrack,
         NegativeTrack,
+        DeadTrack,
         NegativeArtist,
         SourceBlocked,
         SkipRatio,
@@ -58,41 +59,63 @@ class WaveCandidateFilter(
         candidates: Iterable<WaveCandidate>,
         state: WaveSessionState,
         statsByTrackId: Map<String, TrackStats> = emptyMap(),
-        limit: Int = Int.MAX_VALUE
+        limit: Int = Int.MAX_VALUE,
+        // Айди, которые ICM отдаёт в каталоге, но которые 404-ят на POST /track
+        // (track_not_found). Жёсткий reject в ОБОИХ проходах — битый трек не должен
+        // просачиваться даже в аварийном relaxed-повторе. Инжектится снаружи
+        // (DeadTrackRegistry), чтобы фильтр оставался чистым и тестируемым.
+        deadTrackIds: Set<String> = emptySet()
     ): Result {
         if (limit <= 0) {
             return Result(accepted = emptyList(), rejected = emptyList(), nextState = state)
         }
 
-        val accepted = mutableListOf<WaveCandidate>()
-        val rejected = mutableListOf<Decision>()
-        val seenTrackIds = LinkedHashSet<String>().apply {
-            addAll(state.excludeSet)
-            addAll(state.playedSet)
-        }
-        val recentArtistKeys = state.recentArtistKeys.takeLast(policy.artistWindowSize).toMutableList()
-        var nextState = state
+        val deadSet = deadTrackIds.mapNotNullTo(HashSet()) { it.normalizedIdKey() }
+        val candidateList = candidates.toList()
 
-        for (candidate in candidates) {
-            if (accepted.size >= limit) break
+        // Один проход фильтра. relaxed включает «пол бесконечной волны»: снимает
+        // анти-повтор и косметику (кулдаун артиста, skip-ratio), оставляя только
+        // жёсткое — пустой id, явный дизлайк трека/артиста, заблокир. источник.
+        fun runPass(relaxed: Boolean): Result {
+            val accepted = mutableListOf<WaveCandidate>()
+            val rejected = mutableListOf<Decision>()
+            // В жёсткий reject идёт только in-run exclude (markQueued), НЕ засеянная
+            // недавняя история (playedSet): персональная волна рекомендует близкое к
+            // недавнему, и раньше это вырезалось в ноль. playedSet по-прежнему уходит
+            // серверу как мягкий played_track_ids, но клиент им больше не банит.
+            val seenTrackIds = LinkedHashSet<String>().apply {
+                if (!relaxed) addAll(state.excludeSet)
+            }
+            val recentArtistKeys = state.recentArtistKeys.takeLast(policy.artistWindowSize).toMutableList()
+            var nextState = state
 
-            val reason = rejectReason(candidate, nextState, seenTrackIds, recentArtistKeys, statsByTrackId)
-            if (reason != null) {
-                rejected += Decision(candidate, accepted = false, reason = reason)
-                continue
+            for (candidate in candidateList) {
+                if (accepted.size >= limit) break
+
+                val reason = rejectReason(candidate, nextState, seenTrackIds, recentArtistKeys, statsByTrackId, deadSet, relaxed)
+                if (reason != null) {
+                    rejected += Decision(candidate, accepted = false, reason = reason)
+                    continue
+                }
+
+                accepted += candidate
+                seenTrackIds += candidate.normalizedId
+                candidate.artistKey?.let { recentArtistKeys += it }
+                nextState = nextState.markQueued(candidate)
             }
 
-            accepted += candidate
-            seenTrackIds += candidate.normalizedId
-            candidate.artistKey?.let { recentArtistKeys += it }
-            nextState = nextState.markQueued(candidate)
+            return Result(accepted = accepted, rejected = rejected, nextState = nextState)
         }
 
-        return Result(
-            accepted = accepted,
-            rejected = rejected,
-            nextState = nextState
-        )
+        val strict = runPass(relaxed = false)
+        // Непустая пачка кандидатов НИКОГДА не должна дать 0 принятых — иначе волна
+        // «высыхает» и не играет (корневой баг из лога). Если строгий проход всё
+        // вырезал — повторяем мягко, сохраняя только явные дизлайки.
+        return if (strict.accepted.isEmpty() && candidateList.isNotEmpty()) {
+            runPass(relaxed = true)
+        } else {
+            strict
+        }
     }
 
     private fun rejectReason(
@@ -100,12 +123,18 @@ class WaveCandidateFilter(
         state: WaveSessionState,
         seenTrackIds: Set<String>,
         recentArtistKeys: List<String>,
-        statsByTrackId: Map<String, TrackStats>
+        statsByTrackId: Map<String, TrackStats>,
+        deadSet: Set<String>,
+        relaxed: Boolean
     ): RejectReason? {
         val id = candidate.normalizedId
         if (id.isBlank()) return RejectReason.BlankId
+        // В relaxed seenTrackIds стартует пустым → ловит только повтор ВНУТРИ пачки.
         if (id in seenTrackIds) return RejectReason.DuplicateTrack
         if (id in state.negativeTrackSet) return RejectReason.NegativeTrack
+        // Битый трек (404 track_not_found) — жёсткий reject даже в relaxed: играть
+        // его всё равно нельзя, повторная выдача только жжёт запрос и рвёт очередь.
+        if (deadSet.isNotEmpty() && id in deadSet) return RejectReason.DeadTrack
 
         val source = candidate.source.normalizedKey()
         if (policy.normalizedSources.isNotEmpty() && source !in policy.normalizedSources) {
@@ -115,17 +144,19 @@ class WaveCandidateFilter(
         val artistKey = candidate.artistKey
         if (artistKey != null) {
             if (candidate.artistKeys.any { it in state.negativeArtistSet }) return RejectReason.NegativeArtist
-            if (recentArtistKeys.count { it == artistKey } >= policy.maxTracksPerArtistWindow) {
+            if (!relaxed && recentArtistKeys.count { it == artistKey } >= policy.maxTracksPerArtistWindow) {
                 return RejectReason.ArtistCooldown
             }
         }
 
-        val stats = statsByTrackId[id] ?: TrackStats(
-            playCount = state.playCounts[id] ?: 0,
-            skipCount = state.skipCounts[id] ?: 0
-        )
-        if (stats.total >= policy.minSkipSamples && stats.skipRatio > policy.skipRatioThreshold) {
-            return RejectReason.SkipRatio
+        if (!relaxed) {
+            val stats = statsByTrackId[id] ?: TrackStats(
+                playCount = state.playCounts[id] ?: 0,
+                skipCount = state.skipCounts[id] ?: 0
+            )
+            if (stats.total >= policy.minSkipSamples && stats.skipRatio > policy.skipRatioThreshold) {
+                return RejectReason.SkipRatio
+            }
         }
 
         return null

@@ -32,6 +32,9 @@ class IcmSearchApi(
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
+        // callTimeout (P1, аудит): readTimeout сбрасывается КАЖДЫМ байтом —
+        // «капающий» ответ держал поиск (и весь dataSync-импорт) бесконечно.
+        .callTimeout(30, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .build()
 

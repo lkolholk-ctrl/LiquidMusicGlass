@@ -32,8 +32,10 @@ class LyricsTimeProcessor(
     private val lyrics: LyricsParser.Lyrics
 ) {
     companion object {
-        /** Saturation boost — как в графическом слое Apple Music. */
-        const val SATURATION_BOOST = 2.5f
+        /** Saturation boost. Снижен 2.5→1.6: центральный экстрактор
+         *  (AlbumColorExtractor.vivid) теперь сам отдаёт сочные цвета, прежний
+         *  агрессивный локальный буст поверх клипал лирику в белый. */
+        const val SATURATION_BOOST = 1.6f
 
         /** Alpha для уже пропетых слов. */
         const val PAST_ALPHA = 0.5f

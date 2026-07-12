@@ -107,7 +107,14 @@ fun LibraryScreen(
     val lc = LiquidTheme.colors
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val viewModel = remember { LibraryViewModel(context) }
+    // viewModel(), НЕ remember{} (P1, аудит): remember создавал VM мимо
+    // ViewModelStore — два вечных Room-коллектора из init + БЕЗУСЛОВНЫЙ
+    // syncWithCloud (полный сетевой обход лайков) на КАЖДЫЙ заход в таб.
+    // applicationContext — чтобы retained-VM не держал Activity.
+    val appContext = remember(context) { context.applicationContext }
+    val viewModel: LibraryViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
+        initializer = { LibraryViewModel(appContext) }
+    )
 
     var currentView by remember { mutableStateOf(LibraryView.MAIN) }
 

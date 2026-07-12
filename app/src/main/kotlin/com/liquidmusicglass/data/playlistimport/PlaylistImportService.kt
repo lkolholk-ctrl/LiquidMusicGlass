@@ -32,7 +32,9 @@ class PlaylistImportService : Service() {
     companion object {
         const val CHANNEL_ID = "yandex_import_channel"
         const val CHANNEL_NAME = "Playlist Import Services"
-        const val NOTIFICATION_ID = 1001
+        // 3001, НЕ 1001 (P1, аудит): 1001 занят медиа-нотификацией AudioService —
+        // импорт замещал контролы плеера в шторке и ломал их по завершении.
+        const val NOTIFICATION_ID = 3001
 
         const val EXTRA_URL = "extra_url"
         const val EXTRA_PLAYLIST_NAME = "extra_playlist_name"
@@ -61,6 +63,9 @@ class PlaylistImportService : Service() {
         SupervisorJob() + Dispatchers.IO + CoroutineName("PlaylistImportService")
     )
     private var currentJob: Job? = null
+    /** Поколение импорта (P1, аудит): отмена ПЕРВОГО импорта при старте второго
+     *  делала stopSelf в catch — убивая сервис со свежезапущенным импортом. */
+    @Volatile private var importGeneration = 0
     private lateinit var notificationManager: NotificationManager
 
     override fun onCreate() {
@@ -93,15 +98,16 @@ class PlaylistImportService : Service() {
 
         // Cancel any previous job
         currentJob?.cancel()
+        val gen = ++importGeneration
 
         currentJob = serviceScope.launch {
-            runImport(url, playlistName)
+            runImport(gen, url, playlistName)
         }
 
         return START_NOT_STICKY
     }
 
-    private suspend fun runImport(url: String, playlistName: String?) {
+    private suspend fun runImport(gen: Int, url: String, playlistName: String?) {
         val logger = ImportFileLogger(this)
         logger.clear()
         logger.log("I", "Service", "Starting import for: $url")
@@ -209,8 +215,13 @@ class PlaylistImportService : Service() {
 
         } catch (e: CancellationException) {
             logger.log("I", "Service", "Import cancelled")
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
+            // stopSelf только если МЫ всё ещё актуальный импорт: иначе нас
+            // вытеснил новый — сервис должен жить дальше (P1, аудит).
+            if (gen == importGeneration) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
+            throw e
         } catch (e: PlaylistImportException) {
             logger.log("E", "Service", "Import failed: ${e.message}")
             showErrorNotification(e.message ?: "Import failed")
@@ -349,5 +360,13 @@ class PlaylistImportService : Service() {
         super.onDestroy()
         currentJob?.cancel()
         serviceScope.cancel("Service destroyed")
+    }
+
+    // Android 14/15: dataSync-FGS имеет бюджет 6ч/сутки; по исчерпании система
+    // зовёт onTimeout, и если сервис за секунды не остановится — процесс
+    // убивается ForegroundServiceDidNotStopInTimeException (P1, аудит).
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        currentJob?.cancel()
+        stopSelf()
     }
 }

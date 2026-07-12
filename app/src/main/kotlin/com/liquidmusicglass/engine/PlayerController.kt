@@ -73,7 +73,10 @@ object PlayerController {
     val context: Context? get() = appContext
     private var controller: MediaController? = null
     private var isConnectingController = false
-    private var mediaControllerUnavailable = false
+    // Не вечный флаг, а бэкофф (P1, аудит): один 6-сек таймаут коннекта на
+    // холодном старте НАВСЕГДА выключал MediaController — play/skip/seek были
+    // мертвы до перезапуска процесса. Теперь повторная попытка через 30с.
+    @Volatile private var mediaControllerRetryAfterMs = 0L
 
     // ── Queue ──
     private var queue = listOf<Track>()
@@ -369,6 +372,13 @@ object PlayerController {
                     val result = resolveStreamUrl(track.id)
                     if (result is StreamResult.Success) {
                         ok = MediaCacheManager.preCacheTrack(track.id, result.uri)
+                    } else if (result is StreamResult.Error && result.code in TERMINAL_RESOLVE_ERRORS) {
+                        // Терминальная ошибка (404 track_not_found / 403 source_not_allowed /
+                        // 451 region / early_access): ретраить бессмысленно — трек не
+                        // появится. Не жжём 3 попытки с бэкоффом (это и был «провал
+                        // (3 попыт.)» в логе на битых треках волны); плеер такой трек
+                        // авто-скипнет при проигрывании.
+                        break
                     }
                 }
                 if (isActive || ok) {
@@ -514,11 +524,7 @@ object PlayerController {
 
             when (startStreamResult) {
                 is StreamResult.Success -> {
-                    // Set queue BEFORE building MediaItems so resolveStreamUrlSync can find tracks
                     val immutableTracks = tracks.toList()
-                    queue = immutableTracks
-                    _queueFlow.value = immutableTracks
-                    currentIndex = startIndex
 
                     val mediaItems = tracks.mapIndexed { i, track ->
                         // Start track gets resolved URL, others use trackId (resolved on demand)
@@ -527,6 +533,17 @@ object PlayerController {
                     }
 
                     withContext(Dispatchers.Main) {
+                        // Мутации queue/currentIndex — ТОЛЬКО на main (P0, аудит):
+                        // раньше писались здесь с IO, а addTracksToQueue/move/remove
+                        // мутируют с main — plain var без синхронизации давал lost
+                        // update (треки рефилла волны исчезали) и битую видимость.
+                        // Инвариант «queue до prepare» сохранён: setMediaItems ниже
+                        // дергает resolveStreamUrlSync только при реальном открытии
+                        // источника, к этому моменту queue уже выставлена.
+                        queue = immutableTracks
+                        _queueFlow.value = immutableTracks
+                        currentIndex = startIndex
+
                         _currentTrack.value = startTrack
                         _durationMs.value = startTrack.durationMs
                         _currentPositionMs.value = 0L
@@ -599,13 +616,15 @@ object PlayerController {
             endlessEngine.reset()
 
             val immutableTracks = tracks.toList()
-            queue = immutableTracks
-            _queueFlow.value = immutableTracks
-            currentIndex = startIndex
 
             val mediaItems = immutableTracks.map { track -> buildMediaItem(track, track.uri) }
 
             withContext(Dispatchers.Main) {
+                // Мутации queue/currentIndex — только на main (см. playFromList).
+                queue = immutableTracks
+                _queueFlow.value = immutableTracks
+                currentIndex = startIndex
+
                 _currentTrack.value = startTrack
                 _durationMs.value = startTrack.durationMs
                 _currentPositionMs.value = 0L
@@ -647,10 +666,24 @@ object PlayerController {
             val atQueueEnd = currentIndex + 1 >= currentQueue.size
 
             if (remaining <= EndlessPlaybackEngine.REFILL_THRESHOLD) {
-                val refilled = withContext(Dispatchers.IO) {
+                // Ждём рефилл ТОЛЬКО на реальном конце очереди (P1, аудит):
+                // порог 40 при батчах по 30 — типовое состояние, и каждый тап
+                // «next» синхронно ждал сетевой рефилл (до секунд). Если впереди
+                // ещё есть треки — рефилл уходит в фон, скип мгновенный.
+                if (!atQueueEnd) {
+                    ioScope.launch {
+                        runCatching {
+                            endlessEngine.checkAndRefillIfNeeded(
+                                remainingCount = remaining,
+                                force = false
+                            )
+                        }
+                    }
+                }
+                val refilled = if (!atQueueEnd) false else withContext(Dispatchers.IO) {
                     endlessEngine.checkAndRefillIfNeeded(
                         remainingCount = remaining,
-                        force = atQueueEnd
+                        force = true
                     )
                 }
                 if (refilled) {
@@ -953,6 +986,12 @@ object PlayerController {
         data class Success(val uri: Uri) : StreamResult()
         data class Error(val code: String, val message: String?) : StreamResult()
     }
+
+    // Коды резолва стрима, при которых повтор бесполезен — трек не появится.
+    // Используются предзагрузкой, чтобы не жечь 3 попытки на битом треке.
+    private val TERMINAL_RESOLVE_ERRORS = setOf(
+        "track_not_found", "source_not_allowed", "region_unavailable", "early_access"
+    )
 
     private data class CachedStreamUrl(
         val uri: Uri,
@@ -1285,15 +1324,18 @@ object PlayerController {
 
     private suspend fun getPlayer(context: Context): MediaController? {
         controller?.let { return it }
-        if (mediaControllerUnavailable) return null
+        if (System.currentTimeMillis() < mediaControllerRetryAfterMs) return null
 
         try {
             val serviceIntent = android.content.Intent(context.applicationContext, AudioService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.applicationContext.startForegroundService(serviceIntent)
-            } else {
-                context.applicationContext.startService(serviceIntent)
-            }
+            // startService, НЕ startForegroundService (P0, аудит): FGS-старт вешает
+            // контракт «startForeground за 5-10с», а media3 зовёт startForeground
+            // только когда музыка РЕАЛЬНО заиграла. Медленный сетевой резолв (>10с),
+            // ошибка резолва (Toast без плейбека) или шаффл-тумблер без плейбека →
+            // ForegroundServiceDidNotStartInTimeException убивал ВСЁ приложение.
+            // Обычный startService контракта не вешает; MediaController тут же
+            // биндит сервис, а FGS-промоушен media3 делает сам при старте плейбека.
+            context.applicationContext.startService(serviceIntent)
         } catch (_: Exception) {}
 
         while (isConnectingController) {
@@ -1324,7 +1366,7 @@ object PlayerController {
                     }
                 }
             } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
-                mediaControllerUnavailable = true
+                mediaControllerRetryAfterMs = System.currentTimeMillis() + 30_000L
                 null
             }
             builtController?.let {

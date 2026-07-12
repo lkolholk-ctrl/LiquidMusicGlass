@@ -760,7 +760,11 @@ data class IcmLikeRequest(
 data class IcmLikeResponse(
     @SerialName("status") val status: String? = null,
     @SerialName("ok") val ok: Boolean = false,
-    @SerialName("logged") val logged: Boolean = false
+    @SerialName("logged") val logged: Boolean = false,
+    // POST /library/likes теперь toggle (changelog ICM 2026-07-11): в ответе
+    // liked = ИТОГОВОЕ состояние. Nullable: старый сервер/omit → null → откат
+    // на HTTP-2xx = успех.
+    @SerialName("liked") val liked: Boolean? = null
 )
 
 @Serializable

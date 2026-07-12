@@ -22,10 +22,22 @@ object IcmKeyProvider {
      */
     external fun nativeGetBaseUrl(): String
 
+    // Расшифрованный ключ кешируется после первого успеха: nativeGetKey каждый
+    // раз гоняет полную анти-тампер проверку APK (чтение+хеш), а первый вызов ещё
+    // и грузит .so. Это дорого и БЕЗ КЕША висело на главном потоке на старте
+    // (ANR). Кешируем — второй и последующие вызовы мгновенные.
+    @Volatile
+    private var cachedKey: String? = null
+
     /**
-     * Kotlin-facing API key accessor.
+     * Kotlin-facing API key accessor. Кешируется после первого непустого ответа.
      */
-    fun getApiKey(context: android.content.Context): String = nativeGetKey(context)
+    fun getApiKey(context: android.content.Context): String {
+        cachedKey?.let { return it }
+        val key = nativeGetKey(context)
+        if (key.isNotBlank()) cachedKey = key
+        return key
+    }
 
     /**
      * Kotlin-facing base URL accessor.

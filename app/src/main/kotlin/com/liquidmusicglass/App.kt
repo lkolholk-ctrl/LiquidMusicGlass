@@ -127,12 +127,24 @@ class App : Application(), ImageLoaderFactory {
 
     override fun onCreate() {
         super.onCreate()
-        CrashHandler.install(this) // Java крэши
+        CrashHandler.install(this) // Java крэши (синхронно и ПЕРВЫМ — Fishnet ниже
+        // подшивается к уже установленному дефолтному хендлеру)
+        // Чистим устаревшие ui_freeze-логи из crash_logs/ ДО того, как MainActivity
+        // проверит hasCrashLog: раньше отчёт о фризе (в т.ч. ложный) показывался
+        // экраном краша при первом открытии. Синхронно и рано — дешёвый file-delete.
+        CrashHandler.purgeStaleFreezeLogs(this)
         val logDir = File(filesDir, "crash_logs").apply { mkdirs() }
-        Fishnet.init(this, logDir.absolutePath) // Native/ANR крэши
+        // Fishnet.init грузит первую в процессе нативную .so (libfishnet), делает
+        // синхронный getPackageInfo(SIGNING_CERTIFICATES) binder-IPC к холодному
+        // system_server и ставит sigaction/вачдог — на главном потоке это часть
+        // стартового ANR-бюджета. Уносим в отдельный поток: хендлеры встают через
+        // пару мс, а критический путь первого кадра свободен.
+        Thread { Fishnet.init(this@App, logDir.absolutePath) } // Native/ANR крэши
+            .apply { name = "fishnet-init"; start() }
 
         // Ловушка зависаний UI: Fishnet-дампы ANR приходят БЕЗ стека main —
-        // вачдог сам пишет полный Java-дамп в crash_logs/ui_freeze_*.txt,
+        // вачдог сам пишет полный Java-дамп в watchdog_diag/ (ТОЛЬКО файл, НЕ
+        // экран краша: фриз ≠ крэш; экран краша — только Fishnet/CrashHandler),
         // когда main-лупер молчит > 6с (полевой кейс: тап по поиску).
         com.liquidmusicglass.debug.UiWatchdog.start(this)
 

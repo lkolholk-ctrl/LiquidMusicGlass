@@ -34,6 +34,13 @@ class HomeViewModel : ViewModel() {
     private var genresLoadJob: Job? = null
     private var waveLoadJob: Job? = null
 
+    /** Когда /home успешно загружен из сети (для TTL в loadHomeContent). */
+    private var homeLoadedAtMs = 0L
+
+    private companion object {
+        const val HOME_TTL_MS = 5 * 60_000L
+    }
+
     init {
         Log.d("HomeViewModel", "HomeViewModel created")
     }
@@ -106,6 +113,16 @@ class HomeViewModel : ViewModel() {
             Log.d("HomeViewModel", "loadHomeContent ignored: already active; active=${activeLoadCount()}")
             return
         }
+        // TTL свежести (P1, аудит): LaunchedEffect на Wave/New перезапускает
+        // загрузку при КАЖДОМ входе в таб — свежий /home перегружался по кругу
+        // (до 3 сетевых попыток на свитч). Если контент уже есть и моложе TTL —
+        // не ходим в сеть. force (pull-to-refresh/логин) обходит.
+        if (!force && _homeContent.value != null &&
+            System.currentTimeMillis() - homeLoadedAtMs < HOME_TTL_MS
+        ) {
+            Log.d("HomeViewModel", "loadHomeContent ignored: fresh (TTL)")
+            return
+        }
         homeLoadJob?.cancel()
         _isLoading.value = true
         _error.value = null
@@ -120,6 +137,7 @@ class HomeViewModel : ViewModel() {
                     try {
                         val response = IcmRepository.loadHomeContent()
                         _homeContent.value = response
+                        homeLoadedAtMs = System.currentTimeMillis()
                         _error.value = null
                         HomeCacheManager.save(response)
                         // The home response already contains its charts block. Do not issue
@@ -227,6 +245,9 @@ class HomeViewModel : ViewModel() {
             try {
                 val repo = WaveRepository.getInstance(context)
                 val tracks = repo.startPersonalWave()
+                com.liquidmusicglass.api.icm.IcmApiFileLogger.log(
+                    "D", "Wave", "buildWaveQueue: startPersonalWave -> ${tracks.size} tracks"
+                )
 
                 if (tracks.isNotEmpty()) {
                     _waveTracks.value = tracks
@@ -239,17 +260,48 @@ class HomeViewModel : ViewModel() {
                     _isBuildingWave.value = false
                     PlayerController.ensureWaveRefill()
                 } else {
-                    // Пусто → по доке: у сервера нет seed-артистов/лайков. Если онбординг
-                    // ещё не пройден — показываем выбор артистов (персонализация стартует
-                    // только после него). Иначе просто молчим.
-                    val onboarded = try {
-                        IcmRepository.getWaveOnboarding()?.completed ?: false
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (_: Exception) {
-                        false
+                    // Персональная волна ICM пуста НА СЕРВЕРЕ: он Apple-only и у
+                    // аккаунта нет apple-сидов (лайки Y/кастомные), поэтому на все
+                    // /wave/* приходит status:"empty", tracks:[]. Чтобы «Моя волна»
+                    // не молчала и не откатывалась — падаем в бесконечную ЖАНРОВУЮ
+                    // волну по топ-жанрам юзера: /wave/genre/{genre} это Apple-каталог,
+                    // не зависит от персональных сидов. GENRE-дозаправка (см.
+                    // EndlessPlaybackEngine) держит её бесконечной.
+                    val fallback = buildGenreFallbackQueue(repo)
+                    if (fallback != null) {
+                        val (genres, genreTracks) = fallback
+                        com.liquidmusicglass.api.icm.IcmApiFileLogger.log(
+                            "D", "Wave",
+                            "buildWaveQueue: personal empty -> search genre fallback $genres -> ${genreTracks.size} tracks"
+                        )
+                        _waveTracks.value = genreTracks
+                        // autoRefillType=SEARCH + seedPool=жанры → EndlessPlaybackEngine
+                        // дозаправляет волну поиском по этим жанрам (см. SEARCH-ветку).
+                        // Персональная волна пуста (Apple-only), поэтому идём поиском;
+                        // /wave/genre ICM починил (2026-07-11). Волна бесконечна.
+                        PlayerController.playFromList(
+                            context = context,
+                            tracks = genreTracks,
+                            startIndex = 0,
+                            autoRefillType = "SEARCH",
+                            autoRefillId = genres.firstOrNull(),
+                            autoRefillName = genres.firstOrNull(),
+                            seedPool = genres
+                        )
+                        _isBuildingWave.value = false
+                        PlayerController.ensureWaveRefill()
+                    } else {
+                        // Даже жанровая волна пуста → по доке нужен онбординг (выбор
+                        // seed-артистов). Если он ещё не пройден — показываем выбор.
+                        val onboarded = try {
+                            IcmRepository.getWaveOnboarding()?.completed ?: false
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (_: Exception) {
+                            false
+                        }
+                        if (!onboarded) _needsOnboarding.value = true
                     }
-                    if (!onboarded) _needsOnboarding.value = true
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -262,6 +314,47 @@ class HomeViewModel : ViewModel() {
                 }
             }
         }
+    }
+
+    /**
+     * Fallback для пустой персональной волны. Берёт топ-жанры юзера и набирает
+     * очередь ПОИСКОМ (buildGenreSearchQueue): персональная волна пуста (Apple-
+     * only), а поиск стабилен. (/wave/genre ICM починил 2026-07-11 — раньше он
+     * висел; теперь это просто наш fallback.) Возвращает список жанров (для
+     * SEARCH-дозаправки через seedPool) и стартовую пачку. getTopGenres сам
+     * отдаёт дефолты (Electronic/Techno…), если истории нет — так что волна
+     * заведётся даже у нового юзера.
+     */
+    private suspend fun buildGenreFallbackQueue(
+        repo: WaveRepository
+    ): Pair<List<String>, List<Track>>? {
+        val genres = try {
+            repo.getTopGenres(limit = 5)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            emptyList()
+        }
+        if (genres.isEmpty()) return null
+        suspend fun search(): List<Track> = try {
+            repo.buildGenreSearchQueue(
+                genres = genres,
+                count = WaveRepository.WAVE_QUEUE_SIZE
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            emptyList()
+        }
+        var tracks = search()
+        if (tracks.isEmpty()) {
+            // Первый заход мог совпасть со сменой сети на старте (OkHttp сбрасывает
+            // пулы — «NET revive»), из-за чего волна не стартовала с первого раза.
+            // Один повтор после короткой паузы обычно уже попадает в живые пулы.
+            delay(600)
+            tracks = search()
+        }
+        return if (tracks.isNotEmpty()) genres to tracks else null
     }
 
     /**
@@ -298,6 +391,37 @@ class HomeViewModel : ViewModel() {
                     )
                     _isBuildingWave.value = false
                     PlayerController.ensureWaveRefill()
+                } else {
+                    // Реальный /wave/mood (его ICM починил 2026-07-11) вернул пусто →
+                    // страховка от молчаливого тупика: падаем в SEARCH по терму
+                    // настроения (как buildWaveQueue при пустой персональной): волна и заведётся, и
+                    // будет бесконечной через SEARCH-дозаправку.
+                    val fallback = try {
+                        repo.buildGenreSearchQueue(
+                            genres = listOf(query),
+                            count = WaveRepository.WAVE_QUEUE_SIZE
+                        )
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        emptyList()
+                    }
+                    if (fallback.isNotEmpty()) {
+                        _waveTracks.value = fallback
+                        PlayerController.playFromList(
+                            context = context,
+                            tracks = fallback,
+                            startIndex = 0,
+                            autoRefillType = "SEARCH",
+                            autoRefillId = query,
+                            autoRefillName = name,
+                            seedPool = listOf(query)
+                        )
+                        _isBuildingWave.value = false
+                        PlayerController.ensureWaveRefill()
+                    } else {
+                        _error.value = "Failed to build wave"
+                    }
                 }
             } catch (e: CancellationException) {
                 throw e

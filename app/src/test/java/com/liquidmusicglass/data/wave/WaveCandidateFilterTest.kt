@@ -7,8 +7,12 @@ import kotlin.test.assertTrue
 class WaveCandidateFilterTest {
 
     @Test
-    fun `filter rejects tracks already present in session state`() {
+    fun `filter hard-rejects in-run excluded tracks but not seeded recent history`() {
         val filter = WaveCandidateFilter()
+        // excludeIds = in-run anti-repeat (hard reject). playedIds = the soft
+        // played_track_ids signal sent to the server — NOT a client hard-reject:
+        // personal wave legitimately returns tracks close to recent listening, and
+        // banning them client-side reduced whole 200-batches to zero (the wave-loop bug).
         val state = WaveSessionState(excludeIds = listOf("1"), playedIds = listOf("2"))
 
         val result = filter.filter(
@@ -20,15 +24,32 @@ class WaveCandidateFilterTest {
             state = state
         )
 
-        assertEquals(listOf("3"), result.accepted.map { it.id })
+        // "1" is in the in-run exclude set → DuplicateTrack. "2" (recent history)
+        // is now allowed. "3" is new.
+        assertEquals(listOf("2", "3"), result.accepted.map { it.id })
         assertEquals(
-            listOf(
-                WaveCandidateFilter.RejectReason.DuplicateTrack,
-                WaveCandidateFilter.RejectReason.DuplicateTrack
-            ),
+            listOf(WaveCandidateFilter.RejectReason.DuplicateTrack),
             result.rejected.map { it.reason }
         )
         assertTrue("3" in result.nextState.excludeIds)
+    }
+
+    @Test
+    fun `filter never empties a non-empty batch (infinite-wave floor)`() {
+        val filter = WaveCandidateFilter()
+        // Every candidate would be a DuplicateTrack under the strict pass — the
+        // relaxation floor must still yield playable tracks so the wave never dies.
+        val state = WaveSessionState(excludeIds = listOf("1", "2"))
+
+        val result = filter.filter(
+            candidates = listOf(
+                WaveCandidate(id = "1", artistId = "a"),
+                WaveCandidate(id = "2", artistId = "b")
+            ),
+            state = state
+        )
+
+        assertTrue(result.accepted.isNotEmpty())
     }
 
     @Test
@@ -83,6 +104,44 @@ class WaveCandidateFilterTest {
 
         assertEquals(listOf("21"), result.accepted.map { it.id })
         assertEquals(WaveCandidateFilter.RejectReason.SkipRatio, result.rejected.single().reason)
+    }
+
+    @Test
+    fun `filter hard-rejects dead tracks in the strict pass`() {
+        val filter = WaveCandidateFilter()
+
+        val result = filter.filter(
+            candidates = listOf(
+                WaveCandidate(id = "367614920", artistId = "a"),
+                WaveCandidate(id = "42", artistId = "b")
+            ),
+            state = WaveSessionState(),
+            deadTrackIds = setOf("367614920")
+        )
+
+        assertEquals(listOf("42"), result.accepted.map { it.id })
+        assertEquals(WaveCandidateFilter.RejectReason.DeadTrack, result.rejected.single().reason)
+    }
+
+    @Test
+    fun `dead track never leaks through the relaxed floor even if batch would dry up`() {
+        val filter = WaveCandidateFilter()
+        // Both candidates would be DuplicateTrack under the strict pass; the
+        // relaxed floor normally re-serves them so the wave never dies. A dead
+        // track must stay rejected in BOTH passes — playing it is impossible.
+        val state = WaveSessionState(excludeIds = listOf("dead", "alive"))
+
+        val result = filter.filter(
+            candidates = listOf(
+                WaveCandidate(id = "dead", artistId = "a"),
+                WaveCandidate(id = "alive", artistId = "b")
+            ),
+            state = state,
+            deadTrackIds = setOf("dead")
+        )
+
+        assertEquals(listOf("alive"), result.accepted.map { it.id })
+        assertTrue(result.accepted.none { it.id == "dead" })
     }
 
     @Test

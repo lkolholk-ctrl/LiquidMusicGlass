@@ -88,8 +88,10 @@ fun SearchScreen(
     val prefs = remember { context.getSharedPreferences("search_history", Context.MODE_PRIVATE) }
     val scope = rememberCoroutineScope()
 
-    // ICM search state
-    val viewModel = remember { SearchViewModel() }
+    // ICM search state. viewModel(), НЕ remember{} (P1, аудит): remember создаёт
+    // VM мимо ViewModelStore — onCleared никогда не зовётся, debounce-коллектор
+    // из init жил вечно; каждый заход в поиск = +1 бессмертный SearchViewModel.
+    val viewModel: SearchViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
     val query by viewModel.query.collectAsState()
     val searchResults by viewModel.searchResults.collectAsState()
     val categories by viewModel.categories.collectAsState()

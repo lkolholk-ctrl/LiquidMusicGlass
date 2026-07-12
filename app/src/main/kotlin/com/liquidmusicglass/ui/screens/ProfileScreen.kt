@@ -1,6 +1,7 @@
 package com.liquidmusicglass.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,6 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -416,6 +418,10 @@ fun ProfileScreen(
                                                         com.liquidmusicglass.api.icm.IcmRepository.getUserRegion()
                                                     }.getOrNull() ?: regionInfo
                                                     IcmAuthRepository.fetchUserData()
+                                                    // Явный выбор юзера приоритетнее серверного
+                                                    // дефолта: ставим ПОСЛЕ fetchUserData (внутри него
+                                                    // syncRegionFromServer мог поставить /me/region.current).
+                                                    com.liquidmusicglass.api.icm.IcmRepository.region = r.code
                                                 } else {
                                                     android.widget.Toast.makeText(
                                                         context, "Couldn't switch region",
@@ -511,6 +517,30 @@ fun ProfileScreen(
                     textAlign = TextAlign.Center,
                     letterSpacing = 1.sp,
                     modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            // Диагностика: копирует последние строки ICM-лога в буфер обмена (тот же
+            // IcmApiFileLogger, что и в LibraryScreen, но доступно всегда — чтобы снять
+            // причину сбоя волны без ошибки импорта).
+            item {
+                Spacer(modifier = Modifier.height(12.dp))
+                val clipboard = LocalClipboardManager.current
+                Text(
+                    text = "Copy ICM logs",
+                    color = Color(0xFF0A84FF),
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            val logs = com.liquidmusicglass.api.icm.IcmApiFileLogger.getRecentLogs(200)
+                            clipboard.setText(androidx.compose.ui.text.AnnotatedString(logs))
+                            android.widget.Toast.makeText(
+                                context, "ICM logs copied", android.widget.Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                        .padding(vertical = 8.dp)
                 )
             }
 

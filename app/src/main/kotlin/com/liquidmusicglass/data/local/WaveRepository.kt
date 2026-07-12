@@ -10,12 +10,14 @@ import com.liquidmusicglass.data.local.db.AppDatabase
 import com.liquidmusicglass.data.local.db.CachedTrack
 import com.liquidmusicglass.data.local.db.GenreCount
 import com.liquidmusicglass.data.local.db.ListeningHistory
+import com.liquidmusicglass.data.wave.DeadTrackRegistry
 import com.liquidmusicglass.data.wave.WaveCandidateFilter
 import com.liquidmusicglass.data.wave.WaveMode
 import com.liquidmusicglass.data.wave.WaveSessionState
 import com.liquidmusicglass.data.wave.negativeWaveCandidate
 import com.liquidmusicglass.data.wave.toWaveCandidate
 import com.liquidmusicglass.engine.Track
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -48,6 +50,12 @@ class WaveRepository(context: Context) {
     // Сериализует создание серверной сессии: фоновый прогрев и первый рефилл
     // не должны открыть две сессии параллельно.
     private val personalSessionMutex = Mutex()
+    // ICM-волна Apple-only; у аккаунтов без apple-сидов ВСЕ её эндпоинты отдают
+    // empty. Пробить их (~7 запросов) на КАЖДЫЙ тап «Моей волны» — чистый сетевой
+    // шторм (→ ANR/«не с первого раза»/медленный старт). Подтвердив пустоту один
+    // раз, коротко-замыкаем на TTL: следующие старты идут сразу в поиск-fallback.
+    @Volatile
+    private var personalWaveEmptyUntilMs = 0L
 
     companion object {
         private const val TAG = "WaveRepository"
@@ -72,6 +80,8 @@ class WaveRepository(context: Context) {
          */
         private const val PERSONAL_WAVE_DIVERSITY = 0.35
         private const val SESSION_EXPIRY_MARGIN_MS = 60_000L
+        /** Сколько держим вердикт «ICM-волна пуста», не пробивая её заново. */
+        private const val PERSONAL_EMPTY_TTL_MS = 10 * 60_000L
 
         @Volatile
         private var instance: WaveRepository? = null
@@ -401,6 +411,104 @@ class WaveRepository(context: Context) {
         }
     }
 
+    /**
+     * Fallback-очередь волны через ПОИСК, а не через волновые эндпоинты.
+     *
+     * Зачем: personal-волна ICM для этого аккаунта пуста (она Apple-only, а
+     * apple-сидов нет — лайки Y/кастомные). /search работает стабильно и быстро,
+     * поэтому fallback «жанровой волны» набираем поиском по топ-жанрам юзера.
+     * (Историческая причина — /wave/genre|mood ВИСЛИ — ICM починил на сервере
+     * 2026-07-11: теперь отвечают за секунды. Реальные эндпоинты предпочитаются
+     * там, где вызываются; этот поиск-путь остаётся рабочим fallback'ом.)
+     *
+     * Ротация по жанрам (round-robin) + вычитание exclude на каждой дозаправке
+     * держат выдачу свежей: с 5 жанрами это сотни треков, т.е. волна фактически
+     * бесконечна на сессию. /search кешируется на 60с, так что повтор поиска по
+     * жанру внутри окна бесплатен.
+     */
+    suspend fun buildGenreSearchQueue(
+        genres: List<String>,
+        count: Int,
+        exclude: Collection<String> = emptyList()
+    ): List<Track> = withContext(Dispatchers.IO) {
+        if (genres.isEmpty() || count <= 0) return@withContext emptyList()
+        val excludeSet = exclude.toSet()
+        // Негативный фидбек («реже»/дизлайк) поиск-fallback обязан чтить сам: он
+        // ходит мимо волновых эндпоинтов, поэтому серверный decay-сигнал сюда не
+        // долетает — забаненный трек/артист вернулся бы снова. Снимаем снапшот
+        // банов из личного состояния волны и режем их ПРЯМО в сыром пуле, чтобы
+        // бан соблюдался в ОБОИХ проходах (и exclude-фильтр, и аварийный relaxed-
+        // повтор), а бесконечность держалась на переигрывании НЕ-забаненного.
+        val negTrackSet: Set<String>
+        val negArtistSet: Set<String>
+        synchronized(personalWaveStateLock) {
+            negTrackSet = personalWaveState.negativeTrackSet
+            negArtistSet = personalWaveState.negativeArtistSet
+        }
+        fun Track.isLocallyRejected(): Boolean {
+            val candidate = toWaveCandidate()
+            if (DeadTrackRegistry.isDead(candidate.normalizedId)) return true
+            if (negTrackSet.isNotEmpty() && candidate.normalizedId in negTrackSet) return true
+            return negArtistSet.isNotEmpty() && candidate.artistKeys.any { it in negArtistSet }
+        }
+        // Каждый жанр ищем один раз. Держим СЫРЫХ кандидатов (пустые id и
+        // дизлайкнутое отсеиваем сразу); exclude применяем отдельным проходом,
+        // чтобы при исчерпании конечного пула можно было повторно раздать уже
+        // игранное (но не забаненное), а не отдать пусто.
+        val rawPerGenre: Map<String, List<Track>> = genres.associateWith { genre ->
+            val found = try {
+                // source="apple" + searchTracks (не searchTracksByGenre):
+                //  • apple-каталог стабильно стримится; source=all тянул VK/кастом,
+                //    часть которых у этого юзера не играла («не все треки работают»);
+                //  • searchTracks фильтрует isTrack — searchTracksByGenre мапил в
+                //    «треки» И альбомы/артистов, которые физически не проигрываются.
+                IcmRepository.searchTracks(query = genre, source = "apple", limit = 30)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "Genre search '$genre' failed: ${e.message}")
+                emptyList()
+            }
+            found.filter { it.id.isNotBlank() && !it.isLocallyRejected() }
+        }
+        // Round-robin по жанрам: [g0[0], g1[0], …, g0[1], g1[1], …] — так в начале
+        // очереди намешаны все топ-жанры, а не только первый.
+        fun roundRobin(pools: Map<String, List<Track>>): List<Track> {
+            val out = LinkedHashMap<String, Track>()
+            var idx = 0
+            var addedThisPass = true
+            while (out.size < count && addedThisPass) {
+                addedThisPass = false
+                for (genre in genres) {
+                    val list = pools[genre] ?: continue
+                    if (idx < list.size) {
+                        val track = list[idx]
+                        if (!out.containsKey(track.id)) {
+                            out[track.id] = track
+                            addedThisPass = true
+                        }
+                        if (out.size >= count) break
+                    }
+                }
+                idx++
+            }
+            return out.values.toList()
+        }
+        val filtered = rawPerGenre.mapValues { (_, v) -> v.filter { it.id !in excludeSet } }
+        // ГАРАНТИЯ БЕСКОНЕЧНОСТИ: пул поиска КОНЕЧЕН (≈жанры×30). engine.playedIds
+        // копится и рано или поздно исключает ВЕСЬ пул → раньше здесь возвращался
+        // emptyList и волна МОЛЧА умирала (≈после 150 треков). Теперь: если exclude
+        // выел всё — зацикливаем, повторно раздаём уже игранное (переслушать лучше
+        // тишины; анти-повтор очереди не даёт повтора подряд).
+        val result = roundRobin(filtered).ifEmpty { roundRobin(rawPerGenre) }
+        com.liquidmusicglass.api.icm.IcmApiFileLogger.log(
+            "D", "Wave",
+            "buildGenreSearchQueue: genres=$genres exclude=${excludeSet.size} " +
+                "negTracks=${negTrackSet.size} negArtists=${negArtistSet.size} -> ${result.size} tracks"
+        )
+        result
+    }
+
     private suspend fun fetchPersonalWaveBatch(
         targetCount: Int,
         excludeIds: Set<String>,
@@ -529,6 +637,12 @@ class WaveRepository(context: Context) {
      * Серверная сессия для дальнейших дозаправок прогревается параллельно.
      */
     suspend fun startPersonalWave(count: Int = FAST_START_COUNT): List<Track> = withContext(Dispatchers.IO) {
+        // Короткое замыкание: ICM-волну недавно подтвердили пустой — не пробиваем
+        // все её эндпоинты снова (сетевой шторм → ANR/«не с первого раза»). Сразу
+        // отдаём пусто, ViewModel уходит в поиск-fallback.
+        if (System.currentTimeMillis() < personalWaveEmptyUntilMs) {
+            return@withContext emptyList()
+        }
         val recentIds = getRecentTrackIdsSafely(50)
         val negativeArtistKeys = getLocallyRejectedArtistKeys()
         val apiExcludeArtistIds = negativeArtistKeys.filter { key -> key.all { it.isDigit() } }
@@ -573,7 +687,13 @@ class WaveRepository(context: Context) {
         )
         if (viaSession.isNotEmpty()) return@withContext viaSession
 
-        fetchLegacyPersonalWave(count.coerceAtMost(5))
+        val legacy = fetchLegacyPersonalWave(count.coerceAtMost(5))
+        if (legacy.isEmpty()) {
+            // Все пути ICM-волны пусты → фиксируем вердикт на TTL, чтобы следующие
+            // тапы «Моей волны» шли сразу в поиск без повторного ICM-шторма.
+            personalWaveEmptyUntilMs = System.currentTimeMillis() + PERSONAL_EMPTY_TTL_MS
+        }
+        legacy
     }
 
     /**
@@ -610,7 +730,8 @@ class WaveRepository(context: Context) {
             candidates = tracks.map { it.toWaveCandidate() },
             state = sessionState.withSessionId(effectiveSessionId),
             statsByTrackId = statsByTrackId,
-            limit = targetCount
+            limit = targetCount,
+            deadTrackIds = DeadTrackRegistry.snapshot()
         )
         updatePersonalWaveState(filtered.nextState.withSessionId(effectiveSessionId))
 
@@ -619,9 +740,16 @@ class WaveRepository(context: Context) {
         }
 
         val tracksById = tracks.associateBy { it.id }
-        return filtered.accepted.mapNotNull { candidate ->
+        val result = filtered.accepted.mapNotNull { candidate ->
             tracksById[candidate.id]?.toTrack()
         }
+        // DIAG (wave-diag build): видно в «Copy ICM logs». server=сколько отдал ICM,
+        // filterAccepted=сколько прошло WaveCandidateFilter, mapped=сколько стало Track.
+        com.liquidmusicglass.api.icm.IcmApiFileLogger.log(
+            "D", "Wave",
+            "$label: server=${tracks.size} filterAccepted=${filtered.accepted.size} mapped=${result.size}"
+        )
+        return result
     }
 
     /**
@@ -778,7 +906,8 @@ class WaveRepository(context: Context) {
             candidates = response.tracks.map { it.toWaveCandidate() },
             state = state,
             statsByTrackId = statsByTrackId,
-            limit = targetCount
+            limit = targetCount,
+            deadTrackIds = DeadTrackRegistry.snapshot()
         )
         updateModeWaveState(key, filtered.nextState)
 

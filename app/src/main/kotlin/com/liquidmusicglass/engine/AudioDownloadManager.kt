@@ -24,6 +24,10 @@ object AudioDownloadManager {
     private val _downloadProgress = MutableStateFlow<Map<String, Float>>(emptyMap())
     val downloadProgress: StateFlow<Map<String, Float>> = _downloadProgress
 
+    /** Активные закачки — атомарный барьер от дублей (см. downloadTrack). */
+    private val activeDownloads: MutableSet<String> =
+        java.util.concurrent.ConcurrentHashMap.newKeySet()
+
     fun isDownloading(trackId: String): Boolean {
         return _downloadProgress.value.containsKey(trackId)
     }
@@ -40,19 +44,25 @@ object AudioDownloadManager {
         }
 
         val trackId = track.id
-        if (isDownloading(trackId)) return
-
-        val db = FavoriteTrackDatabase.getInstance(context)
-        if (db.isDownloaded(trackId)) {
-            onComplete(true)
-            return
-        }
-
-        // Determine file extension from quality
-        val quality = IcmAuthRepository.maxQuality.value ?: "256K"
-        val ext = if (quality.uppercase() == "ALAC") ".m4a" else ".mp3"
+        // Атомарный барьер (P1, аудит): прежний check-then-act по прогресс-мапе
+        // (isDownloading → флаг ставился уже ВНУТРИ корутины) пропускал два
+        // быстрых тапа Download → два конкурентных writer'а в один temp-файл =
+        // битый файл в downloads/ и в БД.
+        if (!activeDownloads.add(trackId)) return
 
         CoroutineScope(Dispatchers.IO).launch {
+            try {
+            // Диск-проверки — на IO, не на потоке вызывающего (main из
+            // onCustomCommand нотификации; P2, аудит).
+            val db = FavoriteTrackDatabase.getInstance(context)
+            if (db.isDownloaded(trackId)) {
+                onComplete(true)
+                return@launch
+            }
+
+            val quality = IcmAuthRepository.maxQuality.value ?: "256K"
+            val ext = if (quality.uppercase() == "ALAC") ".m4a" else ".mp3"
+
             updateProgress(trackId, 0.0f)
             val success = performDownload(context, track, ext)
             if (success) {
@@ -77,12 +87,15 @@ object AudioDownloadManager {
                 updateProgress(trackId, null)
                 onComplete(false)
             }
+            } finally {
+                activeDownloads.remove(trackId)
+            }
         }
     }
 
     fun deleteDownloadedTrack(context: Context, trackId: String) {
         val db = FavoriteTrackDatabase.getInstance(context)
-        val entity = db.getDownloadedTracks().find { it.trackId == trackId }
+        val entity = db.getDownloadedTrack(trackId)
         val ext = if (entity?.quality?.uppercase() == "ALAC") ".m4a" else ".mp3"
 
         // Delete physical audio file
@@ -216,12 +229,16 @@ object AudioDownloadManager {
     }
 
     private fun updateProgress(trackId: String, progress: Float?) {
-        val current = _downloadProgress.value.toMutableMap()
-        if (progress == null) {
-            current.remove(trackId)
-        } else {
-            current[trackId] = progress
+        // synchronized (P1, аудит): неатомарный read-modify-write StateFlow-мапы
+        // с трёх IO-потоков терял апдейты прогресса.
+        synchronized(this) {
+            val current = _downloadProgress.value.toMutableMap()
+            if (progress == null) {
+                current.remove(trackId)
+            } else {
+                current[trackId] = progress
+            }
+            _downloadProgress.value = current
         }
-        _downloadProgress.value = current
     }
 }

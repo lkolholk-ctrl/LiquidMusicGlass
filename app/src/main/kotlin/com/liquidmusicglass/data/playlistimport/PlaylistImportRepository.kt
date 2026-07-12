@@ -347,6 +347,10 @@ class PlaylistImportRepository(
                     searchQuery = track.query
                 )
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // Отмена импорта обязана останавливать матчинг сразу, а не
+            // превращаться в TrackMatchResult.Error (P1, аудит).
+            throw e
         } catch (e: Exception) {
             TrackMatchResult.Error(track, e)
         }

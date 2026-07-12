@@ -2,6 +2,7 @@ package com.liquidmusicglass.api.icm
 
 import com.liquidmusicglass.api.icm.wave.IcmWaveFeedbackAlias
 import com.liquidmusicglass.api.icm.wave.IcmWaveRepository
+import com.liquidmusicglass.data.wave.DeadTrackRegistry
 import com.liquidmusicglass.engine.Track
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -10,6 +11,9 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Repository for ICM Music Partner API.
@@ -37,6 +41,13 @@ object IcmRepository {
     // Сбрасываются при новой сессии (логин).
     @Volatile private var preferencesBlocked = false
     @Volatile private var likesBlocked = false
+
+    // Per-track мьютексы лайка: POST /library/likes — TOGGLE (не идемпотентный),
+    // а лайк дёргается из двух мест (мгновенный пуш при тапе + пуш pending-inserts
+    // в syncWithCloud). Без сериализации два toggle накладывались и возвращали
+    // трек в «не лайкнуто» → синк потом сносил локальное сердечко. Мьютекс на трек
+    // выстраивает их в очередь, и reconcile в setLikeState сходится к desired.
+    private val likeMutexes = ConcurrentHashMap<String, Mutex>()
 
     /** Сбросить бизнес-гейты (на новый логин/сессию — состояние подписки могло измениться). */
     fun resetBusinessGates() {
@@ -455,12 +466,27 @@ object IcmRepository {
         return charts
     }
 
+    /**
+     * ICM-каталог (/wave, /search) отдаёт айди, которых нет в стрим-слое: POST
+     * /track → 404 track_not_found. Заносим такой айди в глобальный бан, чтобы
+     * волна не выдавала его повторно (по полевым логам один битый айди прилетал
+     * по 3 раза за сессию). Только track_not_found: region_unavailable / 5xx /
+     * timeout НЕ мёртвые (регион-специфично либо транзиент) — их банить нельзя.
+     */
+    private fun noteDeadTrackIfNeeded(trackId: String, error: Throwable?) {
+        val apiError = error as? IcmApiException ?: return
+        if (apiError.errorCode == IcmErrorCodes.TRACK_NOT_FOUND) {
+            DeadTrackRegistry.markDead(trackId)
+        }
+    }
+
     suspend fun getStreamUrl(trackId: String, region: String? = null, source: String? = null): String? {
         val quality = IcmAuthRepository.getEffectiveQuality(trackId, source)
         val result = api.getTrack(trackId, region, quality)
         result.exceptionOrNull()?.let {
             _lastException = it as? Exception
             _lastError.value = it.message
+            noteDeadTrackIfNeeded(trackId, it)
         }
         return result.getOrNull()?.url
     }
@@ -474,6 +500,7 @@ object IcmRepository {
         result.exceptionOrNull()?.let {
             _lastException = it as? Exception
             _lastError.value = it.message
+            noteDeadTrackIfNeeded(trackId, it)
             if (it is IcmApiException) {
                 _lastApiException.value = it
                 android.util.Log.e("IcmRepository", "[VK_DEBUG] API error: code=${it.code}, errorCode=${it.errorCode}, message=${it.message}, requiredRegion=${it.requiredRegion}")
@@ -492,6 +519,7 @@ object IcmRepository {
         result.exceptionOrNull()?.let {
             _lastException = it as? Exception
             _lastError.value = it.message
+            noteDeadTrackIfNeeded(trackId, it)
             if (it is IcmApiException) {
                 _lastApiException.value = it
             }
@@ -605,14 +633,19 @@ object IcmRepository {
         limit: Int? = null,
         offset: Int? = null
     ): IcmLibraryLikesResponse? {
-        // Терминально: 405 (метод не поддержан) / 403 → эндпоинт недоступен, не зовём.
-        if (likesBlocked) return null
+        // Чтение лайков (GET) НЕ гейтим — это единственный путь подтянуть веб-лайки
+        // (down-sync). Раньше likesReadBlocked, взведённый разовой 403 (напр.
+        // user_not_linked на старте до готовности линка), НАВСЕГДА блокировал
+        // чтение → syncWithCloud падал на шаге 1 (getLibraryLikes==null) → шаг 2
+        // (подтянуть облачные лайки) не выполнялся, и веб-лайки не появлялись,
+        // хотя up-sync (мгновенный пуш при тапе) работал. syncWithCloud и так
+        // гейтит по partnerUserId, а чтение зовётся на дискретных событиях (старт/
+        // открытие Медиатеки/смена сети/ручной рефреш), не в цикле — шторма нет,
+        // поэтому просто пробуем каждый раз.
         val result = api.getLibraryLikes(source, limit, offset)
         result.exceptionOrNull()?.let {
             _lastException = it as? Exception
             _lastError.value = it.message
-            val code = (it as? IcmApiException)?.code
-            if (code == 405 || code == 403) likesBlocked = true
         }
         return result.getOrNull()
     }
@@ -620,25 +653,50 @@ object IcmRepository {
     /**
      * Like a track in cloud library.
      */
-    suspend fun likeTrack(trackId: String): Boolean {
-        val result = api.likeTrack(trackId)
-        result.exceptionOrNull()?.let {
-            _lastException = it as? Exception
-            _lastError.value = it.message
-        }
-        return result.isSuccess
-    }
+    suspend fun likeTrack(trackId: String): Boolean = setLikeState(trackId, desired = true)
 
     /**
      * Unlike a track in cloud library.
      */
-    suspend fun unlikeTrack(trackId: String): Boolean {
-        val result = api.unlikeTrack(trackId)
-        result.exceptionOrNull()?.let {
-            _lastException = it as? Exception
-            _lastError.value = it.message
+    suspend fun unlikeTrack(trackId: String): Boolean = setLikeState(trackId, desired = false)
+
+    /**
+     * Приводит облачный лайк трека к ЖЕЛАЕМОМУ состоянию.
+     *
+     * POST /library/likes теперь TOGGLE (changelog ICM 2026-07-11): один POST
+     * переключает состояние, в ответе liked = итог. Поэтому «слепой» POST может
+     * увести не туда, если клиент и сервер рассинхронены. Приводим к desired:
+     * один POST; если сервер уже был в desired и toggle увёл прочь — ровно ОДИН
+     * доповторный POST (без цикла). likesBlocked оставлен как транзиентный
+     * анти-шторм предохранитель (сбрасывается на новом логине); при рабочем 200
+     * он больше не взводится. Идемпотентность у вызова обеспечивает
+     * LibraryRepository (гейт по db.isFavorite): unlike летит только на реальном
+     * переходе liked→unliked, like — на unliked→liked.
+     */
+    private suspend fun setLikeState(trackId: String, desired: Boolean): Boolean {
+        if (likesBlocked) return false
+        // Сериализуем toggle этого трека: без этого мгновенный пуш и пуш из
+        // syncWithCloud накладывались и оставляли сервер в НЕ том состоянии.
+        return likeMutexes.getOrPut(trackId) { Mutex() }.withLock {
+            val first = api.likeTrack(trackId) // POST /library/likes = toggle (обе стороны)
+            first.exceptionOrNull()?.let {
+                _lastException = it as? Exception
+                _lastError.value = it.message
+                val code = (it as? IcmApiException)?.code
+                if (code == 405 || code == 403) likesBlocked = true
+                return@withLock false
+            }
+            val liked = first.getOrNull()?.liked ?: return@withLock first.isSuccess // старый сервер: liked нет → 2xx=успех
+            if (liked == desired) return@withLock true
+            // Сервер уже был в desired → первый toggle увёл прочь. Ровно один доповтор.
+            val second = api.likeTrack(trackId)
+            second.exceptionOrNull()?.let {
+                _lastException = it as? Exception
+                _lastError.value = it.message
+                return@withLock false
+            }
+            second.getOrNull()?.liked?.let { it == desired } ?: second.isSuccess
         }
-        return result.isSuccess
     }
 
     /**

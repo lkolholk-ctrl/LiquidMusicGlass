@@ -27,12 +27,37 @@ object CrashHandler {
         }
     }
 
+    /**
+     * Реальный крэш-лог (java_crash / нативный дамп Fishnet) — то, что ДОЛЖНО
+     * показываться экраном краша. ui_freeze — это отчёт о ЗАВИСАНИИ (не крэш): он
+     * не должен хайджекать старт приложения, поэтому в расчёт не берётся.
+     */
+    private fun File.isRealCrashLog(): Boolean =
+        isFile && !name.startsWith("ui_freeze_")
+
     fun hasCrashLog(context: Context): Boolean {
         return try {
             val dir = File(context.filesDir, "crash_logs")
-            dir.exists() && dir.listFiles()?.any { it.isFile } == true
+            dir.exists() && dir.listFiles()?.any { it.isRealCrashLog() } == true
         } catch (_: Throwable) {
             false
+        }
+    }
+
+    /**
+     * Удалить УСТАРЕВШИЕ ui_freeze-логи из crash_logs/. Раньше UiWatchdog писал туда
+     * отчёты о фризах, и они всплывали ЭКРАНОМ КРАША на старте (в т.ч. ЛОЖНЫЕ —
+     * полевой фидбек: «лог вылезает при первом открытии, с этим многие столкнулись»).
+     * Теперь фризы — только диагностика в watchdog_diag/; старые чистим, чтобы не
+     * показывались после апдейта. Зовём синхронно и рано из App.onCreate (до
+     * MainActivity, которая проверяет hasCrashLog).
+     */
+    fun purgeStaleFreezeLogs(context: Context) {
+        runCatching {
+            val dir = File(context.filesDir, "crash_logs")
+            dir.listFiles()
+                ?.filter { it.isFile && it.name.startsWith("ui_freeze_") }
+                ?.forEach { it.delete() }
         }
     }
 
@@ -40,7 +65,8 @@ object CrashHandler {
         return try {
             val dir = File(context.filesDir, "crash_logs")
             if (!dir.exists()) return null
-            val files = dir.listFiles()?.filter { it.isFile } ?: return null
+            // Только реальные крэши; ui_freeze не показываем (их чистит purgeStaleFreezeLogs).
+            val files = dir.listFiles()?.filter { it.isRealCrashLog() } ?: return null
             if (files.isEmpty()) return null
             val combined = files
                 .sortedBy { it.lastModified() }

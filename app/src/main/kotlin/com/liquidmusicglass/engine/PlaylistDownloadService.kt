@@ -56,7 +56,7 @@ class PlaylistDownloadService : Service() {
 
         const val EXTRA_TRACK_IDS = "extra_track_ids"
         const val EXTRA_PLAYLIST_NAME = "extra_playlist_name"
-        const val EXTRA_TRACK_META_JSON = "extra_track_meta_json"
+        const val EXTRA_TRACK_META_FILE = "extra_track_meta_file"
 
         private const val ACTION_CANCEL = "action_cancel_download"
         private const val CONCURRENCY = 3
@@ -64,15 +64,22 @@ class PlaylistDownloadService : Service() {
         /** Start downloading a batch of tracks with full metadata. */
         fun start(context: Context, tracks: List<Track>, playlistName: String? = null) {
             if (tracks.isEmpty()) return
-            val trackIds = tracks.map { it.id }
+            // distinct: дубль трека в плейлисте давал два конкурентных writer'а
+            // в один temp-файл (битый файл).
+            val trackIds = tracks.map { it.id }.distinct()
             // Serialize metadata as simple JSON array
             val metaJson = tracks.joinToString(prefix = "[", postfix = "]") { track ->
                 val cover = track.coverUrl?.let { "\"${it.replace("\"", "\\\"")}\"" } ?: "null"
                 """{"id":"${track.id}","title":"${track.title.replace("\"", "\\\"")}","artist":"${track.artist.replace("\"", "\\\"")}","coverUrl":$cover,"durationMs":${track.durationMs}}"""
             }
+            // Мета — через ФАЙЛ, не через extras (P1, аудит): binder-лимит ~1МБ,
+            // плейлист 1000+ треков с длинными cover-URL пробивал
+            // TransactionTooLargeException прямо в UI-клике.
+            val metaFile = java.io.File(context.cacheDir, "dl_meta_${System.currentTimeMillis()}.json")
+            val metaOk = runCatching { metaFile.writeText(metaJson) }.isSuccess
             val intent = Intent(context, PlaylistDownloadService::class.java).apply {
                 putStringArrayListExtra(EXTRA_TRACK_IDS, ArrayList(trackIds))
-                putExtra(EXTRA_TRACK_META_JSON, metaJson)
+                if (metaOk) putExtra(EXTRA_TRACK_META_FILE, metaFile.absolutePath)
                 playlistName?.let { putExtra(EXTRA_PLAYLIST_NAME, it) }
             }
             context.startForegroundService(intent)
@@ -92,8 +99,14 @@ class PlaylistDownloadService : Service() {
     )
     private var currentJob: Job? = null
     private lateinit var notificationManager: NotificationManager
-    @Volatile
-    private var isCancelled = false
+
+    /** Пер-батчевый флаг отмены (P1, аудит): общий isCancelled сбрасывался в
+     *  false при старте ВТОРОЙ пачки и «реанимировал» блокирующие read-циклы
+     *  первой (Job-cancel их не прерывает — они проверяют флаг), а
+     *  CancellationException первой пачки делал stopSelf — убивая сервис, в
+     *  котором только что стартовала вторая. */
+    private class Batch { @Volatile var cancelled = false }
+    @Volatile private var activeBatch: Batch? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -106,7 +119,7 @@ class PlaylistDownloadService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_CANCEL -> {
-                isCancelled = true
+                activeBatch?.cancelled = true
                 currentJob?.cancel()
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf(startId)
@@ -122,22 +135,30 @@ class PlaylistDownloadService : Service() {
         }
 
         val playlistName = intent.getStringExtra(EXTRA_PLAYLIST_NAME)
-        val metaJson = intent.getStringExtra(EXTRA_TRACK_META_JSON)
-        val metaMap = parseMetaJson(metaJson, trackIds)
+        val metaPath = intent.getStringExtra(EXTRA_TRACK_META_FILE)
 
         startForeground(NOTIFICATION_ID, buildInitialNotification(trackIds.size))
 
         currentJob?.cancel()
-        isCancelled = false
+        val batch = Batch()
+        activeBatch = batch
 
         currentJob = serviceScope.launch {
-            runDownload(trackIds, metaMap, playlistName)
+            // Парсинг меты — в корутине, НЕ в onStartCommand на main (P2, аудит):
+            // regex-парс сотен КБ строки давал джанк кадров на старте загрузки.
+            val metaJson = metaPath?.let { path ->
+                runCatching { java.io.File(path).readText() }.getOrNull()
+                    .also { runCatching { java.io.File(path).delete() } }
+            }
+            val metaMap = parseMetaJson(metaJson, trackIds)
+            runDownload(batch, trackIds, metaMap, playlistName)
         }
 
         return START_NOT_STICKY
     }
 
     private suspend fun runDownload(
+        batch: Batch,
         trackIds: List<String>,
         metaMap: Map<String, DownloadTrackMeta>,
         playlistName: String?
@@ -190,10 +211,10 @@ class PlaylistDownloadService : Service() {
                         // ── Isolated try-catch per track ──
                         // A failure here must NEVER cancel sibling coroutines or the supervisorScope
                         try {
-                            if (isCancelled) return@async
+                            if (batch.cancelled) return@async
 
                             semaphore.withPermit {
-                                if (isCancelled) return@withPermit
+                                if (batch.cancelled) return@withPermit
 
                                 val meta = metaMap[trackId]
                                 val safeName = buildSanitizedFileName(meta?.artist, meta?.title, ext)
@@ -211,7 +232,9 @@ class PlaylistDownloadService : Service() {
                                 }
 
                                 // Also skip if fully recorded in DB with both paths
-                                val existing = db.getDownloadedTracks().find { it.trackId == trackId }
+                                // Точечный запрос вместо полной выборки таблицы на КАЖДЫЙ трек
+                                // (O(N²) на больших плейлистах — секунды лишнего I/O; P2, аудит).
+                                val existing = db.getDownloadedTrack(trackId)
                                 if (existing != null &&
                                     File(existing.localPath).exists() &&
                                     existing.localCoverPath != null &&
@@ -224,6 +247,7 @@ class PlaylistDownloadService : Service() {
                                 }
 
                                 val success = downloadSingleTrack(
+                                    batch,
                                     trackId = trackId,
                                     targetFile = targetFile,
                                     coverFile = coverFile,
@@ -249,7 +273,7 @@ class PlaylistDownloadService : Service() {
                 }.awaitAll()
             }
 
-            if (isCancelled) {
+            if (batch.cancelled) {
                 showCancelledNotification(processed.get(), totalCount)
             } else {
                 showCompletionNotification(
@@ -261,7 +285,11 @@ class PlaylistDownloadService : Service() {
             }
 
         } catch (e: CancellationException) {
-            showCancelledNotification(processed.get(), totalCount)
+            // Только если МЫ всё ещё активная пачка: отмену первой пачки при
+            // старте второй раньше сопровождал stopForeground/stopSelf — сервис
+            // умирал вместе со свежезапущенной загрузкой (P1, аудит).
+            if (activeBatch === batch) showCancelledNotification(processed.get(), totalCount)
+            throw e
         } catch (e: Exception) {
             // This should only fire if supervisorScope itself fails (extremely unlikely)
             android.util.Log.e("PlaylistDownloadService", "Supervisor scope failed: ${e.message}")
@@ -275,6 +303,7 @@ class PlaylistDownloadService : Service() {
     }
 
     private suspend fun downloadSingleTrack(
+        batch: Batch,
         trackId: String,
         targetFile: File,
         coverFile: File,
@@ -315,7 +344,7 @@ class PlaylistDownloadService : Service() {
             var count: Int
 
             while (inputStream.read(buffer).also { count = it } != -1) {
-                if (isCancelled) {
+                if (batch.cancelled) {
                     outputStream.close()
                     inputStream.close()
                     connection.disconnect()
@@ -354,7 +383,7 @@ class PlaylistDownloadService : Service() {
                         val coverBuf = ByteArray(4096)
                         var cCount: Int
                         while (coverIn.read(coverBuf).also { cCount = it } != -1) {
-                            if (isCancelled) break
+                            if (batch.cancelled) break
                             coverOut.write(coverBuf, 0, cCount)
                         }
                         coverOut.flush()
@@ -676,8 +705,17 @@ class PlaylistDownloadService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        isCancelled = true
+        activeBatch?.cancelled = true
         currentJob?.cancel()
         serviceScope.cancel("Service destroyed")
+    }
+
+    // Android 14/15: dataSync-FGS бюджет 6ч/сутки — см. PlaylistImportService.
+    // Многочасовая загрузка 600-1000+ треков на медленной сети реально
+    // упирается в лимит; без обработчика система убивала процесс.
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        activeBatch?.cancelled = true
+        currentJob?.cancel()
+        stopSelf()
     }
 }

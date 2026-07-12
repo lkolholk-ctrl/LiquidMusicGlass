@@ -46,6 +46,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -214,6 +215,11 @@ class AudioService : MediaSessionService() {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             PlayerController.setPlaying(isPlaying)
             manageWakeLock()
+            // Фокус берём при РЕАЛЬНОМ старте плейбека (P1, аудит): раньше он
+            // запрашивался один раз в onCreate — чужая музыка вставала на паузу
+            // при простом открытии приложения, а после AUDIOFOCUS_LOSS повторный
+            // Play играл БЕЗ фокуса (две музыки одновременно, дакинг мёртв).
+            if (isPlaying) requestAudioFocus()
         }
 
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
@@ -362,6 +368,8 @@ class AudioService : MediaSessionService() {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             PlayerController.setPlaying(isPlaying)
             manageWakeLock()
+            // См. Exo-листенер: фокус — при реальном старте плейбека.
+            if (isPlaying) requestAudioFocus()
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
@@ -380,15 +388,18 @@ class AudioService : MediaSessionService() {
     override fun onCreate() {
         super.onCreate()
 
-        // ── Global service-scope exception handler ──
-        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
-            android.util.Log.e("AudioService", "Uncaught exception on thread ${thread.name}", throwable)
-            // Do NOT kill the process — log and swallow to keep service alive
-        }
+        // УДАЛЁН глотающий setDefaultUncaughtExceptionHandler (P0, аудит).
+        // Он был ПРОЦЕСС-глобальным и затирал CrashHandler из App.onCreate:
+        // (а) краши переставали писаться в crash_logs («лог не создаётся» —
+        // полевой фидбек), (б) необработанное исключение на main «глоталось»,
+        // Looper.loop() завершался — приложение НАВСЕГДА замерзало с живым FGS
+        // (системный диалог «не отвечает» вместо честного краша). Краши обязан
+        // обрабатывать ТОЛЬКО CrashHandler (лог + завершение процесса).
 
-        // Audio focus setup
+        // Audio focus setup. Сам запрос фокуса — при старте плейбека
+        // (onIsPlayingChanged), НЕ здесь: запрос в onCreate ставил чужую музыку
+        // на паузу при простом открытии приложения.
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        requestAudioFocus()
 
         // Наушники выдернули → пауза (для JUCE-пути; Exo обрабатывает сам).
         // ContextCompat + NOT_EXPORTED: системные бродкасты доходят, а требование
@@ -463,13 +474,17 @@ class AudioService : MediaSessionService() {
         startPositionPolling()
         ensureNotificationChannel()
 
-        // Observe current track and favorites to update notification button dynamically
-        serviceScope.launch {
+        // Observe current track and favorites to update notification button dynamically.
+        // mainScope, НЕ serviceScope(IO) (P0, аудит): updateNotificationLayout зовёт
+        // session.setCustomLayout — методы MediaSession обязаны вызываться на
+        // application-потоке плеера (main); с IO это wrong-thread/UB media3,
+        // причём на КАЖДУЮ смену трека и каждое изменение избранного.
+        mainScope.launch {
             PlayerController.favoriteIds.collect {
                 updateNotificationLayout()
             }
         }
-        serviceScope.launch {
+        mainScope.launch {
             PlayerController.currentTrack.collect {
                 updateNotificationLayout()
             }
@@ -581,7 +596,14 @@ class AudioService : MediaSessionService() {
     }
 
     override fun onStartCommand(intent: android.content.Intent?, flags: Int, startId: Int): Int {
-        // START_STICKY ensures Android recreates the service if killed by LMK
+        // super ОБЯЗАТЕЛЕН (P0, аудит): MediaSessionService.onStartCommand
+        // обрабатывает ACTION_MEDIA_BUTTON от манифестного MediaButtonReceiver
+        // (кнопка гарнитуры после смерти процесса) и service-PendingIntent'ы
+        // кнопок нотификации (на Android ≤12 они шлются именно сюда). Без super
+        // события молча терялись: гарнитура не стартовала плейбек (и система
+        // добивала процесс за не-вызванный startForeground), кнопки нотификации
+        // были мертвы. super сам возвращает START_STICKY-семантику media3.
+        super.onStartCommand(intent, flags, startId)
         return START_STICKY
     }
 
@@ -645,6 +667,11 @@ class AudioService : MediaSessionService() {
     override fun onDestroy() {
         PlayerController.logFinalPlayback()
         positionJob?.cancel()
+        // Отмена скоупов (P1, аудит): вечные коллекторы currentTrack/favoriteIds
+        // из onCreate переживали пересоздание сервиса (LMK+STICKY) — утечка
+        // инстанса + дубли коллекторов на каждый рестарт.
+        runCatching { serviceScope.cancel() }
+        runCatching { mainScope.cancel() }
         cancelCrossfadeFade(resetVolume = false)
         abandonAudioFocus()
         runCatching { unregisterReceiver(becomingNoisyReceiver) }

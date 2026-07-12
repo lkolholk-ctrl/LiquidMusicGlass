@@ -470,8 +470,10 @@ fun FullPlayer(
         // Подложка под контролами — только когда открыта лирика или очередь.
         // Цвет — из палитры обложки (не чёрный), чтобы совпадал с фоном.
         if (showLyrics || showQueue) {
-            // Цвет обложки — светлее (меньше чёрного), непрозрачный книзу
-            val scrimColor = lerp(albumColors.dominant, Color.Black, 0.3f)
+            // Цвет обложки — светлее (меньше чёрного), непрозрачный книзу.
+            // dominant теперь сочный из центрального экстрактора (vivid) — тянем к
+            // чёрному чуть меньше (0.3→0.24), чтобы под контролами был цвет, не пятно.
+            val scrimColor = lerp(albumColors.dominant, Color.Black, 0.24f)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()

@@ -9,11 +9,15 @@ object UiLogger {
     fun log(msg: String) {
         val ts = System.currentTimeMillis() % 100000
         val entry = "[$ts] $msg"
-        logs.add(entry)
         android.util.Log.d("UiLogger", entry)
-        // Keep last 100 entries
-        while (logs.size > 100) {
-            logs.removeAt(0)
+        // synchronized (P2, аудит): log() зовётся и с loader-потока ExoPlayer
+        // (resolveStreamUrlSync), и с main — check-then-act на size под
+        // конкуренцией ловил IndexOutOfBounds.
+        synchronized(logs) {
+            logs.add(entry)
+            while (logs.size > 100) {
+                logs.removeAt(0)
+            }
         }
     }
 

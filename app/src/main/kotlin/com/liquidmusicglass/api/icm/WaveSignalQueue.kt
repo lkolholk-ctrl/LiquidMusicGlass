@@ -67,14 +67,21 @@ object WaveSignalQueue {
     }
 
     private suspend fun deliver(s: Signal): IcmRepository.DeliveryResult =
-        runCatching {
+        try {
             when (s.kind) {
                 "feedback" -> IcmRepository.deliverWaveFeedback(s.a, s.b ?: "")
                 else -> IcmRepository.deliverWavePlayback(
                     s.a, s.played, s.total, s.completed, s.skipped
                 )
             }
-        }.getOrDefault(IcmRepository.DeliveryResult.RETRY)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // P1 (аудит): runCatching глотал отмену корутины и превращал её в
+            // RETRY — send()/drain() продолжали работать ПОСЛЕ отмены. Отмена
+            // обязана пробрасываться.
+            throw e
+        } catch (_: Exception) {
+            IcmRepository.DeliveryResult.RETRY
+        }
 
     /** Фидбек волны с гарантией доставки: неудача → копим и дошлём. */
     suspend fun sendFeedback(type: String, value: String) {
