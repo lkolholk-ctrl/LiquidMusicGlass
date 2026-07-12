@@ -197,10 +197,11 @@ fun WaveHomeScreen(
         AuraBackground(
             albumColors = albumColors,
             modifier = Modifier.fillMaxSize(),
+            intensity = 0.90f,
             animate = animationsActive,
             playing = isPlaying,
-            smokeSaturation = 1.22f,
-            smokeContrast = 1.16f
+            smokeSaturation = 1.50f,
+            smokeContrast = 1.30f
         )
 
         Column(

@@ -10,6 +10,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.palette.graphics.Palette
 import kotlinx.coroutines.Dispatchers
@@ -21,10 +22,13 @@ private val FALLBACK_MUTED = 0xFF1C1C1E.toInt()
 
 data class AlbumColors(
     val dominant: Color = Color(FALLBACK_DARK),
-    val darkMuted: Color = Color(FALLBACK_DARK),
+    val darkMuted: Color = Color(FALLBACK_DARK),      // база дыма — тёмная, но сочная
+    val darkVibrant: Color = Color(FALLBACK_DARK),    // глубокий насыщенный тон
     val vibrant: Color = Color(FALLBACK_MUTED),
     val lightVibrant: Color = Color(FALLBACK_MUTED),
-    val muted: Color = Color(FALLBACK_MUTED)
+    val muted: Color = Color(FALLBACK_MUTED),
+    val lightMuted: Color = Color(FALLBACK_MUTED),    // светлый дымок/подсветка
+    val accents: List<Color> = emptyList()            // топ-N сочных свотчей обложки
 )
 
 /**
@@ -74,25 +78,33 @@ private fun boostDarkColor(color: Int, minBrightness: Float = 0.15f): Color {
 }
 
 /**
- * Жёсткий нижний порог яркости. В отличие от [boostDarkColor] (мультипликативный —
- * на чисто-чёрном даёт чёрное), здесь АДДИТИВНЫЙ подъём: pure black поднимается до
- * видимого нейтрального тона, а у цветных обложек сохраняется оттенок. Применяется
- * ко ВСЕМ полям [AlbumColors], чтобы чёрно-серые обложки (напр. ч/б каверы) не
- * превращали ауру-дым и прочие Palette-зависимые элементы в чёрный экран.
+ * Hue-СОХРАНЯЮЩИЙ подъём яркости + буст насыщенности в HSV. Заменяет прежний
+ * аддитивный withMinBrightness, который поднимал R/G/B на ОДНУ величину и тем
+ * ДЕСАТУРИРОВАЛ цвет (тянул к серому — «вымыто», полевой фидбек): аддитив держит
+ * (max−min), но растит max → S=(max−min)/max падает. Здесь V умножается — max и min
+ * масштабируются одинаково, S в HSV не меняется (яркость без потери цвета), а satMul
+ * отдельно добавляет сочности. valFloor — нижний порог яркости (чтобы тёмные/чёрные
+ * каверы не давали чёрный дым). H не трогаем — оттенок обложки сохранён точно.
  */
-private fun withMinBrightness(color: Color, floor: Float): Color {
-    val r = color.red
-    val g = color.green
-    val b = color.blue
-    val brightness = (r + g + b) / 3f
-    if (brightness >= floor) return color
-    val lift = floor - brightness
-    return Color(
-        red = (r + lift).coerceIn(0f, 1f),
-        green = (g + lift).coerceIn(0f, 1f),
-        blue = (b + lift).coerceIn(0f, 1f)
-    )
+private fun vivid(c: Color, satMul: Float, valMul: Float, valFloor: Float): Color {
+    val hsv = FloatArray(3)
+    AndroidColor.colorToHSV(c.toArgb(), hsv)
+    hsv[1] = (hsv[1] * satMul).coerceIn(0f, 1f)
+    hsv[2] = (hsv[2] * valMul).coerceAtLeast(valFloor).coerceIn(0f, 1f)
+    return Color(AndroidColor.HSVToColor(hsv))
 }
+
+/**
+ * Топ-N самых сочных населённых свотчей обложки как акцент-цвета (для пилюль,
+ * подсветок, доп. вуали дыма). Скоринг тот же, что у bestVibrant: насыщенность ×
+ * населённость. Малонасыщенное/шумовое (sat<0.25 или редкое) не берём.
+ */
+private fun topAccents(palette: Palette, satMul: Float, count: Int): List<Color> =
+    palette.swatches
+        .filter { saturationOf(it.rgb) >= 0.25f && it.population >= 40 }
+        .sortedByDescending { saturationOf(it.rgb) * (minOf(it.population, 500) / 500f) }
+        .take(count)
+        .map { vivid(Color(it.rgb), satMul = satMul, valMul = 1.05f, valFloor = 0.20f) }
 
 @Composable
 fun rememberAlbumColors(uri: Uri?, coverUrl: String? = null): AlbumColors {
@@ -215,16 +227,21 @@ fun rememberAlbumColors(uri: Uri?, coverUrl: String? = null): AlbumColors {
                     ?: rawVibrant.takeIf { saturationOf(it) >= 0.12f }
                     ?: FALLBACK_MUTED
 
-                // Двухступенчато: сначала boostDarkColor (коррекция холодного/серого),
-                // затем АДДИТИВНЫЙ нижний порог — гарантирует видимый минимум яркости даже
-                // на чисто-чёрных каверах (darkMuted — база дыма — раньше шла вообще без
-                // обработки и давала чёрный фон).
+                // Двухступенчато: boostDarkColor (коррекция холодного/серого,
+                // мультипликативный лифт) → vivid (HSV: буст насыщенности + hue-
+                // сохраняющий подъём яркости с нижним порогом). Раньше второй ступенью
+                // был аддитивный withMinBrightness, который ДЕСАТУРИРОВАЛ («вымыто»).
+                // darkMuted — база дыма: сочность поднимаем, но яркость держим (valMul
+                // 1.0) — глубина/объём дыма важнее, чем светлота фона.
                 AlbumColors(
-                    dominant = withMinBrightness(boostDarkColor(rawDominant, 0.10f), 0.16f),
-                    darkMuted = withMinBrightness(Color(rawDarkMuted), 0.13f),
-                    vibrant = withMinBrightness(boostDarkColor(bestVibrant, 0.12f), 0.20f),
-                    lightVibrant = withMinBrightness(boostDarkColor(rawLightVibrant, 0.15f), 0.24f),
-                    muted = withMinBrightness(boostDarkColor(rawMuted, 0.10f), 0.16f)
+                    dominant = vivid(boostDarkColor(rawDominant, 0.10f), satMul = 1.50f, valMul = 1.10f, valFloor = 0.18f),
+                    darkMuted = vivid(Color(rawDarkMuted), satMul = 1.60f, valMul = 1.00f, valFloor = 0.12f),
+                    darkVibrant = vivid(boostDarkColor(palette.getDarkVibrantColor(FALLBACK_DARK), 0.10f), satMul = 1.50f, valMul = 1.05f, valFloor = 0.16f),
+                    vibrant = vivid(boostDarkColor(bestVibrant, 0.12f), satMul = 1.55f, valMul = 1.15f, valFloor = 0.22f),
+                    lightVibrant = vivid(boostDarkColor(rawLightVibrant, 0.15f), satMul = 1.45f, valMul = 1.15f, valFloor = 0.26f),
+                    muted = vivid(boostDarkColor(rawMuted, 0.10f), satMul = 1.45f, valMul = 1.10f, valFloor = 0.16f),
+                    lightMuted = vivid(Color(palette.getLightMutedColor(FALLBACK_MUTED)), satMul = 1.30f, valMul = 1.15f, valFloor = 0.30f),
+                    accents = topAccents(palette, satMul = 1.40f, count = 3)
                 )
             } catch (_: Exception) {
                 AlbumColors()

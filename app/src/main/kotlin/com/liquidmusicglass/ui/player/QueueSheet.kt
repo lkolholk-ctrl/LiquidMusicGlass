@@ -59,6 +59,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -132,11 +133,22 @@ fun QueueSheet(
                 )
             }
 
-            // Dark scrim for readability
+            // Dark scrim for readability — раньше плоский Black α0.65 «гасил» весь
+            // цвет фона в чёрную простыню. Градиент: сверху почти прозрачный (цвет
+            // виден), книзу плотнее (под текстом очереди — читаемость). Текст белый,
+            // так что верх можно держать светлым.
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.65f))
+                    .background(
+                        Brush.verticalGradient(
+                            colorStops = arrayOf(
+                                0.00f to Color.Black.copy(alpha = 0.18f),
+                                0.45f to Color.Black.copy(alpha = 0.30f),
+                                1.00f to Color.Black.copy(alpha = 0.48f)
+                            )
+                        )
+                    )
             )
 
             Column(

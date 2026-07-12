@@ -53,7 +53,7 @@ private fun auraAgsl(octaves: Int, lighting: Boolean): String {
     // наветренная сторона клуба светлее, подветренная в тени. Это и делает
     // дым «настоящим»: плоский туман превращается в объёмные клубы.
     float ffL = fbm(pw + float2(-0.14, -0.20));
-    float shade = clamp(0.55 + (ff - ffL) * 3.0, 0.35, 1.55);"""
+    float shade = clamp(0.55 + (ff - ffL) * 4.0, 0.30, 1.75);"""
     else """
     float shade = 1.0;"""
     return """
@@ -64,6 +64,7 @@ uniform half3  uColorBg;
 uniform half3  uColorA;
 uniform half3  uColorB;
 uniform half3  uColorC;
+uniform half3  uColorD;  // 4-я вуаль (muted) — больше цветов обложки в дыму
 uniform float  uBass;   // сглаженная огибающая баса 0..1 (без вспышек)
 uniform float  uSmokeSaturation;
 uniform float  uSmokeContrast;
@@ -120,23 +121,27 @@ half4 main(float2 fragCoord) {
 
     // три декоррелированных потока (двойной domain-warp) → мультицвет
     float w1 = fbm(p + d1);
-    float w2 = fbm(float2(p.x * 1.3 + 5.2 + 0.8 * w1, p.y * 1.3 + 0.8 * w1) + d2);
-    float2 pw = float2(p.x + 1.4 * w1, p.y + 1.4 * w2) + d3;
+    float w2 = fbm(float2(p.x * 1.3 + 5.2 + 1.0 * w1, p.y * 1.3 + 1.0 * w1) + d2);
+    float2 pw = float2(p.x + 1.9 * w1, p.y + 1.9 * w2) + d3;
     float ff = fbm(pw);
 
     // «Клубы»: billow из УЖЕ посчитанного w2 (бесплатно) — плотность вуалей
     // модулируется пухлыми сгустками, края становятся рваными, как у дыма.
     float puff = 1.0 - abs(2.0 * w2 - 1.0);
 
-    float sA = smoothstep(0.40, 0.63, ff) * (0.72 + 0.55 * puff);
-    float sB = smoothstep(0.40, 0.63, w1) * (0.80 + 0.40 * puff);
-    float sC = smoothstep(0.42, 0.66, w2);
+    float sA = smoothstep(0.34, 0.60, ff) * (0.72 + 0.55 * puff);
+    float sB = smoothstep(0.34, 0.60, w1) * (0.80 + 0.40 * puff);
+    float sC = smoothstep(0.36, 0.62, w2);
 $lightBlock
 
     half3 col = uColorBg;
-    col = mix(col, uColorA, clamp(sA * 0.92 * uIntensity, 0.0, 1.0));
-    col = mix(col, uColorB, clamp(sB * 0.78 * uIntensity, 0.0, 1.0));
-    col = mix(col, uColorC, clamp(sC * 0.70 * uIntensity, 0.0, 1.0));
+    col = mix(col, uColorA, clamp(sA * 0.98 * uIntensity, 0.0, 1.0));
+    col = mix(col, uColorB, clamp(sB * 0.86 * uIntensity, 0.0, 1.0));
+    col = mix(col, uColorC, clamp(sC * 0.78 * uIntensity, 0.0, 1.0));
+    // 4-я вуаль (uColorD ← muted): ещё один цвет обложки в дыму. Порог из УЖЕ
+    // посчитанных w1/ff — без новой fbm-выборки (бесплатно для GPU).
+    float sD = smoothstep(0.44, 0.68, w1 * ff);
+    col = mix(col, uColorD, clamp(sD * 0.62 * uIntensity, 0.0, 1.0));
 
     // Усиление только цветного дыма: база остаётся как есть, меняется
     // насыщенность/контраст вуалей относительно uColorBg. Свет (shade)
@@ -150,14 +155,14 @@ $lightBlock
     // Поглощение: самые плотные ядра чуть темнее — глубина/объём, как у
     // настоящего густого дыма (свет сквозь него не проходит).
     float dens = clamp(max(sA, max(sB, sC)), 0.0, 1.0);
-    col = mix(col, col * 0.90, dens * 0.30);
+    col = mix(col, col * 0.90, dens * 0.36);
 
     // лёгкая вертикальная форма: чуть ярче к верху, мягче к фону у низа (читаемость)
-    col *= mix(0.82, 1.05, 1.0 - smoothstep(0.1, 1.0, uv.y));
+    col *= mix(0.90, 1.08, 1.0 - smoothstep(0.1, 1.0, uv.y));
     // лёгкая поддержка яркостью (вторично, вдох — главный): узко +~10%,
     // через сглаженную огибающую — без вспышек (безопасно для фотосенситивности)
     col *= (1.0 + uBass * 0.10);
-    col = mix(col, uColorBg, smoothstep(0.62, 1.0, uv.y) * 0.62);
+    col = mix(col, uColorBg, smoothstep(0.72, 1.0, uv.y) * 0.40);
 
     return half4(col, 1.0);
 }
@@ -222,7 +227,7 @@ private const val AURA_WARMUP_FRAMES = 24  // ~0.4с отрисованных к
 fun AuraBackground(
     albumColors: AlbumColors,
     modifier: Modifier = Modifier,
-    intensity: Float = 0.78f,
+    intensity: Float = 0.88f,
     animate: Boolean = true,
     playing: Boolean = false,
     smokeSaturation: Float = 1.0f,
@@ -301,7 +306,7 @@ private fun AuraShaderBackground(
     // lite-устройства: 4 октавы fbm вместо 6 (~вдвое дешевле на пиксель),
     // объёмный свет выключен (он стоит +1 полную fbm-выборку на пиксель).
     val liteTier = com.liquidmusicglass.ui.DeviceTier.lite
-    val shader = remember { RuntimeShader(auraAgsl(if (liteTier) 4 else 6, lighting = !liteTier)) }
+    val shader = remember { RuntimeShader(auraAgsl(if (liteTier) 5 else 7, lighting = !liteTier)) }
     val brush = remember { ShaderBrush(shader) }
 
     // цвета вуалей — из палитры обложки, плавно меняются при смене трека
@@ -309,6 +314,7 @@ private fun AuraShaderBackground(
     val a by animateColorAsState(albumColors.vibrant, tween(900), label = "auraA")
     val b by animateColorAsState(albumColors.dominant, tween(900), label = "auraB")
     val c by animateColorAsState(albumColors.lightVibrant, tween(900), label = "auraC")
+    val d by animateColorAsState(albumColors.muted, tween(900), label = "auraD")
 
     // Фаза анимации интегрируется на CPU: базовая (НЕнулевая) скорость + узкий
     // басовый прирост ≤ +15% (множитель 1.0..1.15), накапливаемый по dt. Дым
@@ -361,6 +367,7 @@ private fun AuraShaderBackground(
                 shader.setFloatUniform("uColorA", a.red, a.green, a.blue)
                 shader.setFloatUniform("uColorB", b.red, b.green, b.blue)
                 shader.setFloatUniform("uColorC", c.red, c.green, c.blue)
+                shader.setFloatUniform("uColorD", d.red, d.green, d.blue)
                 shader.setFloatUniform("uBass", bass)
                 shader.setFloatUniform("uSmokeSaturation", smokeSaturation.coerceIn(0.0f, 2.0f))
                 shader.setFloatUniform("uSmokeContrast", smokeContrast.coerceIn(0.0f, 2.0f))

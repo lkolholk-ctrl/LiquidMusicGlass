@@ -320,9 +320,10 @@ fun HomeScreen(
         AuraBackground(
             albumColors = auraColors,
             modifier = Modifier.fillMaxSize(),
+            intensity = 0.90f,
             playing = isPlaying,
-            smokeSaturation = 1.22f,
-            smokeContrast = 1.16f
+            smokeSaturation = 1.50f,
+            smokeContrast = 1.30f
         )
         Column(
             modifier = Modifier

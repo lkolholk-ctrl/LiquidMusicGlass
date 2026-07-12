@@ -44,6 +44,9 @@ fun LyricsBackground(
     val baseVibrant = rememberSaturationBoost(albumColors.vibrant, saturationBoost)
     val baseDominant = rememberSaturationBoost(albumColors.dominant, saturationBoost)
     val baseMuted = rememberSaturationBoost(albumColors.muted, saturationBoost)
+    // Задействуем БОЛЬШЕ свотчей обложки (раньше в градиенте крутились всего 3).
+    val baseLightVibrant = rememberSaturationBoost(albumColors.lightVibrant, saturationBoost)
+    val baseDarkMuted = rememberSaturationBoost(albumColors.darkMuted, saturationBoost)
 
     // Насыщенный базовый цвет фона из обложки (+сатурация/+яркость, как у Apple).
     val bgColor by animateColorAsState(
@@ -66,6 +69,16 @@ fun LyricsBackground(
         targetValue = baseMuted,
         animationSpec = tween(durationMillis = 1000),
         label = "boostedMuted"
+    )
+    val boostedLightVibrant by animateColorAsState(
+        targetValue = baseLightVibrant,
+        animationSpec = tween(durationMillis = 1000),
+        label = "boostedLightVibrant"
+    )
+    val boostedDarkMuted by animateColorAsState(
+        targetValue = baseDarkMuted,
+        animationSpec = tween(durationMillis = 1000),
+        label = "boostedDarkMuted"
     )
 
     data class ArtState(
@@ -98,9 +111,9 @@ fun LyricsBackground(
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
-                        scaleX = 1.8f
-                        scaleY = 1.8f
-                        alpha = 0.45f
+                        scaleX = 1.5f
+                        scaleY = 1.5f
+                        alpha = 0.60f
                     }
                     // При просадке FPS режем тяжёлый full-screen blur (RenderEffect) —
                     // на слабом GPU это один из главных пожирателей RenderThread.
@@ -118,10 +131,10 @@ fun LyricsBackground(
                 .background(
                     Brush.verticalGradient(
                         colorStops = arrayOf(
-                            0.00f to boostedVibrant.copy(alpha = 0.55f),
-                            0.40f to boostedDominant.copy(alpha = 0.45f),
-                            0.75f to boostedMuted.copy(alpha = 0.50f),
-                            1.00f to boostedVibrant.copy(alpha = 0.50f)
+                            0.00f to boostedLightVibrant.copy(alpha = 0.70f),
+                            0.40f to boostedVibrant.copy(alpha = 0.62f),
+                            0.75f to boostedDominant.copy(alpha = 0.58f),
+                            1.00f to boostedDarkMuted.copy(alpha = 0.66f)
                         )
                     )
                 )
@@ -150,7 +163,7 @@ fun LyricsBackground(
                     Brush.verticalGradient(
                         colorStops = arrayOf(
                             0.75f to Color.Transparent,
-                            1.00f to Color.Black.copy(alpha = 0.28f)
+                            1.00f to boostedDarkMuted.copy(alpha = 0.30f)   // тонируем, не чернить
                         )
                     )
                 )
@@ -165,8 +178,8 @@ fun LyricsBackground(
 fun boostedCoverColor(color: Color): Color {
     val hsv = FloatArray(3)
     android.graphics.Color.colorToHSV(color.toArgb(), hsv)
-    hsv[1] = (hsv[1] * 1.3f).coerceAtMost(1f)
-    hsv[2] = (hsv[2] * 1.3f).coerceAtMost(0.85f)
+    hsv[1] = (hsv[1] * 1.5f).coerceAtMost(1f)
+    hsv[2] = (hsv[2] * 1.35f).coerceIn(0.42f, 0.96f)   // выше потолок + нижний пол — сочнее, но не в пастель
     return Color(android.graphics.Color.HSVToColor(hsv))
 }
 
