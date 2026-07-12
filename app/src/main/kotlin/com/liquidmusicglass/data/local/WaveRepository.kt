@@ -10,6 +10,7 @@ import com.liquidmusicglass.data.local.db.AppDatabase
 import com.liquidmusicglass.data.local.db.CachedTrack
 import com.liquidmusicglass.data.local.db.GenreCount
 import com.liquidmusicglass.data.local.db.ListeningHistory
+import com.liquidmusicglass.data.wave.DeadTrackRegistry
 import com.liquidmusicglass.data.wave.WaveCandidateFilter
 import com.liquidmusicglass.data.wave.WaveMode
 import com.liquidmusicglass.data.wave.WaveSessionState
@@ -446,6 +447,7 @@ class WaveRepository(context: Context) {
         }
         fun Track.isLocallyRejected(): Boolean {
             val candidate = toWaveCandidate()
+            if (DeadTrackRegistry.isDead(candidate.normalizedId)) return true
             if (negTrackSet.isNotEmpty() && candidate.normalizedId in negTrackSet) return true
             return negArtistSet.isNotEmpty() && candidate.artistKeys.any { it in negArtistSet }
         }
@@ -728,7 +730,8 @@ class WaveRepository(context: Context) {
             candidates = tracks.map { it.toWaveCandidate() },
             state = sessionState.withSessionId(effectiveSessionId),
             statsByTrackId = statsByTrackId,
-            limit = targetCount
+            limit = targetCount,
+            deadTrackIds = DeadTrackRegistry.snapshot()
         )
         updatePersonalWaveState(filtered.nextState.withSessionId(effectiveSessionId))
 
@@ -903,7 +906,8 @@ class WaveRepository(context: Context) {
             candidates = response.tracks.map { it.toWaveCandidate() },
             state = state,
             statsByTrackId = statsByTrackId,
-            limit = targetCount
+            limit = targetCount,
+            deadTrackIds = DeadTrackRegistry.snapshot()
         )
         updateModeWaveState(key, filtered.nextState)
 

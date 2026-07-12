@@ -107,6 +107,44 @@ class WaveCandidateFilterTest {
     }
 
     @Test
+    fun `filter hard-rejects dead tracks in the strict pass`() {
+        val filter = WaveCandidateFilter()
+
+        val result = filter.filter(
+            candidates = listOf(
+                WaveCandidate(id = "367614920", artistId = "a"),
+                WaveCandidate(id = "42", artistId = "b")
+            ),
+            state = WaveSessionState(),
+            deadTrackIds = setOf("367614920")
+        )
+
+        assertEquals(listOf("42"), result.accepted.map { it.id })
+        assertEquals(WaveCandidateFilter.RejectReason.DeadTrack, result.rejected.single().reason)
+    }
+
+    @Test
+    fun `dead track never leaks through the relaxed floor even if batch would dry up`() {
+        val filter = WaveCandidateFilter()
+        // Both candidates would be DuplicateTrack under the strict pass; the
+        // relaxed floor normally re-serves them so the wave never dies. A dead
+        // track must stay rejected in BOTH passes — playing it is impossible.
+        val state = WaveSessionState(excludeIds = listOf("dead", "alive"))
+
+        val result = filter.filter(
+            candidates = listOf(
+                WaveCandidate(id = "dead", artistId = "a"),
+                WaveCandidate(id = "alive", artistId = "b")
+            ),
+            state = state,
+            deadTrackIds = setOf("dead")
+        )
+
+        assertEquals(listOf("alive"), result.accepted.map { it.id })
+        assertTrue(result.accepted.none { it.id == "dead" })
+    }
+
+    @Test
     fun `filter limits repeated artists inside recent artist window`() {
         val filter = WaveCandidateFilter(
             WaveCandidateFilter.Policy(maxTracksPerArtistWindow = 2, artistWindowSize = 8)

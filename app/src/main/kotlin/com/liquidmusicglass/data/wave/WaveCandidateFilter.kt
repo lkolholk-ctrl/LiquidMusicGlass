@@ -36,6 +36,7 @@ class WaveCandidateFilter(
         BlankId,
         DuplicateTrack,
         NegativeTrack,
+        DeadTrack,
         NegativeArtist,
         SourceBlocked,
         SkipRatio,
@@ -58,12 +59,18 @@ class WaveCandidateFilter(
         candidates: Iterable<WaveCandidate>,
         state: WaveSessionState,
         statsByTrackId: Map<String, TrackStats> = emptyMap(),
-        limit: Int = Int.MAX_VALUE
+        limit: Int = Int.MAX_VALUE,
+        // Айди, которые ICM отдаёт в каталоге, но которые 404-ят на POST /track
+        // (track_not_found). Жёсткий reject в ОБОИХ проходах — битый трек не должен
+        // просачиваться даже в аварийном relaxed-повторе. Инжектится снаружи
+        // (DeadTrackRegistry), чтобы фильтр оставался чистым и тестируемым.
+        deadTrackIds: Set<String> = emptySet()
     ): Result {
         if (limit <= 0) {
             return Result(accepted = emptyList(), rejected = emptyList(), nextState = state)
         }
 
+        val deadSet = deadTrackIds.mapNotNullTo(HashSet()) { it.normalizedIdKey() }
         val candidateList = candidates.toList()
 
         // Один проход фильтра. relaxed включает «пол бесконечной волны»: снимает
@@ -85,7 +92,7 @@ class WaveCandidateFilter(
             for (candidate in candidateList) {
                 if (accepted.size >= limit) break
 
-                val reason = rejectReason(candidate, nextState, seenTrackIds, recentArtistKeys, statsByTrackId, relaxed)
+                val reason = rejectReason(candidate, nextState, seenTrackIds, recentArtistKeys, statsByTrackId, deadSet, relaxed)
                 if (reason != null) {
                     rejected += Decision(candidate, accepted = false, reason = reason)
                     continue
@@ -117,6 +124,7 @@ class WaveCandidateFilter(
         seenTrackIds: Set<String>,
         recentArtistKeys: List<String>,
         statsByTrackId: Map<String, TrackStats>,
+        deadSet: Set<String>,
         relaxed: Boolean
     ): RejectReason? {
         val id = candidate.normalizedId
@@ -124,6 +132,9 @@ class WaveCandidateFilter(
         // В relaxed seenTrackIds стартует пустым → ловит только повтор ВНУТРИ пачки.
         if (id in seenTrackIds) return RejectReason.DuplicateTrack
         if (id in state.negativeTrackSet) return RejectReason.NegativeTrack
+        // Битый трек (404 track_not_found) — жёсткий reject даже в relaxed: играть
+        // его всё равно нельзя, повторная выдача только жжёт запрос и рвёт очередь.
+        if (deadSet.isNotEmpty() && id in deadSet) return RejectReason.DeadTrack
 
         val source = candidate.source.normalizedKey()
         if (policy.normalizedSources.isNotEmpty() && source !in policy.normalizedSources) {

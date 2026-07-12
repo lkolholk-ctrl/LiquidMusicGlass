@@ -2,6 +2,7 @@ package com.liquidmusicglass.api.icm
 
 import com.liquidmusicglass.api.icm.wave.IcmWaveFeedbackAlias
 import com.liquidmusicglass.api.icm.wave.IcmWaveRepository
+import com.liquidmusicglass.data.wave.DeadTrackRegistry
 import com.liquidmusicglass.engine.Track
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -465,12 +466,27 @@ object IcmRepository {
         return charts
     }
 
+    /**
+     * ICM-каталог (/wave, /search) отдаёт айди, которых нет в стрим-слое: POST
+     * /track → 404 track_not_found. Заносим такой айди в глобальный бан, чтобы
+     * волна не выдавала его повторно (по полевым логам один битый айди прилетал
+     * по 3 раза за сессию). Только track_not_found: region_unavailable / 5xx /
+     * timeout НЕ мёртвые (регион-специфично либо транзиент) — их банить нельзя.
+     */
+    private fun noteDeadTrackIfNeeded(trackId: String, error: Throwable?) {
+        val apiError = error as? IcmApiException ?: return
+        if (apiError.errorCode == IcmErrorCodes.TRACK_NOT_FOUND) {
+            DeadTrackRegistry.markDead(trackId)
+        }
+    }
+
     suspend fun getStreamUrl(trackId: String, region: String? = null, source: String? = null): String? {
         val quality = IcmAuthRepository.getEffectiveQuality(trackId, source)
         val result = api.getTrack(trackId, region, quality)
         result.exceptionOrNull()?.let {
             _lastException = it as? Exception
             _lastError.value = it.message
+            noteDeadTrackIfNeeded(trackId, it)
         }
         return result.getOrNull()?.url
     }
@@ -484,6 +500,7 @@ object IcmRepository {
         result.exceptionOrNull()?.let {
             _lastException = it as? Exception
             _lastError.value = it.message
+            noteDeadTrackIfNeeded(trackId, it)
             if (it is IcmApiException) {
                 _lastApiException.value = it
                 android.util.Log.e("IcmRepository", "[VK_DEBUG] API error: code=${it.code}, errorCode=${it.errorCode}, message=${it.message}, requiredRegion=${it.requiredRegion}")
@@ -502,6 +519,7 @@ object IcmRepository {
         result.exceptionOrNull()?.let {
             _lastException = it as? Exception
             _lastError.value = it.message
+            noteDeadTrackIfNeeded(trackId, it)
             if (it is IcmApiException) {
                 _lastApiException.value = it
             }
