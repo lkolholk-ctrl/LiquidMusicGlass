@@ -34,6 +34,13 @@ class HomeViewModel : ViewModel() {
     private var genresLoadJob: Job? = null
     private var waveLoadJob: Job? = null
 
+    /** Когда /home успешно загружен из сети (для TTL в loadHomeContent). */
+    private var homeLoadedAtMs = 0L
+
+    private companion object {
+        const val HOME_TTL_MS = 5 * 60_000L
+    }
+
     init {
         Log.d("HomeViewModel", "HomeViewModel created")
     }
@@ -106,6 +113,16 @@ class HomeViewModel : ViewModel() {
             Log.d("HomeViewModel", "loadHomeContent ignored: already active; active=${activeLoadCount()}")
             return
         }
+        // TTL свежести (P1, аудит): LaunchedEffect на Wave/New перезапускает
+        // загрузку при КАЖДОМ входе в таб — свежий /home перегружался по кругу
+        // (до 3 сетевых попыток на свитч). Если контент уже есть и моложе TTL —
+        // не ходим в сеть. force (pull-to-refresh/логин) обходит.
+        if (!force && _homeContent.value != null &&
+            System.currentTimeMillis() - homeLoadedAtMs < HOME_TTL_MS
+        ) {
+            Log.d("HomeViewModel", "loadHomeContent ignored: fresh (TTL)")
+            return
+        }
         homeLoadJob?.cancel()
         _isLoading.value = true
         _error.value = null
@@ -120,6 +137,7 @@ class HomeViewModel : ViewModel() {
                     try {
                         val response = IcmRepository.loadHomeContent()
                         _homeContent.value = response
+                        homeLoadedAtMs = System.currentTimeMillis()
                         _error.value = null
                         HomeCacheManager.save(response)
                         // The home response already contains its charts block. Do not issue

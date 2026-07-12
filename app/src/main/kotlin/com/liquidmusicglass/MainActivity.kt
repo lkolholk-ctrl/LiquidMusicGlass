@@ -478,28 +478,33 @@ class MainActivity : ComponentActivity() {
             // Try to issue a Bearer session token so /me/* endpoints work
             // without S2S API key. Best-effort — wave already works via
             // X-Partner-Key + X-Partner-User-Id even if this fails.
-            val apiKey = try {
-                IcmKeyProvider.getApiKey(this)
-            } catch (_: Throwable) { "" }
-                .ifBlank { BuildConfig.ICM_API_KEY }
-            if (apiKey.isNotBlank() && apiKey.startsWith("pk_")) {
-                authScope.launch {
+            //
+            // ВЕСЬ блок в authScope (P1, аудит): IcmKeyProvider.getApiKey грузит
+            // нативную .so + анти-тампер проверку APK — «дорого» (см. коммент в
+            // onCreate, из-за этого был стартовый ANR), а тут он оставался
+            // СИНХРОННЫМ на main в deeplink-пути (возврат из Telegram = фриз).
+            authScope.launch {
+                val apiKey = try {
+                    IcmKeyProvider.getApiKey(this@MainActivity)
+                } catch (_: Throwable) { "" }
+                    .ifBlank { BuildConfig.ICM_API_KEY }
+                if (apiKey.isNotBlank() && apiKey.startsWith("pk_")) {
                     val loginResult = runCatching {
                         IcmAuthRepository.issueSessionAfterTelegramAuth(apiKey)
                     }
                     if (loginResult.isSuccess) {
-                        // Fetch profile & preferences, then refresh UI on main thread
-                        val dataResult = IcmAuthRepository.fetchUserData()
-                        if (dataResult.isSuccess) {
-                            withContext(Dispatchers.Main) {
-                                // Trigger UI refresh — StateFlows will update automatically
-                                // but if profile screen is already open, force recreate
-                                recreate()
-                            }
-                        }
+                        // UI обновится сам через StateFlow. recreate() УДАЛЁН (P1):
+                        // он перезапускал Activity, onCreate снова обрабатывал ТОТ ЖЕ
+                        // oauth-intent, а oauth_state уже удалён → юзер видел ложный
+                        // тост «Auth failed: invalid state» СРАЗУ после успешного
+                        // входа (+ повторный getApiKey).
+                        IcmAuthRepository.fetchUserData()
                     }
                 }
             }
+            // Гасим обработанный oauth-intent: при recreate/config-change
+            // onCreate не должен переигрывать его заново.
+            intent?.data = null
 
             android.widget.Toast.makeText(
                 this,

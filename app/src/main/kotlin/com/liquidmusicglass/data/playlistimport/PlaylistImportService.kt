@@ -32,7 +32,9 @@ class PlaylistImportService : Service() {
     companion object {
         const val CHANNEL_ID = "yandex_import_channel"
         const val CHANNEL_NAME = "Playlist Import Services"
-        const val NOTIFICATION_ID = 1001
+        // 3001, НЕ 1001 (P1, аудит): 1001 занят медиа-нотификацией AudioService —
+        // импорт замещал контролы плеера в шторке и ломал их по завершении.
+        const val NOTIFICATION_ID = 3001
 
         const val EXTRA_URL = "extra_url"
         const val EXTRA_PLAYLIST_NAME = "extra_playlist_name"
@@ -349,5 +351,13 @@ class PlaylistImportService : Service() {
         super.onDestroy()
         currentJob?.cancel()
         serviceScope.cancel("Service destroyed")
+    }
+
+    // Android 14/15: dataSync-FGS имеет бюджет 6ч/сутки; по исчерпании система
+    // зовёт onTimeout, и если сервис за секунды не остановится — процесс
+    // убивается ForegroundServiceDidNotStopInTimeException (P1, аудит).
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        currentJob?.cancel()
+        stopSelf()
     }
 }

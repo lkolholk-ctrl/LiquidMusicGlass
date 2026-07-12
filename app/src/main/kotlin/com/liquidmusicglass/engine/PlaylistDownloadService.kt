@@ -680,4 +680,13 @@ class PlaylistDownloadService : Service() {
         currentJob?.cancel()
         serviceScope.cancel("Service destroyed")
     }
+
+    // Android 14/15: dataSync-FGS бюджет 6ч/сутки — см. PlaylistImportService.
+    // Многочасовая загрузка 600-1000+ треков на медленной сети реально
+    // упирается в лимит; без обработчика система убивала процесс.
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        isCancelled = true
+        currentJob?.cancel()
+        stopSelf()
+    }
 }

@@ -46,6 +46,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -214,6 +215,11 @@ class AudioService : MediaSessionService() {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             PlayerController.setPlaying(isPlaying)
             manageWakeLock()
+            // Фокус берём при РЕАЛЬНОМ старте плейбека (P1, аудит): раньше он
+            // запрашивался один раз в onCreate — чужая музыка вставала на паузу
+            // при простом открытии приложения, а после AUDIOFOCUS_LOSS повторный
+            // Play играл БЕЗ фокуса (две музыки одновременно, дакинг мёртв).
+            if (isPlaying) requestAudioFocus()
         }
 
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
@@ -362,6 +368,8 @@ class AudioService : MediaSessionService() {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             PlayerController.setPlaying(isPlaying)
             manageWakeLock()
+            // См. Exo-листенер: фокус — при реальном старте плейбека.
+            if (isPlaying) requestAudioFocus()
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
@@ -388,9 +396,10 @@ class AudioService : MediaSessionService() {
         // (системный диалог «не отвечает» вместо честного краша). Краши обязан
         // обрабатывать ТОЛЬКО CrashHandler (лог + завершение процесса).
 
-        // Audio focus setup
+        // Audio focus setup. Сам запрос фокуса — при старте плейбека
+        // (onIsPlayingChanged), НЕ здесь: запрос в onCreate ставил чужую музыку
+        // на паузу при простом открытии приложения.
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        requestAudioFocus()
 
         // Наушники выдернули → пауза (для JUCE-пути; Exo обрабатывает сам).
         // ContextCompat + NOT_EXPORTED: системные бродкасты доходят, а требование
@@ -658,6 +667,11 @@ class AudioService : MediaSessionService() {
     override fun onDestroy() {
         PlayerController.logFinalPlayback()
         positionJob?.cancel()
+        // Отмена скоупов (P1, аудит): вечные коллекторы currentTrack/favoriteIds
+        // из onCreate переживали пересоздание сервиса (LMK+STICKY) — утечка
+        // инстанса + дубли коллекторов на каждый рестарт.
+        runCatching { serviceScope.cancel() }
+        runCatching { mainScope.cancel() }
         cancelCrossfadeFade(resetVolume = false)
         abandonAudioFocus()
         runCatching { unregisterReceiver(becomingNoisyReceiver) }
