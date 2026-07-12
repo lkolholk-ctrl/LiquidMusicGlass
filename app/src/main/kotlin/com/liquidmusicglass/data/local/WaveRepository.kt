@@ -570,7 +570,7 @@ class WaveRepository(context: Context) {
             }
 
             acceptPersonalWaveTracks(
-                tracks = response.tracks,
+                rawTracks = response.tracks,
                 sessionState = sessionState,
                 responseSessionId = response.sessionId,
                 targetCount = targetCount,
@@ -664,7 +664,7 @@ class WaveRepository(context: Context) {
             ).getOrNull()
             if (oneShot?.status == "ok" && oneShot.tracks.isNotEmpty()) {
                 val accepted = acceptPersonalWaveTracks(
-                    tracks = oneShot.tracks,
+                    rawTracks = oneShot.tracks,
                     sessionState = state,
                     responseSessionId = null,
                     targetCount = count,
