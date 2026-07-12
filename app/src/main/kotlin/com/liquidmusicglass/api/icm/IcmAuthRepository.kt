@@ -597,24 +597,33 @@ object IcmAuthRepository {
      * region_unavailable / 404. Раньше defaultRegion был константой "us" и не
      * трогался вообще → NZ-подписчик обслуживался как us.
      *
+     * Регион у каждого юзера СВОЙ, по его подписке (US или NZ — не оба). Приоритет
+     * NZ — лишь теоретический тай-брейк на случай двойного покрытия; на практике
+     * subRegions из одного элемента, и берётся именно он (US-подписчик → us,
+     * NZ-подписчик → nz).
+     *
      * Явный выбор региона в Профиле (PUT /me/region) приоритетнее и ставится там же
      * локально; этот метод задаёт лишь ПОДПИСОЧНЫЙ дефолт на старте/после логина.
-     * Истёкшие региональные покрытия (expires_at в прошлом) не учитываем.
+     * Истёкшие региональные покрытия (expires_at в прошлом) не учитываем. Если
+     * /me/subscription не отдал regions[] — фолбэк на серверный /me/region.current.
      */
-    fun syncDefaultRegionFromSubscription() {
-        val sub = _subscription.value ?: return
+    suspend fun syncDefaultRegionFromSubscription() {
         val nowSec = System.currentTimeMillis() / 1000
-        val subRegions = sub.regions
-            .filter { it.expiresAt == null || it.expiresAt > nowSec }
-            .mapNotNull { it.code.trim().lowercase().takeIf { code -> code.isNotBlank() } }
+        val subRegions = _subscription.value?.regions
+            ?.filter { it.expiresAt == null || it.expiresAt > nowSec }
+            ?.mapNotNull { it.code.trim().lowercase().takeIf { code -> code.isNotBlank() } }
+            ?: emptyList()
         val effective = when {
-            subRegions.isEmpty() -> return           // нет региональной подписки — дефолт не трогаем
             "nz" in subRegions -> "nz"               // премиум: ранние релизы, юзер за это платит
-            else -> subRegions.first()
+            subRegions.isNotEmpty() -> subRegions.first()   // единственный регион подписки
+            // Подписка не отдала regions[] — берём серверный текущий регион аккаунта.
+            else -> runCatching { IcmRepository.getUserRegion()?.current }
+                .getOrNull()?.trim()?.lowercase()?.takeIf { it.isNotBlank() }
+                ?: return                            // регион неизвестен — дефолт не трогаем
         }
         if (!effective.equals(IcmRepository.region, ignoreCase = true)) {
             IcmRepository.region = effective
-            android.util.Log.d("IcmAuthRepository", "Default region from subscription -> $effective")
+            android.util.Log.d("IcmAuthRepository", "Default region -> $effective")
         }
     }
 
