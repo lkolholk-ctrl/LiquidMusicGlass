@@ -4,7 +4,11 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
+import android.widget.Toast
+import androidx.core.content.FileProvider
+import java.io.File
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -47,24 +51,61 @@ class CrashActivity : ComponentActivity() {
                 CrashScreen(
                     crashText = crashText,
                     onCopy = { copyToClipboard(this, crashText) },
-                    onShare = { shareText(this, crashText) }
+                    onShare = { shareLog(this, crashText) }
                 )
             }
         }
     }
 
     private fun copyToClipboard(context: Context, text: String) {
-        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        clipboard.setPrimaryClip(ClipData.newPlainText("crash_log", text))
+        try {
+            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            clipboard.setPrimaryClip(ClipData.newPlainText("crash_log", text))
+            // Без явного подтверждения юзер думает, что «ничего не произошло»
+            // (полевой отзыв: «Copy никуда не копируется»). Android 13+ рисует
+            // системную плашку сам, но на 12 и ниже — нет, поэтому тостим всегда.
+            Toast.makeText(context, "Crash log copied to clipboard", Toast.LENGTH_SHORT).show()
+        } catch (t: Throwable) {
+            Toast.makeText(context, "Copy failed: ${t.message}", Toast.LENGTH_LONG).show()
+        }
     }
 
-    private fun shareText(context: Context, text: String) {
-        val intent = Intent(Intent.ACTION_SEND).apply {
-            type = "text/plain"
-            putExtra(Intent.EXTRA_SUBJECT, "LiquidMusicGlass crash log")
-            putExtra(Intent.EXTRA_TEXT, text)
+    /**
+     * Отправка лога. Раньше весь текст улетал через Intent.EXTRA_TEXT — на
+     * большом логе это TransactionTooLargeException (лог «никуда не
+     * отправлялся»), да и мессенджеры такой объём в тексте часто режут.
+     * Пишем лог во ФАЙЛ (cache/logs/, уже разрешён в file_paths.xml) и шлём как
+     * вложение через FileProvider — Telegram/почта примут его целиком. Если
+     * файловый путь недоступен — деградируем к EXTRA_TEXT, всё в try/catch с
+     * тостом, чтобы кнопка никогда не «молчала».
+     */
+    private fun shareLog(context: Context, text: String) {
+        val fileIntent = try {
+            val dir = File(context.cacheDir, "logs").apply { mkdirs() }
+            val file = File(dir, "crash_log.txt").apply { writeText(text) }
+            val uri: Uri = FileProvider.getUriForFile(
+                context, "${context.packageName}.fileprovider", file
+            )
+            Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_SUBJECT, "LiquidMusicGlass crash log")
+                putExtra(Intent.EXTRA_STREAM, uri)
+                // Дублируем текстом для клиентов, читающих только EXTRA_TEXT.
+                putExtra(Intent.EXTRA_TEXT, text.take(90_000))
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+        } catch (_: Throwable) {
+            Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_SUBJECT, "LiquidMusicGlass crash log")
+                putExtra(Intent.EXTRA_TEXT, text.take(90_000))
+            }
         }
-        context.startActivity(Intent.createChooser(intent, "Send log via..."))
+        try {
+            context.startActivity(Intent.createChooser(fileIntent, "Send log via..."))
+        } catch (t: Throwable) {
+            Toast.makeText(context, "No app to send the log: ${t.message}", Toast.LENGTH_LONG).show()
+        }
     }
 
     companion object {
