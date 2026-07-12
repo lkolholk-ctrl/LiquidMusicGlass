@@ -73,7 +73,10 @@ object PlayerController {
     val context: Context? get() = appContext
     private var controller: MediaController? = null
     private var isConnectingController = false
-    private var mediaControllerUnavailable = false
+    // Не вечный флаг, а бэкофф (P1, аудит): один 6-сек таймаут коннекта на
+    // холодном старте НАВСЕГДА выключал MediaController — play/skip/seek были
+    // мертвы до перезапуска процесса. Теперь повторная попытка через 30с.
+    @Volatile private var mediaControllerRetryAfterMs = 0L
 
     // ── Queue ──
     private var queue = listOf<Track>()
@@ -663,10 +666,24 @@ object PlayerController {
             val atQueueEnd = currentIndex + 1 >= currentQueue.size
 
             if (remaining <= EndlessPlaybackEngine.REFILL_THRESHOLD) {
-                val refilled = withContext(Dispatchers.IO) {
+                // Ждём рефилл ТОЛЬКО на реальном конце очереди (P1, аудит):
+                // порог 40 при батчах по 30 — типовое состояние, и каждый тап
+                // «next» синхронно ждал сетевой рефилл (до секунд). Если впереди
+                // ещё есть треки — рефилл уходит в фон, скип мгновенный.
+                if (!atQueueEnd) {
+                    ioScope.launch {
+                        runCatching {
+                            endlessEngine.checkAndRefillIfNeeded(
+                                remainingCount = remaining,
+                                force = false
+                            )
+                        }
+                    }
+                }
+                val refilled = if (!atQueueEnd) false else withContext(Dispatchers.IO) {
                     endlessEngine.checkAndRefillIfNeeded(
                         remainingCount = remaining,
-                        force = atQueueEnd
+                        force = true
                     )
                 }
                 if (refilled) {
@@ -1307,7 +1324,7 @@ object PlayerController {
 
     private suspend fun getPlayer(context: Context): MediaController? {
         controller?.let { return it }
-        if (mediaControllerUnavailable) return null
+        if (System.currentTimeMillis() < mediaControllerRetryAfterMs) return null
 
         try {
             val serviceIntent = android.content.Intent(context.applicationContext, AudioService::class.java)
@@ -1349,7 +1366,7 @@ object PlayerController {
                     }
                 }
             } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
-                mediaControllerUnavailable = true
+                mediaControllerRetryAfterMs = System.currentTimeMillis() + 30_000L
                 null
             }
             builtController?.let {

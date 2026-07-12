@@ -370,6 +370,17 @@ class FavoriteTrackDatabase private constructor(context: Context) : SQLiteOpenHe
         ).use { it.moveToFirst() }
     }
 
+    /** Точечная выборка одной записи — вместо getDownloadedTracks().find{}
+     *  (полная выборка таблицы на КАЖДЫЙ трек пачки = O(N²); P2, аудит). */
+    fun getDownloadedTrack(trackId: String): DownloadedTrackEntity? {
+        return readableDatabase.rawQuery(
+            "SELECT * FROM downloaded_tracks WHERE trackId = ? LIMIT 1",
+            arrayOf(trackId)
+        ).use { cursor ->
+            if (cursor.moveToFirst()) cursorToDownloadedEntity(cursor) else null
+        }
+    }
+
     fun isDownloadedFlow(trackId: String): Flow<Boolean> {
         return _downloadStatusFlows.getOrPut(trackId) {
             // См. isFavoriteFlow: без синхронного SQLite на потоке вызова (main).

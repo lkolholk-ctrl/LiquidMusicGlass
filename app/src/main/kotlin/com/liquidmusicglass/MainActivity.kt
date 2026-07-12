@@ -385,6 +385,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        // Джобы старой Activity не должны переживать её (утечка this; P2, аудит).
+        runCatching { kotlinx.coroutines.cancel(authScope) }
         com.liquidmusicglass.engine.automix.JuceContextHolder.clear(this)
     }
 
@@ -407,9 +409,11 @@ class MainActivity : ComponentActivity() {
         ) return
         val prefs = getSharedPreferences("permissions", android.content.Context.MODE_PRIVATE)
         if (prefs.getBoolean("post_notif_requested", false)) return
-        prefs.edit().putBoolean("post_notif_requested", true).apply()
         try {
             notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+            // Флаг — ПОСЛЕ успешного launch (P2, аудит): если прошивка кинула на
+            // launch, диалог не показан — не сжигаем единственную попытку.
+            prefs.edit().putBoolean("post_notif_requested", true).apply()
         } catch (_: Throwable) {
             // Отдельные прошивки могут кинуть на launch — не роняем старт.
         }

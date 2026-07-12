@@ -63,6 +63,9 @@ class PlaylistImportService : Service() {
         SupervisorJob() + Dispatchers.IO + CoroutineName("PlaylistImportService")
     )
     private var currentJob: Job? = null
+    /** Поколение импорта (P1, аудит): отмена ПЕРВОГО импорта при старте второго
+     *  делала stopSelf в catch — убивая сервис со свежезапущенным импортом. */
+    @Volatile private var importGeneration = 0
     private lateinit var notificationManager: NotificationManager
 
     override fun onCreate() {
@@ -95,15 +98,16 @@ class PlaylistImportService : Service() {
 
         // Cancel any previous job
         currentJob?.cancel()
+        val gen = ++importGeneration
 
         currentJob = serviceScope.launch {
-            runImport(url, playlistName)
+            runImport(gen, url, playlistName)
         }
 
         return START_NOT_STICKY
     }
 
-    private suspend fun runImport(url: String, playlistName: String?) {
+    private suspend fun runImport(gen: Int, url: String, playlistName: String?) {
         val logger = ImportFileLogger(this)
         logger.clear()
         logger.log("I", "Service", "Starting import for: $url")
@@ -211,8 +215,13 @@ class PlaylistImportService : Service() {
 
         } catch (e: CancellationException) {
             logger.log("I", "Service", "Import cancelled")
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
+            // stopSelf только если МЫ всё ещё актуальный импорт: иначе нас
+            // вытеснил новый — сервис должен жить дальше (P1, аудит).
+            if (gen == importGeneration) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
+            throw e
         } catch (e: PlaylistImportException) {
             logger.log("E", "Service", "Import failed: ${e.message}")
             showErrorNotification(e.message ?: "Import failed")

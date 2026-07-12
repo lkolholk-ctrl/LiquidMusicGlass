@@ -43,16 +43,22 @@ object PlaylistImportManager {
      * Launches a Foreground Service — the import runs independently of the UI.
      */
     fun importPlaylist(url: String, context: Context, playlistName: String? = null) {
+        appContext = context.applicationContext
         _importState.value = ImportState.Loading(0, 0, LoadingPhase.RESOLVING)
         PlaylistImportService.start(context, url, playlistName)
     }
+
+    // Для cancelImport (P1, аудит): без контекста in-app отмена лишь сбрасывала
+    // UI-стейт, а сервис продолжал молотить. При отклонённом POST_NOTIFICATIONS
+    // FGS-нотификация невидима — отменить импорт было вообще нечем.
+    @Volatile private var appContext: Context? = null
 
     /**
      * Cancel the current import.
      */
     fun cancelImport() {
-        // The service handles its own cancellation via the notification action.
-        // We just reset the local state here for any UI observers.
+        // Реально отменяем сервис (раньше — только сброс UI-стейта; P1, аудит).
+        appContext?.let { runCatching { PlaylistImportService.cancel(it) } }
         _importState.value = ImportState.Idle
     }
 

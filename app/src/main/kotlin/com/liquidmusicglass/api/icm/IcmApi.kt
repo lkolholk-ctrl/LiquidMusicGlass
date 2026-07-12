@@ -208,9 +208,11 @@ class IcmApi private constructor() {
     private val mediaTypeJson = "application/json; charset=utf-8".toMediaType()
 
     /** Partner API key (pk_<id>_<random>) */
+    @Volatile
     var apiKey: String? = null
 
     /** Session token (JWT) — alternative to apiKey for client requests */
+    @Volatile
     var sessionToken: String? = null
 
     /** Дефолтный регион ДО опроса сервера. "tr", не "us": по разбору ICM запросы
@@ -238,6 +240,15 @@ class IcmApi private constructor() {
 
     private fun extractRequestId(response: okhttp3.Response): String? {
         return response.header("X-Request-Id")
+    }
+
+    /** Числовой trackId для строк ошибок /track: раньше в логе был только rid
+     *  (X-Request-Id ответа), а сам айди трека жил в POST-body и в диагностику
+     *  не попадал — VVS не мог сматчить битые треки по логу. */
+    private fun trackIdForLog(endpoint: String, body: String?): String {
+        if (!endpoint.startsWith("/track") || body == null) return ""
+        val m = Regex("\"trackId\":\"([^\"]+)\"").find(body) ?: return ""
+        return " trackId=${m.groupValues[1]}"
     }
 
     /** Links a coroutine cancellation to the underlying OkHttp call. */
@@ -446,7 +457,7 @@ class IcmApi private constructor() {
                         }
                         else -> {
                             val errorText = response.body?.string() ?: "HTTP ${response.code}"
-                            IcmApiFileLogger.log("E", "IcmApi", "API error: ${response.code} on $endpoint rid=${requestId ?: "-"}")
+                            IcmApiFileLogger.log("E", "IcmApi", "API error: ${response.code} on $endpoint rid=${requestId ?: "-"}${trackIdForLog(endpoint, body)}")
                             if (response.code != 429) {
                                 com.liquidmusicglass.debug.DebugLog.add(
                                     "ICM ${response.code} $endpoint rid=${requestId ?: "-"}"
@@ -550,7 +561,7 @@ class IcmApi private constructor() {
                         val errorText = response.body?.string() ?: "HTTP ${response.code}"
                         // rid — X-Request-Id сервера: по нему саппорт ICM находит
                         // конкретный запрос в своих логах за секунды.
-                        IcmApiFileLogger.log("E", "IcmApi", "API error: ${response.code} on $endpoint rid=${requestId ?: "-"}")
+                        IcmApiFileLogger.log("E", "IcmApi", "API error: ${response.code} on $endpoint rid=${requestId ?: "-"}${trackIdForLog(endpoint, body)}")
                         if (response.code != 429) {
                             com.liquidmusicglass.debug.DebugLog.add(
                                 "ICM ${response.code} $endpoint rid=${requestId ?: "-"}"
@@ -639,7 +650,7 @@ class IcmApi private constructor() {
                 }
                 else -> {
                     val errorText = response.body?.string() ?: "HTTP ${response.code}"
-                    IcmApiFileLogger.log("E", "IcmApi", "API error (sync): ${response.code} on $endpoint")
+                    IcmApiFileLogger.log("E", "IcmApi", "API error (sync): ${response.code} on $endpoint${trackIdForLog(endpoint, body)}")
                     val error = try {
                         json.decodeFromString<IcmErrorWrapper>(errorText).detail
                     } catch (_: Exception) {
