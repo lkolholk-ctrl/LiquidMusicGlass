@@ -460,7 +460,7 @@ class IcmApi private constructor() {
                             IcmApiFileLogger.log("E", "IcmApi", "API error: ${response.code} on $endpoint rid=${requestId ?: "-"}${trackIdForLog(endpoint, body)}")
                             if (response.code != 429) {
                                 com.liquidmusicglass.debug.DebugLog.add(
-                                    "ICM ${response.code} $endpoint rid=${requestId ?: "-"}"
+                                    "ICM ${response.code} $endpoint rid=${requestId ?: "-"}${trackIdForLog(endpoint, body)}"
                                 )
                             }
                             val error = try {
@@ -564,7 +564,7 @@ class IcmApi private constructor() {
                         IcmApiFileLogger.log("E", "IcmApi", "API error: ${response.code} on $endpoint rid=${requestId ?: "-"}${trackIdForLog(endpoint, body)}")
                         if (response.code != 429) {
                             com.liquidmusicglass.debug.DebugLog.add(
-                                "ICM ${response.code} $endpoint rid=${requestId ?: "-"}"
+                                "ICM ${response.code} $endpoint rid=${requestId ?: "-"}${trackIdForLog(endpoint, body)}"
                             )
                         }
                         val error = try {
