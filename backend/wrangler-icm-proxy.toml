@@ -1,0 +1,24 @@
+# Cloudflare Worker config для ICM Partner API proxy.
+#
+# Деплой:
+#   cd backend
+#   wrangler secret put ICM_PARTNER_KEY --config wrangler-icm-proxy.toml   # pk_...
+#   wrangler secret put APP_ACCESS_KEY  --config wrangler-icm-proxy.toml   # длинная случайная строка
+#   wrangler deploy --config wrangler-icm-proxy.toml
+#
+# После деплоя привязать custom domain в дашборде:
+#   Workers & Pages → lmg-icm-proxy → Settings → Domains & Routes → Add Custom Domain
+#   (напр. lmg-api.glassfiles.ru). Edge-сертификат выпишется автоматически.
+#
+# Секреты (ICM_PARTNER_KEY, APP_ACCESS_KEY) задаются ТОЛЬКО через `wrangler secret`,
+# в этом файле их быть не должно.
+
+name = "lmg-icm-proxy"
+main = "icm-proxy-worker.js"
+compatibility_date = "2025-01-01"
+
+# Custom domain удобнее привязывать в дашборде (авто-SSL). Если предпочитаешь
+# декларативно — раскомментируй и подставь свой домен:
+# routes = [
+#   { pattern = "lmg-api.glassfiles.ru", custom_domain = true }
+# ]
