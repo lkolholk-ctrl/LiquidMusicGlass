@@ -108,12 +108,35 @@ object IcmRateGate {
         }
     }
 
-    /** Блокирующий троттлинг (для sync-пути на потоке загрузчика ExoPlayer). */
+    /**
+     * Блокирующий троттлинг (для sync-пути на потоке загрузчика ExoPlayer).
+     *
+     * P1 (аудит): (1) добавлен ПОТОЛОК суммарного ожидания — раньше при шторме
+     * loader-поток мог спать циклами минуты подряд (полный столл буферизации);
+     * теперь по исчерпании бюджета бросаем InterruptedIOException — вызывающий
+     * sync-путь фейлится штатно, плеер авто-скипает/ретраит по своей логике.
+     * (2) interrupt больше не глотается: ExoPlayer отменяет загрузку именно
+     * интерраптом — раньше return из catch «выдавал токен», запрос уходил в
+     * сеть без токена и висел до callTimeout. Теперь восстанавливаем флаг и
+     * фейлимся сразу.
+     */
+    private const val BLOCKING_WAIT_CAP_MS = 3_000L
+
     fun throttleBlocking() {
+        var waited = 0L
         while (true) {
             val wait = nextWaitMs()
             if (wait == 0L) return
-            try { Thread.sleep(wait) } catch (_: InterruptedException) { return }
+            if (waited + wait > BLOCKING_WAIT_CAP_MS) {
+                throw java.io.InterruptedIOException("icm rate gate: blocking wait cap exceeded")
+            }
+            try {
+                Thread.sleep(wait)
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+                throw java.io.InterruptedIOException("icm rate gate: interrupted (cancelled load)")
+            }
+            waited += wait
         }
     }
 }

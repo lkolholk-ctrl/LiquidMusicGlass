@@ -102,35 +102,12 @@ object IcmAuthRepository {
             // Единая политика ретраев — только наш интерсептор (без двойных повторов).
             .retryOnConnectionFailure(false)
             .addInterceptor { chain ->
-                val request = chain.request()
-                var response: okhttp3.Response? = null
-                var exception: java.io.IOException? = null
-                var tryCount = 0
-                val maxRetries = 3
-                while (tryCount < maxRetries) {
-                    try {
-                        response = chain.proceed(request)
-                        // Никогда не ретраим 4xx (в т.ч. 429).
-                        if (response.isSuccessful || response.code < 500) {
-                            return@addInterceptor response
-                        }
-                        // Server error (5xx) — retry с бэкоффом + джиттером.
-                        tryCount++
-                        if (tryCount >= maxRetries) {
-                            return@addInterceptor response
-                        }
-                        response.close()
-                        val backoff = 500L * (1L shl (tryCount - 1)) + kotlin.random.Random.nextLong(0, 150)
-                        try { Thread.sleep(backoff) } catch (_: Exception) {}
-                    } catch (e: java.io.IOException) {
-                        exception = e
-                        tryCount++
-                        if (tryCount >= maxRetries) throw e
-                        val backoff = 500L * (1L shl (tryCount - 1)) + kotlin.random.Random.nextLong(0, 150)
-                        try { Thread.sleep(backoff) } catch (_: Exception) {}
-                    }
-                }
-                response ?: throw exception ?: java.io.IOException("Network error")
+                // Ретраи с Thread.sleep УДАЛЕНЫ (P1, аудит): тот же паттерн, что
+                // уже убран из IcmApi — sleep держал поток Dispatcher'а во время
+                // паузы (до ~2.1с на вызов), а auth-вызовы блокирующие и без
+                // отмены. Ровно один proceed; повтор при want — на вызывающем
+                // уровне (auth-вызовы редкие: логин/перевыпуск токена).
+                chain.proceed(chain.request())
             }
             .build()
     }
@@ -192,17 +169,34 @@ object IcmAuthRepository {
      * берутся из собственного состояния. null = перевыпуск невозможен
      * (нет ключа/юзера или сеть легла).
      */
+    // Single-flight перевыпуска токена (P1, аудит): токен истекает у ВСЕХ
+    // параллельных вызовов одновременно (401 на волне/лайках/playback-логе
+    // разом) — каждый независимо перевыпускал сессию → залп POST /session/issue
+    // (этот клиент идёт МИМО RateGate) и риск 429 по IP.
+    private val reissueMutex = kotlinx.coroutines.sync.Mutex()
+
     suspend fun reissueSessionToken(): String? = withContext(Dispatchers.IO) {
-        val key = getPartnerKey().takeIf { it.isNotBlank() } ?: return@withContext null
-        val userId = _partnerUserId.value ?: return@withContext null
-        val tokenData = issueSessionToken(userId, key).getOrNull() ?: return@withContext null
-        prefs?.edit()?.apply {
-            putString(KEY_TOKEN, tokenData.token)
-            putLong(KEY_TOKEN_EXPIRES, tokenData.expiresAt)
-            apply()
+        val before = prefs?.getString(KEY_TOKEN, null)
+        reissueMutex.lock()
+        try {
+            // Пока ждали лок, параллельный вызов мог уже перевыпустить токен —
+            // отдаём свежий без второго похода в /session/issue.
+            val current = prefs?.getString(KEY_TOKEN, null)
+            if (!current.isNullOrBlank() && current != before) return@withContext current
+
+            val key = getPartnerKey().takeIf { it.isNotBlank() } ?: return@withContext null
+            val userId = _partnerUserId.value ?: return@withContext null
+            val tokenData = issueSessionToken(userId, key).getOrNull() ?: return@withContext null
+            prefs?.edit()?.apply {
+                putString(KEY_TOKEN, tokenData.token)
+                putLong(KEY_TOKEN_EXPIRES, tokenData.expiresAt)
+                apply()
+            }
+            IcmRepository.setSessionToken(tokenData.token)
+            tokenData.token
+        } finally {
+            reissueMutex.unlock()
         }
-        IcmRepository.setSessionToken(tokenData.token)
-        tokenData.token
     }
 
     /**

@@ -31,7 +31,22 @@ import kotlin.coroutines.resumeWithException
  */
 object IcmApiFileLogger {
     private var logFile: File? = null
+    private var rotatedFile: File? = null
+    // dateFormat используется ТОЛЬКО на writer-потоке (SimpleDateFormat не
+    // потокобезопасен — раньше format() звался с main/IO одновременно).
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
+
+    /** Ротация по размеру: файл рос ВЕЧНО (2-4 строки на каждый запрос), и
+     *  «Copy ICM logs» на старом инсталле читал десятки МБ на main → ANR. */
+    private const val MAX_LOG_BYTES = 256L * 1024
+
+    // Выделенный writer-поток (P1, аудит): log() зовётся из горячих путей —
+    // в т.ч. из invokeOnCancellation при отмене запроса, а отменяет часто MAIN
+    // (searchJob?.cancel() на каждый keystroke) — диск на main на каждую букву.
+    // Теперь log() лишь ставит запись в очередь; пишет фоновый демон.
+    private val writer = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+        Thread(r, "icm-file-log").apply { isDaemon = true; priority = Thread.MIN_PRIORITY }
+    }
 
     fun init(context: Context) {
         // filesDir (внутреннее, всегда смонтировано), а НЕ getExternalFilesDir:
@@ -41,33 +56,49 @@ object IcmApiFileLogger {
         val dir = File(context.filesDir, "icm_logs")
         dir.mkdirs()
         logFile = File(dir, "icm_api.log")
+        rotatedFile = File(dir, "icm_api.log.1")
     }
 
     fun log(level: String, tag: String, message: String) {
-        val timestamp = dateFormat.format(Date())
-        val line = "[$timestamp] $level/$tag: $message\n"
-        try {
-            logFile?.appendText(line)
-        } catch (_: Exception) {}
-        // Also echo to system log
+        // Echo в logcat сразу (дёшево, на потоке вызова)
         when (level) {
             "D" -> android.util.Log.d(tag, message)
             "E" -> android.util.Log.e(tag, message)
             "W" -> android.util.Log.w(tag, message)
             "I" -> android.util.Log.i(tag, message)
         }
+        val ts = System.currentTimeMillis()
+        try {
+            writer.execute {
+                try {
+                    val f = logFile ?: return@execute
+                    if (f.length() > MAX_LOG_BYTES) {
+                        rotatedFile?.let { rot -> rot.delete(); f.renameTo(rot) }
+                    }
+                    f.appendText("[${dateFormat.format(Date(ts))}] $level/$tag: $message\n")
+                } catch (_: Exception) {}
+            }
+        } catch (_: Exception) {} // executor мог быть погашен — лог не роняет приложение
     }
 
     fun getLogPath(): String? = logFile?.absolutePath
 
     fun getRecentLogs(maxLines: Int = 200): String {
         return try {
-            logFile?.readLines()?.takeLast(maxLines)?.joinToString("\n") ?: "No logs"
+            // Оба файла ограничены MAX_LOG_BYTES — чтение хвоста дёшево и БЕЗ
+            // риска многосекундного readLines на распухшем файле.
+            val lines = mutableListOf<String>()
+            rotatedFile?.takeIf { it.isFile }?.let { lines += it.readLines() }
+            logFile?.takeIf { it.isFile }?.let { lines += it.readLines() }
+            lines.takeLast(maxLines).joinToString("\n").ifBlank { "No logs" }
         } catch (_: Exception) { "No logs" }
     }
 
     fun clear() {
-        try { logFile?.writeText("") } catch (_: Exception) {}
+        try {
+            rotatedFile?.delete()
+            logFile?.writeText("")
+        } catch (_: Exception) {}
     }
 }
 
@@ -336,22 +367,13 @@ class IcmApi private constructor() {
                 return executeOnce(endpoint, method, body, async)
             }
         }
-        // 5xx на /track* — временные ошибки шлюза: разовый 502 срывал
-        // кроссфейд AutoMix и предзагрузку (полевой лог: «ICM 502 /track …
-        // xfade LOAD FAILED»). До 2 повторов с коротким бэкоффом.
-        if (endpoint.startsWith("/track")) {
-            var res = first
-            var attempt = 0
-            while (attempt < 2) {
-                val ex = res.exceptionOrNull()
-                if (ex !is IcmApiException || ex.code !in 500..599) break
-                kotlinx.coroutines.delay(700L * (attempt + 1))
-                attempt++
-                com.liquidmusicglass.debug.DebugLog.add("ICM retry #$attempt $endpoint (${ex.code})")
-                res = executeOnce(endpoint, method, body, async)
-            }
-            return res
-        }
+        // ВНЕШНИЙ 5xx-ретрай /track УДАЛЁН (P1, аудит): транзиентные 5xx уже
+        // ретраит executeWithRetry внутри executeOnce (2 HTTP-попытки с
+        // бэкоффом). Два несогласованных слоя давали до 6 HTTP-запросов на
+        // ОДИН логический getTrack при устойчивом 502 — каждый жёг токен
+        // RateGate (5/с) и раскручивал шторм (полевой лог: retry #1/#2 +
+        // серия 502/404). Устойчивый 5xx теперь быстро фейлится и копится в
+        // 5xx-streak circuit-breaker'а — шторм гаснет сам.
         return first
     }
 
@@ -390,20 +412,27 @@ class IcmApi private constructor() {
         body: String? = null,
         async: Boolean = false
     ): Result<String> {
+        if (IcmRateGate.isBanned()) {
+            return Result.failure(
+                IcmApiException(429, "rate-limited (local gate)", "ip_temporarily_blocked", null, IcmRateGate.bannedForSeconds().coerceAtLeast(1), null)
+            )
+        }
+        // Throttle ВНЕ withTimeoutOrNull (P1, аудит): ожидание токена засчитывалось
+        // в 14с «сетевого» таймаута; при шторме очередь за токенами превышала 14с →
+        // запросы «фейлились», НЕ выйдя в сеть, каждый звал recordFailure → 4 подряд
+        // = 15с самобан. Локальный троттлинг — не сетевой фейл.
+        IcmRateGate.throttle()
         return withTimeoutOrNull(14_000L) {
             withContext(Dispatchers.IO) {
-                if (IcmRateGate.isBanned()) {
-                    return@withContext Result.failure(
-                        IcmApiException(429, "rate-limited (local gate)", "ip_temporarily_blocked", null, IcmRateGate.bannedForSeconds().coerceAtLeast(1), null)
-                    )
-                }
                 try {
-                    IcmRateGate.throttle()
                     val url = if (async) "$BASE_URL$endpoint?async=1" else "$BASE_URL$endpoint"
                     val request = buildRequest(url, method, body)
                     val response = executeWithRetry(request, endpoint)
                     try {
-                    IcmRateGate.recordSuccess()
+                    // 5xx НЕ сбрасывает счётчик фейлов (аудит): «ответ получен» при
+                    // устойчивом 502-шторме держал breaker закрытым — шторм ничем не
+                    // гасился. 5xx копится как фейл → streak открывает breaker.
+                    if (response.code < 500) IcmRateGate.recordSuccess() else IcmRateGate.recordFailure()
                     com.liquidmusicglass.engine.NetworkVitality.onRequestSuccess()
 
                     val requestId = extractRequestId(response)
@@ -479,21 +508,23 @@ class IcmApi private constructor() {
         // ВНЕШНИЙ корутинный таймаут — на случай, если OkHttp callTimeout не сработает
         // (висение на socketRead0): корутина гарантированно отменяется, не вешает пул.
         // Внешний лимит > callTimeout (12с), иначе корутина отваливалась бы раньше OkHttp.
+        // Circuit-breaker: пока активен бан — мгновенно фейлим, не выходя в сеть.
+        if (IcmRateGate.isBanned()) {
+            return Result.failure(
+                IcmApiException(429, "rate-limited (local gate)", "ip_temporarily_blocked", null, IcmRateGate.bannedForSeconds().coerceAtLeast(1), null)
+            )
+        }
+        // Throttle ВНЕ таймаута — см. requestJsonOnce (самобан от очереди за токенами).
+        IcmRateGate.throttle()
         return withTimeoutOrNull(14_000L) {
         withContext(Dispatchers.IO) {
-            // Circuit-breaker: пока активен бан — мгновенно фейлим, не выходя в сеть.
-            if (IcmRateGate.isBanned()) {
-                return@withContext Result.failure(
-                    IcmApiException(429, "rate-limited (local gate)", "ip_temporarily_blocked", null, IcmRateGate.bannedForSeconds().coerceAtLeast(1), null)
-                )
-            }
             try {
-                IcmRateGate.throttle()
                 val url = if (async) "$BASE_URL$endpoint?async=1" else "$BASE_URL$endpoint"
                 val request = buildRequest(url, method, body)
                 val response = executeWithRetry(request, endpoint)
                 try {
-                IcmRateGate.recordSuccess()   // ответ получен → хост жив, сбрасываем счётчик фейлов
+                // 5xx копится как фейл breaker'а — см. requestJsonOnce.
+                if (response.code < 500) IcmRateGate.recordSuccess() else IcmRateGate.recordFailure()
                 com.liquidmusicglass.engine.NetworkVitality.onRequestSuccess()
 
                 val requestId = extractRequestId(response)
@@ -593,7 +624,8 @@ class IcmApi private constructor() {
             IcmApiFileLogger.log("D", "IcmApi", "Sync request started $endpoint")
             val response = client.newCall(request).execute()
             try {
-            IcmRateGate.recordSuccess()
+            // 5xx копится как фейл breaker'а — см. requestJsonOnce.
+            if (response.code < 500) IcmRateGate.recordSuccess() else IcmRateGate.recordFailure()
 
             extractRequestId(response)?.let { onRequestId?.invoke(it) }
 
@@ -635,6 +667,11 @@ class IcmApi private constructor() {
                 response.close()
                 IcmApiFileLogger.log("D", "IcmApi", "Sync request finished $endpoint")
             }
+        } catch (e: java.io.InterruptedIOException) {
+            // ЛОКАЛЬНЫЙ отказ (кап ожидания токена / interrupt отменённой загрузки)
+            // — НЕ сетевой фейл, breaker не кормим: иначе быстрые скипы юзера
+            // сами взводили бы 15-секундный бан.
+            return Result.failure(e)
         } catch (e: Exception) {
             IcmRateGate.recordFailure()
             return Result.failure(e)
