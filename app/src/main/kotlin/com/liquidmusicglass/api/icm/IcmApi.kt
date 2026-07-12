@@ -139,8 +139,7 @@ class IcmApi private constructor() {
             .protocols(listOf(okhttp3.Protocol.HTTP_2, okhttp3.Protocol.HTTP_1_1))
             .addInterceptor { chain ->
                 val request = chain.request()
-                // «Быстрый» путь (sync-резолв на потоке ExoPlayer): короткий таймаут и
-                // 1 попытка — загрузчик не должен висеть до 30с.
+                // «Быстрый» путь (sync-резолв на потоке ExoPlayer): короткий таймаут.
                 val fast = request.header("X-LMG-Fast") == "1"
                 // Внутренний маркер на сервер не отправляем.
                 val outRequest = if (fast) request.newBuilder().removeHeader("X-LMG-Fast").build() else request
@@ -149,37 +148,14 @@ class IcmApi private constructor() {
                         .withReadTimeout(5, TimeUnit.SECONDS)
                         .withWriteTimeout(5, TimeUnit.SECONDS)
                 } else chain
-                var response: okhttp3.Response? = null
-                var exception: java.io.IOException? = null
-                var tryCount = 0
-                // 3→2: при лежачем хосте 3 попытки на КАЖДЫЙ вызов плодили лишние
-                // висящие коннекты. 2 достаточно для транзиентных 5xx; остальное
-                // отсекает circuit-breaker (IcmRateGate).
-                val maxRetries = if (fast) 1 else 2
-                while (tryCount < maxRetries) {
-                    try {
-                        // Закрываем предыдущий 5xx-ответ перед повтором (не течём телом).
-                        response?.close()
-                        response = activeChain.proceed(outRequest)
-                        // НИКОГДА не ретраим 4xx (в т.ч. 429) — повтор лишь усугубляет бан.
-                        if (response.isSuccessful || response.code < 500) {
-                            return@addInterceptor response
-                        }
-                        tryCount++
-                        if (tryCount < maxRetries) {
-                            // Экспоненциальный бэкофф + джиттер.
-                            val backoff = 250L * (1L shl (tryCount - 1)) + kotlin.random.Random.nextLong(0, 120)
-                            try { Thread.sleep(backoff) } catch (_: Exception) {}
-                        }
-                    } catch (e: java.io.IOException) {
-                        exception = e
-                        tryCount++
-                        if (tryCount >= maxRetries) throw e
-                        val backoff = 250L * (1L shl (tryCount - 1)) + kotlin.random.Random.nextLong(0, 120)
-                        try { Thread.sleep(backoff) } catch (_: Exception) {}
-                    }
-                }
-                response ?: throw exception ?: java.io.IOException("Network error")
+                // Ретрай транзиентных 5xx с бэкоффом ПЕРЕНЕСЁН в coroutine-слой
+                // (executeWithRetry + delay()). Раньше здесь был Thread.sleep(backoff),
+                // державший поток OkHttp Dispatcher'а во время паузы — при пачке
+                // запросов это подъедало пул и тормозило вход в приложение (полевой
+                // лог: поток OkHttp в intercept→Thread.sleep). Интерсептор теперь
+                // делает РОВНО один proceed; connection-level ретраи покрывает
+                // retryOnConnectionFailure(true) нативно, без ручного sleep.
+                activeChain.proceed(outRequest)
             }
             .build()
     }
@@ -253,6 +229,40 @@ class IcmApi private constructor() {
                 }
             }
         })
+    }
+
+    /**
+     * Выполнить запрос с ретраем ТРАНЗИЕНТНЫХ сбоев (5xx / IOException) и бэкоффом
+     * через delay() — в coroutine, а НЕ через Thread.sleep в OkHttp-интерсепторе
+     * (тот держал поток Dispatcher'а). 4xx (в т.ч. 429) НЕ ретраим — повтор лишь
+     * усугубляет бан; их отсекает и circuit-breaker (IcmRateGate). fast-запросы
+     * (X-LMG-Fast, sync-резолв на потоке ExoPlayer) — без ретрая (1 попытка).
+     *
+     * Отменяемость: delay() отменяем сам; CancellationException пробрасываем сразу
+     * (не глотаем как IOException), чтобы отмена ICM-запроса завершалась мгновенно.
+     */
+    private suspend fun executeWithRetry(request: Request, endpoint: String): Response {
+        val maxRetries = if (request.header("X-LMG-Fast") == "1") 1 else 2
+        var attempt = 0
+        while (true) {
+            try {
+                val response = client.newCall(request).awaitResponse(endpoint)
+                // НИКОГДА не ретраим 4xx; 5xx — только пока есть попытки.
+                if (response.isSuccessful || response.code < 500 || attempt >= maxRetries - 1) {
+                    return response
+                }
+                response.close()   // не течём телом 5xx перед повтором
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e            // отмена coroutine — сразу наружу
+            } catch (e: IOException) {
+                if (attempt >= maxRetries - 1) throw e
+            }
+            attempt++
+            // Экспоненциальный бэкофф + джиттер, но через ОТМЕНЯЕМЫЙ delay() —
+            // поток OkHttp Dispatcher'а во время паузы НЕ держим.
+            val backoff = 250L * (1L shl (attempt - 1)) + kotlin.random.Random.nextLong(0, 120)
+            kotlinx.coroutines.delay(backoff)
+        }
     }
 
     private fun buildRequest(url: String, method: String = "GET", body: String? = null, fast: Boolean = false): Request {
@@ -391,7 +401,7 @@ class IcmApi private constructor() {
                     IcmRateGate.throttle()
                     val url = if (async) "$BASE_URL$endpoint?async=1" else "$BASE_URL$endpoint"
                     val request = buildRequest(url, method, body)
-                    val response = client.newCall(request).awaitResponse(endpoint)
+                    val response = executeWithRetry(request, endpoint)
                     try {
                     IcmRateGate.recordSuccess()
                     com.liquidmusicglass.engine.NetworkVitality.onRequestSuccess()
@@ -481,7 +491,7 @@ class IcmApi private constructor() {
                 IcmRateGate.throttle()
                 val url = if (async) "$BASE_URL$endpoint?async=1" else "$BASE_URL$endpoint"
                 val request = buildRequest(url, method, body)
-                val response = client.newCall(request).awaitResponse(endpoint)
+                val response = executeWithRetry(request, endpoint)
                 try {
                 IcmRateGate.recordSuccess()   // ответ получен → хост жив, сбрасываем счётчик фейлов
                 com.liquidmusicglass.engine.NetworkVitality.onRequestSuccess()
