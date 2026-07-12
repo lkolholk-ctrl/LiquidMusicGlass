@@ -418,9 +418,9 @@ fun ProfileScreen(
                                                         com.liquidmusicglass.api.icm.IcmRepository.getUserRegion()
                                                     }.getOrNull() ?: regionInfo
                                                     IcmAuthRepository.fetchUserData()
-                                                    // Явный выбор юзера приоритетнее подписочного
+                                                    // Явный выбор юзера приоритетнее серверного
                                                     // дефолта: ставим ПОСЛЕ fetchUserData (внутри него
-                                                    // syncDefaultRegionFromSubscription мог поставить NZ).
+                                                    // syncRegionFromServer мог поставить /me/region.current).
                                                     com.liquidmusicglass.api.icm.IcmRepository.region = r.code
                                                 } else {
                                                     android.widget.Toast.makeText(

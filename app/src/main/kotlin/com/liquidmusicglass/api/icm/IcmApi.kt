@@ -206,8 +206,10 @@ class IcmApi private constructor() {
     /** Session token (JWT) — alternative to apiKey for client requests */
     var sessionToken: String? = null
 
-    /** Default search region */
-    var defaultRegion: String = "us"
+    /** Дефолтный регион ДО опроса сервера. "tr", не "us": по разбору ICM запросы
+     *  на партнёре перенаправляются, и зашитый "us" давал 404. После логина регион
+     *  сверяется с сервером — /me/region.current (IcmAuthRepository.syncRegionFromServer). */
+    var defaultRegion: String = "tr"
 
     /** Stream quality: "128K", "256K", "320K", "ALAC" or null for default */
     var streamQuality: String? = IcmStreamQuality.K256

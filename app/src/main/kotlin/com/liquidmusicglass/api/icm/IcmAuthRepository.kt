@@ -588,42 +588,21 @@ object IcmAuthRepository {
     }
 
     /**
-     * Регион для поиска/стрима берём из ПОДПИСКИ, а не из зашитого "us".
+     * Регион для поиска/стрима СВЕРЯЕМ С СЕРВЕРОМ — берём /me/region.current.
      *
-     * Подписка ICM покрывает регионы (us / nz), они приходят в
-     * [IcmSubscriptionResponse.regions]. NZ приоритетнее US: релизы там на ~полсуток
-     * раньше, и NZ оплачивается отдельно (дороже) — если он куплен, юзера НАДО
-     * обслуживать как NZ, иначе ранних релизов он не видит и часть треков отдаёт
-     * region_unavailable / 404. Раньше defaultRegion был константой "us" и не
-     * трогался вообще → NZ-подписчик обслуживался как us.
-     *
-     * Регион у каждого юзера СВОЙ, по его подписке (US или NZ — не оба). Приоритет
-     * NZ — лишь теоретический тай-брейк на случай двойного покрытия; на практике
-     * subRegions из одного элемента, и берётся именно он (US-подписчик → us,
-     * NZ-подписчик → nz).
-     *
-     * Явный выбор региона в Профиле (PUT /me/region) приоритетнее и ставится там же
-     * локально; этот метод задаёт лишь ПОДПИСОЧНЫЙ дефолт на старте/после логина.
-     * Истёкшие региональные покрытия (expires_at в прошлом) не учитываем. Если
-     * /me/subscription не отдал regions[] — фолбэк на серверный /me/region.current.
+     * По разбору ICM: регион нельзя хардкодить и нельзя гадать по подписке — запросы
+     * на партнёре перенаправляются, и любой зашитый регион (был "us") даёт 404.
+     * Правильный регион знает сервер (/me/region.current) — его и ставим как есть,
+     * без клиентских предпочтений. Базовый дефолт клиента (IcmApi.defaultRegion="tr")
+     * работает, пока сервер ещё не опрошен (до логина / нет сети). Явный выбор в
+     * Профиле приоритетнее и ставится там же локально после fetchUserData.
      */
-    suspend fun syncDefaultRegionFromSubscription() {
-        val nowSec = System.currentTimeMillis() / 1000
-        val subRegions = _subscription.value?.regions
-            ?.filter { it.expiresAt == null || it.expiresAt > nowSec }
-            ?.mapNotNull { it.code.trim().lowercase().takeIf { code -> code.isNotBlank() } }
-            ?: emptyList()
-        val effective = when {
-            "nz" in subRegions -> "nz"               // премиум: ранние релизы, юзер за это платит
-            subRegions.isNotEmpty() -> subRegions.first()   // единственный регион подписки
-            // Подписка не отдала regions[] — берём серверный текущий регион аккаунта.
-            else -> runCatching { IcmRepository.getUserRegion()?.current }
-                .getOrNull()?.trim()?.lowercase()?.takeIf { it.isNotBlank() }
-                ?: return                            // регион неизвестен — дефолт не трогаем
-        }
-        if (!effective.equals(IcmRepository.region, ignoreCase = true)) {
-            IcmRepository.region = effective
-            android.util.Log.d("IcmAuthRepository", "Default region -> $effective")
+    suspend fun syncRegionFromServer() {
+        val current = runCatching { IcmRepository.getUserRegion()?.current }
+            .getOrNull()?.trim()?.lowercase()?.takeIf { it.isNotBlank() } ?: return
+        if (!current.equals(IcmRepository.region, ignoreCase = true)) {
+            IcmRepository.region = current
+            android.util.Log.d("IcmAuthRepository", "Region synced from server -> $current")
         }
     }
 
@@ -638,9 +617,9 @@ object IcmAuthRepository {
         // Fetch subscription in parallel/sequence
         fetchSubscription()
 
-        // Регион поиска/стрима — из подписки (NZ приоритетнее us). Раньше был зашит
-        // "us", и NZ-подписчик не видел ранних релизов + ловил 404/region_unavailable.
-        syncDefaultRegionFromSubscription()
+        // Регион поиска/стрима СВЕРЯЕМ С СЕРВЕРОМ (/me/region.current). Дефолт клиента
+        // = "tr" (зашитый "us" давал 404 из-за редиректа запросов на партнёре).
+        syncRegionFromServer()
 
         val profile = profileResult.getOrNull()
         val preferences = prefsResult.getOrNull()
