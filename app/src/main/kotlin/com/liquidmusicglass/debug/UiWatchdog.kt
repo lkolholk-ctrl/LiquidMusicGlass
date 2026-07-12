@@ -71,9 +71,10 @@ internal fun classifyFreeze(
  *  - единый источник времени — [SystemClock.uptimeMillis];
  *  - фриз ПОДТВЕРЖДАЕТСЯ двумя проверками (см. [classifyFreeze]): при превышении
  *    порога сразу снимаем стек ТОЛЬКО main; через ~400мс повторная проверка;
- *  - CONFIRMED_FREEZE → полный дамп в crash_logs/ (его покажет экран краша на
- *    следующем старте); RECOVERED_DELAY → диагностика в watchdog_diag/ БЕЗ
- *    показа пользователю;
+ *  - ОБА вида (CONFIRMED_FREEZE и RECOVERED_DELAY) → диагностика в watchdog_diag/
+ *    БЕЗ показа пользователю: фриз ≠ крэш и НЕ должен хайджекать старт экраном
+ *    краша (полевой фидбек: «лог вылезает при первом открытии»). Реальные крэши
+ *    (CrashHandler java_crash / нативные) показываются как раньше;
  *  - только foreground + есть RESUMED-Activity; в фоне — стоп/сброс; startup- и
  *    resumed-grace глушат ложные срабатывания на инициализации;
  *  - cooldown + дедуп по сигнатуре стека: один отчёт на один фриз.
@@ -340,7 +341,11 @@ object UiWatchdog {
         }
     }
 
-    /** CONFIRMED_FREEZE: полный дамп в crash_logs/ → показывается экраном краша на следующем старте. */
+    /**
+     * CONFIRMED_FREEZE: полный дамп в watchdog_diag/ — ДИАГНОСТИКА, а НЕ экран
+     * краша. Фриз (даже подтверждённый) не крэш и не должен хайджекать старт
+     * приложения. Реальные крэши (CrashHandler / нативные) показываются как раньше.
+     */
     private fun dumpConfirmedFreeze(
         measuredDelayMs: Long,
         freezeDetectedAt: Long,
@@ -363,8 +368,9 @@ object UiWatchdog {
                 sb.append("--- ").append(t.name).append(" (").append(t.state).append(")\n")
                 st.take(24).forEach { sb.append("  at ").append(it).append('\n') }
             }
-            val dir = File(appContext.filesDir, "crash_logs").apply { mkdirs() }
-            File(dir, "ui_freeze_${System.currentTimeMillis()}.txt").writeText(sb.toString())
+            val dir = File(appContext.filesDir, "watchdog_diag").apply { mkdirs() }
+            trimDir(dir)
+            File(dir, "confirmed_freeze_${System.currentTimeMillis()}.txt").writeText(sb.toString())
         }
     }
 

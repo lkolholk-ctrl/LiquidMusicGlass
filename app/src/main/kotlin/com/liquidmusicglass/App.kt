@@ -129,6 +129,10 @@ class App : Application(), ImageLoaderFactory {
         super.onCreate()
         CrashHandler.install(this) // Java крэши (синхронно и ПЕРВЫМ — Fishnet ниже
         // подшивается к уже установленному дефолтному хендлеру)
+        // Чистим устаревшие ui_freeze-логи из crash_logs/ ДО того, как MainActivity
+        // проверит hasCrashLog: раньше отчёт о фризе (в т.ч. ложный) показывался
+        // экраном краша при первом открытии. Синхронно и рано — дешёвый file-delete.
+        CrashHandler.purgeStaleFreezeLogs(this)
         val logDir = File(filesDir, "crash_logs").apply { mkdirs() }
         // Fishnet.init грузит первую в процессе нативную .so (libfishnet), делает
         // синхронный getPackageInfo(SIGNING_CERTIFICATES) binder-IPC к холодному
