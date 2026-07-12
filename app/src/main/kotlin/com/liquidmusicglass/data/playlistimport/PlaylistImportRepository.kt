@@ -328,7 +328,7 @@ class PlaylistImportRepository(
             )
 
             val firstTrack = response.items.firstOrNull { item ->
-                !item.isArtist && !item.isAlbum
+                !item.isArtist && !item.isAlbum && !item.isClip
             }
 
             if (firstTrack != null) {

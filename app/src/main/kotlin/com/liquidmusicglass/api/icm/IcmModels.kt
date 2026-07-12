@@ -141,6 +141,10 @@ data class IcmSearchItem(
     @SerialName("isArtist") val isArtist: Boolean = false,
     @SerialName("isAlbum") val isAlbum: Boolean = false,
     @SerialName("isCustom") val isCustom: Boolean = false,
+    // Видеоклип из Apple-каталога: валидная сущность каталога (числовой id, как у
+    // песни), но аудио-стрима у неё нет — POST /track стабильно даёт 404
+    // track_not_found. Именно клипы были «битыми треками» из полевых логов.
+    @SerialName("isClip") val isClip: Boolean = false,
     val duration: Long? = null,
     val source: String? = null,
     @SerialName("trackId") val trackId: String? = null
@@ -155,8 +159,9 @@ data class IcmSearchItem(
     val durationMs: Long
         get() = normalizeDurationMs(duration, source)
 
+    /** Трек = не артист, не альбом и не видеоклип (клип не стримится). */
     val isTrack: Boolean
-        get() = !isArtist && !isAlbum
+        get() = !isArtist && !isAlbum && !isClip
 
     val isVk: Boolean
         get() = id.startsWith("vk_") || source == "vk"
@@ -711,6 +716,9 @@ data class IcmWaveTrack(
     @SerialName("collectionId") val collectionId: String? = null,
     @SerialName("is_explicit") val isExplicit: Boolean = false,
     @SerialName("isCustom") val isCustom: Boolean = false,
+    // Видеоклип: каталог волны его отдаёт, но стрима нет (404 track_not_found) —
+    // WaveRepository режет такие ДО очереди, не тратя запрос /track.
+    @SerialName("isClip") val isClip: Boolean = false,
     val source: String? = null
 ) {
     val durationMs: Long
@@ -977,11 +985,12 @@ data class IcmHomeItem(
     // «альбом или трек» по наличию collectionId — но трек по API ТОЖЕ несёт
     // collectionId (id своего альбома), поэтому тап по треку открывал альбом.
     @SerialName("isAlbum") val isAlbum: Boolean = false,
-    @SerialName("isArtist") val isArtist: Boolean = false
+    @SerialName("isArtist") val isArtist: Boolean = false,
+    @SerialName("isClip") val isClip: Boolean = false
 ) {
-    /** Трек = не альбом и не артист (как в /search: оба флага false). */
+    /** Трек = не альбом, не артист и не видеоклип (клип не стримится). */
     val isTrack: Boolean
-        get() = !isAlbum && !isArtist
+        get() = !isAlbum && !isArtist && !isClip
 
     val displayArtist: String
         get() = artist?.takeIf { it.isNotBlank() && it != "Исполнитель" }

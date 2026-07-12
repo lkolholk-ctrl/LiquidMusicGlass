@@ -228,6 +228,11 @@ data class IcmSearchItemDto(
     @SerialName("isAlbum")
     val isAlbum: Boolean = false,
 
+    // Видеоклип: каталог отдаёт его как «трек», но аудио-стрима нет
+    // (POST /track → 404 track_not_found) — при матчинге импорта пропускаем.
+    @SerialName("isClip")
+    val isClip: Boolean = false,
+
     @SerialName("region")
     val region: String? = null
 )

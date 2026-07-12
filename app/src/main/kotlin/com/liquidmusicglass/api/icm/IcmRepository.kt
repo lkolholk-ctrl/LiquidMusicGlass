@@ -368,6 +368,9 @@ object IcmRepository {
                 result?.items?.forEach { item ->
                     if (items.size >= maxItems) return@forEach
                     val shouldInclude = when {
+                        // Видеоклипы не включаем ни в один режим: играть их нельзя
+                        // (POST /track → 404), тап по такой карточке — мёртвый.
+                        item.isClip -> false
                         filterTracks && filterAlbums -> true
                         filterTracks -> item.isTrack
                         filterAlbums -> item.isAlbum || item.collectionId != null
@@ -387,7 +390,8 @@ object IcmRepository {
                             genre = if (genreTag) query else null,
                             // Сохраняем тип сущности, чтобы UI не угадывал по collectionId.
                             isAlbum = item.isAlbum,
-                            isArtist = item.isArtist
+                            isArtist = item.isArtist,
+                            isClip = item.isClip
                         )
                         transform?.let { homeItem = it(homeItem) }
                         items.add(homeItem)

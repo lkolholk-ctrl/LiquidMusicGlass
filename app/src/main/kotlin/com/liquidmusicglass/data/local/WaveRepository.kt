@@ -701,12 +701,19 @@ class WaveRepository(context: Context) {
      * WaveCandidateFilter, обновление in-memory состояния.
      */
     private suspend fun acceptPersonalWaveTracks(
-        tracks: List<com.liquidmusicglass.api.icm.IcmWaveTrack>,
+        rawTracks: List<com.liquidmusicglass.api.icm.IcmWaveTrack>,
         sessionState: WaveSessionState,
         responseSessionId: String?,
         targetCount: Int,
         label: String
     ): List<Track> {
+        // Видеоклипы каталог отдаёт вперемешку с песнями, но аудио-стрима у них
+        // нет (POST /track → 404 track_not_found) — режем ДО фильтра и очереди,
+        // не тратя запрос на заведомо мёртвый айди.
+        val tracks = rawTracks.filterNot { it.isClip }
+        if (tracks.size != rawTracks.size) {
+            Log.d(TAG, "$label dropped ${rawTracks.size - tracks.size} clip(s)")
+        }
         val statsByTrackId = mutableMapOf<String, WaveCandidateFilter.TrackStats>()
         for (track in tracks) {
             val stats = playbackDao.getTrackStat(track.id) ?: continue
@@ -764,11 +771,17 @@ class WaveRepository(context: Context) {
             val first = IcmWaveRepository.startWave().getOrNull()
             if (first?.status == "ok") {
                 first.track?.let {
-                    tracks += it.toTrack()
+                    // Клип не играем, но в exclude заносим — чтобы сервер не
+                    // предлагал его же на следующем /wave/next.
+                    if (!it.isClip) tracks += it.toTrack()
                     exclude += it.id
                 }
             }
-            while (tracks.size < count) {
+            // Кап итераций: пропуск клипа не растит tracks.size, и без него серия
+            // клипов от сервера растянула бы цикл до бесконечности.
+            var attempts = 0
+            while (tracks.size < count && attempts < count * 3) {
+                attempts++
                 kotlinx.coroutines.delay(150)
                 val next = IcmRepository.getWaveNext(
                     seedTrackId = null,
@@ -776,7 +789,7 @@ class WaveRepository(context: Context) {
                 ) ?: break
                 if (next.status != "ok") break
                 val track = next.track ?: break
-                tracks += track.toTrack()
+                if (!track.isClip) tracks += track.toTrack()
                 exclude += track.id
             }
         } catch (e: Exception) {
@@ -886,8 +899,15 @@ class WaveRepository(context: Context) {
             return emptyList()
         }
 
+        // Клипы не стримятся (404 track_not_found) — режем до фильтра.
+        val serverTracks = response.tracks.filterNot { it.isClip }
+        if (serverTracks.size != response.tracks.size) {
+            Log.d(TAG, "Mode wave ${mode.waveStateKey()} dropped ${response.tracks.size - serverTracks.size} clip(s)")
+        }
+        if (serverTracks.isEmpty()) return emptyList()
+
         val statsByTrackId = mutableMapOf<String, WaveCandidateFilter.TrackStats>()
-        for (track in response.tracks) {
+        for (track in serverTracks) {
             val stats = playbackDao.getTrackStat(track.id) ?: continue
             statsByTrackId[track.id] = WaveCandidateFilter.TrackStats(
                 playCount = stats.playCount,
@@ -903,7 +923,7 @@ class WaveRepository(context: Context) {
             )
         )
         val filtered = filter.filter(
-            candidates = response.tracks.map { it.toWaveCandidate() },
+            candidates = serverTracks.map { it.toWaveCandidate() },
             state = state,
             statsByTrackId = statsByTrackId,
             limit = targetCount,
@@ -912,10 +932,10 @@ class WaveRepository(context: Context) {
         updateModeWaveState(key, filtered.nextState)
 
         if (filtered.rejected.isNotEmpty()) {
-            Log.d(TAG, "Mode wave ${mode.waveStateKey()} filtered ${filtered.rejected.size}/${response.tracks.size}")
+            Log.d(TAG, "Mode wave ${mode.waveStateKey()} filtered ${filtered.rejected.size}/${serverTracks.size}")
         }
 
-        val tracksById = response.tracks.associateBy { it.id }
+        val tracksById = serverTracks.associateBy { it.id }
         return filtered.accepted.mapNotNull { candidate ->
             tracksById[candidate.id]?.toTrack()
         }
