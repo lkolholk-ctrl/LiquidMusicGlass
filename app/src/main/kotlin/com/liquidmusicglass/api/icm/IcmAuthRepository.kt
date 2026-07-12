@@ -588,6 +588,37 @@ object IcmAuthRepository {
     }
 
     /**
+     * Регион для поиска/стрима берём из ПОДПИСКИ, а не из зашитого "us".
+     *
+     * Подписка ICM покрывает регионы (us / nz), они приходят в
+     * [IcmSubscriptionResponse.regions]. NZ приоритетнее US: релизы там на ~полсуток
+     * раньше, и NZ оплачивается отдельно (дороже) — если он куплен, юзера НАДО
+     * обслуживать как NZ, иначе ранних релизов он не видит и часть треков отдаёт
+     * region_unavailable / 404. Раньше defaultRegion был константой "us" и не
+     * трогался вообще → NZ-подписчик обслуживался как us.
+     *
+     * Явный выбор региона в Профиле (PUT /me/region) приоритетнее и ставится там же
+     * локально; этот метод задаёт лишь ПОДПИСОЧНЫЙ дефолт на старте/после логина.
+     * Истёкшие региональные покрытия (expires_at в прошлом) не учитываем.
+     */
+    fun syncDefaultRegionFromSubscription() {
+        val sub = _subscription.value ?: return
+        val nowSec = System.currentTimeMillis() / 1000
+        val subRegions = sub.regions
+            .filter { it.expiresAt == null || it.expiresAt > nowSec }
+            .mapNotNull { it.code.trim().lowercase().takeIf { code -> code.isNotBlank() } }
+        val effective = when {
+            subRegions.isEmpty() -> return           // нет региональной подписки — дефолт не трогаем
+            "nz" in subRegions -> "nz"               // премиум: ранние релизы, юзер за это платит
+            else -> subRegions.first()
+        }
+        if (!effective.equals(IcmRepository.region, ignoreCase = true)) {
+            IcmRepository.region = effective
+            android.util.Log.d("IcmAuthRepository", "Default region from subscription -> $effective")
+        }
+    }
+
+    /**
      * Fetch profile, preferences, and subscription after successful auth.
      * Call this after Telegram redirect or email login completes.
      */
@@ -597,6 +628,10 @@ object IcmAuthRepository {
         
         // Fetch subscription in parallel/sequence
         fetchSubscription()
+
+        // Регион поиска/стрима — из подписки (NZ приоритетнее us). Раньше был зашит
+        // "us", и NZ-подписчик не видел ранних релизов + ловил 404/region_unavailable.
+        syncDefaultRegionFromSubscription()
 
         val profile = profileResult.getOrNull()
         val preferences = prefsResult.getOrNull()
