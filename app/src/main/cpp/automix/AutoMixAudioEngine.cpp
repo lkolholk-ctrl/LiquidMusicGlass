@@ -775,6 +775,8 @@ void AutoMixAudioEngine::setCurrentVolume (float v01)            { audioFx.setCu
 void AutoMixAudioEngine::setStereoWidth (float w)               { audioFx.setStereoWidth (w); }
 void AutoMixAudioEngine::setBalance (float p)                   { audioFx.setBalance (p); }
 void AutoMixAudioEngine::setMono (bool on)                      { audioFx.setMono (on); }
+void AutoMixAudioEngine::setParamEqEnabled (bool on)           { audioFx.setParamEqEnabled (on); }
+void AutoMixAudioEngine::setParamBand (int b, float f, float q, float g) { audioFx.setParamBand (b, f, q, g); }
 void AutoMixAudioEngine::setCompressorFx (bool on, float t, float r, float a, float rel)
                                                                  { audioFx.setCompressor (on, t, r, a, rel); }
 void AutoMixAudioEngine::setLimiterFx (bool on, float t, float rel) { audioFx.setLimiter (on, t, rel); }

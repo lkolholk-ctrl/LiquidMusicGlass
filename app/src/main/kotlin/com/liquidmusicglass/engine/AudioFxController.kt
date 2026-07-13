@@ -53,6 +53,23 @@ object AudioFxController {
     )
     const val EQ_PRESET_CUSTOM = -1
 
+    // ── Параметрический EQ (5 полос: freq/Q/gain) ───────────────────────────
+    const val PARAM_BAND_COUNT = 5
+    const val PARAM_FREQ_MIN = 20f
+    const val PARAM_FREQ_MAX = 20000f
+    const val PARAM_Q_MIN = 0.1f
+    const val PARAM_Q_MAX = 10f
+    const val PARAM_GAIN_MIN = -12f
+    const val PARAM_GAIN_MAX = 12f
+    data class ParamBand(val freq: Float, val q: Float, val gain: Float)
+    val PARAM_DEFAULTS: List<ParamBand> = listOf(
+        ParamBand(60f, 1f, 0f),
+        ParamBand(250f, 1f, 0f),
+        ParamBand(1000f, 1f, 0f),
+        ParamBand(4000f, 1f, 0f),
+        ParamBand(12000f, 1f, 0f),
+    )
+
     // ── Compressor пресеты ──────────────────────────────────────────────────
     data class CompPreset(val name: String, val threshDb: Float, val ratio: Float, val attackMs: Float, val releaseMs: Float)
     val COMP_PRESETS: List<CompPreset> = listOf(
@@ -93,6 +110,11 @@ object AudioFxController {
     val eqGains: StateFlow<List<Float>> = _eqGains
     private val _eqPreset = MutableStateFlow(0)
     val eqPreset: StateFlow<Int> = _eqPreset
+
+    private val _paramEqEnabled = MutableStateFlow(false)
+    val paramEqEnabled: StateFlow<Boolean> = _paramEqEnabled
+    private val _paramBands = MutableStateFlow(PARAM_DEFAULTS)
+    val paramBands: StateFlow<List<ParamBand>> = _paramBands
 
     private val _bassEnabled = MutableStateFlow(false)
     val bassEnabled: StateFlow<Boolean> = _bassEnabled
@@ -153,6 +175,8 @@ object AudioFxController {
     private val K_EQ_ON = booleanPreferencesKey("eq_on")
     private val K_EQ_GAINS = stringPreferencesKey("eq_gains")
     private val K_EQ_PRESET = intPreferencesKey("eq_preset")
+    private val K_PARAM_ON = booleanPreferencesKey("param_on")
+    private val K_PARAM_BANDS = stringPreferencesKey("param_bands")
     private val K_BASS_ON = booleanPreferencesKey("bass_on")
     private val K_BASS_FREQ = floatPreferencesKey("bass_freq")
     private val K_BASS_GAIN = floatPreferencesKey("bass_gain")
@@ -205,6 +229,8 @@ object AudioFxController {
         _eqEnabled.value = p[K_EQ_ON] ?: false
         _eqGains.value = parseGains(p[K_EQ_GAINS])
         _eqPreset.value = p[K_EQ_PRESET] ?: 0
+        _paramEqEnabled.value = p[K_PARAM_ON] ?: false
+        _paramBands.value = parseParamBands(p[K_PARAM_BANDS])
         _bassEnabled.value = p[K_BASS_ON] ?: false
         _bassFreq.value = (p[K_BASS_FREQ] ?: 80f).coerceIn(BASS_FREQ_MIN, BASS_FREQ_MAX)
         _bassGain.value = (p[K_BASS_GAIN] ?: 6f).coerceIn(0f, 12f)
@@ -244,6 +270,8 @@ object AudioFxController {
         e.fxSetPreampGainDb(preampDb())
         e.setEqEnabled(_eqEnabled.value)
         e.setEqBands(_eqGains.value.toFloatArray())
+        e.fxSetParamEqEnabled(_paramEqEnabled.value)
+        _paramBands.value.forEachIndexed { i, b -> e.fxSetParamBand(i, b.freq, b.q, b.gain) }
         pushBass()
         pushLoudness()
         pushWidth()
@@ -338,6 +366,46 @@ object AudioFxController {
         _eqPreset.value = index
         AutoMixNativeEngine.setEqBands(preset.gains.copyOf())
         persist { it[K_EQ_GAINS] = list.joinToString(","); it[K_EQ_PRESET] = index }
+    }
+
+    // ── Параметрический EQ ──────────────────────────────────────────────────
+    fun setParamEqEnabled(on: Boolean) {
+        _paramEqEnabled.value = on
+        AutoMixNativeEngine.fxSetParamEqEnabled(on)
+        if (on) _paramBands.value.forEachIndexed { i, b ->
+            AutoMixNativeEngine.fxSetParamBand(i, b.freq, b.q, b.gain)
+        }
+        persist { it[K_PARAM_ON] = on }
+    }
+
+    fun setParamBand(band: Int, freq: Float, q: Float, gain: Float) {
+        if (band !in 0 until PARAM_BAND_COUNT) return
+        val b = ParamBand(
+            freq.coerceIn(PARAM_FREQ_MIN, PARAM_FREQ_MAX),
+            q.coerceIn(PARAM_Q_MIN, PARAM_Q_MAX),
+            gain.coerceIn(PARAM_GAIN_MIN, PARAM_GAIN_MAX),
+        )
+        val updated = _paramBands.value.toMutableList().also { it[band] = b }
+        _paramBands.value = updated
+        AutoMixNativeEngine.fxSetParamBand(band, b.freq, b.q, b.gain)
+        persist { it[K_PARAM_BANDS] = serializeParamBands(updated) }
+    }
+
+    private fun serializeParamBands(bands: List<ParamBand>): String =
+        bands.joinToString(",") { "${it.freq}:${it.q}:${it.gain}" }
+
+    private fun parseParamBands(s: String?): List<ParamBand> {
+        if (s.isNullOrBlank()) return PARAM_DEFAULTS
+        val parts = s.split(',')
+        return List(PARAM_BAND_COUNT) { i ->
+            val def = PARAM_DEFAULTS[i]
+            val f = parts.getOrNull(i)?.split(':')
+            ParamBand(
+                f?.getOrNull(0)?.toFloatOrNull()?.coerceIn(PARAM_FREQ_MIN, PARAM_FREQ_MAX) ?: def.freq,
+                f?.getOrNull(1)?.toFloatOrNull()?.coerceIn(PARAM_Q_MIN, PARAM_Q_MAX) ?: def.q,
+                f?.getOrNull(2)?.toFloatOrNull()?.coerceIn(PARAM_GAIN_MIN, PARAM_GAIN_MAX) ?: def.gain,
+            )
+        }
     }
 
     fun setBassEnabled(on: Boolean) {
@@ -477,6 +545,8 @@ object AudioFxController {
         setPreamp01(1f)
         applyEqPreset(0)
         setEqEnabled(false)
+        setParamEqEnabled(false)
+        PARAM_DEFAULTS.forEachIndexed { i, b -> setParamBand(i, b.freq, b.q, b.gain) }
         setBassEnabled(false); setBassFreq(80f); setBassGain(6f)
         setLoudnessEnabled(false)
         setStereoWidth(1f)

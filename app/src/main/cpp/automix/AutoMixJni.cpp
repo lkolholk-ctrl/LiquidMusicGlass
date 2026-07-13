@@ -278,6 +278,22 @@ Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeFxSetMono(
 }
 
 JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeFxSetParamEqEnabled(
+        JNIEnv* /*env*/, jobject /*thiz*/, jboolean on)
+{
+    withEngineVoid ([&] (AutoMixAudioEngine& engine) { engine.setParamEqEnabled (on == JNI_TRUE); });
+}
+
+JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeFxSetParamBand(
+        JNIEnv* /*env*/, jobject /*thiz*/, jint band, jfloat freqHz, jfloat q, jfloat gainDb)
+{
+    withEngineVoid ([&] (AutoMixAudioEngine& engine) {
+        engine.setParamBand ((int) band, (float) freqHz, (float) q, (float) gainDb);
+    });
+}
+
+JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeFxSetCompressor(
         JNIEnv* /*env*/, jobject /*thiz*/, jboolean on,
         jfloat threshDb, jfloat ratio, jfloat attackMs, jfloat releaseMs)

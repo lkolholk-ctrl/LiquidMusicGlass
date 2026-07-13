@@ -24,8 +24,9 @@
 class AudioFxChain
 {
 public:
-    static constexpr int kEqBands = 10;
-    static constexpr int kMaxCh   = 2;   // обрабатываем стерео (телефон)
+    static constexpr int kEqBands    = 10;
+    static constexpr int kParamBands = 5;    // параметрический EQ (freq/Q/gain на полосу)
+    static constexpr int kMaxCh      = 2;    // обрабатываем стерео (телефон)
 
     AudioFxChain();
 
@@ -42,6 +43,9 @@ public:
     void setEqEnabled     (bool on)       { eqEnabled.store (on); dirty.store (true); }
     void setEqBandGain    (int band, float gainDb);
     void setEqBands       (const float* gainsDb, int count);
+
+    void setParamEqEnabled (bool on)      { paramEqEnabled.store (on); dirty.store (true); }
+    void setParamBand      (int band, float freqHz, float q, float gainDb);
 
     void setBassBoost     (bool on, float freqHz, float gainDb);
 
@@ -95,6 +99,15 @@ private:
     std::array<Biquad, (size_t) kEqBands> eqC {};
     std::array<std::array<BiquadState, (size_t) kEqBands>, (size_t) kMaxCh> eqS {};
     bool eqWas { false };
+
+    // Параметрический EQ (5 полос: freq/Q/gain на каждую)
+    std::atomic<bool> paramEqEnabled { false };
+    std::array<std::atomic<float>, (size_t) kParamBands> paramFreq;
+    std::array<std::atomic<float>, (size_t) kParamBands> paramQ;
+    std::array<std::atomic<float>, (size_t) kParamBands> paramGainDb;
+    std::array<Biquad, (size_t) kParamBands> paramC {};
+    std::array<std::array<BiquadState, (size_t) kParamBands>, (size_t) kMaxCh> paramS {};
+    bool paramWas { false };
 
     // Bass boost (low shelf)
     std::atomic<bool>  bassEnabled { false };

@@ -8,12 +8,20 @@ namespace
     constexpr std::array<double, 10> kEqCenters {
         31.0, 62.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0
     };
+    // Дефолтные центры параметрических полос (те же, что в Kotlin/UI).
+    constexpr std::array<float, 5> kParamDefFreq { 60.0f, 250.0f, 1000.0f, 4000.0f, 12000.0f };
 }
 
 AudioFxChain::AudioFxChain()
 {
     for (auto& g : eqGainsDb)
         g.store (0.0f);
+    for (int b = 0; b < kParamBands; ++b)
+    {
+        paramFreq[(size_t) b].store   (kParamDefFreq[(size_t) b]);
+        paramQ[(size_t) b].store      (1.0f);
+        paramGainDb[(size_t) b].store (0.0f);
+    }
 }
 
 void AudioFxChain::prepare (double sampleRate, int maxBlockSize, int numChannels)
@@ -40,6 +48,7 @@ void AudioFxChain::prepare (double sampleRate, int maxBlockSize, int numChannels
 void AudioFxChain::reset()
 {
     for (auto& cs : eqS) for (auto& s : cs) s = {};
+    for (auto& cs : paramS) for (auto& s : cs) s = {};
     for (auto& s : bassS)      s = {};
     for (auto& s : loudLowS)   s = {};
     for (auto& s : loudHighS)  s = {};
@@ -61,6 +70,15 @@ void AudioFxChain::setEqBands (const float* gainsDb, int count)
     const int n = juce::jmin (count, (int) kEqBands);
     for (int i = 0; i < n; ++i)
         eqGainsDb[(size_t) i].store (juce::jlimit (-12.0f, 12.0f, gainsDb[i]));
+    dirty.store (true);
+}
+
+void AudioFxChain::setParamBand (int band, float freqHz, float q, float gainDb)
+{
+    if (band < 0 || band >= kParamBands) return;
+    paramFreq[(size_t) band].store   (juce::jlimit (20.0f, 20000.0f, freqHz));
+    paramQ[(size_t) band].store      (juce::jlimit (0.1f, 10.0f, q));
+    paramGainDb[(size_t) band].store (juce::jlimit (-12.0f, 12.0f, gainDb));
     dirty.store (true);
 }
 
@@ -152,6 +170,11 @@ void AudioFxChain::recompute()
         for (int b = 0; b < kEqBands; ++b)
             eqC[(size_t) b] = makePeak (sr, kEqCenters[(size_t) b], 1.0, eqGainsDb[(size_t) b].load());
 
+    if (paramEqEnabled.load())
+        for (int b = 0; b < kParamBands; ++b)
+            paramC[(size_t) b] = makePeak (sr, paramFreq[(size_t) b].load(),
+                                           paramQ[(size_t) b].load(), paramGainDb[(size_t) b].load());
+
     if (bassEnabled.load())
         bassC = makeLowShelf (sr, bassFreq.load(), bassGainDb.load());
 
@@ -179,6 +202,7 @@ void AudioFxChain::process (float* const* channels, int numChannels, int numSamp
         recompute();
 
     const bool  eqOn    = eqEnabled.load();
+    const bool  paramOn = paramEqEnabled.load();
     const bool  bassOn  = bassEnabled.load();
     const bool  loudOn  = loudnessEnabled.load();
     const float width   = stereoWidth.load();
@@ -189,12 +213,14 @@ void AudioFxChain::process (float* const* channels, int numChannels, int numSamp
     // Сброс состояния фильтров на фронте включения (без щелчка).
     if (eqOn && ! eqWas) for (auto& cs : eqS) for (auto& s : cs) s = {};
     eqWas = eqOn;
+    if (paramOn && ! paramWas) for (auto& cs : paramS) for (auto& s : cs) s = {};
+    paramWas = paramOn;
     if (loudOn && ! loudWas) { for (auto& s : loudLowS) s = {}; for (auto& s : loudHighS) s = {}; }
     loudWas = loudOn;
 
     preampGain.setTargetValue (juce::Decibels::decibelsToGain (preDb));
 
-    const bool tonal = eqOn || bassOn || loudOn || (n > 1 && width != 1.0f) || preDb != 0.0f
+    const bool tonal = eqOn || paramOn || bassOn || loudOn || (n > 1 && width != 1.0f) || preDb != 0.0f
                        || (n > 1 && (monoOn || bal != 0.0f));
 
     // Лёгкий быстрый путь: тональных стадий нет → per-sample цикл пропускаем.
@@ -211,6 +237,13 @@ void AudioFxChain::process (float* const* channels, int numChannels, int numSamp
                 {
                     l = processBiquad (eqC[(size_t) b], eqS[0][(size_t) b], l);
                     if (n > 1) r = processBiquad (eqC[(size_t) b], eqS[1][(size_t) b], r);
+                }
+
+            if (paramOn)
+                for (int b = 0; b < kParamBands; ++b)
+                {
+                    l = processBiquad (paramC[(size_t) b], paramS[0][(size_t) b], l);
+                    if (n > 1) r = processBiquad (paramC[(size_t) b], paramS[1][(size_t) b], r);
                 }
 
             if (bassOn)

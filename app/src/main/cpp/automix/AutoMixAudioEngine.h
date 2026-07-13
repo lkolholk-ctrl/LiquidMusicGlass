@@ -164,6 +164,8 @@ public:
     void setStereoWidth     (float width);
     void setBalance         (float pan);
     void setMono            (bool on);
+    void setParamEqEnabled  (bool on);
+    void setParamBand       (int band, float freqHz, float q, float gainDb);
     void setCompressorFx    (bool on, float threshDb, float ratio, float attackMs, float releaseMs);
     void setLimiterFx       (bool on, float threshDb, float releaseMs);
 

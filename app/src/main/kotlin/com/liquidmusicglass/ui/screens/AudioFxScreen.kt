@@ -94,6 +94,8 @@ fun AudioFxScreen(onBack: () -> Unit) {
                     Spacer(Modifier.height(14.dp))
                     EqSection(lc, master)
                     Spacer(Modifier.height(14.dp))
+                    ParametricEqSection(lc, master)
+                    Spacer(Modifier.height(14.dp))
                     BassSection(lc, master)
                     Spacer(Modifier.height(14.dp))
                     LoudnessSection(lc, master)
@@ -185,6 +187,43 @@ private fun EqBandRow(band: Int, gain: Float, label: String, active: Boolean, lc
             fontSize = 12.sp, fontWeight = FontWeight.SemiBold
         )
     }
+}
+
+@Composable
+private fun ParametricEqSection(lc: LiquidColors, master: Boolean) {
+    val on by AudioFxController.paramEqEnabled.collectAsState()
+    val bands by AudioFxController.paramBands.collectAsState()
+    val active = master && on
+    SectionWithToggle("Parametric EQ", lc, on, { AudioFxController.setParamEqEnabled(it) }, master) {
+        Box(Modifier.alpha(if (active) 1f else 0.4f)) {
+            Column {
+                bands.forEachIndexed { i, b ->
+                    if (i > 0) Spacer(Modifier.height(12.dp))
+                    ParamBandControls(i, b, active, lc)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ParamBandControls(index: Int, band: AudioFxController.ParamBand, active: Boolean, lc: LiquidColors) {
+    val fMin = AudioFxController.PARAM_FREQ_MIN
+    val fMax = AudioFxController.PARAM_FREQ_MAX
+    // Частоту крутим по логарифму (слайдер 0..1) — иначе низы «съедаются».
+    val fNorm = (Math.log((band.freq / fMin).toDouble()) / Math.log((fMax / fMin).toDouble())).toFloat()
+    Text("Band ${index + 1}", color = lc.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+    LabelValue("Frequency", "${band.freq.roundToInt()} Hz", lc)
+    FxSlider(fNorm, 0f..1f, active, { n ->
+        val f = (fMin * Math.pow((fMax / fMin).toDouble(), n.toDouble())).toFloat()
+        AudioFxController.setParamBand(index, f, band.q, band.gain)
+    }, lc)
+    LabelValue("Gain", "${if (band.gain > 0) "+" else ""}${band.gain.roundToInt()} dB", lc)
+    FxSlider(band.gain, AudioFxController.PARAM_GAIN_MIN..AudioFxController.PARAM_GAIN_MAX, active,
+        { AudioFxController.setParamBand(index, band.freq, band.q, it) }, lc)
+    LabelValue("Q", String.format("%.2f", band.q), lc)
+    FxSlider(band.q, AudioFxController.PARAM_Q_MIN..AudioFxController.PARAM_Q_MAX, active,
+        { AudioFxController.setParamBand(index, band.freq, it, band.gain) }, lc)
 }
 
 @Composable
