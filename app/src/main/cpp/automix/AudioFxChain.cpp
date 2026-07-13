@@ -35,6 +35,7 @@ void AudioFxChain::prepare (double sampleRate, int maxBlockSize, int numChannels
 
     compressor.prepare (spec);
     limiter.prepare (spec);
+    reverb.prepare (spec);
 
     preampGain.reset (sr, 0.02);   // 20 мс рамп — без зиппера
     preampGain.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (preampGainDb.load()));
@@ -54,6 +55,7 @@ void AudioFxChain::reset()
     for (auto& s : loudHighS)  s = {};
     compressor.reset();
     limiter.reset();
+    reverb.reset();
 }
 
 // ── Сеттеры IIR-стадий ───────────────────────────────────────────────────────
@@ -106,6 +108,15 @@ void AudioFxChain::setLimiter (bool on, float threshDb, float releaseMs)
     limThresh.store  (juce::jlimit (-12.0f, 0.0f, threshDb));
     limRelease.store (juce::jlimit (1.0f, 1000.0f, releaseMs));
     limDirty.store (true);
+}
+
+void AudioFxChain::setReverb (bool on, float roomSize, float damping, float wet)
+{
+    reverbEnabled.store (on);
+    revRoom.store (juce::jlimit (0.0f, 1.0f, roomSize));
+    revDamp.store (juce::jlimit (0.0f, 1.0f, damping));
+    revWet.store  (juce::jlimit (0.0f, 1.0f, wet));
+    revDirty.store (true);
 }
 
 // ── RBJ cookbook (1:1 с juce::dsp::IIR::Coefficients::make*) ──────────────────
@@ -306,13 +317,32 @@ void AudioFxChain::process (float* const* channels, int numChannels, int numSamp
         }
     }
 
-    // Динамика — штатные juce::dsp на блоке.
+    // Reverb + динамика — штатные juce::dsp на блоке.
+    const bool revOn  = reverbEnabled.load();
     const bool compOn = compEnabled.load();
     const bool limOn  = limEnabled.load();
-    if (compOn || limOn)
+    if (revOn && ! revWas) reverb.reset();   // фронт включения — без старого хвоста
+    revWas = revOn;
+    if (revOn || compOn || limOn)
     {
         juce::dsp::AudioBlock<float> block (channels, (size_t) n, (size_t) numSamples);
         juce::dsp::ProcessContextReplacing<float> ctx (block);
+
+        if (revOn)                            // reverb ДО динамики (хвост потом лимитируется)
+        {
+            if (revDirty.exchange (false))
+            {
+                juce::Reverb::Parameters p;
+                p.roomSize   = revRoom.load();
+                p.damping    = revDamp.load();
+                p.wetLevel   = revWet.load();
+                p.dryLevel   = 1.0f - revWet.load();
+                p.width      = 1.0f;
+                p.freezeMode = 0.0f;
+                reverb.setParameters (p);
+            }
+            reverb.process (ctx);
+        }
 
         if (compOn)
         {

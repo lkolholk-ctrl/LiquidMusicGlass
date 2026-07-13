@@ -65,6 +65,7 @@ public:
 
     void setCompressor (bool on, float threshDb, float ratio, float attackMs, float releaseMs);
     void setLimiter    (bool on, float threshDb, float releaseMs);
+    void setReverb     (bool on, float roomSize, float damping, float wet);
 
 private:
     struct Biquad      { float b0 { 1.0f }, b1 { 0.0f }, b2 { 0.0f }, a1 { 0.0f }, a2 { 0.0f }; };
@@ -143,6 +144,14 @@ private:
     std::atomic<bool>  compDirty { true }, limDirty { true };
     std::atomic<float> compThresh { -18.0f }, compRatio { 3.0f }, compAttack { 20.0f }, compRelease { 150.0f };
     std::atomic<float> limThresh { -1.0f }, limRelease { 50.0f };
+
+    // Reverb (juce::dsp::Reverb — алгоритмический, не свёртка). Выключен = не
+    // вызывается вообще. reset() на фронте включения — без старого хвоста.
+    juce::dsp::Reverb  reverb;
+    std::atomic<bool>  reverbEnabled { false };
+    std::atomic<float> revRoom { 0.5f }, revDamp { 0.5f }, revWet { 0.3f };
+    std::atomic<bool>  revDirty { true };
+    bool revWas { false };
 
     JUCE_DECLARE_NON_COPYABLE (AudioFxChain)
 };

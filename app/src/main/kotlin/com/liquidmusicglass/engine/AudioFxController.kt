@@ -169,6 +169,16 @@ object AudioFxController {
     private val _limRelease = MutableStateFlow(50f)
     val limRelease: StateFlow<Float> = _limRelease
 
+    // ── Reverb (все параметры 0..1) ─────────────────────────────────────────
+    private val _reverbEnabled = MutableStateFlow(false)
+    val reverbEnabled: StateFlow<Boolean> = _reverbEnabled
+    private val _revRoom = MutableStateFlow(0.5f)        // размер «зала»
+    val revRoom: StateFlow<Float> = _revRoom
+    private val _revDamp = MutableStateFlow(0.5f)        // затухание верхов
+    val revDamp: StateFlow<Float> = _revDamp
+    private val _revWet = MutableStateFlow(0.3f)         // доля эффекта (mix)
+    val revWet: StateFlow<Float> = _revWet
+
     // ── DataStore ───────────────────────────────────────────────────────────
     private val K_MASTER = booleanPreferencesKey("master")
     private val K_PREAMP = floatPreferencesKey("preamp01")
@@ -193,6 +203,10 @@ object AudioFxController {
     private val K_LIM_ON = booleanPreferencesKey("lim_on")
     private val K_LIM_THRESH = floatPreferencesKey("lim_thresh")
     private val K_LIM_RELEASE = floatPreferencesKey("lim_release")
+    private val K_REV_ON = booleanPreferencesKey("rev_on")
+    private val K_REV_ROOM = floatPreferencesKey("rev_room")
+    private val K_REV_DAMP = floatPreferencesKey("rev_damp")
+    private val K_REV_WET = floatPreferencesKey("rev_wet")
     private val K_WARM = booleanPreferencesKey("warm_on")
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -249,6 +263,10 @@ object AudioFxController {
         _limEnabled.value = p[K_LIM_ON] ?: true
         _limThreshold.value = (p[K_LIM_THRESH] ?: -1f).coerceIn(LIM_THRESH_MIN_DB, LIM_THRESH_MAX_DB)
         _limRelease.value = (p[K_LIM_RELEASE] ?: 50f).coerceIn(LIM_RELEASE_MIN_MS, LIM_RELEASE_MAX_MS)
+        _reverbEnabled.value = p[K_REV_ON] ?: false
+        _revRoom.value = (p[K_REV_ROOM] ?: 0.5f).coerceIn(0f, 1f)
+        _revDamp.value = (p[K_REV_DAMP] ?: 0.5f).coerceIn(0f, 1f)
+        _revWet.value = (p[K_REV_WET] ?: 0.3f).coerceIn(0f, 1f)
         _warmEnabled.value = p[K_WARM] ?: false
     }
 
@@ -279,6 +297,7 @@ object AudioFxController {
         e.fxSetMono(_monoEnabled.value)
         e.fxSetCompressor(_compEnabled.value, _compThreshold.value, _compRatio.value, _compAttack.value, _compRelease.value)
         e.fxSetLimiter(_limEnabled.value, _limThreshold.value, _limRelease.value)
+        applyReverb()
     }
 
     // ── Warm-оверлей: эффективные бас/ширина = пользовательские + Warm ──────
@@ -540,6 +559,29 @@ object AudioFxController {
         persist { it[K_LIM_RELEASE] = v }
     }
 
+    // ── Reverb ──────────────────────────────────────────────────────────────
+    private fun applyReverb() {
+        AutoMixNativeEngine.fxSetReverb(_reverbEnabled.value, _revRoom.value, _revDamp.value, _revWet.value)
+    }
+
+    fun setReverbEnabled(on: Boolean) {
+        _reverbEnabled.value = on
+        applyReverb()
+        persist { it[K_REV_ON] = on }
+    }
+
+    fun setReverbRoom(v: Float) {
+        val x = v.coerceIn(0f, 1f); _revRoom.value = x; applyReverb(); persist { it[K_REV_ROOM] = x }
+    }
+
+    fun setReverbDamping(v: Float) {
+        val x = v.coerceIn(0f, 1f); _revDamp.value = x; applyReverb(); persist { it[K_REV_DAMP] = x }
+    }
+
+    fun setReverbWet(v: Float) {
+        val x = v.coerceIn(0f, 1f); _revWet.value = x; applyReverb(); persist { it[K_REV_WET] = x }
+    }
+
     /** Полный сброс к дефолтам (Flat EQ + выкл эффекты, лимитер вкл). */
     fun resetAll() {
         setPreamp01(1f)
@@ -553,6 +595,7 @@ object AudioFxController {
         setBalance(0f); setMonoEnabled(false)
         setCompEnabled(false); setCompPreset(1)
         setLimEnabled(true); setLimThreshold(-1f); setLimRelease(50f)
+        setReverbEnabled(false); setReverbRoom(0.5f); setReverbDamping(0.5f); setReverbWet(0.3f)
     }
 
     private fun matchEqPreset(gains: List<Float>): Int {

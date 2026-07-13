@@ -168,6 +168,7 @@ public:
     void setParamBand       (int band, float freqHz, float q, float gainDb);
     void setCompressorFx    (bool on, float threshDb, float ratio, float attackMs, float releaseMs);
     void setLimiterFx       (bool on, float threshDb, float releaseMs);
+    void setReverbFx        (bool on, float roomSize, float damping, float wet);
 
     // juce::AudioIODeviceCallback
     void audioDeviceAboutToStart (juce::AudioIODevice* device) override;

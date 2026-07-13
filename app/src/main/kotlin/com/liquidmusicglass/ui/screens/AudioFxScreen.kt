@@ -109,6 +109,8 @@ fun AudioFxScreen(onBack: () -> Unit) {
                     CompressorSection(lc, master)
                     Spacer(Modifier.height(14.dp))
                     LimiterSection(lc, master)
+                    Spacer(Modifier.height(14.dp))
+                    ReverbSection(lc, master)
                     Spacer(Modifier.height(20.dp))
                     ResetButton(lc, master)
                 }
@@ -392,6 +394,32 @@ private fun LimiterSection(lc: LiquidColors, master: Boolean) {
                 )
                 Text("Protects against clipping on loud audio. Recommended: ON.",
                     color = lc.textSecondary, fontSize = 12.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReverbSection(lc: LiquidColors, master: Boolean) {
+    val on by AudioFxController.reverbEnabled.collectAsState()
+    val room by AudioFxController.revRoom.collectAsState()
+    val damp by AudioFxController.revDamp.collectAsState()
+    val wet by AudioFxController.revWet.collectAsState()
+    val active = master && on
+    SectionWithToggle("Reverb", lc, on, { AudioFxController.setReverbEnabled(it) }, master) {
+        Box(Modifier.alpha(if (active) 1f else 0.4f)) {
+            Column {
+                Text("Adds space — from a small room to a concert hall.",
+                    color = lc.textSecondary, fontSize = 12.sp)
+                Spacer(Modifier.height(8.dp))
+                LabelValue("Room size (space)", "${(room * 100).roundToInt()}%", lc)
+                FxSlider(room, 0f..1f, active, { AudioFxController.setReverbRoom(it) }, lc)
+                Spacer(Modifier.height(8.dp))
+                LabelValue("Damping (high-cut)", "${(damp * 100).roundToInt()}%", lc)
+                FxSlider(damp, 0f..1f, active, { AudioFxController.setReverbDamping(it) }, lc)
+                Spacer(Modifier.height(8.dp))
+                LabelValue("Mix (dry / wet)", "${(wet * 100).roundToInt()}%", lc)
+                FxSlider(wet, 0f..1f, active, { AudioFxController.setReverbWet(it) }, lc)
             }
         }
     }

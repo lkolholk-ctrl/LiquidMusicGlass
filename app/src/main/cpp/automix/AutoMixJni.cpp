@@ -294,6 +294,15 @@ Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeFxSetParamBan
 }
 
 JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeFxSetReverb(
+        JNIEnv* /*env*/, jobject /*thiz*/, jboolean on, jfloat roomSize, jfloat damping, jfloat wet)
+{
+    withEngineVoid ([&] (AutoMixAudioEngine& engine) {
+        engine.setReverbFx (on == JNI_TRUE, (float) roomSize, (float) damping, (float) wet);
+    });
+}
+
+JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeFxSetCompressor(
         JNIEnv* /*env*/, jobject /*thiz*/, jboolean on,
         jfloat threshDb, jfloat ratio, jfloat attackMs, jfloat releaseMs)
