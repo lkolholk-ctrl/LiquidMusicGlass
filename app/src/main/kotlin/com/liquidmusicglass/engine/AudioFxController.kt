@@ -107,6 +107,11 @@ object AudioFxController {
     private val _stereoWidth = MutableStateFlow(1f)         // 0..2 (1 = норма)
     val stereoWidth: StateFlow<Float> = _stereoWidth
 
+    private val _balance = MutableStateFlow(0f)             // -1..+1 (0 = центр)
+    val balance: StateFlow<Float> = _balance
+    private val _monoEnabled = MutableStateFlow(false)
+    val monoEnabled: StateFlow<Boolean> = _monoEnabled
+
     // ── Warm Sound: «звук как на Track» для быстрых выходов ────────────────
     // Полевое наблюдение: на Track (системный AudioTrack) звук «басистее и
     // объёмнее» — это вендорская DSP (Honor Sound / тюнинг динамиков), которая
@@ -153,6 +158,8 @@ object AudioFxController {
     private val K_BASS_GAIN = floatPreferencesKey("bass_gain")
     private val K_LOUD_ON = booleanPreferencesKey("loud_on")
     private val K_WIDTH = floatPreferencesKey("width")
+    private val K_BALANCE = floatPreferencesKey("balance")
+    private val K_MONO = booleanPreferencesKey("mono")
     private val K_COMP_ON = booleanPreferencesKey("comp_on")
     private val K_COMP_PRESET = intPreferencesKey("comp_preset")
     private val K_COMP_THRESH = floatPreferencesKey("comp_thresh")
@@ -203,6 +210,8 @@ object AudioFxController {
         _bassGain.value = (p[K_BASS_GAIN] ?: 6f).coerceIn(0f, 12f)
         _loudnessEnabled.value = p[K_LOUD_ON] ?: false
         _stereoWidth.value = (p[K_WIDTH] ?: 1f).coerceIn(0f, 2f)
+        _balance.value = (p[K_BALANCE] ?: 0f).coerceIn(-1f, 1f)
+        _monoEnabled.value = p[K_MONO] ?: false
         _compEnabled.value = p[K_COMP_ON] ?: false
         val presetIndex = (p[K_COMP_PRESET] ?: 1).let { if (it == COMP_PRESET_CUSTOM) it else it.coerceIn(0, COMP_PRESETS.lastIndex) }
         val preset = COMP_PRESETS.getOrNull(presetIndex) ?: COMP_PRESETS[1]
@@ -238,6 +247,8 @@ object AudioFxController {
         pushBass()
         pushLoudness()
         pushWidth()
+        e.fxSetBalance(_balance.value)
+        e.fxSetMono(_monoEnabled.value)
         e.fxSetCompressor(_compEnabled.value, _compThreshold.value, _compRatio.value, _compAttack.value, _compRelease.value)
         e.fxSetLimiter(_limEnabled.value, _limThreshold.value, _limRelease.value)
     }
@@ -362,6 +373,19 @@ object AudioFxController {
         persist { it[K_WIDTH] = v }
     }
 
+    fun setBalance(pan: Float) {
+        val v = pan.coerceIn(-1f, 1f)
+        _balance.value = v
+        AutoMixNativeEngine.fxSetBalance(v)
+        persist { it[K_BALANCE] = v }
+    }
+
+    fun setMonoEnabled(on: Boolean) {
+        _monoEnabled.value = on
+        AutoMixNativeEngine.fxSetMono(on)
+        persist { it[K_MONO] = on }
+    }
+
     fun setCompEnabled(on: Boolean) {
         _compEnabled.value = on
         applyCompressor()
@@ -456,6 +480,7 @@ object AudioFxController {
         setBassEnabled(false); setBassFreq(80f); setBassGain(6f)
         setLoudnessEnabled(false)
         setStereoWidth(1f)
+        setBalance(0f); setMonoEnabled(false)
         setCompEnabled(false); setCompPreset(1)
         setLimEnabled(true); setLimThreshold(-1f); setLimRelease(50f)
     }

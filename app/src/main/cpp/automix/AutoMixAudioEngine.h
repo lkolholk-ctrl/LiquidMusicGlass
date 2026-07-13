@@ -162,6 +162,8 @@ public:
     void setLoudnessEnabled (bool on);
     void setCurrentVolume   (float v01);
     void setStereoWidth     (float width);
+    void setBalance         (float pan);
+    void setMono            (bool on);
     void setCompressorFx    (bool on, float threshDb, float ratio, float attackMs, float releaseMs);
     void setLimiterFx       (bool on, float threshDb, float releaseMs);
 

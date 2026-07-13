@@ -100,6 +100,10 @@ fun AudioFxScreen(onBack: () -> Unit) {
                     Spacer(Modifier.height(14.dp))
                     StereoSection(lc, master)
                     Spacer(Modifier.height(14.dp))
+                    BalanceSection(lc, master)
+                    Spacer(Modifier.height(14.dp))
+                    MonoSection(lc, master)
+                    Spacer(Modifier.height(14.dp))
                     CompressorSection(lc, master)
                     Spacer(Modifier.height(14.dp))
                     LimiterSection(lc, master)
@@ -218,6 +222,30 @@ private fun StereoSection(lc: LiquidColors, master: Boolean) {
     Section("Stereo Width", lc, valueText = "${(w * 100).roundToInt()}%") {
         FxSlider(w, 0f..2f, master, { AudioFxController.setStereoWidth(it) }, lc)
         Text("0% — mono, 100% — normal, 200% — wide.", color = lc.textSecondary, fontSize = 12.sp)
+    }
+}
+
+@Composable
+private fun BalanceSection(lc: LiquidColors, master: Boolean) {
+    val bal by AudioFxController.balance.collectAsState()
+    val pct = (kotlin.math.abs(bal) * 100).roundToInt()
+    val label = when {
+        bal < -0.005f -> "L $pct%"
+        bal > 0.005f -> "R $pct%"
+        else -> "Center"
+    }
+    Section("Balance", lc, valueText = label) {
+        FxSlider(bal, -1f..1f, master, { AudioFxController.setBalance(it) }, lc)
+        Text("Shifts sound between the left and right ear.", color = lc.textSecondary, fontSize = 12.sp)
+    }
+}
+
+@Composable
+private fun MonoSection(lc: LiquidColors, master: Boolean) {
+    val on by AudioFxController.monoEnabled.collectAsState()
+    SectionWithToggle("Mono", lc, on, { AudioFxController.setMonoEnabled(it) }, master) {
+        Text("Merges left and right into one channel — for mono speakers or one-ear listening.",
+            color = lc.textSecondary, fontSize = 12.sp)
     }
 }
 

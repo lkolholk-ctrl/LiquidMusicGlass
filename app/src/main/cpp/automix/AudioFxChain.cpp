@@ -183,6 +183,8 @@ void AudioFxChain::process (float* const* channels, int numChannels, int numSamp
     const bool  loudOn  = loudnessEnabled.load();
     const float width   = stereoWidth.load();
     const float preDb   = preampGainDb.load();
+    const float bal     = balance.load();
+    const bool  monoOn  = monoEnabled.load();
 
     // Сброс состояния фильтров на фронте включения (без щелчка).
     if (eqOn && ! eqWas) for (auto& cs : eqS) for (auto& s : cs) s = {};
@@ -192,7 +194,8 @@ void AudioFxChain::process (float* const* channels, int numChannels, int numSamp
 
     preampGain.setTargetValue (juce::Decibels::decibelsToGain (preDb));
 
-    const bool tonal = eqOn || bassOn || loudOn || (n > 1 && width != 1.0f) || preDb != 0.0f;
+    const bool tonal = eqOn || bassOn || loudOn || (n > 1 && width != 1.0f) || preDb != 0.0f
+                       || (n > 1 && (monoOn || bal != 0.0f));
 
     // Лёгкий быстрый путь: тональных стадий нет → per-sample цикл пропускаем.
     if (tonal)
@@ -233,6 +236,18 @@ void AudioFxChain::process (float* const* channels, int numChannels, int numSamp
                 const float side = 0.5f * (l - r) * width;
                 l = mid + side;
                 r = mid - side;
+            }
+
+            if (n > 1 && monoOn)                             // моно-даунмикс
+            {
+                const float m = 0.5f * (l + r);
+                l = m; r = m;
+            }
+
+            if (n > 1 && bal != 0.0f)                        // баланс L/R (-1..+1)
+            {
+                l *= (bal > 0.0f) ? (1.0f - bal) : 1.0f;     // правее → тише левый
+                r *= (bal < 0.0f) ? (1.0f + bal) : 1.0f;     // левее  → тише правый
             }
 
             channels[0][i] = l;

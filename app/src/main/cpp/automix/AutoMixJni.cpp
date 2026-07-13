@@ -264,6 +264,20 @@ Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeFxSetStereoWi
 }
 
 JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeFxSetBalance(
+        JNIEnv* /*env*/, jobject /*thiz*/, jfloat pan)
+{
+    withEngineVoid ([&] (AutoMixAudioEngine& engine) { engine.setBalance ((float) pan); });
+}
+
+JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeFxSetMono(
+        JNIEnv* /*env*/, jobject /*thiz*/, jboolean on)
+{
+    withEngineVoid ([&] (AutoMixAudioEngine& engine) { engine.setMono (on == JNI_TRUE); });
+}
+
+JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeFxSetCompressor(
         JNIEnv* /*env*/, jobject /*thiz*/, jboolean on,
         jfloat threshDb, jfloat ratio, jfloat attackMs, jfloat releaseMs)

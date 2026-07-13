@@ -56,6 +56,9 @@ public:
 
     void setStereoWidth   (float width)   { stereoWidth.store (juce::jlimit (0.0f, 2.0f, width)); }
 
+    void setBalance       (float pan)     { balance.store (juce::jlimit (-1.0f, 1.0f, pan)); }
+    void setMono          (bool on)       { monoEnabled.store (on); }
+
     void setCompressor (bool on, float threshDb, float ratio, float attackMs, float releaseMs);
     void setLimiter    (bool on, float threshDb, float releaseMs);
 
@@ -109,6 +112,10 @@ private:
 
     // Stereo width (mid-side)
     std::atomic<float> stereoWidth { 1.0f };
+
+    // Balance (L/R) и Mono-даунмикс
+    std::atomic<float> balance { 0.0f };       // -1..+1 (0 = центр)
+    std::atomic<bool>  monoEnabled { false };
 
     // Динамика (штатные juce::dsp)
     std::atomic<bool>  compEnabled { false };

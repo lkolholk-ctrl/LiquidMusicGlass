@@ -773,6 +773,8 @@ void AutoMixAudioEngine::setBassBoost (bool on, float f, float g) { audioFx.setB
 void AutoMixAudioEngine::setLoudnessEnabled (bool on)            { audioFx.setLoudnessEnabled (on); }
 void AutoMixAudioEngine::setCurrentVolume (float v01)            { audioFx.setCurrentVolume (v01); }
 void AutoMixAudioEngine::setStereoWidth (float w)               { audioFx.setStereoWidth (w); }
+void AutoMixAudioEngine::setBalance (float p)                   { audioFx.setBalance (p); }
+void AutoMixAudioEngine::setMono (bool on)                      { audioFx.setMono (on); }
 void AutoMixAudioEngine::setCompressorFx (bool on, float t, float r, float a, float rel)
                                                                  { audioFx.setCompressor (on, t, r, a, rel); }
 void AutoMixAudioEngine::setLimiterFx (bool on, float t, float rel) { audioFx.setLimiter (on, t, rel); }

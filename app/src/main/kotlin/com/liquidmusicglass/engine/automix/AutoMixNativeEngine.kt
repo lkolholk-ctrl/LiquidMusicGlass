@@ -373,6 +373,16 @@ object AutoMixNativeEngine {
         runCatching { nativeFxSetStereoWidth(width) }.onFailure { Log.w(TAG, "fxWidth failed", it) }
     }
 
+    @Synchronized fun fxSetBalance(pan: Float) {
+        if (!isLoaded || !initialised) return
+        runCatching { nativeFxSetBalance(pan) }.onFailure { Log.w(TAG, "fxBalance failed", it) }
+    }
+
+    @Synchronized fun fxSetMono(on: Boolean) {
+        if (!isLoaded || !initialised) return
+        runCatching { nativeFxSetMono(on) }.onFailure { Log.w(TAG, "fxMono failed", it) }
+    }
+
     @Synchronized fun fxSetCompressor(on: Boolean, threshDb: Float, ratio: Float, attackMs: Float, releaseMs: Float) {
         if (!isLoaded || !initialised) return
         runCatching { nativeFxSetCompressor(on, threshDb, ratio, attackMs, releaseMs) }
@@ -617,6 +627,8 @@ object AutoMixNativeEngine {
     private external fun nativeFxSetLoudnessEnabled(on: Boolean)
     private external fun nativeFxSetCurrentVolume(v01: Float)
     private external fun nativeFxSetStereoWidth(width: Float)
+    private external fun nativeFxSetBalance(pan: Float)
+    private external fun nativeFxSetMono(on: Boolean)
     private external fun nativeFxSetCompressor(on: Boolean, threshDb: Float, ratio: Float, attackMs: Float, releaseMs: Float)
     private external fun nativeFxSetLimiter(on: Boolean, threshDb: Float, releaseMs: Float)
     private external fun nativeSetOutputRouteBluetooth(isBluetooth: Boolean)
