@@ -108,6 +108,11 @@ private:
     std::array<Biquad, (size_t) kParamBands> paramC {};
     std::array<std::array<BiquadState, (size_t) kParamBands>, (size_t) kMaxCh> paramS {};
     bool paramWas { false };
+    // Обрабатываем ТОЛЬКО задействованные полосы (gain != 0) — плоские не стоят
+    // ничего (иначе 5 биквадов×2 канала на сэмпл даже вхолостую → микро-дропауты
+    // на зажатом фоне). Флаги пишутся в recompute (аудио-поток), там же и читаются.
+    std::array<bool, (size_t) kParamBands> paramBandActive {};
+    bool paramAnyActive { false };
 
     // Bass boost (low shelf)
     std::atomic<bool>  bassEnabled { false };

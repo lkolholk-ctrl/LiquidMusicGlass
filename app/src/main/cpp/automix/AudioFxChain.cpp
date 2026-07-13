@@ -170,10 +170,27 @@ void AudioFxChain::recompute()
         for (int b = 0; b < kEqBands; ++b)
             eqC[(size_t) b] = makePeak (sr, kEqCenters[(size_t) b], 1.0, eqGainsDb[(size_t) b].load());
 
+    paramAnyActive = false;
     if (paramEqEnabled.load())
+    {
         for (int b = 0; b < kParamBands; ++b)
-            paramC[(size_t) b] = makePeak (sr, paramFreq[(size_t) b].load(),
-                                           paramQ[(size_t) b].load(), paramGainDb[(size_t) b].load());
+        {
+            const float g   = paramGainDb[(size_t) b].load();
+            const bool  act = (g != 0.0f);              // плоская полоса (0 дБ) = проход → не считаем
+            if (act && ! paramBandActive[(size_t) b])   // полоса ожила → чистим состояние (без щелчка)
+                for (auto& ch : paramS) ch[(size_t) b] = {};
+            paramBandActive[(size_t) b] = act;
+            if (act)
+            {
+                paramC[(size_t) b] = makePeak (sr, paramFreq[(size_t) b].load(), paramQ[(size_t) b].load(), g);
+                paramAnyActive = true;
+            }
+        }
+    }
+    else
+    {
+        for (auto& a : paramBandActive) a = false;
+    }
 
     if (bassEnabled.load())
         bassC = makeLowShelf (sr, bassFreq.load(), bassGainDb.load());
@@ -202,7 +219,7 @@ void AudioFxChain::process (float* const* channels, int numChannels, int numSamp
         recompute();
 
     const bool  eqOn    = eqEnabled.load();
-    const bool  paramOn = paramEqEnabled.load();
+    const bool  paramOn = paramEqEnabled.load() && paramAnyActive;   // только если есть активные полосы
     const bool  bassOn  = bassEnabled.load();
     const bool  loudOn  = loudnessEnabled.load();
     const float width   = stereoWidth.load();
@@ -241,10 +258,11 @@ void AudioFxChain::process (float* const* channels, int numChannels, int numSamp
 
             if (paramOn)
                 for (int b = 0; b < kParamBands; ++b)
-                {
-                    l = processBiquad (paramC[(size_t) b], paramS[0][(size_t) b], l);
-                    if (n > 1) r = processBiquad (paramC[(size_t) b], paramS[1][(size_t) b], r);
-                }
+                    if (paramBandActive[(size_t) b])         // плоские полосы пропускаем
+                    {
+                        l = processBiquad (paramC[(size_t) b], paramS[0][(size_t) b], l);
+                        if (n > 1) r = processBiquad (paramC[(size_t) b], paramS[1][(size_t) b], r);
+                    }
 
             if (bassOn)
             {
