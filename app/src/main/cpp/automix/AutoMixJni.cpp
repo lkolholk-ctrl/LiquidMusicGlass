@@ -303,6 +303,13 @@ Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeFxSetReverb(
 }
 
 JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeFxSetSaturation(
+        JNIEnv* /*env*/, jobject /*thiz*/, jboolean on, jfloat drive)
+{
+    withEngineVoid ([&] (AutoMixAudioEngine& engine) { engine.setSaturationFx (on == JNI_TRUE, (float) drive); });
+}
+
+JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeFxSetCompressor(
         JNIEnv* /*env*/, jobject /*thiz*/, jboolean on,
         jfloat threshDb, jfloat ratio, jfloat attackMs, jfloat releaseMs)

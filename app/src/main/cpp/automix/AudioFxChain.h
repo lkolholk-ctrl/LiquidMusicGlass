@@ -66,6 +66,7 @@ public:
     void setCompressor (bool on, float threshDb, float ratio, float attackMs, float releaseMs);
     void setLimiter    (bool on, float threshDb, float releaseMs);
     void setReverb     (bool on, float roomSize, float damping, float wet);
+    void setSaturation (bool on, float drive)  { satEnabled.store (on); satDrive.store (juce::jlimit (0.0f, 1.0f, drive)); }
 
 private:
     struct Biquad      { float b0 { 1.0f }, b1 { 0.0f }, b2 { 0.0f }, a1 { 0.0f }, a2 { 0.0f }; };
@@ -82,6 +83,15 @@ private:
         s.z1 = c.b1 * x - c.a1 * y + s.z2;
         s.z2 = c.b2 * x - c.a2 * y;
         return y;
+    }
+
+    // Мягкий клиппер (кубик) + makeup /g + бленд по drive — «ламповое тепло».
+    // Дёшево (без tanh), состояния нет.
+    static inline float saturate (float x, float g, float drive) noexcept
+    {
+        float xs = juce::jlimit (-1.0f, 1.0f, x * g);
+        const float shaped = (1.5f * xs - 0.5f * xs * xs * xs) / g;
+        return x + drive * (shaped - x);
     }
 
     void recompute();   // audio-thread: rebuild IIR coeffs from atomics (no alloc)
@@ -152,6 +162,10 @@ private:
     std::atomic<float> revRoom { 0.5f }, revDamp { 0.5f }, revWet { 0.3f };
     std::atomic<bool>  revDirty { true };
     bool revWas { false };
+
+    // Сатурация («ламповое тепло») — мягкий клиппер, без состояния, per-sample.
+    std::atomic<bool>  satEnabled { false };
+    std::atomic<float> satDrive { 0.3f };   // 0..1
 
     JUCE_DECLARE_NON_COPYABLE (AudioFxChain)
 };

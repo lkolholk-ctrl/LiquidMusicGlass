@@ -179,6 +179,12 @@ object AudioFxController {
     private val _revWet = MutableStateFlow(0.3f)         // доля эффекта (mix)
     val revWet: StateFlow<Float> = _revWet
 
+    // ── Saturation («ламповое тепло») ──────────────────────────────────────
+    private val _satEnabled = MutableStateFlow(false)
+    val satEnabled: StateFlow<Boolean> = _satEnabled
+    private val _satDrive = MutableStateFlow(0.3f)       // 0..1
+    val satDrive: StateFlow<Float> = _satDrive
+
     // ── DataStore ───────────────────────────────────────────────────────────
     private val K_MASTER = booleanPreferencesKey("master")
     private val K_PREAMP = floatPreferencesKey("preamp01")
@@ -207,6 +213,8 @@ object AudioFxController {
     private val K_REV_ROOM = floatPreferencesKey("rev_room")
     private val K_REV_DAMP = floatPreferencesKey("rev_damp")
     private val K_REV_WET = floatPreferencesKey("rev_wet")
+    private val K_SAT_ON = booleanPreferencesKey("sat_on")
+    private val K_SAT_DRIVE = floatPreferencesKey("sat_drive")
     private val K_WARM = booleanPreferencesKey("warm_on")
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -267,6 +275,8 @@ object AudioFxController {
         _revRoom.value = (p[K_REV_ROOM] ?: 0.5f).coerceIn(0f, 1f)
         _revDamp.value = (p[K_REV_DAMP] ?: 0.5f).coerceIn(0f, 1f)
         _revWet.value = (p[K_REV_WET] ?: 0.3f).coerceIn(0f, 1f)
+        _satEnabled.value = p[K_SAT_ON] ?: false
+        _satDrive.value = (p[K_SAT_DRIVE] ?: 0.3f).coerceIn(0f, 1f)
         _warmEnabled.value = p[K_WARM] ?: false
     }
 
@@ -298,6 +308,7 @@ object AudioFxController {
         e.fxSetCompressor(_compEnabled.value, _compThreshold.value, _compRatio.value, _compAttack.value, _compRelease.value)
         e.fxSetLimiter(_limEnabled.value, _limThreshold.value, _limRelease.value)
         applyReverb()
+        applySaturation()
     }
 
     // ── Warm-оверлей: эффективные бас/ширина = пользовательские + Warm ──────
@@ -582,6 +593,19 @@ object AudioFxController {
         val x = v.coerceIn(0f, 1f); _revWet.value = x; applyReverb(); persist { it[K_REV_WET] = x }
     }
 
+    // ── Saturation ──────────────────────────────────────────────────────────
+    private fun applySaturation() {
+        AutoMixNativeEngine.fxSetSaturation(_satEnabled.value, _satDrive.value)
+    }
+
+    fun setSaturationEnabled(on: Boolean) {
+        _satEnabled.value = on; applySaturation(); persist { it[K_SAT_ON] = on }
+    }
+
+    fun setSaturationDrive(v: Float) {
+        val x = v.coerceIn(0f, 1f); _satDrive.value = x; applySaturation(); persist { it[K_SAT_DRIVE] = x }
+    }
+
     /** Полный сброс к дефолтам (Flat EQ + выкл эффекты, лимитер вкл). */
     fun resetAll() {
         setPreamp01(1f)
@@ -596,6 +620,7 @@ object AudioFxController {
         setCompEnabled(false); setCompPreset(1)
         setLimEnabled(true); setLimThreshold(-1f); setLimRelease(50f)
         setReverbEnabled(false); setReverbRoom(0.5f); setReverbDamping(0.5f); setReverbWet(0.3f)
+        setSaturationEnabled(false); setSaturationDrive(0.3f)
     }
 
     private fun matchEqPreset(gains: List<Float>): Int {

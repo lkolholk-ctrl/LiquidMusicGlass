@@ -781,6 +781,7 @@ void AutoMixAudioEngine::setCompressorFx (bool on, float t, float r, float a, fl
                                                                  { audioFx.setCompressor (on, t, r, a, rel); }
 void AutoMixAudioEngine::setLimiterFx (bool on, float t, float rel) { audioFx.setLimiter (on, t, rel); }
 void AutoMixAudioEngine::setReverbFx (bool on, float rs, float d, float w) { audioFx.setReverb (on, rs, d, w); }
+void AutoMixAudioEngine::setSaturationFx (bool on, float d) { audioFx.setSaturation (on, d); }
 
 double AutoMixAudioEngine::positionMsA()
 {

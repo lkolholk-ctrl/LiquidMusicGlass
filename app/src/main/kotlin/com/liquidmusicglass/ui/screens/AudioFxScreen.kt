@@ -111,6 +111,8 @@ fun AudioFxScreen(onBack: () -> Unit) {
                     LimiterSection(lc, master)
                     Spacer(Modifier.height(14.dp))
                     ReverbSection(lc, master)
+                    Spacer(Modifier.height(14.dp))
+                    SaturationSection(lc, master)
                     Spacer(Modifier.height(20.dp))
                     ResetButton(lc, master)
                 }
@@ -394,6 +396,24 @@ private fun LimiterSection(lc: LiquidColors, master: Boolean) {
                 )
                 Text("Protects against clipping on loud audio. Recommended: ON.",
                     color = lc.textSecondary, fontSize = 12.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SaturationSection(lc: LiquidColors, master: Boolean) {
+    val on by AudioFxController.satEnabled.collectAsState()
+    val drive by AudioFxController.satDrive.collectAsState()
+    val active = master && on
+    SectionWithToggle("Saturation (warmth)", lc, on, { AudioFxController.setSaturationEnabled(it) }, master) {
+        Box(Modifier.alpha(if (active) 1f else 0.4f)) {
+            Column {
+                Text("Analog-style soft saturation — adds harmonics / warmth.",
+                    color = lc.textSecondary, fontSize = 12.sp)
+                Spacer(Modifier.height(8.dp))
+                LabelValue("Drive", "${(drive * 100).roundToInt()}%", lc)
+                FxSlider(drive, 0f..1f, active, { AudioFxController.setSaturationDrive(it) }, lc)
             }
         }
     }

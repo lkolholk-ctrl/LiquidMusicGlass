@@ -237,6 +237,8 @@ void AudioFxChain::process (float* const* channels, int numChannels, int numSamp
     const float preDb   = preampGainDb.load();
     const float bal     = balance.load();
     const bool  monoOn  = monoEnabled.load();
+    const bool  satOn   = satEnabled.load();
+    const float satDrv  = satDrive.load();
 
     // Сброс состояния фильтров на фронте включения (без щелчка).
     if (eqOn && ! eqWas) for (auto& cs : eqS) for (auto& s : cs) s = {};
@@ -248,7 +250,7 @@ void AudioFxChain::process (float* const* channels, int numChannels, int numSamp
 
     preampGain.setTargetValue (juce::Decibels::decibelsToGain (preDb));
 
-    const bool tonal = eqOn || paramOn || bassOn || loudOn || (n > 1 && width != 1.0f) || preDb != 0.0f
+    const bool tonal = eqOn || paramOn || bassOn || loudOn || satOn || (n > 1 && width != 1.0f) || preDb != 0.0f
                        || (n > 1 && (monoOn || bal != 0.0f));
 
     // Лёгкий быстрый путь: тональных стадий нет → per-sample цикл пропускаем.
@@ -290,6 +292,13 @@ void AudioFxChain::process (float* const* channels, int numChannels, int numSamp
                     r = processBiquad (loudLowC,  loudLowS[1],  r);
                     r = processBiquad (loudHighC, loudHighS[1], r);
                 }
+            }
+
+            if (satOn)                                       // сатурация («ламповое тепло»)
+            {
+                const float g = 1.0f + satDrv * 4.0f;
+                l = saturate (l, g, satDrv);
+                if (n > 1) r = saturate (r, g, satDrv);
             }
 
             if (n > 1 && width != 1.0f)                      // stereo width (mid-side)
