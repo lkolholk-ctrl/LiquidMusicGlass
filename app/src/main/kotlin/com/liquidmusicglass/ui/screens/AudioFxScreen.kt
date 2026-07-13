@@ -15,8 +15,14 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -461,17 +467,23 @@ private fun ResetButton(lc: LiquidColors, enabled: Boolean) {
 
 @Composable
 private fun Section(title: String, lc: LiquidColors, valueText: String? = null, content: @Composable () -> Unit) {
+    var expanded by rememberSaveable(key = "sec:$title") { mutableStateOf(false) }
     Column(
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp))
-            .background(lc.cardSurface).padding(16.dp)
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(lc.cardSurface)
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(16.dp)
+        ) {
             Text(title, color = lc.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f))
             if (valueText != null) Text(valueText, color = lc.accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.width(8.dp))
+            Icon(if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, null, tint = lc.textSecondary)
         }
-        Spacer(Modifier.height(10.dp))
-        content()
+        AnimatedVisibility(expanded) {
+            Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) { content() }
+        }
     }
 }
 
@@ -480,17 +492,23 @@ private fun SectionWithToggle(
     title: String, lc: LiquidColors, checked: Boolean,
     onCheckedChange: (Boolean) -> Unit, master: Boolean, content: @Composable () -> Unit
 ) {
+    var expanded by rememberSaveable(key = "sec:$title") { mutableStateOf(false) }
     Column(
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp))
-            .background(lc.cardSurface).padding(16.dp)
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(lc.cardSurface)
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(16.dp)
+        ) {
             Text(title, color = lc.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f))
             FxSwitch(checked && master, enabled = master) { onCheckedChange(it) }
+            Spacer(Modifier.width(8.dp))
+            Icon(if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, null, tint = lc.textSecondary)
         }
-        Spacer(Modifier.height(10.dp))
-        content()
+        AnimatedVisibility(expanded) {
+            Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) { content() }
+        }
     }
 }
 
