@@ -412,6 +412,77 @@ class WaveRepository(context: Context) {
     }
 
     /**
+     * Мульти-жанровая волна через ПРАВИЛЬНЫЙ /wave/genre/{genre} (Apple-каталог,
+     * пул по каталогу + ранжирование по предпочтениям), round-robin по жанрам:
+     * [g0[0], g1[0], g2[0], g0[1], …] — в начале очереди намешаны ВСЕ выбранные
+     * жанры, а не только первый.
+     *
+     * Зачем отдельный метод: раньше и первую пачку, и SEARCH-дозаправку жанровой
+     * волны набивал buildGenreSearchQueue сырым текст-поиском searchTracks(query=
+     * genre) — а он отдаёт треки, где слово-жанр в НАЗВАНИИ/АРТИСТЕ, а не жанрово
+     * классифицированные («в начале волны не те треки»). /wave/genre ICM починил
+     * 2026-07-11, так что теперь он и есть основной источник; сырой поиск остаётся
+     * лишь аварийным фолбэком (см. ниже), чтобы гарантия бесконечности не потерялась.
+     */
+    suspend fun buildMultiGenreWaveQueue(
+        genres: List<String>,
+        count: Int = WAVE_QUEUE_SIZE,
+        exclude: Collection<String> = emptyList()
+    ): List<Track> = withContext(Dispatchers.IO) {
+        val cleanGenres = genres.map { it.trim() }.filter { it.length >= 2 }.distinct()
+        if (cleanGenres.isEmpty() || count <= 0) return@withContext emptyList()
+        val excludeSet = exclude.toSet()
+
+        // По каждому жанру — своя пачка через /wave/genre. Просим с запасом на
+        // dedup/exclude/interleave, чтобы после ротации хватило на count.
+        val perGenre = ((count + cleanGenres.size - 1) / cleanGenres.size + 4).coerceIn(4, 40)
+        val pools: List<List<Track>> = cleanGenres.map { genre ->
+            try {
+                buildWaveModeQueue(
+                    mode = WaveMode.Genre(genre = genre, source = "apple", diversity = 0.5),
+                    count = perGenre,
+                    exclude = excludeSet
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "Genre wave '$genre' failed: ${e.message}")
+                emptyList()
+            }
+        }
+
+        val out = LinkedHashMap<String, Track>()
+        var idx = 0
+        var addedThisPass = true
+        while (out.size < count && addedThisPass) {
+            addedThisPass = false
+            for (pool in pools) {
+                if (idx < pool.size) {
+                    val track = pool[idx]
+                    if (track.id.isNotBlank() && track.id !in excludeSet && !out.containsKey(track.id)) {
+                        out[track.id] = track
+                        addedThisPass = true
+                    }
+                    if (out.size >= count) break
+                }
+            }
+            idx++
+        }
+
+        val result = out.values.toList()
+        com.liquidmusicglass.api.icm.IcmApiFileLogger.log(
+            "D", "Wave",
+            "buildMultiGenreWaveQueue: genres=$cleanGenres exclude=${excludeSet.size} -> ${result.size} tracks"
+        )
+        // Серверный /wave/genre вернул пусто по ВСЕМ жанрам (сеть/пустой аккаунт) →
+        // аварийный сырой поиск: бесконечность важнее идеальной жанровости.
+        if (result.isEmpty()) {
+            return@withContext buildGenreSearchQueue(genres = cleanGenres, count = count, exclude = exclude)
+        }
+        result
+    }
+
+    /**
      * Fallback-очередь волны через ПОИСК, а не через волновые эндпоинты.
      *
      * Зачем: personal-волна ICM для этого аккаунта пуста (она Apple-only, а

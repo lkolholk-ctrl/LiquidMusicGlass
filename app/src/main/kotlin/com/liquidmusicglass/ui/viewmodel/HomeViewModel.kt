@@ -336,8 +336,12 @@ class HomeViewModel : ViewModel() {
             emptyList()
         }
         if (genres.isEmpty()) return null
+        // Первую пачку берём через ПРАВИЛЬНЫЙ /wave/genre/{genre} (round-robin по
+        // жанрам): жанрово классифицированные треки, а не результат текст-поиска по
+        // слову-жанру. Сырой поиск остаётся внутри buildMultiGenreWaveQueue как
+        // аварийный фолбэк, если сервер вернёт пусто по всем жанрам.
         suspend fun search(): List<Track> = try {
-            repo.buildGenreSearchQueue(
+            repo.buildMultiGenreWaveQueue(
                 genres = genres,
                 count = WaveRepository.WAVE_QUEUE_SIZE
             )

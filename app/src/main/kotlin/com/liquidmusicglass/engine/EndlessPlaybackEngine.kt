@@ -234,7 +234,9 @@ class EndlessPlaybackEngine(
                             listOfNotNull(refillCtx.id ?: refillCtx.name)
                         }
                         if (genres.isNotEmpty()) {
-                            return@withContext waveRepo.buildGenreSearchQueue(
+                            // Дозаправка тоже через /wave/genre (round-robin), а не сырой
+                            // текст-поиск — иначе жанровость терялась после первой пачки.
+                            return@withContext waveRepo.buildMultiGenreWaveQueue(
                                 genres = genres,
                                 count = REFILL_BATCH_SIZE,
                                 exclude = (playedIds + queueIds).toList()
@@ -349,7 +351,7 @@ class EndlessPlaybackEngine(
                     if (tracks.isEmpty()) {
                         val genres = waveRepo.getTopGenres(limit = 5)
                         if (genres.isNotEmpty()) {
-                            tracks = waveRepo.buildGenreSearchQueue(
+                            tracks = waveRepo.buildMultiGenreWaveQueue(
                                 genres = genres,
                                 count = REFILL_BATCH_SIZE,
                                 exclude = (playedIds + queueIds).toList()
