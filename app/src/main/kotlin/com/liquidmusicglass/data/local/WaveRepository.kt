@@ -10,6 +10,7 @@ import com.liquidmusicglass.data.local.db.AppDatabase
 import com.liquidmusicglass.data.local.db.CachedTrack
 import com.liquidmusicglass.data.local.db.GenreCount
 import com.liquidmusicglass.data.local.db.ListeningHistory
+import com.liquidmusicglass.data.wave.AppleCatalogFilter
 import com.liquidmusicglass.data.wave.DeadTrackRegistry
 import com.liquidmusicglass.data.wave.WaveCandidateFilter
 import com.liquidmusicglass.data.wave.WaveMode
@@ -372,7 +373,8 @@ class WaveRepository(context: Context) {
         }
 
         Log.d(TAG, "Final wave queue: ${queue.size} tracks (attempts: $attempts)")
-        queue
+        // Досеиваем Apple music-video, которые ICM не пометил isClip.
+        AppleCatalogFilter.stripVideoClips(queue)
     }
 
     suspend fun buildWaveModeQueue(
@@ -380,6 +382,9 @@ class WaveRepository(context: Context) {
         count: Int = WAVE_QUEUE_SIZE,
         exclude: Collection<String> = emptyList()
     ): List<Track> = withContext(Dispatchers.IO) {
+        // Клип-страховка (AppleCatalogFilter) стоит на «листьях» ниже:
+        // fetchGenreOrMoodWaveBatch / acceptPersonalWaveTracks / buildWaveQueue /
+        // buildGenreSearchQueue — так покрыты и прямые вызовы в обход диспетчера.
         when (mode) {
             is WaveMode.Personal -> fetchPersonalWaveBatch(
                 targetCount = count,
@@ -571,7 +576,10 @@ class WaveRepository(context: Context) {
         // emptyList и волна МОЛЧА умирала (≈после 150 треков). Теперь: если exclude
         // выел всё — зацикливаем, повторно раздаём уже игранное (переслушать лучше
         // тишины; анти-повтор очереди не даёт повтора подряд).
-        val result = roundRobin(filtered).ifEmpty { roundRobin(rawPerGenre) }
+        val rawResult = roundRobin(filtered).ifEmpty { roundRobin(rawPerGenre) }
+        // Поиск /search фильтрует клипы по isTrack, но ICM неполно ставит isClip —
+        // Apple music-video просачиваются как обычные треки. Досеиваем по Apple-каталогу.
+        val result = AppleCatalogFilter.stripVideoClips(rawResult)
         com.liquidmusicglass.api.icm.IcmApiFileLogger.log(
             "D", "Wave",
             "buildGenreSearchQueue: genres=$genres exclude=${excludeSet.size} " +
@@ -818,14 +826,17 @@ class WaveRepository(context: Context) {
         }
 
         val tracksById = tracks.associateBy { it.id }
-        val result = filtered.accepted.mapNotNull { candidate ->
+        val mapped = filtered.accepted.mapNotNull { candidate ->
             tracksById[candidate.id]?.toTrack()
         }
+        // isClip выше режет только помеченные ICM; часть Apple music-video он не
+        // помечает (и /track на них не 404) → досеиваем по Apple-каталогу.
+        val result = AppleCatalogFilter.stripVideoClips(mapped)
         // DIAG (wave-diag build): видно в «Copy ICM logs». server=сколько отдал ICM,
         // filterAccepted=сколько прошло WaveCandidateFilter, mapped=сколько стало Track.
         com.liquidmusicglass.api.icm.IcmApiFileLogger.log(
             "D", "Wave",
-            "$label: server=${tracks.size} filterAccepted=${filtered.accepted.size} mapped=${result.size}"
+            "$label: server=${tracks.size} filterAccepted=${filtered.accepted.size} mapped=${mapped.size} afterClipFilter=${result.size}"
         )
         return result
     }
@@ -1007,9 +1018,11 @@ class WaveRepository(context: Context) {
         }
 
         val tracksById = serverTracks.associateBy { it.id }
-        return filtered.accepted.mapNotNull { candidate ->
+        val tracks = filtered.accepted.mapNotNull { candidate ->
             tracksById[candidate.id]?.toTrack()
         }
+        // ICM неполно ставит isClip → досеиваем Apple music-video по каталогу.
+        return AppleCatalogFilter.stripVideoClips(tracks)
     }
 
     private fun preparePersonalWaveState(

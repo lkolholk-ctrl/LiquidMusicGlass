@@ -19,11 +19,11 @@ android {
         // Выше 20260702 (сборки greeting уже стоят на тест-девайсах с ним):
         // меньший versionCode Android считает даунгрейдом и отклоняет установку
         // поверх с ошибкой «пакет недействителен».
-        versionCode = 20260740
+        versionCode = 20260741
         // Метка билда (видно в Профиле внизу). Бампается вручную на заметных
         // сборках, чтобы можно было отличить, какой билд стоит. Динамический
         // git-хэш убран — он ломал конфигурацию Gradle в CI.
-        versionName = "13.07.1 genre-wave"
+        versionName = "13.07.2 clip-guard"
 
         // Build native libs only for arm64-v8a (faster builds, smaller APK).
         // Note: won't run on 32-bit (armeabi-v7a) or x86/x86_64 emulators.
