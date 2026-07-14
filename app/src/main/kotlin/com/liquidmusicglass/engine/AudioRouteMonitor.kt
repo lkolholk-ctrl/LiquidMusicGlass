@@ -9,6 +9,8 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
 import com.liquidmusicglass.engine.automix.AutoMixNativeEngine
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 
 /**
  * Следит за маршрутом аудио-вывода (BT/гарнитура) через [AudioManager.AudioDeviceCallback]
@@ -35,6 +37,11 @@ object AudioRouteMonitor {
 
     // Последнее ПРИМЕНЁННОЕ BT-состояние. null = ещё не применяли (форс на первом).
     @Volatile private var lastAppliedBt: Boolean? = null
+
+    // Категория выхода для пер-девайс профилей (наушники / BT / динамик).
+    enum class DeviceCategory { HEADPHONES, BLUETOOTH, SPEAKER }
+    private val _category = MutableStateFlow(DeviceCategory.SPEAKER)
+    val category: StateFlow<DeviceCategory> = _category
 
     private val applyRunnable = Runnable { applyIfChanged() }
 
@@ -70,9 +77,23 @@ object AudioRouteMonitor {
 
     private fun applyIfChanged() {
         val bt = isBluetoothActive()
+        _category.value = classify(bt)         // категорию обновляем ВСЕГДА (в т.ч. наушники↔динамик)
         if (bt == lastAppliedBt) return        // маршрут реально не изменился → движок НЕ трогаем
         lastAppliedBt = bt
         AutoMixNativeEngine.setOutputRouteBluetooth(bt)
+    }
+
+    private fun classify(bt: Boolean): DeviceCategory {
+        if (bt) return DeviceCategory.BLUETOOTH
+        val am = audioManager ?: return DeviceCategory.SPEAKER
+        val wired = runCatching {
+            am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any { d ->
+                d.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+                    d.type == AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+                    d.type == AudioDeviceInfo.TYPE_USB_HEADSET
+            }
+        }.getOrDefault(false)
+        return if (wired) DeviceCategory.HEADPHONES else DeviceCategory.SPEAKER
     }
 
     /** Активен ли беспроводной (BT) выход. SCO (звонки) не считаем — музыка идёт по A2DP/BLE. */

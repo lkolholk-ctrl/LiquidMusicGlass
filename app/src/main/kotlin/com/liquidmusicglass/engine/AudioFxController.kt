@@ -14,9 +14,12 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.liquidmusicglass.engine.automix.AutoMixNativeEngine
+import org.json.JSONObject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -185,6 +188,12 @@ object AudioFxController {
     private val _satDrive = MutableStateFlow(0.3f)       // 0..1
     val satDrive: StateFlow<Float> = _satDrive
 
+    // ── Пер-девайс профили ──────────────────────────────────────────────────
+    private val _autoSwitch = MutableStateFlow(false)
+    val autoSwitch: StateFlow<Boolean> = _autoSwitch
+    private val _currentDevice = MutableStateFlow(AudioRouteMonitor.DeviceCategory.SPEAKER)
+    val currentDevice: StateFlow<AudioRouteMonitor.DeviceCategory> = _currentDevice
+
     // ── DataStore ───────────────────────────────────────────────────────────
     private val K_MASTER = booleanPreferencesKey("master")
     private val K_PREAMP = floatPreferencesKey("preamp01")
@@ -216,6 +225,11 @@ object AudioFxController {
     private val K_SAT_ON = booleanPreferencesKey("sat_on")
     private val K_SAT_DRIVE = floatPreferencesKey("sat_drive")
     private val K_WARM = booleanPreferencesKey("warm_on")
+    // Пер-девайс профили: JSON-снимок настроек на категорию устройства + авто-переключение.
+    private val K_SNAP_HP = stringPreferencesKey("snap_headphones")
+    private val K_SNAP_BT = stringPreferencesKey("snap_bluetooth")
+    private val K_SNAP_SPK = stringPreferencesKey("snap_speaker")
+    private val K_AUTOSWITCH = booleanPreferencesKey("profiles_autoswitch")
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var dataStore: DataStore<Preferences>? = null
@@ -236,6 +250,14 @@ object AudioFxController {
         // режима переотправляем бас/ширину с учётом нового состояния.
         scope.launch {
             AppSettings.audioCompatMode.collect { pushBass(); pushWidth(); pushLoudness() }
+        }
+        // Пер-девайс профили: следим за категорией выхода; при авто-переключении
+        // грузим снимок настроек для текущего устройства.
+        scope.launch {
+            AudioRouteMonitor.category.collect { cat ->
+                _currentDevice.value = cat
+                if (_autoSwitch.value) loadProfile(cat)
+            }
         }
         // Следим за системной громкостью (для loudness-компенсации).
         runCatching {
@@ -278,6 +300,7 @@ object AudioFxController {
         _satEnabled.value = p[K_SAT_ON] ?: false
         _satDrive.value = (p[K_SAT_DRIVE] ?: 0.3f).coerceIn(0f, 1f)
         _warmEnabled.value = p[K_WARM] ?: false
+        _autoSwitch.value = p[K_AUTOSWITCH] ?: false
     }
 
     private fun parseGains(csv: String?): List<Float> {
@@ -380,6 +403,7 @@ object AudioFxController {
 
     fun setEqBand(band: Int, gainDb: Float) {
         if (band !in 0 until BAND_COUNT) return
+        eqAnimJob?.cancel()   // ручной драг отменяет анимацию пресета
         val v = gainDb.coerceIn(EQ_MIN_DB, EQ_MAX_DB)
         val updated = _eqGains.value.toMutableList().also { it[band] = v }
         _eqGains.value = updated
@@ -389,13 +413,30 @@ object AudioFxController {
         persist { it[K_EQ_GAINS] = updated.joinToString(","); it[K_EQ_PRESET] = pidx }
     }
 
+    private var eqAnimJob: Job? = null
+
     fun applyEqPreset(index: Int) {
         val preset = EQ_PRESETS.getOrNull(index) ?: return
-        val list = preset.gains.toList()
-        _eqGains.value = list
+        val target = preset.gains
         _eqPreset.value = index
-        AutoMixNativeEngine.setEqBands(preset.gains.copyOf())
-        persist { it[K_EQ_GAINS] = list.joinToString(","); it[K_EQ_PRESET] = index }
+        persist { it[K_EQ_GAINS] = target.joinToString(","); it[K_EQ_PRESET] = index }
+        // Плавно едем к пресету: анимируем ДАННЫЕ, слайдеры следуют за StateFlow.
+        // Ручной драг (setEqBand) отменяет анимацию — конфликта нет.
+        eqAnimJob?.cancel()
+        val from = _eqGains.value.toFloatArray()
+        eqAnimJob = scope.launch {
+            val steps = 16
+            for (s in 1..steps) {
+                val t = s.toFloat() / steps
+                val e = t * t * (3f - 2f * t)   // smoothstep
+                val cur = FloatArray(BAND_COUNT) { i -> from[i] + (target[i] - from[i]) * e }
+                _eqGains.value = cur.toList()
+                AutoMixNativeEngine.setEqBands(cur)
+                delay(16)
+            }
+            _eqGains.value = target.toList()
+            AutoMixNativeEngine.setEqBands(target.copyOf())
+        }
     }
 
     // ── Параметрический EQ ──────────────────────────────────────────────────
@@ -609,6 +650,107 @@ object AudioFxController {
     // ── VU-метр (визуал; включается, пока секция на экране) ─────────────────
     fun setMeterEnabled(on: Boolean) = AutoMixNativeEngine.fxSetMeterEnabled(on)
     fun meterLevels(): FloatArray = AutoMixNativeEngine.fxMeterLevels()
+
+    // ── Пер-девайс профили: снимок / восстановление ─────────────────────────
+    private fun snapKeyFor(cat: AudioRouteMonitor.DeviceCategory) = when (cat) {
+        AudioRouteMonitor.DeviceCategory.HEADPHONES -> K_SNAP_HP
+        AudioRouteMonitor.DeviceCategory.BLUETOOTH -> K_SNAP_BT
+        AudioRouteMonitor.DeviceCategory.SPEAKER -> K_SNAP_SPK
+    }
+
+    private fun snapshotJson(): String = JSONObject().apply {
+        put("master", _masterEnabled.value)
+        put("preamp", _preamp01.value.toDouble())
+        put("eqOn", _eqEnabled.value)
+        put("eqGains", _eqGains.value.joinToString(","))
+        put("eqPreset", _eqPreset.value)
+        put("paramOn", _paramEqEnabled.value)
+        put("paramBands", serializeParamBands(_paramBands.value))
+        put("bassOn", _bassEnabled.value)
+        put("bassFreq", _bassFreq.value.toDouble())
+        put("bassGain", _bassGain.value.toDouble())
+        put("loudOn", _loudnessEnabled.value)
+        put("width", _stereoWidth.value.toDouble())
+        put("balance", _balance.value.toDouble())
+        put("mono", _monoEnabled.value)
+        put("compOn", _compEnabled.value)
+        put("compPreset", _compPreset.value)
+        put("compThr", _compThreshold.value.toDouble())
+        put("compRatio", _compRatio.value.toDouble())
+        put("compAtk", _compAttack.value.toDouble())
+        put("compRel", _compRelease.value.toDouble())
+        put("limOn", _limEnabled.value)
+        put("limThr", _limThreshold.value.toDouble())
+        put("limRel", _limRelease.value.toDouble())
+        put("revOn", _reverbEnabled.value)
+        put("revRoom", _revRoom.value.toDouble())
+        put("revDamp", _revDamp.value.toDouble())
+        put("revWet", _revWet.value.toDouble())
+        put("satOn", _satEnabled.value)
+        put("satDrive", _satDrive.value.toDouble())
+        put("warm", _warmEnabled.value)
+    }.toString()
+
+    private fun restoreJson(s: String) {
+        val o = runCatching { JSONObject(s) }.getOrNull() ?: return
+        setMasterEnabled(o.optBoolean("master", _masterEnabled.value))
+        setPreamp01(o.optDouble("preamp", _preamp01.value.toDouble()).toFloat())
+        val gains = parseGains(o.optString("eqGains", _eqGains.value.joinToString(",")))
+        _eqGains.value = gains
+        AutoMixNativeEngine.setEqBands(gains.toFloatArray())
+        _eqPreset.value = o.optInt("eqPreset", _eqPreset.value)
+        persist { it[K_EQ_GAINS] = gains.joinToString(","); it[K_EQ_PRESET] = _eqPreset.value }
+        setEqEnabled(o.optBoolean("eqOn", _eqEnabled.value))
+        val pbands = parseParamBands(o.optString("paramBands", serializeParamBands(_paramBands.value)))
+        _paramBands.value = pbands
+        pbands.forEachIndexed { i, b -> AutoMixNativeEngine.fxSetParamBand(i, b.freq, b.q, b.gain) }
+        persist { it[K_PARAM_BANDS] = serializeParamBands(pbands) }
+        setParamEqEnabled(o.optBoolean("paramOn", _paramEqEnabled.value))
+        setBassFreq(o.optDouble("bassFreq", _bassFreq.value.toDouble()).toFloat())
+        setBassGain(o.optDouble("bassGain", _bassGain.value.toDouble()).toFloat())
+        setBassEnabled(o.optBoolean("bassOn", _bassEnabled.value))
+        setLoudnessEnabled(o.optBoolean("loudOn", _loudnessEnabled.value))
+        setStereoWidth(o.optDouble("width", _stereoWidth.value.toDouble()).toFloat())
+        setBalance(o.optDouble("balance", _balance.value.toDouble()).toFloat())
+        setMonoEnabled(o.optBoolean("mono", _monoEnabled.value))
+        setCompThreshold(o.optDouble("compThr", _compThreshold.value.toDouble()).toFloat())
+        setCompRatio(o.optDouble("compRatio", _compRatio.value.toDouble()).toFloat())
+        setCompAttack(o.optDouble("compAtk", _compAttack.value.toDouble()).toFloat())
+        setCompRelease(o.optDouble("compRel", _compRelease.value.toDouble()).toFloat())
+        _compPreset.value = o.optInt("compPreset", _compPreset.value)
+        setCompEnabled(o.optBoolean("compOn", _compEnabled.value))
+        setLimThreshold(o.optDouble("limThr", _limThreshold.value.toDouble()).toFloat())
+        setLimRelease(o.optDouble("limRel", _limRelease.value.toDouble()).toFloat())
+        setLimEnabled(o.optBoolean("limOn", _limEnabled.value))
+        setReverbRoom(o.optDouble("revRoom", _revRoom.value.toDouble()).toFloat())
+        setReverbDamping(o.optDouble("revDamp", _revDamp.value.toDouble()).toFloat())
+        setReverbWet(o.optDouble("revWet", _revWet.value.toDouble()).toFloat())
+        setReverbEnabled(o.optBoolean("revOn", _reverbEnabled.value))
+        setSaturationDrive(o.optDouble("satDrive", _satDrive.value.toDouble()).toFloat())
+        setSaturationEnabled(o.optBoolean("satOn", _satEnabled.value))
+        setWarmEnabled(o.optBoolean("warm", _warmEnabled.value))
+    }
+
+    /** Сохранить ТЕКУЩИЕ настройки как профиль устройства. */
+    fun saveCurrentToProfile(cat: AudioRouteMonitor.DeviceCategory) {
+        val snap = snapshotJson()
+        persist { it[snapKeyFor(cat)] = snap }
+    }
+
+    /** Загрузить профиль устройства (если сохранён) в живые настройки. */
+    fun loadProfile(cat: AudioRouteMonitor.DeviceCategory) {
+        val ds = dataStore ?: return
+        scope.launch {
+            val snap = runCatching { ds.data.first()[snapKeyFor(cat)] }.getOrNull()
+            if (!snap.isNullOrBlank()) restoreJson(snap)
+        }
+    }
+
+    fun setAutoSwitch(on: Boolean) {
+        _autoSwitch.value = on
+        persist { it[K_AUTOSWITCH] = on }
+        if (on) loadProfile(_currentDevice.value)
+    }
 
     /** Полный сброс к дефолтам (Flat EQ + выкл эффекты, лимитер вкл). */
     fun resetAll() {

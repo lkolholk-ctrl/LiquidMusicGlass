@@ -44,6 +44,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.graphics.Brush
 import com.liquidmusicglass.engine.AudioFxController
+import com.liquidmusicglass.engine.AudioRouteMonitor
 import com.liquidmusicglass.ui.glass.liquidClickable
 import com.liquidmusicglass.ui.theme.LiquidMotion
 import com.liquidmusicglass.ui.liquid.LiquidSlider
@@ -101,6 +102,8 @@ fun AudioFxScreen(onBack: () -> Unit) {
 
             Box(modifier = Modifier.alpha(if (master) 1f else 0.4f)) {
                 Column {
+                    DeviceProfilesSection(lc, master)
+                    Spacer(Modifier.height(14.dp))
                     PreampSection(lc, master)
                     Spacer(Modifier.height(14.dp))
                     EqSection(lc, master)
@@ -137,6 +140,39 @@ fun AudioFxScreen(onBack: () -> Unit) {
 }
 
 // ── Sections ─────────────────────────────────────────────────────────────────
+
+@Composable
+private fun DeviceProfilesSection(lc: LiquidColors, master: Boolean) {
+    val dev by AudioFxController.currentDevice.collectAsState()
+    val auto by AudioFxController.autoSwitch.collectAsState()
+    Section("Device profiles", lc, valueText = deviceLabel(dev)) {
+        Text("Own settings per output. Auto-switch loads the matching profile when the device changes.",
+            color = lc.textSecondary, fontSize = 12.sp)
+        Spacer(Modifier.height(10.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Auto-switch by device", color = lc.textPrimary, fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            FxSwitch(auto && master, enabled = master) { AudioFxController.setAutoSwitch(it) }
+        }
+        Spacer(Modifier.height(10.dp))
+        Text("Save current settings as profile:", color = lc.textSecondary, fontSize = 12.sp)
+        Spacer(Modifier.height(6.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            AudioRouteMonitor.DeviceCategory.entries.forEach { cat ->
+                Chip(deviceLabel(cat), dev == cat, lc, master) { AudioFxController.saveCurrentToProfile(cat) }
+            }
+        }
+    }
+}
+
+private fun deviceLabel(cat: AudioRouteMonitor.DeviceCategory): String = when (cat) {
+    AudioRouteMonitor.DeviceCategory.HEADPHONES -> "Headphones"
+    AudioRouteMonitor.DeviceCategory.BLUETOOTH -> "Bluetooth"
+    AudioRouteMonitor.DeviceCategory.SPEAKER -> "Speaker"
+}
 
 @Composable
 private fun PreampSection(lc: LiquidColors, enabled: Boolean) {
