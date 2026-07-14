@@ -606,6 +606,10 @@ object AudioFxController {
         val x = v.coerceIn(0f, 1f); _satDrive.value = x; applySaturation(); persist { it[K_SAT_DRIVE] = x }
     }
 
+    // ── VU-метр (визуал; включается, пока секция на экране) ─────────────────
+    fun setMeterEnabled(on: Boolean) = AutoMixNativeEngine.fxSetMeterEnabled(on)
+    fun meterLevels(): FloatArray = AutoMixNativeEngine.fxMeterLevels()
+
     /** Полный сброс к дефолтам (Flat EQ + выкл эффекты, лимитер вкл). */
     fun resetAll() {
         setPreamp01(1f)

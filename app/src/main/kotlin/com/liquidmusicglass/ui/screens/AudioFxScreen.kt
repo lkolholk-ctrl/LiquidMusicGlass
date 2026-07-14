@@ -14,7 +14,12 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.geometry.CornerRadius
+import kotlinx.coroutines.delay
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.rounded.ExpandLess
@@ -119,6 +124,8 @@ fun AudioFxScreen(onBack: () -> Unit) {
                     ReverbSection(lc, master)
                     Spacer(Modifier.height(14.dp))
                     SaturationSection(lc, master)
+                    Spacer(Modifier.height(14.dp))
+                    VuSection(lc)
                     Spacer(Modifier.height(20.dp))
                     ResetButton(lc, master)
                 }
@@ -420,6 +427,53 @@ private fun SaturationSection(lc: LiquidColors, master: Boolean) {
                 Spacer(Modifier.height(8.dp))
                 LabelValue("Drive", "${(drive * 100).roundToInt()}%", lc)
                 FxSlider(drive, 0f..1f, active, { AudioFxController.setSaturationDrive(it) }, lc)
+            }
+        }
+    }
+}
+
+@Composable
+private fun VuSection(lc: LiquidColors) {
+    // Section рендерит контент ТОЛЬКО когда раскрыт → метр считается лишь при
+    // просмотре (DisposableEffect вкл/выкл), poll идёт лишь пока секция открыта.
+    Section("Level meter (VU)", lc) {
+        var l by remember { mutableFloatStateOf(0f) }
+        var r by remember { mutableFloatStateOf(0f) }
+        DisposableEffect(Unit) {
+            AudioFxController.setMeterEnabled(true)
+            onDispose { AudioFxController.setMeterEnabled(false) }
+        }
+        LaunchedEffect(Unit) {
+            while (true) {
+                val lv = AudioFxController.meterLevels()
+                l = maxOf(lv.getOrElse(0) { 0f }, l * 0.82f)   // быстрый подъём, плавный спад
+                r = maxOf(lv.getOrElse(1) { 0f }, r * 0.82f)
+                delay(40)
+            }
+        }
+        Text("Peak output level, left / right.", color = lc.textSecondary, fontSize = 12.sp)
+        Spacer(Modifier.height(10.dp))
+        VuBar("L", l, lc)
+        Spacer(Modifier.height(8.dp))
+        VuBar("R", r, lc)
+    }
+}
+
+@Composable
+private fun VuBar(label: String, level: Float, lc: LiquidColors) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(label, modifier = Modifier.width(18.dp), color = lc.textSecondary,
+            fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Canvas(Modifier.weight(1f).height(16.dp)) {
+            val radius = CornerRadius(size.height / 2f, size.height / 2f)
+            drawRoundRect(
+                color = (if (lc.isDark) Color.White else Color.Black).copy(alpha = 0.14f),
+                cornerRadius = radius
+            )
+            val lvl = level.coerceIn(0f, 1f)
+            if (lvl > 0f) {
+                val col = if (lvl > 0.95f) Color(0xFFFF5252) else lc.accent   // клиппинг → красный
+                drawRoundRect(color = col, size = Size(size.width * lvl, size.height), cornerRadius = radius)
             }
         }
     }

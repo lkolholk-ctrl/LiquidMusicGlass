@@ -403,6 +403,17 @@ object AutoMixNativeEngine {
         runCatching { nativeFxSetSaturation(on, drive) }.onFailure { Log.w(TAG, "fxSaturation failed", it) }
     }
 
+    fun fxSetMeterEnabled(on: Boolean) {
+        if (!isLoaded || !initialised) return
+        runCatching { nativeFxSetMeterEnabled(on) }.onFailure { Log.w(TAG, "fxMeter failed", it) }
+    }
+
+    /** Пик L/R (0..1) для VU. Частый poll из UI — без @Synchronized (чтение атомиков). */
+    fun fxMeterLevels(): FloatArray {
+        if (!isLoaded || !initialised) return floatArrayOf(0f, 0f)
+        return runCatching { floatArrayOf(nativeFxMeterL(), nativeFxMeterR()) }.getOrElse { floatArrayOf(0f, 0f) }
+    }
+
     @Synchronized fun fxSetCompressor(on: Boolean, threshDb: Float, ratio: Float, attackMs: Float, releaseMs: Float) {
         if (!isLoaded || !initialised) return
         runCatching { nativeFxSetCompressor(on, threshDb, ratio, attackMs, releaseMs) }
@@ -653,6 +664,9 @@ object AutoMixNativeEngine {
     private external fun nativeFxSetParamBand(band: Int, freqHz: Float, q: Float, gainDb: Float)
     private external fun nativeFxSetReverb(on: Boolean, roomSize: Float, damping: Float, wet: Float)
     private external fun nativeFxSetSaturation(on: Boolean, drive: Float)
+    private external fun nativeFxSetMeterEnabled(on: Boolean)
+    private external fun nativeFxMeterL(): Float
+    private external fun nativeFxMeterR(): Float
     private external fun nativeFxSetCompressor(on: Boolean, threshDb: Float, ratio: Float, attackMs: Float, releaseMs: Float)
     private external fun nativeFxSetLimiter(on: Boolean, threshDb: Float, releaseMs: Float)
     private external fun nativeSetOutputRouteBluetooth(isBluetooth: Boolean)

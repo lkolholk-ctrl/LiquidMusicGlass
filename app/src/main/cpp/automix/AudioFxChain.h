@@ -68,6 +68,12 @@ public:
     void setReverb     (bool on, float roomSize, float damping, float wet);
     void setSaturation (bool on, float drive)  { satEnabled.store (on); satDrive.store (juce::jlimit (0.0f, 1.0f, drive)); }
 
+    // VU-метр: считаем пик по блоку ТОЛЬКО когда метр виден (meterEnabled) → ноль
+    // стоимости, когда экран закрыт. Читается из UI-потока (poll), пишется в аудио.
+    void  setMeterEnabled (bool on) { meterEnabled.store (on); }
+    float meterPeakL() const { return meterL.load(); }
+    float meterPeakR() const { return meterR.load(); }
+
 private:
     struct Biquad      { float b0 { 1.0f }, b1 { 0.0f }, b2 { 0.0f }, a1 { 0.0f }, a2 { 0.0f }; };
     struct BiquadState { float z1 { 0.0f }, z2 { 0.0f }; };
@@ -166,6 +172,10 @@ private:
     // Сатурация («ламповое тепло») — мягкий клиппер, без состояния, per-sample.
     std::atomic<bool>  satEnabled { false };
     std::atomic<float> satDrive { 0.3f };   // 0..1
+
+    // VU-метр: пик по блоку на канал (0..1), считается только при meterEnabled.
+    std::atomic<bool>  meterEnabled { false };
+    std::atomic<float> meterL { 0.0f }, meterR { 0.0f };
 
     JUCE_DECLARE_NON_COPYABLE (AudioFxChain)
 };

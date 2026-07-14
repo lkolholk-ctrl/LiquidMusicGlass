@@ -219,6 +219,21 @@ void AudioFxChain::recompute()
 // ── Обработка ────────────────────────────────────────────────────────────────
 void AudioFxChain::process (float* const* channels, int numChannels, int numSamples)
 {
+    // VU-метр: пик по блоку (0..1). Считаем ТОЛЬКО когда метр виден на экране и
+    // до master-гейта — чтобы уровень показывался даже при выключенном мастер-FX.
+    if (meterEnabled.load() && numSamples > 0 && numChannels > 0)
+    {
+        const int mc = juce::jmin (numChannels, kMaxCh);
+        float pl = 0.0f, pr = 0.0f;
+        for (int i = 0; i < numSamples; ++i)
+        {
+            pl = juce::jmax (pl, std::fabs (channels[0][i]));
+            if (mc > 1) pr = juce::jmax (pr, std::fabs (channels[1][i]));
+        }
+        meterL.store (pl);
+        meterR.store (mc > 1 ? pr : pl);
+    }
+
     if (! masterEnabled.load())
         return;
 

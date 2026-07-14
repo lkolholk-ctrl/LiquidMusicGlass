@@ -310,6 +310,31 @@ Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeFxSetSaturati
 }
 
 JNIEXPORT void JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeFxSetMeterEnabled(
+        JNIEnv* /*env*/, jobject /*thiz*/, jboolean on)
+{
+    withEngineVoid ([&] (AutoMixAudioEngine& engine) { engine.setMeterEnabled (on == JNI_TRUE); });
+}
+
+JNIEXPORT jfloat JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeFxMeterL(
+        JNIEnv* /*env*/, jobject /*thiz*/)
+{
+    float v = 0.0f;
+    withEngineVoid ([&] (AutoMixAudioEngine& engine) { v = engine.meterPeakL(); });
+    return (jfloat) v;
+}
+
+JNIEXPORT jfloat JNICALL
+Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeFxMeterR(
+        JNIEnv* /*env*/, jobject /*thiz*/)
+{
+    float v = 0.0f;
+    withEngineVoid ([&] (AutoMixAudioEngine& engine) { v = engine.meterPeakR(); });
+    return (jfloat) v;
+}
+
+JNIEXPORT void JNICALL
 Java_com_liquidmusicglass_engine_automix_AutoMixNativeEngine_nativeFxSetCompressor(
         JNIEnv* /*env*/, jobject /*thiz*/, jboolean on,
         jfloat threshDb, jfloat ratio, jfloat attackMs, jfloat releaseMs)

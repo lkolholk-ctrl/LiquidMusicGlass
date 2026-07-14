@@ -170,6 +170,9 @@ public:
     void setLimiterFx       (bool on, float threshDb, float releaseMs);
     void setReverbFx        (bool on, float roomSize, float damping, float wet);
     void setSaturationFx    (bool on, float drive);
+    void  setMeterEnabled   (bool on);
+    float meterPeakL();
+    float meterPeakR();
 
     // juce::AudioIODeviceCallback
     void audioDeviceAboutToStart (juce::AudioIODevice* device) override;
