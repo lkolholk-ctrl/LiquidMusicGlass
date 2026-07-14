@@ -13,6 +13,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -98,9 +99,14 @@ fun LiquidSlider(
             )
         }
 
-        // Внешние изменения — ТОЛЬКО когда НЕ drag
+        // Внешние изменения — ТОЛЬКО когда НЕ drag. value оборачиваем в
+        // rememberUpdatedState: долгоживущий LaunchedEffect иначе держит СТАРУЮ
+        // лямбду (value == { gain } захватывает Float-параметр EqBandRow) и не
+        // видит новых значений (пресеты/профили) → полоски стояли, менялись лишь
+        // цифры. Теперь snapshotFlow читает свежую лямбду каждый кадр.
+        val latestValue = rememberUpdatedState(value)
         LaunchedEffect(dampedDragAnimation) {
-            snapshotFlow { value() }
+            snapshotFlow { latestValue.value() }
                 .collectLatest { v ->
                     if (!isDragging && dampedDragAnimation.targetValue != v) {
                         dampedDragAnimation.updateValue(v)
