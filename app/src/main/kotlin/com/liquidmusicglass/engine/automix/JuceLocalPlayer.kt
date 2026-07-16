@@ -108,11 +108,13 @@ class JuceLocalPlayer(
     private var lastXRuns = -1
 
     // Адаптация буфера: если за окно проверки прилетело ≥ XRUN_ESCALATE_DELTA
-    // underrun'ов — просим движок расширить буфер (6×→8×burst). Не чаще
+    // underrun'ов — просим движок расширить буфер (8×→12×→16×burst). Не чаще
     // MAX_BUFFER_ESCALATIONS раз за сессию плеера; сам вызов — на loadHandler
     // (внутри реопен устройства, main это делать нельзя).
-    private val XRUN_ESCALATE_DELTA = 3
-    private val MAX_BUFFER_ESCALATIONS = 1
+    // Порог 2 и две ступени (было 3 и одна): одна эскалация за сессию не
+    // спасала от заиканий под длительной системной нагрузкой (MagicOS).
+    private val XRUN_ESCALATE_DELTA = 2
+    private val MAX_BUFFER_ESCALATIONS = 2
     private var bufferEscalations = 0
 
     // Синхронизация буфера движка с Battery Saver: тикер замечает смену режима

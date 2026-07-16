@@ -295,10 +295,11 @@ private:
     std::atomic<bool> routeIsBluetooth { false };
     std::atomic<bool> routeEverApplied { false };
 
-    // Множитель burst-размера для встроенного/проводного маршрута. Стартует с 6
-    // (запас против CPU-сторма системного UI: шторка/переключения); телеметрия
-    // xrun'ов может адаптивно поднять до 8 (escalateBufferForUnderruns).
-    std::atomic<int> bufferBurstMultiplier { 6 };
+    // Множитель burst-размера для встроенного/проводного маршрута. Стартует с 8
+    // (запас против CPU-сторма системного UI: шторка/переключения; 6 оказалось
+    // мало — MagicOS микро-фризит процесс при использовании телефона); телеметрия
+    // xrun'ов может адаптивно поднять до 16 (escalateBufferForUnderruns).
+    std::atomic<int> bufferBurstMultiplier { 8 };
     // Battery Saver: на время режима буфер держится на максимуме (8×burst).
     std::atomic<bool> powerSaveBuffer { false };
 

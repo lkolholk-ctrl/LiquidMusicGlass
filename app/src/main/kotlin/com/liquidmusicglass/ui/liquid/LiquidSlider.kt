@@ -114,11 +114,16 @@ fun LiquidSlider(
                 }
         }
 
-        // Throttled системная громкость — раз в ~80ms, не на каждый кадр
-        LaunchedEffect(dampedDragAnimation) {
+        // Throttled системная громкость — раз в ~80ms, но ТОЛЬКО пока идёт drag.
+        // Раньше цикл жил вечно в каждом слайдере (десятки инстансов по всему
+        // приложению = постоянные пробуждения main даже в простое → лишний фон
+        // CPU, на тонком аудио-дедлайне это заикания). Теперь: drag начался →
+        // цикл поднялся, палец отпущен → LaunchedEffect отменён, тиков нет.
+        LaunchedEffect(isDragging) {
+            if (!isDragging) return@LaunchedEffect
             while (true) {
                 kotlinx.coroutines.delay(80L)
-                if (isDragging && didDrag) {
+                if (didDrag) {
                     onValueChange(dampedDragAnimation.targetValue)
                 }
             }

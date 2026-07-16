@@ -261,7 +261,9 @@ void AutoMixAudioEngine::applyBufferForRouteUnlocked (bool isBluetooth, bool for
             // BT — высоколатентный беспроводной маршрут. Маленький буфер уводит на
             // fast-path, который BT-микшер не тянет → underrun/заикания. Берём
             // крупный буфер: Oboe уходит на обычный микшер, звук стабилен.
-            target = juce::jmax (burst > 0 ? burst * 8 : 4096, 3840);
+            // 10× (было 8×): заикания ловились и на BT — запас против
+            // микро-фризов процесса; лишняя латентность на BT не ощущается.
+            target = juce::jmax (burst > 0 ? burst * 10 : 5120, 4800);
         }
         else
         {
@@ -270,12 +272,12 @@ void AutoMixAudioEngine::applyBufferForRouteUnlocked (bool isBluetooth, bool for
             // MediaCodec + FX: при шторке/переключении приложений read-ahead и mixer
             // получают короткий CPU stall, и fast-path уходит в underrun. Для музыки
             // 30-40 мс системной задержки не критичны, зато Oboe перестаёт щёлкать.
-            // Множитель адаптивный: базово 6×burst, телеметрия xrun'ов может
-            // поднять до 8× (escalateBufferForUnderruns); в энергосбережении —
-            // сразу максимум (система тротлит CPU жёстче обычного).
+            // Множитель адаптивный: базово 8×burst, телеметрия xrun'ов может
+            // поднять до 16× (escalateBufferForUnderruns); в энергосбережении —
+            // сразу крупный (система тротлит CPU жёстче обычного).
             int mult = bufferBurstMultiplier.load();
             if (powerSaveBuffer.load())
-                mult = juce::jmax (mult, 8);
+                mult = juce::jmax (mult, 12);
             target = (burst > 0) ? juce::jmax (burst * mult, 1536)
                                  : (sizes.isEmpty() ? 1536 : sizes.getFirst());
         }
@@ -820,12 +822,13 @@ void AutoMixAudioEngine::setPowerSaveMode (bool on)
 
 void AutoMixAudioEngine::escalateBufferForUnderruns()
 {
-    // Кап 8×burst: дальше расти бессмысленно — латентность заметна, а причина
-    // уже точно не в размере буфера.
+    // Кап 16×burst (~80мс при burst 5мс): для музыки такая латентность не
+    // слышна, зато переживает микро-фризы процесса от системы (MagicOS).
+    // Шаг 4: 8 → 12 → 16.
     int cur = bufferBurstMultiplier.load();
-    if (cur >= 8)
+    if (cur >= 16)
         return;
-    bufferBurstMultiplier.store (cur + 2);
+    bufferBurstMultiplier.store (cur + 4);
     // BT-маршрут и так на крупном буфере — эскалация касается динамика/провода.
     if (! routeIsBluetooth.load())
         applyBufferForRoute (false, /*forceReopen=*/true);
