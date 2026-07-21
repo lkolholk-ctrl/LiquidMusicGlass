@@ -529,6 +529,22 @@ object IcmAuthRepository {
                 val isPremium = json.optBoolean("is_premium", false)
                 val expiresAt = json.optLong("premium_expires_at", 0L)
                 val plan = json.optString("plan", "").takeIf { it.isNotBlank() }
+                // Регионы подписки (US/NZ) — брокер пробрасывает их из ICM;
+                // без них профиль показывал ложный «Global (WW)».
+                val regions = buildList {
+                    val arr = json.optJSONArray("regions")
+                    if (arr != null) for (i in 0 until arr.length()) {
+                        val r = arr.optJSONObject(i) ?: continue
+                        val code = r.optString("code", "")
+                        if (code.isNotBlank()) add(
+                            IcmSubscriptionRegion(
+                                code = code,
+                                name = r.optString("name", code.uppercase()),
+                                expiresAt = r.optLong("expires_at", 0L).takeIf { it > 0L }
+                            )
+                        )
+                    }
+                }
 
                 setPremium(isPremium, expiresAt)
 
@@ -542,7 +558,8 @@ object IcmAuthRepository {
                     active = isPremium,
                     expiresAt = expiresAt.takeIf { it > 0L },
                     daysLeft = daysLeft,
-                    planType = plan
+                    planType = plan,
+                    regions = regions
                 )
                 _subscription.value = sub
                 Result.success(sub)
