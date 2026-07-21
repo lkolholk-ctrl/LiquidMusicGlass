@@ -230,6 +230,7 @@ object IcmAuthRepository {
                 .url("${IcmApi.SERVER_BASE}$endpoint")
                 .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
                 .header("Content-Type", "application/json")
+                .applyTelemetryHeaders()
                 .build()
             try {
                 httpClient.newCall(request).execute().use { response ->
@@ -518,6 +519,7 @@ object IcmAuthRepository {
             val request = Request.Builder()
                 .url("${IcmApi.SERVER_BASE}/me/subscription")
                 .header("X-Partner-User-Id", userId)
+                .applyTelemetryHeaders()
                 .build()
             httpClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
@@ -616,6 +618,15 @@ object IcmAuthRepository {
     // getPartnerKey()/setPartnerKey() УДАЛЕНЫ: партнёрский ключ ICM больше не
     // хранится на устройстве ни в каком виде (prefs/JNI .so/BuildConfig) —
     // его подставляет наш сервер-брокер (см. IcmApi.SERVER_BASE).
+
+    /** Версия/девайс для админки брокера (разбивка версий, учёт устройств). */
+    private fun Request.Builder.applyTelemetryHeaders(): Request.Builder {
+        com.liquidmusicglass.logging.ClientTelemetry.appVersion
+            .takeIf { it.isNotBlank() }?.let { header("X-App-Version", it) }
+        com.liquidmusicglass.logging.ClientTelemetry.deviceId
+            .takeIf { it.isNotBlank() }?.let { header("X-Device-Id", it) }
+        return this
+    }
 
     /**
      * Get effective quality for a track based on its catalog type (Apple vs VK)

@@ -129,6 +129,9 @@ class App : Application(), ImageLoaderFactory {
         super.onCreate()
         CrashHandler.install(this) // Java крэши (синхронно и ПЕРВЫМ — Fishnet ниже
         // подшивается к уже установленному дефолтному хендлеру)
+        // Телеметрия для админки брокера: device-id/версия в заголовках +
+        // догрузка крэшей прошлой сессии (fire-and-forget, в фоне ниже).
+        com.liquidmusicglass.logging.ClientTelemetry.init(this)
         // Чистим устаревшие ui_freeze-логи из crash_logs/ ДО того, как MainActivity
         // проверит hasCrashLog: раньше отчёт о фризе (в т.ч. ложный) показывался
         // экраном краша при первом открытии. Синхронно и рано — дешёвый file-delete.
@@ -234,6 +237,9 @@ class App : Application(), ImageLoaderFactory {
             // больше нет (его подставляет сервер-брокер, см. IcmApi.SERVER_BASE).
             IcmRepository.init(IcmAuthRepository.ensurePartnerUserId())
             IcmAuthRepository.getSessionToken()?.let { IcmRepository.setSessionToken(it) }
+
+            // Крэши прошлой сессии → в админку брокера (best-effort).
+            runCatching { com.liquidmusicglass.logging.ClientTelemetry.uploadPendingCrashes(this@App) }
 
             // Дослать сигналы волны, не доставленные в прошлой сессии,
             // и подтянуть серверные лайки в локальное избранное (синк

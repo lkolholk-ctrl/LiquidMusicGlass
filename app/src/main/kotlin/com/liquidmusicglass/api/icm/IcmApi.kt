@@ -347,6 +347,13 @@ class IcmApi private constructor() {
             builder.header("X-Partner-User-Id", it)
         }
 
+        // Для админки брокера: разбивка по версиям и учёт девайсов
+        // (сервер группирует по X-Device-Id; без него — по User-Agent).
+        com.liquidmusicglass.logging.ClientTelemetry.appVersion
+            .takeIf { it.isNotBlank() }?.let { builder.header("X-App-Version", it) }
+        com.liquidmusicglass.logging.ClientTelemetry.deviceId
+            .takeIf { it.isNotBlank() }?.let { builder.header("X-Device-Id", it) }
+
         if (body != null) {
             val requestBody = body.toRequestBody(mediaTypeJson)
             builder.method(method, requestBody)
