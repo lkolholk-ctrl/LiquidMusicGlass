@@ -416,6 +416,22 @@ class FavoriteTrackDatabase private constructor(context: Context) : SQLiteOpenHe
         reloadDownloads()
     }
 
+    /**
+     * Обновить путь файла трека (миграция приватная папка → публичные
+     * Загрузки). [reload] = false для батча (миграция сотен треков — не
+     * перечитывать таблицу на каждый), затем один [refreshDownloads].
+     */
+    fun updateDownloadedLocalPath(trackId: String, localPath: String, reload: Boolean = true) {
+        val values = android.content.ContentValues().apply {
+            put("localPath", localPath)
+        }
+        writableDatabase.update("downloaded_tracks", values, "trackId = ?", arrayOf(trackId))
+        if (reload) reloadDownloads()
+    }
+
+    /** Публичная перечитка списка загрузок (для батч-операций). */
+    fun refreshDownloads() = reloadDownloads()
+
     fun clearAllDownloads() {
         writableDatabase.execSQL("DELETE FROM downloaded_tracks")
         reloadDownloads()

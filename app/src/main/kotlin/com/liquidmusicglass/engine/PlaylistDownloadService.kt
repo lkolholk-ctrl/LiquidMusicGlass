@@ -236,7 +236,8 @@ class PlaylistDownloadService : Service() {
                                 // (O(N²) на больших плейлистах — секунды лишнего I/O; P2, аудит).
                                 val existing = db.getDownloadedTrack(trackId)
                                 if (existing != null &&
-                                    File(existing.localPath).exists() &&
+                                    com.liquidmusicglass.data.local.PublicDownloads
+                                        .exists(applicationContext, existing.localPath) &&
                                     existing.localCoverPath != null &&
                                     File(existing.localCoverPath).exists()
                                 ) {
@@ -411,6 +412,19 @@ class PlaylistDownloadService : Service() {
             //  4. Persist to database with full metadata
             // ═══════════════════════════════════════════════════════════════
             if (audioSuccess) {
+                // Публичные Загрузки (MediaStore); фолбэк — приватный файл.
+                // Экспорт ПОСЛЕ инъекции ID3 — в проводник уезжает уже
+                // протегированный файл.
+                val publicUri = com.liquidmusicglass.data.local.PublicDownloads.exportAudio(
+                    applicationContext, targetFile,
+                    com.liquidmusicglass.data.local.PublicDownloads
+                        .displayName(meta?.artist, meta?.title ?: trackId).ifBlank { trackId },
+                    ext,
+                )
+                val storedPath = if (publicUri != null) {
+                    targetFile.delete()
+                    publicUri
+                } else targetFile.absolutePath
                 val db = FavoriteTrackDatabase.getInstance(this@PlaylistDownloadService)
                 db.insertDownloaded(
                     DownloadedTrackEntity(
@@ -420,7 +434,7 @@ class PlaylistDownloadService : Service() {
                         albumTitle = null,
                         durationMs = meta?.durationMs ?: 0L,
                         imageUrl = meta?.coverUrl,
-                        localPath = targetFile.absolutePath,
+                        localPath = storedPath,
                         localCoverPath = if (coverSuccess) coverFile.absolutePath else null,
                         quality = quality,
                         downloadedAt = System.currentTimeMillis()

@@ -71,8 +71,10 @@ object YandexDownloadManager {
     }
 
     /**
-     * Скачать [track] через текущий токен [YandexAuthRepository] →
-     * `filesDir/downloads/ym_….mp3|.m4a` + запись в downloaded_tracks.
+     * Скачать [track] через текущий токен [YandexAuthRepository] → публичные
+     * Загрузки (`Download/LiquidMusicGlass/Артист - Название.…`, MediaStore)
+     * + запись в downloaded_tracks (localPath = content://-uri; при недоступном
+     * MediaStore — приватный `filesDir/downloads/` как фолбэк).
      */
     fun download(
         context: Context,
@@ -149,16 +151,32 @@ object YandexDownloadManager {
             "${info.bitrateInKbps}kbps"
         }
 
-        val audioFile = File(dir, "$sid$ext")
-        try {
-            if (audioFile.exists()) audioFile.delete()
-            if (!tmp.renameTo(audioFile)) {
-                tmp.copyTo(audioFile, overwrite = true)
-                tmp.delete()
-            }
-        } catch (_: Exception) {
+        // Публичные Загрузки (Download/LiquidMusicGlass, видно в проводнике) —
+        // основной путь. MediaStore не дался → приватный файл как раньше
+        // (лучше приватная копия, чем потерянная загрузка).
+        val publicUri = com.liquidmusicglass.data.local.PublicDownloads.exportAudio(
+            context, tmp,
+            com.liquidmusicglass.data.local.PublicDownloads
+                .displayName(track.artistsLine, track.title).ifBlank { sid },
+            ext,
+        )
+        val storedPath: String
+        if (publicUri != null) {
+            storedPath = publicUri
             tmp.delete()
-            return Outcome.FAILED
+        } else {
+            val audioFile = File(dir, "$sid$ext")
+            try {
+                if (audioFile.exists()) audioFile.delete()
+                if (!tmp.renameTo(audioFile)) {
+                    tmp.copyTo(audioFile, overwrite = true)
+                    tmp.delete()
+                }
+            } catch (_: Exception) {
+                tmp.delete()
+                return Outcome.FAILED
+            }
+            storedPath = audioFile.absolutePath
         }
 
         setProgress(sid, 0.95f)
@@ -185,7 +203,7 @@ object YandexDownloadManager {
                 albumTitle = track.albumTitle,
                 durationMs = track.durationMs,
                 imageUrl = coverUrl,
-                localPath = audioFile.absolutePath,
+                localPath = storedPath,
                 localCoverPath = localCover,
                 quality = "yandex-$quality",
             )

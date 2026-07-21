@@ -68,6 +68,18 @@ object AudioDownloadManager {
             if (success) {
                 val downloadsDir = File(context.filesDir, "downloads")
                 val finalFile = File(downloadsDir, "$trackId$ext")
+                // Публичные Загрузки (MediaStore) — основной путь; при неудаче
+                // остаёмся на приватном файле (см. PublicDownloads).
+                val publicUri = com.liquidmusicglass.data.local.PublicDownloads.exportAudio(
+                    context, finalFile,
+                    com.liquidmusicglass.data.local.PublicDownloads
+                        .displayName(track.artist, track.title).ifBlank { trackId },
+                    ext,
+                )
+                val storedPath = if (publicUri != null) {
+                    finalFile.delete()
+                    publicUri
+                } else finalFile.absolutePath
                 db.insertDownloaded(
                     DownloadedTrackEntity(
                         trackId = trackId,
@@ -76,7 +88,7 @@ object AudioDownloadManager {
                         albumTitle = track.albumName,
                         durationMs = track.durationMs,
                         imageUrl = track.coverUrl,
-                        localPath = finalFile.absolutePath,
+                        localPath = storedPath,
                         localCoverPath = null, // Single-track download doesn't cache cover locally yet
                         quality = quality
                     )
@@ -98,7 +110,12 @@ object AudioDownloadManager {
         val entity = db.getDownloadedTrack(trackId)
         val ext = if (entity?.quality?.uppercase() == "ALAC") ".m4a" else ".mp3"
 
-        // Delete physical audio file
+        // Delete physical audio file: localPath понимает оба вида пути
+        // (content:// из публичных Загрузок и легаси-файл в приватной папке).
+        entity?.localPath?.let {
+            com.liquidmusicglass.data.local.PublicDownloads.delete(context, it)
+        }
+        // Легаси-подстраховка: файл по старой схеме имён в приватной папке.
         val audioFile = File(context.filesDir, "downloads/$trackId$ext")
         if (audioFile.exists()) {
             audioFile.delete()
@@ -124,27 +141,25 @@ object AudioDownloadManager {
     suspend fun clearAllDownloads(context: Context) = withContext(Dispatchers.IO) {
         val db = FavoriteTrackDatabase.getInstance(context)
 
-        // 1. Delete all physical files in the public Downloads/LiquidMusicGlass directory
-        val publicDir = File(
-            android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
-            "LiquidMusicGlass"
-        )
-        if (publicDir.exists()) {
-            publicDir.listFiles()?.forEach { file ->
-                if (file.isDirectory) {
-                    // Recursively delete subdirectories (e.g., .covers/)
-                    file.listFiles()?.forEach { it.delete() }
-                }
-                file.delete()
+        // 1. Delete every tracked file: content:// (публичные Загрузки, через
+        // MediaStore — прямой File-доступ туда на 10+ запрещён) и легаси-файлы.
+        db.getDownloadedTracks().forEach { entity ->
+            com.liquidmusicglass.data.local.PublicDownloads.delete(context, entity.localPath)
+            entity.localCoverPath?.let { cover ->
+                runCatching { File(cover).takeIf { it.exists() }?.delete() }
             }
-            // Delete the directory itself if empty
-            publicDir.delete()
         }
 
         // 2. Delete all physical files in the private app downloads directory
         val privateDir = File(context.filesDir, "downloads")
         if (privateDir.exists()) {
-            privateDir.listFiles()?.forEach { it.delete() }
+            privateDir.listFiles()?.forEach { file ->
+                if (file.isDirectory) {
+                    // .covers/ и прочие подпапки
+                    file.listFiles()?.forEach { it.delete() }
+                }
+                file.delete()
+            }
         }
 
         // 3. Clear the database table

@@ -222,6 +222,11 @@ class App : Application(), ImageLoaderFactory {
             // Initialize local database (SQLite + initial load)
             LibraryRepository.getInstance(this@App)
 
+            // Одноразовый перенос скачанного из приватной папки в публичные
+            // Загрузки (Download/LiquidMusicGlass). Идемпотентно, в фоне,
+            // прогресс виден в библиотеке (DownloadsMigrator.progress).
+            com.liquidmusicglass.data.local.DownloadsMigrator.migrateIfNeeded(this@App)
+
             // Initialize home content cache
             HomeCacheManager.init(this@App)
 

@@ -174,7 +174,7 @@ fun LibraryScreen(
                 LaunchedEffect(downloadedTracks) {
                     downloadsSize = kotlinx.coroutines.withContext(Dispatchers.IO) {
                         val bytes = downloadedTracks.sumOf { entity ->
-                            runCatching { java.io.File(entity.localPath).length() }.getOrDefault(0L)
+                            com.liquidmusicglass.data.local.PublicDownloads.sizeBytes(context, entity.localPath)
                         }
                         when {
                             bytes <= 0L -> null
@@ -483,6 +483,23 @@ fun LibraryScreen(
                         }
                     )
 
+                    // Ненавязчивый прогресс одноразовой миграции скачанного в
+                    // публичные Загрузки (сотни файлов — видно, что идёт работа).
+                    val migration by com.liquidmusicglass.data.local.DownloadsMigrator.progress.collectAsState()
+                    migration?.let { (done, total) ->
+                        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp)) {
+                            Text(
+                                text = "Переношу загрузки в «Загрузки»… $done/$total",
+                                color = LiquidTheme.colors.textSecondary,
+                                fontSize = 12.sp
+                            )
+                            androidx.compose.material3.LinearProgressIndicator(
+                                progress = { if (total > 0) done.toFloat() / total else 0f },
+                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                            )
+                        }
+                    }
+
                     if (!isPremium && downloadedTracks.isEmpty()) {
                         PremiumDownloadsPromo(backdrop = backdrop)
                     } else if (downloadedTracks.isEmpty()) {
@@ -503,7 +520,8 @@ fun LibraryScreen(
                                                     title = entity.title,
                                                     artist = entity.artistName ?: "Unknown Artist",
                                                     albumName = entity.albumTitle ?: "",
-                                                    uri = Uri.fromFile(java.io.File(entity.localPath)),
+                                                    // content:// (публичные Загрузки) или легаси-файл
+                                                    uri = com.liquidmusicglass.data.local.PublicDownloads.toPlayableUri(entity.localPath),
                                                     durationMs = entity.durationMs,
                                                     albumId = entity.albumTitle?.hashCode()?.toLong() ?: -1L,
                                                     coverUrl = entity.localCoverPath ?: entity.imageUrl
