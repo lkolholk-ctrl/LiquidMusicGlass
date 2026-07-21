@@ -118,8 +118,11 @@ class IcmApi private constructor() {
         /** Наш серверный брокер (ключ ICM, сессии, premium, конфиг). */
         const val SERVER_BASE = "https://api.gsgit.org/lmg"
 
-        /** Реверс-прокси партнёрки: относительные пути (/search, /track,
-         *  /wave/*, /me/*) НЕ меняются — меняется только база. */
+        // Реверс-прокси партнёрки: относительные пути (search, track, wave,
+        // me) НЕ меняются — меняется только база. ВАЖНО: в KDoc здесь нельзя
+        // писать глоб-пути вида «слэш-звёздочка» — Kotlin-комментарии
+        // ВЛОЖЕННЫЕ, такая последовательность открывает вложенный комментарий
+        // и молча съедает остаток файла (уже наступили).
         const val BASE_URL = "$SERVER_BASE/icm"
 
         @Volatile
@@ -700,8 +703,10 @@ class IcmApi private constructor() {
     suspend fun health(): Result<IcmHealthResponse> = execute("/health")
 
     /**
-     * Выпуск/рефреш session-токена — через НАШ сервер (s2s /session/issue с
-     * устройства больше не зовётся: партнёрский ключ живёт на брокере).
+     * Первичный минт session-токена — через НАШ сервер-брокер
+     * (POST <SERVER>/session/issue; s2s к партнёрке с устройства больше не
+     * зовётся — ключ живёт на брокере). Рефреш протухшего токена делает
+     * IcmAuthRepository через <SERVER>/session/refresh.
      */
     suspend fun issueSession(
         partnerUserId: String,
@@ -710,7 +715,7 @@ class IcmApi private constructor() {
         val body = json.encodeToString(
             IcmSessionRequest(partnerUserId = partnerUserId, hideExplicit = hideExplicit)
         )
-        return execute("$SERVER_BASE/session/refresh", method = "POST", body = body)
+        return execute("$SERVER_BASE/session/issue", method = "POST", body = body)
     }
 
     /**

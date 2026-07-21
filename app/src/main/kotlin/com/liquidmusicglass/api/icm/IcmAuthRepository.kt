@@ -198,55 +198,78 @@ object IcmAuthRepository {
     }
 
     /**
-     * Выпуск/рефреш session-токена — через НАШ сервер-брокер
-     * (POST <SERVER>/session/refresh). Партнёрского ключа на устройстве НЕТ:
-     * X-Partner-Key подставляет сервер. Заодно сервер владеет premium — если
-     * в ответе есть is_premium/premium_expires_at, кэшируем их локально.
+     * Выпуск/рефреш session-токена — через НАШ сервер-брокер. Партнёрского
+     * ключа на устройстве НЕТ: X-Partner-Key подставляет сервер.
+     *
+     * [initial] = true → POST <SERVER>/session/issue (первичный минт после
+     * Telegram-линка, с hide_explicit); false → POST <SERVER>/session/refresh
+     * (только partner_user_id). Сервер лимитит минт (20/мин issue, 30/мин
+     * refresh на IP) — на 429 одна пауза по Retry-After (кап 10с) и один
+     * повтор, в цикл не долбим. partner_user_id — bearer-секрет: только TLS,
+     * в логи не пишем.
+     *
+     * Сервер владеет premium — is_premium/premium_expires_at из ответа
+     * кэшируем локально.
      */
-    private fun issueSessionToken(
+    private suspend fun issueSessionToken(
         partnerUserId: String,
         // hide_explicit — флаг СЕССИИ (per-user настройка на сервере ICM):
-        // сервер фильтрует поиск/треки. Дефолт читает тумблер из настроек —
-        // так флаг уходит при ЛЮБОМ выпуске токена (логин, рестарт, 401-рефреш).
-        hideExplicit: Boolean = com.liquidmusicglass.engine.AppSettings.hideExplicit.value
+        // сервер фильтрует поиск/треки. Дефолт читает тумблер из настроек.
+        hideExplicit: Boolean = com.liquidmusicglass.engine.AppSettings.hideExplicit.value,
+        initial: Boolean = false
     ): Result<TokenData> {
+        val endpoint = if (initial) "/session/issue" else "/session/refresh"
         val jsonBody = JSONObject().apply {
             put("partner_user_id", partnerUserId)
-            put("hide_explicit", hideExplicit)
+            if (initial) put("hide_explicit", hideExplicit)
         }
 
-        val request = Request.Builder()
-            .url("${IcmApi.SERVER_BASE}/session/refresh")
-            .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
-            .header("Content-Type", "application/json")
-            .build()
+        var lastFailure: Exception? = null
+        repeat(2) { attempt ->
+            val request = Request.Builder()
+                .url("${IcmApi.SERVER_BASE}$endpoint")
+                .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
+                .header("Content-Type", "application/json")
+                .build()
+            try {
+                httpClient.newCall(request).execute().use { response ->
+                    if (response.code == 429 && attempt == 0) {
+                        // Rate-limit брокера: пауза по Retry-After (кап 10с) + 1 повтор.
+                        val waitSec = response.header("Retry-After")?.toLongOrNull()
+                            ?.coerceIn(1L, 10L) ?: 3L
+                        lastFailure = IOException("Session $endpoint rate-limited (429)")
+                        response.close()
+                        kotlinx.coroutines.delay(waitSec * 1000)
+                        return@repeat
+                    }
+                    if (!response.isSuccessful) {
+                        return Result.failure(IOException("Session $endpoint failed: ${response.code}"))
+                    }
 
-        return try {
-            httpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    return Result.failure(IOException("Session refresh failed: ${response.code}"))
+                    val body = response.body?.string() ?: return Result.failure(IOException("Empty response"))
+                    val json = JSONObject(body)
+
+                    val token = json.getString("partner_session_token")
+                    val expiresIn = json.getInt("expires_in")
+                    val expiresAt = System.currentTimeMillis() + expiresIn * 1000
+
+                    // Premium с сервера (источник истины — брокер, локально кэш).
+                    if (json.has("is_premium")) {
+                        setPremium(
+                            active = json.optBoolean("is_premium", false),
+                            expiresAt = json.optLong("premium_expires_at", 0L)
+                        )
+                    }
+
+                    return Result.success(TokenData(token, expiresAt))
                 }
-
-                val body = response.body?.string() ?: return Result.failure(IOException("Empty response"))
-                val json = JSONObject(body)
-
-                val token = json.getString("partner_session_token")
-                val expiresIn = json.getInt("expires_in")
-                val expiresAt = System.currentTimeMillis() + expiresIn * 1000
-
-                // Premium с сервера (источник истины — брокер, локально кэш).
-                if (json.has("is_premium")) {
-                    setPremium(
-                        active = json.optBoolean("is_premium", false),
-                        expiresAt = json.optLong("premium_expires_at", 0L)
-                    )
-                }
-
-                Result.success(TokenData(token, expiresAt))
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                return Result.failure(e)
             }
-        } catch (e: Exception) {
-            Result.failure(e)
         }
+        return Result.failure(lastFailure ?: IOException("Session $endpoint failed"))
     }
 
     /**
@@ -378,7 +401,8 @@ object IcmAuthRepository {
         hideExplicit: Boolean = com.liquidmusicglass.engine.AppSettings.hideExplicit.value
     ): Result<String> = withContext(Dispatchers.IO) {
         val userId = _partnerUserId.value ?: return@withContext Result.failure(IOException("No partner_user_id set"))
-        val tokenResult = issueSessionToken(userId, hideExplicit)
+        // Первичный минт после Telegram-линка → /session/issue (с hide_explicit).
+        val tokenResult = issueSessionToken(userId, hideExplicit, initial = true)
 
         if (tokenResult.isSuccess) {
             val tokenData = tokenResult.getOrThrow()
