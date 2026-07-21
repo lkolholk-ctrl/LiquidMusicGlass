@@ -66,11 +66,10 @@ object IcmRepository {
         set(value) { api.streamQuality = value }
 
     /**
-     * Initialize with API key.
-     * Get key: https://byicloud.online/partners
+     * Инициализация. Партнёрского ключа на устройстве больше нет — его
+     * подставляет наш сервер-брокер; здесь только partner_user_id + сброс.
      */
-    fun init(apiKey: String, partnerUserId: String? = null) {
-        api.apiKey = apiKey
+    fun init(partnerUserId: String? = null) {
         api.sessionToken = null
         api.partnerUserId = partnerUserId
         _isInitialized.value = true
@@ -82,7 +81,6 @@ object IcmRepository {
      * Initialize with session token (for client requests).
      */
     fun initWithToken(sessionToken: String, partnerUserId: String? = null) {
-        api.apiKey = null
         api.sessionToken = sessionToken
         api.partnerUserId = partnerUserId
         _isInitialized.value = true
@@ -113,7 +111,6 @@ object IcmRepository {
      * Reset initialization.
      */
     fun reset() {
-        api.apiKey = null
         api.sessionToken = null
         api.partnerUserId = null
         _isInitialized.value = false

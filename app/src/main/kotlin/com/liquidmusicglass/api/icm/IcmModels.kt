@@ -109,8 +109,14 @@ data class IcmSessionRequest(
 data class IcmSessionResponse(
     @SerialName("partner_session_token") val partnerSessionToken: String,
     @SerialName("expires_in") val expiresIn: Int,
-    @SerialName("partner_user_id") val partnerUserId: String,
-    val scopes: List<String>
+    // Дефолты: ответ теперь минтит НАШ сервер-брокер (/session/refresh) —
+    // не падаем парсингом, если какое-то поле он не прислал. Брокер заодно
+    // владеет premium — поля ниже кэшируются локально при наличии.
+    @SerialName("partner_user_id") val partnerUserId: String = "",
+    val scopes: List<String> = emptyList(),
+    @SerialName("is_premium") val isPremium: Boolean? = null,
+    @SerialName("premium_expires_at") val premiumExpiresAt: Long? = null,
+    val plan: String? = null
 )
 
 // ─── Search ───

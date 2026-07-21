@@ -16,7 +16,8 @@ import java.util.concurrent.TimeUnit
  * We first try to request JSON, and fall back to HTML parsing if needed.
  */
 class IcmSearchApi(
-    private val baseUrl: String = "https://byicloud.online/api/partner",
+    // Дефолт — наш сервер-брокер; напрямую в byicloud из APK не ходим.
+    private val baseUrl: String = com.liquidmusicglass.api.icm.IcmApi.BASE_URL,
     private val authProvider: () -> Pair<String?, String?>  // (partnerKey, sessionToken)
 ) {
 
