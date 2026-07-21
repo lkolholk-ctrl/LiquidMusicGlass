@@ -223,7 +223,9 @@ fun WaveOnboardingScreen(
     var isSaving by remember { mutableStateOf(false) }
 
     val visibleArtists = if (searchQuery.trim().isEmpty()) popularArtists else searchResults
-    val hasIcmKey = remember { com.liquidmusicglass.api.icm.IcmAuthRepository.getPartnerKey().isNotBlank() }
+    // Ключ живёт на сервере-брокере — на устройстве его нет и проверять нечего;
+    // заглушка «нет ключа» оставлена мёртвой веткой на случай возврата гейта.
+    val hasIcmKey = true
 
     Dialog(
         onDismissRequest = onDismiss,

@@ -230,20 +230,17 @@ class App : Application(), ImageLoaderFactory {
             // Initialize home content cache
             HomeCacheManager.init(this@App)
 
-            // Initialize ICM Music API if key is saved
-            val prefs = getSharedPreferences("icm", MODE_PRIVATE)
-            val savedKey = prefs.getString("api_key", null)
-            if (!savedKey.isNullOrBlank() && savedKey.startsWith("pk_")) {
-                IcmRepository.init(savedKey, IcmAuthRepository.ensurePartnerUserId())
-                IcmAuthRepository.getSessionToken()?.let { IcmRepository.setSessionToken(it) }
+            // Initialize ICM Music API — безусловно: ключа на устройстве
+            // больше нет (его подставляет сервер-брокер, см. IcmApi.SERVER_BASE).
+            IcmRepository.init(IcmAuthRepository.ensurePartnerUserId())
+            IcmAuthRepository.getSessionToken()?.let { IcmRepository.setSessionToken(it) }
 
-                // Дослать сигналы волны, не доставленные в прошлой сессии,
-                // и подтянуть серверные лайки в локальное избранное (синк
-                // раньше жил только на открытии вкладки Library).
-                runCatching { com.liquidmusicglass.api.icm.WaveSignalQueue.drain() }
-                if (IcmAuthRepository.isLoggedIn.value) {
-                    runCatching { LibraryRepository.getInstance(this@App).syncWithCloud() }
-                }
+            // Дослать сигналы волны, не доставленные в прошлой сессии,
+            // и подтянуть серверные лайки в локальное избранное (синк
+            // раньше жил только на открытии вкладки Library).
+            runCatching { com.liquidmusicglass.api.icm.WaveSignalQueue.drain() }
+            if (IcmAuthRepository.isLoggedIn.value) {
+                runCatching { LibraryRepository.getInstance(this@App).syncWithCloud() }
             }
         }
     }

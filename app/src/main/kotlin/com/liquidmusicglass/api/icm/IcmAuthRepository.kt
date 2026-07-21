@@ -12,7 +12,6 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.IOException
-import java.security.MessageDigest
 
 /**
  * ICM Auth Repository — handles user authentication, session tokens, and subscription state.
@@ -180,13 +179,12 @@ object IcmAuthRepository {
         reissueMutex.lock()
         try {
             // Пока ждали лок, параллельный вызов мог уже перевыпустить токен —
-            // отдаём свежий без второго похода в /session/issue.
+            // отдаём свежий без второго похода на сервер.
             val current = prefs?.getString(KEY_TOKEN, null)
             if (!current.isNullOrBlank() && current != before) return@withContext current
 
-            val key = getPartnerKey().takeIf { it.isNotBlank() } ?: return@withContext null
             val userId = _partnerUserId.value ?: return@withContext null
-            val tokenData = issueSessionToken(userId, key).getOrNull() ?: return@withContext null
+            val tokenData = issueSessionToken(userId).getOrNull() ?: return@withContext null
             prefs?.edit()?.apply {
                 putString(KEY_TOKEN, tokenData.token)
                 putLong(KEY_TOKEN_EXPIRES, tokenData.expiresAt)
@@ -200,127 +198,78 @@ object IcmAuthRepository {
     }
 
     /**
-     * Generate partner_user_id from email using SHA-256 hash.
-     * This creates a stable, anonymous identifier.
+     * Выпуск/рефреш session-токена — через НАШ сервер-брокер. Партнёрского
+     * ключа на устройстве НЕТ: X-Partner-Key подставляет сервер.
+     *
+     * [initial] = true → POST <SERVER>/session/issue (первичный минт после
+     * Telegram-линка, с hide_explicit); false → POST <SERVER>/session/refresh
+     * (только partner_user_id). Сервер лимитит минт (20/мин issue, 30/мин
+     * refresh на IP) — на 429 одна пауза по Retry-After (кап 10с) и один
+     * повтор, в цикл не долбим. partner_user_id — bearer-секрет: только TLS,
+     * в логи не пишем.
+     *
+     * Сервер владеет premium — is_premium/premium_expires_at из ответа
+     * кэшируем локально.
      */
-    fun generateUserIdFromEmail(email: String): String {
-        val normalized = email.trim().lowercase()
-        val hash = MessageDigest.getInstance("SHA-256")
-            .digest(normalized.toByteArray())
-            .joinToString("") { "%02x".format(it) }
-        return "email_${hash.take(32)}"
-    }
-
-    /**
-     * Generate partner_user_id from Telegram ID.
-     */
-    fun generateUserIdFromTelegram(telegramId: Long): String {
-        return "tg_${telegramId}"
-    }
-
-    /**
-     * Login with email. Issues session token via ICM API.
-     */
-    suspend fun loginWithEmail(email: String, apiKey: String): Result<String> = withContext(Dispatchers.IO) {
-        try {
-            val userId = generateUserIdFromEmail(email)
-            val tokenResult = issueSessionToken(userId, apiKey)
-
-            if (tokenResult.isSuccess) {
-                val tokenData = tokenResult.getOrThrow()
-                prefs?.edit()?.apply {
-                    putString(KEY_EMAIL, email)
-                    putString(KEY_USER_ID, userId)
-                    putString(KEY_TOKEN, tokenData.token)
-                    putLong(KEY_TOKEN_EXPIRES, tokenData.expiresAt)
-                    putString(KEY_AUTH_METHOD, "email")
-                    apply()
-                }
-                _userEmail.value = email
-                _partnerUserId.value = userId
-                _isLoggedIn.value = true
-                syncToIcmApi()
-                Result.success(tokenData.token)
-            } else {
-                Result.failure(tokenResult.exceptionOrNull() ?: IOException("Unknown error"))
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    /**
-     * Login with Telegram ID. Issues session token via ICM API.
-     */
-    suspend fun loginWithTelegram(telegramId: Long, apiKey: String): Result<String> = withContext(Dispatchers.IO) {
-        try {
-            val userId = generateUserIdFromTelegram(telegramId)
-            val tokenResult = issueSessionToken(userId, apiKey)
-
-            if (tokenResult.isSuccess) {
-                val tokenData = tokenResult.getOrThrow()
-                prefs?.edit()?.apply {
-                    putString(KEY_TELEGRAM_ID, telegramId.toString())
-                    putString(KEY_USER_ID, userId)
-                    putString(KEY_TOKEN, tokenData.token)
-                    putLong(KEY_TOKEN_EXPIRES, tokenData.expiresAt)
-                    putString(KEY_AUTH_METHOD, "telegram")
-                    apply()
-                }
-                _telegramId.value = telegramId.toString()
-                _partnerUserId.value = userId
-                _isLoggedIn.value = true
-                syncToIcmApi()
-                Result.success(tokenData.token)
-            } else {
-                Result.failure(tokenResult.exceptionOrNull() ?: IOException("Unknown error"))
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    /**
-     * Issue session token from ICM API.
-     */
-    private fun issueSessionToken(
+    private suspend fun issueSessionToken(
         partnerUserId: String,
-        apiKey: String,
         // hide_explicit — флаг СЕССИИ (per-user настройка на сервере ICM):
-        // сервер фильтрует поиск/треки. Дефолт читает тумблер из настроек —
-        // так флаг уходит при ЛЮБОМ выпуске токена (логин, рестарт, 401-рефреш).
-        hideExplicit: Boolean = com.liquidmusicglass.engine.AppSettings.hideExplicit.value
+        // сервер фильтрует поиск/треки. Дефолт читает тумблер из настроек.
+        hideExplicit: Boolean = com.liquidmusicglass.engine.AppSettings.hideExplicit.value,
+        initial: Boolean = false
     ): Result<TokenData> {
+        val endpoint = if (initial) "/session/issue" else "/session/refresh"
         val jsonBody = JSONObject().apply {
             put("partner_user_id", partnerUserId)
-            put("hide_explicit", hideExplicit)
+            if (initial) put("hide_explicit", hideExplicit)
         }
 
-        val request = Request.Builder()
-            .url("https://byicloud.online/api/partner/session/issue")
-            .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
-            .header("X-Partner-Key", apiKey)
-            .header("Content-Type", "application/json")
-            .build()
+        var lastFailure: Exception? = null
+        repeat(2) { attempt ->
+            val request = Request.Builder()
+                .url("${IcmApi.SERVER_BASE}$endpoint")
+                .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
+                .header("Content-Type", "application/json")
+                .build()
+            try {
+                httpClient.newCall(request).execute().use { response ->
+                    if (response.code == 429 && attempt == 0) {
+                        // Rate-limit брокера: пауза по Retry-After (кап 10с) + 1 повтор.
+                        val waitSec = response.header("Retry-After")?.toLongOrNull()
+                            ?.coerceIn(1L, 10L) ?: 3L
+                        lastFailure = IOException("Session $endpoint rate-limited (429)")
+                        response.close()
+                        kotlinx.coroutines.delay(waitSec * 1000)
+                        return@repeat
+                    }
+                    if (!response.isSuccessful) {
+                        return Result.failure(IOException("Session $endpoint failed: ${response.code}"))
+                    }
 
-        return try {
-            httpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    return Result.failure(IOException("Session issue failed: ${response.code}"))
+                    val body = response.body?.string() ?: return Result.failure(IOException("Empty response"))
+                    val json = JSONObject(body)
+
+                    val token = json.getString("partner_session_token")
+                    val expiresIn = json.getInt("expires_in")
+                    val expiresAt = System.currentTimeMillis() + expiresIn * 1000
+
+                    // Premium с сервера (источник истины — брокер, локально кэш).
+                    if (json.has("is_premium")) {
+                        setPremium(
+                            active = json.optBoolean("is_premium", false),
+                            expiresAt = json.optLong("premium_expires_at", 0L)
+                        )
+                    }
+
+                    return Result.success(TokenData(token, expiresAt))
                 }
-
-                val body = response.body?.string() ?: return Result.failure(IOException("Empty response"))
-                val json = JSONObject(body)
-
-                val token = json.getString("partner_session_token")
-                val expiresIn = json.getInt("expires_in")
-                val expiresAt = System.currentTimeMillis() + expiresIn * 1000
-
-                Result.success(TokenData(token, expiresAt))
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                return Result.failure(e)
             }
-        } catch (e: Exception) {
-            Result.failure(e)
         }
+        return Result.failure(lastFailure ?: IOException("Session $endpoint failed"))
     }
 
     /**
@@ -361,16 +310,16 @@ object IcmAuthRepository {
     }
 
     /**
-     * Refresh session token if needed.
+     * Refresh session token if needed (через сервер-брокер, ключ не нужен).
      */
-    suspend fun refreshTokenIfNeeded(apiKey: String): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun refreshTokenIfNeeded(): Result<String> = withContext(Dispatchers.IO) {
         val currentToken = getSessionToken()
         if (currentToken != null) {
             return@withContext Result.success(currentToken)
         }
 
         val userId = _partnerUserId.value ?: return@withContext Result.failure(IOException("Not logged in"))
-        val tokenResult = issueSessionToken(userId, apiKey)
+        val tokenResult = issueSessionToken(userId)
 
         if (tokenResult.isSuccess) {
             val tokenData = tokenResult.getOrThrow()
@@ -445,15 +394,15 @@ object IcmAuthRepository {
     }
 
     /**
-     * Issue session token after Telegram auth.
-     * Must be called after setTelegramAuth with valid API key.
+     * Issue session token after Telegram auth (через сервер-брокер).
+     * Must be called after setTelegramAuth.
      */
     suspend fun issueSessionAfterTelegramAuth(
-        apiKey: String,
         hideExplicit: Boolean = com.liquidmusicglass.engine.AppSettings.hideExplicit.value
     ): Result<String> = withContext(Dispatchers.IO) {
         val userId = _partnerUserId.value ?: return@withContext Result.failure(IOException("No partner_user_id set"))
-        val tokenResult = issueSessionToken(userId, apiKey, hideExplicit)
+        // Первичный минт после Telegram-линка → /session/issue (с hide_explicit).
+        val tokenResult = issueSessionToken(userId, hideExplicit, initial = true)
 
         if (tokenResult.isSuccess) {
             val tokenData = tokenResult.getOrThrow()
@@ -557,28 +506,67 @@ object IcmAuthRepository {
     }
 
     /**
-     * Fetch user's ICM subscription information from /me/subscription.
-     * Updates isPremium, premiumExpiresAt, and subscription StateFlows.
+     * Premium — ТОЛЬКО с нашего сервера: GET <SERVER>/me/subscription
+     * (X-Partner-User-Id). Ответ { is_premium, premium_expires_at, plan }.
+     * Локальные флаги — кэш; источник истины — брокер (клиентскую проверку
+     * можно пропатчить в APK, серверную — нет).
      */
     suspend fun fetchSubscription(): Result<IcmSubscriptionResponse> = withContext(Dispatchers.IO) {
-        val result = IcmRepository.getUserSubscription()
-        result?.let { sub ->
-            _subscription.value = sub
-            // isActive (active И не истёкшая), а не сырой sub.active — чтобы качество
-            // гейтилось ровно так же, как скачивание в FeatureAccessManager. Иначе
-            // подписка с active=true, но daysLeft=0 давала премиум-качество, при этом
-            // скачивание уже было отключено — рассинхрон с подпиской.
-            _isPremium.value = sub.isActive
-            _premiumExpiresAt.value = sub.expiresAt ?: 0L
-            // Persist to SharedPreferences
-            prefs?.edit()?.apply {
-                putBoolean(KEY_IS_PREMIUM, sub.isActive)
-                putLong(KEY_PREMIUM_EXPIRES, sub.expiresAt ?: 0L)
-                apply()
+        val userId = _partnerUserId.value
+            ?: return@withContext Result.failure(IOException("Not logged in"))
+        try {
+            val request = Request.Builder()
+                .url("${IcmApi.SERVER_BASE}/me/subscription")
+                .header("X-Partner-User-Id", userId)
+                .build()
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    return@withContext Result.failure(IOException("Subscription fetch failed: ${response.code}"))
+                }
+                val body = response.body?.string()
+                    ?: return@withContext Result.failure(IOException("Empty response"))
+                val json = JSONObject(body)
+                val isPremium = json.optBoolean("is_premium", false)
+                val expiresAt = json.optLong("premium_expires_at", 0L)
+                val plan = json.optString("plan", "").takeIf { it.isNotBlank() }
+                // Регионы подписки (US/NZ) — брокер пробрасывает их из ICM;
+                // без них профиль показывал ложный «Global (WW)».
+                val regions = buildList {
+                    val arr = json.optJSONArray("regions")
+                    if (arr != null) for (i in 0 until arr.length()) {
+                        val r = arr.optJSONObject(i) ?: continue
+                        val code = r.optString("code", "")
+                        if (code.isNotBlank()) add(
+                            IcmSubscriptionRegion(
+                                code = code,
+                                name = r.optString("name", code.uppercase()),
+                                expiresAt = r.optLong("expires_at", 0L).takeIf { it > 0L }
+                            )
+                        )
+                    }
+                }
+
+                setPremium(isPremium, expiresAt)
+
+                // Синтезируем ответ в прежней форме (daysLeft из expires_at —
+                // isActive считается так же, как гейт скачивания).
+                val daysLeft = if (expiresAt > 0L) {
+                    (((expiresAt - System.currentTimeMillis()) / 86_400_000L) + 1)
+                        .coerceAtLeast(0L).toInt()
+                } else if (isPremium) 1 else 0
+                val sub = IcmSubscriptionResponse(
+                    active = isPremium,
+                    expiresAt = expiresAt.takeIf { it > 0L },
+                    daysLeft = daysLeft,
+                    planType = plan,
+                    regions = regions
+                )
+                _subscription.value = sub
+                Result.success(sub)
             }
+        } catch (e: Exception) {
+            Result.failure(e)
         }
-        result?.let { Result.success(it) }
-            ?: Result.failure(IOException("Failed to fetch subscription"))
     }
 
     /**
@@ -625,41 +613,9 @@ object IcmAuthRepository {
         }
     }
 
-    /**
-     * Get partner API key from secure storage.
-     * First tries SharedPreferences (set during setup), then falls back to native .so.
-     * Returns empty string if not configured — caller must handle.
-     */
-    fun getPartnerKey(): String {
-        // 1. Try SharedPreferences (set during app setup / onboarding)
-        val prefsKey = prefs?.getString("partner_api_key", null)
-        if (!prefsKey.isNullOrBlank() && prefsKey.startsWith("pk_")) {
-            return prefsKey
-        }
-
-        // 2. Fallback: native .so module (JNI) — production path
-        val ctx = appContext ?: com.liquidmusicglass.engine.PlayerController.context
-        if (ctx != null) {
-            try {
-                val nativeKey = com.liquidmusicglass.engine.IcmKeyProvider.getApiKey(ctx)
-                if (!nativeKey.isNullOrBlank() && nativeKey.startsWith("pk_")) {
-                    return nativeKey
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("IcmAuthRepository", "Failed to load partner key from JNI IcmKeyProvider", e)
-            }
-        }
-
-        // 3. Development fallback — fallback to BuildConfig.ICM_API_KEY if available
-        try {
-            val configKey = com.liquidmusicglass.BuildConfig.ICM_API_KEY
-            if (!configKey.isNullOrBlank() && configKey.startsWith("pk_")) {
-                return configKey
-            }
-        } catch (_: Throwable) {}
-
-        return ""
-    }
+    // getPartnerKey()/setPartnerKey() УДАЛЕНЫ: партнёрский ключ ICM больше не
+    // хранится на устройстве ни в каком виде (prefs/JNI .so/BuildConfig) —
+    // его подставляет наш сервер-брокер (см. IcmApi.SERVER_BASE).
 
     /**
      * Get effective quality for a track based on its catalog type (Apple vs VK)
@@ -686,14 +642,4 @@ object IcmAuthRepository {
         return desired
     }
 
-    /**
-     * Save partner API key to secure storage.
-     * Call this after user enters key in setup flow.
-     */
-    fun setPartnerKey(key: String) {
-        prefs?.edit()?.apply {
-            putString("partner_api_key", key)
-            apply()
-        }
-    }
 }

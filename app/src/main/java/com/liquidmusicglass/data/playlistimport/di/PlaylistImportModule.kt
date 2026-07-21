@@ -1,11 +1,9 @@
 package com.liquidmusicglass.data.playlistimport.di
 
 import com.liquidmusicglass.api.icm.IcmApi
-import com.liquidmusicglass.api.icm.IcmAuthRepository
 import com.liquidmusicglass.data.playlistimport.IcmSearchApi
 import com.liquidmusicglass.data.playlistimport.PlaylistImportRepository
 import com.liquidmusicglass.data.playlistimport.PlaylistImportViewModel
-import com.liquidmusicglass.security.LcmNative
 
 object PlaylistImportModule {
 
@@ -14,13 +12,14 @@ object PlaylistImportModule {
 
     fun provideIcmSearchApi(): IcmSearchApi {
         return IcmSearchApi(
-            baseUrl = LcmNative.getIcmBaseUrl(), // из нативного слоя
+            // Через сервер-брокер (см. IcmApi.SERVER_BASE): партнёрский ключ
+            // подставляет сервер, клиент шлёт только Bearer session-token.
+            // Нативный base-url (LcmNative.getIcmBaseUrl → byicloud напрямую)
+            // больше не используется.
+            baseUrl = IcmApi.BASE_URL,
             authProvider = {
-                val partnerKey = IcmAuthRepository.getPartnerKey()
-                    .takeIf { it.isNotBlank() }
-                    ?: IcmApi.getInstance().apiKey
                 val sessionToken = IcmApi.getInstance().sessionToken
-                partnerKey to sessionToken
+                null to sessionToken
             }
         )
     }

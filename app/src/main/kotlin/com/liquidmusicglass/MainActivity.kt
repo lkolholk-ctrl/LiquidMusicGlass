@@ -27,7 +27,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.border
 import com.liquidmusicglass.api.icm.IcmAuthRepository
 import com.liquidmusicglass.api.icm.IcmRepository
-import com.liquidmusicglass.engine.IcmKeyProvider
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.logging.CrashHandler
 import com.liquidmusicglass.ui.AppRoot
@@ -79,29 +78,21 @@ class MainActivity : ComponentActivity() {
         // Сетевой колбэк переехал на уровень App (NetworkVitality): живёт весь
         // срок процесса, а не только пока открыта Activity.
 
-        // Инициализация ICM API — в ФОНЕ (главная причина стартового ANR была тут).
-        // IcmKeyProvider.getApiKey() грузит нативную .so (libicmkey) и гоняет
-        // анти-тампер проверку APK — это дорого и раньше висело на главном потоке
-        // ДО setContent. Ключ нужен только сетевому слою, не первому кадру, поэтому
-        // уносим весь блок в IO. Домашний экран грузит данные с ретраями, короткое
-        // окно «репозиторий ещё не готов» переживается.
+        // Инициализация ICM API — в ФОНЕ. Партнёрского ключа на устройстве
+        // больше НЕТ (его подставляет сервер-брокер) — .so libicmkey и
+        // анти-тампер добыча ключа не нужны, init безусловный.
         authScope.launch {
-            val apiKey = try {
-                IcmKeyProvider.getApiKey(this@MainActivity)
-            } catch (_: Throwable) { "" }.ifBlank { BuildConfig.ICM_API_KEY }
-            if (apiKey.isNotBlank()) {
-                IcmRepository.init(apiKey, IcmAuthRepository.partnerUserId.value)
-                // Restore session token if we have one (survives app updates)
-                IcmAuthRepository.getSessionToken()?.let { token ->
-                    IcmRepository.setSessionToken(token)
-                }
-                // Стартовые сетевые задачи — опциональны и ограничены по времени:
-                // приложение показывается и работает без них, не вися на сети.
-                if (IcmAuthRepository.isLoggedIn.value) {
-                    kotlinx.coroutines.withTimeoutOrNull(5_000) {
-                        IcmAuthRepository.refreshTokenIfNeeded(apiKey)
-                        IcmAuthRepository.fetchUserData()
-                    }
+            IcmRepository.init(IcmAuthRepository.partnerUserId.value)
+            // Restore session token if we have one (survives app updates)
+            IcmAuthRepository.getSessionToken()?.let { token ->
+                IcmRepository.setSessionToken(token)
+            }
+            // Стартовые сетевые задачи — опциональны и ограничены по времени:
+            // приложение показывается и работает без них, не вися на сети.
+            if (IcmAuthRepository.isLoggedIn.value) {
+                kotlinx.coroutines.withTimeoutOrNull(5_000) {
+                    IcmAuthRepository.refreshTokenIfNeeded()
+                    IcmAuthRepository.fetchUserData()
                 }
             }
         }
@@ -479,31 +470,19 @@ class MainActivity : ComponentActivity() {
                 state = state
             )
 
-            // Try to issue a Bearer session token so /me/* endpoints work
-            // without S2S API key. Best-effort — wave already works via
-            // X-Partner-Key + X-Partner-User-Id even if this fails.
-            //
-            // ВЕСЬ блок в authScope (P1, аудит): IcmKeyProvider.getApiKey грузит
-            // нативную .so + анти-тампер проверку APK — «дорого» (см. коммент в
-            // onCreate, из-за этого был стартовый ANR), а тут он оставался
-            // СИНХРОННЫМ на main в deeplink-пути (возврат из Telegram = фриз).
+            // Выпускаем Bearer session-токен через сервер-брокер (партнёрский
+            // ключ с устройства убран — libicmkey больше не грузится, deeplink
+            // не фризит main). Best-effort: при неуспехе юзер уже слинкован.
             authScope.launch {
-                val apiKey = try {
-                    IcmKeyProvider.getApiKey(this@MainActivity)
-                } catch (_: Throwable) { "" }
-                    .ifBlank { BuildConfig.ICM_API_KEY }
-                if (apiKey.isNotBlank() && apiKey.startsWith("pk_")) {
-                    val loginResult = runCatching {
-                        IcmAuthRepository.issueSessionAfterTelegramAuth(apiKey)
-                    }
-                    if (loginResult.isSuccess) {
-                        // UI обновится сам через StateFlow. recreate() УДАЛЁН (P1):
-                        // он перезапускал Activity, onCreate снова обрабатывал ТОТ ЖЕ
-                        // oauth-intent, а oauth_state уже удалён → юзер видел ложный
-                        // тост «Auth failed: invalid state» СРАЗУ после успешного
-                        // входа (+ повторный getApiKey).
-                        IcmAuthRepository.fetchUserData()
-                    }
+                val loginResult = runCatching {
+                    IcmAuthRepository.issueSessionAfterTelegramAuth()
+                }
+                if (loginResult.isSuccess) {
+                    // UI обновится сам через StateFlow. recreate() УДАЛЁН (P1):
+                    // он перезапускал Activity, onCreate снова обрабатывал ТОТ ЖЕ
+                    // oauth-intent, а oauth_state уже удалён → юзер видел ложный
+                    // тост «Auth failed: invalid state» СРАЗУ после успешного входа.
+                    IcmAuthRepository.fetchUserData()
                 }
             }
             // Гасим обработанный oauth-intent: при recreate/config-change

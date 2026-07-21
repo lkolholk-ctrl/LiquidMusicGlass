@@ -19,11 +19,11 @@ android {
         // Выше 20260702 (сборки greeting уже стоят на тест-девайсах с ним):
         // меньший versionCode Android считает даунгрейдом и отклоняет установку
         // поверх с ошибкой «пакет недействителен».
-        versionCode = 20260755
+        versionCode = 20260756
         // Метка билда (видно в Профиле внизу). Бампается вручную на заметных
         // сборках, чтобы можно было отличить, какой билд стоит. Динамический
         // git-хэш убран — он ломал конфигурацию Gradle в CI.
-        versionName = "21.07.3 public-downloads"
+        versionName = "21.07.4 lmg-broker"
 
         // Build native libs only for arm64-v8a (faster builds, smaller APK).
         // Note: won't run on 32-bit (armeabi-v7a) or x86/x86_64 emulators.
@@ -31,16 +31,8 @@ android {
             abiFilters += "arm64-v8a"
         }
 
-        // Read ICM API key from local.properties (GitHub Secret in CI)
-        // Fallback to native .so (JNI) at runtime for maximum protection
-        val icmApiKey = run {
-            val f = rootProject.file("local.properties")
-            if (!f.exists()) return@run ""
-            val lines = f.readLines()
-            val prefix = "ICM_API_KEY="
-            lines.find { it.startsWith(prefix) }?.removePrefix(prefix)?.trim() ?: ""
-        }
-        buildConfigField("String", "ICM_API_KEY", "\"$icmApiKey\"")
+        // ICM_API_KEY из BuildConfig УДАЛЁН: партнёрский ключ живёт только на
+        // сервере-брокере (IcmApi.SERVER_BASE) — в APK секрета нет вообще.
     }
 
     // Resolve a signing secret from the environment first (CI), then from

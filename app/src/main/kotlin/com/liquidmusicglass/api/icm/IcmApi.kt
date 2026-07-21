@@ -10,7 +10,6 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.CertificatePinner
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.OkHttpClient
@@ -103,17 +102,28 @@ object IcmApiFileLogger {
 }
 
 /**
- * ICM Music Partner API client.
- * Documentation: https://byicloud.online/partners/api-docs
+ * ICM Music client — через НАШ серверный брокер (см. [SERVER_BASE]).
  *
- * Uses API key (X-Partner-Key) or session token (Authorization: Bearer).
+ * Партнёрский ключ ICM живёт ТОЛЬКО на сервере: брокер подставляет
+ * X-Partner-Key сам, минтит сессии (/session/refresh) и владеет premium
+ * (/me/subscription). Прямых обращений к byicloud.online из APK больше нет —
+ * секрет с устройства убран, форк без нашего сервера не работает.
  *
- * Get key: https://byicloud.online/partners
+ * Клиент шлёт только Bearer session-token и X-Partner-User-Id.
+ * Дока партнёрки (пути под /icm те же): https://byicloud.online/partners/api-docs
  */
 class IcmApi private constructor() {
 
     companion object {
-        const val BASE_URL = "https://byicloud.online/api/partner"
+        /** Наш серверный брокер (ключ ICM, сессии, premium, конфиг). */
+        const val SERVER_BASE = "https://api.gsgit.org/lmg"
+
+        // Реверс-прокси партнёрки: относительные пути (search, track, wave,
+        // me) НЕ меняются — меняется только база. ВАЖНО: в KDoc здесь нельзя
+        // писать глоб-пути вида «слэш-звёздочка» — Kotlin-комментарии
+        // ВЛОЖЕННЫЕ, такая последовательность открывает вложенный комментарий
+        // и молча съедает остаток файла (уже наступили).
+        const val BASE_URL = "$SERVER_BASE/icm"
 
         @Volatile
         private var instance: IcmApi? = null
@@ -207,11 +217,9 @@ class IcmApi private constructor() {
 
     private val mediaTypeJson = "application/json; charset=utf-8".toMediaType()
 
-    /** Partner API key (pk_<id>_<random>) */
-    @Volatile
-    var apiKey: String? = null
+    // apiKey УДАЛЁН: партнёрский ключ живёт только на сервере-брокере.
 
-    /** Session token (JWT) — alternative to apiKey for client requests */
+    /** Session token (JWT) — единственная клиентская авторизация */
     @Volatile
     var sessionToken: String? = null
 
@@ -307,6 +315,13 @@ class IcmApi private constructor() {
         }
     }
 
+    /** Относительные эндпоинты идут на прокси партнёрки ([BASE_URL]); абсолютные
+     *  (серверные /lmg/session|auth|me — начинаются с http) — как есть. */
+    private fun resolveUrl(endpoint: String, async: Boolean): String {
+        val base = if (endpoint.startsWith("http")) endpoint else "$BASE_URL$endpoint"
+        return if (async) "$base?async=1" else base
+    }
+
     private fun buildRequest(url: String, method: String = "GET", body: String? = null, fast: Boolean = false): Request {
         val builder = Request.Builder()
             .url(url)
@@ -320,23 +335,12 @@ class IcmApi private constructor() {
             builder.header("X-LMG-Fast", "1")
         }
 
-        // Auth: session token for user-scoped endpoints (/me/*, wave, likes).
-        // S2S-only эндпоинты (session/issue, link/email/*) с Bearer'ом дают
-        // 403 s2s_only по доке — для них шлём только X-Partner-Key.
-        val s2sOnly = url.contains("/session/issue") || url.contains("/link/email")
-        if (!s2sOnly) {
-            sessionToken?.let {
-                builder.header("Authorization", "Bearer $it")
-            }
-        }
-
-        // X-Partner-Key is always required for source validation (VK, etc.)
-        // even when Bearer token is present.
-        val partnerKey = com.liquidmusicglass.api.icm.IcmAuthRepository.getPartnerKey()
-            .takeIf { it.isNotBlank() }
-            ?: apiKey
-        if (!partnerKey.isNullOrBlank()) {
-            builder.header("X-Partner-Key", partnerKey)
+        // Auth: Bearer session-token + X-Partner-User-Id. X-Partner-Key УДАЛЁН
+        // из клиента полностью — партнёрский ключ подставляет наш сервер
+        // (секрет в APK не живёт). S2S-эндпоинты с устройства больше не
+        // вызываются: сессии/email-линк идут на серверные /lmg/*-маршруты.
+        sessionToken?.let {
+            builder.header("Authorization", "Bearer $it")
         }
 
         partnerUserId?.let {
@@ -436,7 +440,7 @@ class IcmApi private constructor() {
         return withTimeoutOrNull(14_000L) {
             withContext(Dispatchers.IO) {
                 try {
-                    val url = if (async) "$BASE_URL$endpoint?async=1" else "$BASE_URL$endpoint"
+                    val url = resolveUrl(endpoint, async)
                     val request = buildRequest(url, method, body)
                     val response = executeWithRetry(request, endpoint)
                     try {
@@ -530,7 +534,7 @@ class IcmApi private constructor() {
         return withTimeoutOrNull(14_000L) {
         withContext(Dispatchers.IO) {
             try {
-                val url = if (async) "$BASE_URL$endpoint?async=1" else "$BASE_URL$endpoint"
+                val url = resolveUrl(endpoint, async)
                 val request = buildRequest(url, method, body)
                 val response = executeWithRetry(request, endpoint)
                 try {
@@ -630,7 +634,7 @@ class IcmApi private constructor() {
         }
         try {
             IcmRateGate.throttleBlocking()
-            val url = if (async) "$BASE_URL$endpoint?async=1" else "$BASE_URL$endpoint"
+            val url = resolveUrl(endpoint, async)
             val request = buildRequest(url, method, body, fast = true)
             IcmApiFileLogger.log("D", "IcmApi", "Sync request started $endpoint")
             val response = client.newCall(request).execute()
@@ -699,9 +703,10 @@ class IcmApi private constructor() {
     suspend fun health(): Result<IcmHealthResponse> = execute("/health")
 
     /**
-     * Issue session token for client requests.
-     * Requires apiKey.
-     * Call after Telegram auth to get JWT.
+     * Первичный минт session-токена — через НАШ сервер-брокер
+     * (POST <SERVER>/session/issue; s2s к партнёрке с устройства больше не
+     * зовётся — ключ живёт на брокере). Рефреш протухшего токена делает
+     * IcmAuthRepository через <SERVER>/session/refresh.
      */
     suspend fun issueSession(
         partnerUserId: String,
@@ -710,7 +715,7 @@ class IcmApi private constructor() {
         val body = json.encodeToString(
             IcmSessionRequest(partnerUserId = partnerUserId, hideExplicit = hideExplicit)
         )
-        return execute("/session/issue", method = "POST", body = body)
+        return execute("$SERVER_BASE/session/issue", method = "POST", body = body)
     }
 
     /**
@@ -958,7 +963,8 @@ suspend fun search(
     }
 
     // ═══════════════════════════════════════════════════════════
-    //  Email Account Linking (S2S only, requires X-Partner-Key)
+    //  Email Account Linking — через наш сервер (/lmg/auth/email/*),
+    //  партнёрский ключ подставляет брокер
     // ═══════════════════════════════════════════════════════════
 
     /**
@@ -976,7 +982,7 @@ suspend fun search(
             email = email,
             state = state
         ))
-        return execute("/link/email/request", method = "POST", body = body)
+        return execute("$SERVER_BASE/auth/email/request", method = "POST", body = body)
     }
 
     /**
@@ -987,7 +993,7 @@ suspend fun search(
         otp: String
     ): Result<IcmEmailVerifyResponse> {
         val body = json.encodeToString(IcmEmailVerifyRequest(nonce = nonce, otp = otp))
-        return execute("/link/email/verify", method = "POST", body = body)
+        return execute("$SERVER_BASE/auth/email/verify", method = "POST", body = body)
     }
 
     /**
@@ -1004,7 +1010,7 @@ suspend fun search(
             currentPassword = currentPassword,
             newPassword = newPassword
         ))
-        return execute("/link/email/password/change", method = "POST", body = body)
+        return execute("$SERVER_BASE/auth/email/password/change", method = "POST", body = body)
     }
 
     /**
@@ -1015,7 +1021,7 @@ suspend fun search(
         partnerUserId: String
     ): Result<IcmPasswordResetResponse> {
         val body = json.encodeToString(IcmPasswordResetRequest(partnerUserId = partnerUserId))
-        return execute("/link/email/password/reset", method = "POST", body = body)
+        return execute("$SERVER_BASE/auth/email/password/reset", method = "POST", body = body)
     }
 
     // ═══════════════════════════════════════════════════════════
