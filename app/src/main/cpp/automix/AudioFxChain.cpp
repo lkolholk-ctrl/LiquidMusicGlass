@@ -344,7 +344,14 @@ void AudioFxChain::process (float* const* channels, int numChannels, int numSamp
     // Reverb + динамика — штатные juce::dsp на блоке.
     const bool revOn  = reverbEnabled.load();
     const bool compOn = compEnabled.load();
-    const bool limOn  = limEnabled.load();
+    // Лимитер — анти-клип НАШЕЙ обработки: если ни одна стадия сигнал не
+    // трогала, лимитировать нечего — пропускаем. Иначе включённый по умолчанию
+    // лимитер (juce::dsp::Limiter: две каскадные компрессор-стадии с
+    // баллистикой на каждый сэмпл, pow над порогом) молотил КАЖДЫЙ колбэк даже
+    // при «всё выключено» — эта фоновая стоимость появилась вместе с
+    // FX-цепочкой и пробивала дедлайн fast-path на Honor, где до FX звук был
+    // безупречен (полевой репорт владельца).
+    const bool limOn  = limEnabled.load() && (tonal || revOn || compOn);
     if (revOn && ! revWas) reverb.reset();   // фронт включения — без старого хвоста
     revWas = revOn;
     if (revOn || compOn || limOn)

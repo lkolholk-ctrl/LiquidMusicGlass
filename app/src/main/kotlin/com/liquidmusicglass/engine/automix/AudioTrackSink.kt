@@ -85,7 +85,11 @@ object AudioTrackSink {
         val minBuf = AudioTrack.getMinBufferSize(
             SAMPLE_RATE, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT
         )
-        val bufBytes = maxOf(minBuf, BLOCK_FRAMES * 2 /*ch*/ * 2 /*bytes*/ * 4)
+        // 16 блоков (~320мс): в отличие от MMAP-кольца, AudioTrack при заморозке
+        // процесса не «зацикливает» старый буфер, а большой запас позволяет
+        // пережить микро-фризы MagicOS/сторонних прошивок целиком без дыр.
+        // Задержка для музыки неощутима (write блокирующий — пейсинг тот же).
+        val bufBytes = maxOf(minBuf, BLOCK_FRAMES * 2 /*ch*/ * 2 /*bytes*/ * 16)
         return runCatching {
             AudioTrack.Builder()
                 .setAudioAttributes(

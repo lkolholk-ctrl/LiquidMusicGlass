@@ -116,6 +116,14 @@ class JuceLocalPlayer(
     private val XRUN_ESCALATE_DELTA = 2
     private val MAX_BUFFER_ESCALATIONS = 2
     private var bufferEscalations = 0
+    // Последняя ступень: буфер уже на максимуме (16×burst ≈ потолок ёмкости
+    // MMAP-потока, ~85мс — заморозку процесса длиннее он не переживёт в
+    // принципе), а underrun'ы продолжаются → уходим на AudioTrack-sink
+    // (режим 6, путь ExoPlayer: при фризе система вставляет тишину, а не
+    // крутит кольцо → «циклички» нет, буфер sink'а ~320мс). Один раз за
+    // сессию; счётчик xrun в sink-режиме недоступен (-1) — телеметрия
+    // сама замолкает, повторных попыток не будет.
+    private var sinkFallbackDone = false
 
     // Синхронизация буфера движка с Battery Saver: тикер замечает смену режима
     // и передаёт движку (реопен на loadHandler — не на main).
@@ -632,6 +640,18 @@ class JuceLocalPlayer(
                 DebugLog.add("JUCE.xruns escalate buffer (#$bufferEscalations)")
                 loadHandler.post { if (!released) engine.escalateBufferForUnderruns() }
                 lastXRuns = -1
+            } else if (delta >= XRUN_ESCALATE_DELTA && !sinkFallbackDone) {
+                // Буфер на максимуме, а звук всё рвёт → AudioTrack-sink (см.
+                // sinkFallbackDone). Только из LowLatency-режимов (0/2/3):
+                // 1/4/5 и так идут через обычный микшер — sink им не поможет.
+                val mode = com.liquidmusicglass.engine.AppSettings.audioCompatMode.value
+                if (mode == 0 || mode == 2 || mode == 3) {
+                    sinkFallbackDone = true
+                    DebugLog.add("JUCE.xruns буфер на максимуме, рвёт дальше → AudioTrack-sink (6) до конца сессии")
+                    loadHandler.post {
+                        if (!released) AutoMixNativeEngine.setOboeCompatMode(AutoMixNativeEngine.OBOE_MODE_AUDIOTRACK)
+                    }
+                }
             }
         }
     }

@@ -122,6 +122,15 @@ class AudioService : MediaSessionService() {
     @Volatile private var captureActive = false
     @Volatile private var modeBeforeCapture = -1
 
+    // ── Звонки: тот же уход с fast-path, что и при записи экрана ──
+    // Во время звонка (RINGTONE/IN_CALL/IN_COMMUNICATION) HAL переключает тракт
+    // на голосовой профиль — low-latency/MMAP медиа-потоки на многих прошивках
+    // начинают рвать звук («пык-пык»). Фокус-пауза покрывает классический
+    // звонок, но не CAN_DUCK-источники (ассистент/навигатор/часть VoIP) и не
+    // окно дозвона. AudioTrack-sink идёт путём ExoPlayer — его звонок не рвёт.
+    private var audioModeListener: android.media.AudioManager.OnModeChangedListener? = null
+    @Volatile private var callActive = false
+
     /** WakeLock to prevent CPU sleep during active playback */
     private var wakeLock: PowerManager.WakeLock? = null
 
@@ -415,6 +424,8 @@ class AudioService : MediaSessionService() {
 
         // Запись экрана → capturable-путь для локального JUCE (см. поля выше).
         registerScreenRecordingWatcher()
+        // Звонок → тот же уход с fast-path (голосовой тракт рвёт MMAP-медиа).
+        registerCallModeWatcher()
 
         // WakeLock initialization
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -640,26 +651,60 @@ class AudioService : MediaSessionService() {
     private fun onCaptureStateChanged(active: Boolean) {
         if (active == captureActive) return
         captureActive = active
+        syncFastPathEvasion(if (active) "CAPTURE on" else "CAPTURE off")
+    }
+
+    /**
+     * Звонки (см. поля audioModeListener/callActive): API 31+ — системный
+     * листенер режима аудио. На 29-30 листенера нет — там остаётся только
+     * фокус-пауза (классический звонок она покрывает).
+     */
+    private fun registerCallModeWatcher() {
+        if (android.os.Build.VERSION.SDK_INT < 31) return
+        val am = audioManager ?: return
+        val listener = android.media.AudioManager.OnModeChangedListener { mode ->
+            val inCall = mode == AudioManager.MODE_RINGTONE ||
+                mode == AudioManager.MODE_IN_CALL ||
+                mode == AudioManager.MODE_IN_COMMUNICATION
+            if (inCall != callActive) {
+                callActive = inCall
+                syncFastPathEvasion(if (inCall) "CALL on (mode=$mode)" else "CALL off")
+            }
+        }
+        audioModeListener = listener
+        runCatching { am.addOnModeChangedListener(mainExecutor, listener) }
+    }
+
+    /**
+     * Общий «уход с fast-path»: пока активна ЛЮБАЯ из причин (запись экрана,
+     * звонок) — локальный JUCE в low-latency-режиме (0/2/3) временно уводится
+     * на AudioTrack-sink (режим 6, путь ExoPlayer: капчурится и переживает
+     * голосовой тракт). Когда причин не осталось — прежний режим возвращается.
+     * Стриминг (ExoPlayer) не трогаем — он и так идёт через микшер.
+     */
+    private fun syncFastPathEvasion(reason: String) {
         runCatching {
-            val juceActive =
-                PlayerController.playbackBackend.value == PlaybackBackend.JUCE_LOCAL
-            if (active) {
-                // Уводим на AudioTrack-sink только если реально играет локальный
-                // JUCE в MMAP-режиме — иначе трогать нечего (стриминг капчурится сам).
+            val wantEvade = captureActive || callActive
+            if (wantEvade) {
+                if (modeBeforeCapture >= 0) return@runCatching   // уже увели
+                val juceActive =
+                    PlayerController.playbackBackend.value == PlaybackBackend.JUCE_LOCAL
                 val mode = AppSettings.audioCompatMode.value
-                if (juceActive && (mode == 0 || mode == 2)) {
+                // 0/2/3 — все LowLatency-режимы (Fast/Exclusive/I16); 1/4/5 и так
+                // идут через обычный микшер, их не трогаем.
+                if (juceActive && (mode == 0 || mode == 2 || mode == 3)) {
                     modeBeforeCapture = mode
                     com.liquidmusicglass.engine.automix.AutoMixNativeEngine.setOboeCompatMode(6)
                     com.liquidmusicglass.debug.DebugLog.add(
-                        "CAPTURE on → JUCE mode $mode → 6 (AudioTrack, capturable)"
+                        "$reason → JUCE mode $mode → 6 (AudioTrack)"
                     )
                 }
             } else if (modeBeforeCapture >= 0) {
-                // Запись кончилась — возвращаем прежний MMAP-режим.
+                // Все причины кончились — возвращаем прежний режим.
                 val restore = modeBeforeCapture
                 modeBeforeCapture = -1
                 com.liquidmusicglass.engine.automix.AutoMixNativeEngine.setOboeCompatMode(restore)
-                com.liquidmusicglass.debug.DebugLog.add("CAPTURE off → JUCE mode → $restore")
+                com.liquidmusicglass.debug.DebugLog.add("$reason → JUCE mode → $restore")
             }
         }
     }
@@ -679,6 +724,12 @@ class AudioService : MediaSessionService() {
             runCatching { audioManager?.unregisterAudioRecordingCallback(cb) }
         }
         recordingCallback = null
+        if (android.os.Build.VERSION.SDK_INT >= 31) {
+            audioModeListener?.let { l ->
+                runCatching { audioManager?.removeOnModeChangedListener(l) }
+            }
+        }
+        audioModeListener = null
 
         // Release WakeLock
         if (wakeLock?.isHeld == true) {
