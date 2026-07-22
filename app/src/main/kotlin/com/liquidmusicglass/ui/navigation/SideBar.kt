@@ -74,8 +74,11 @@ fun SideBar(
         modifier = modifier
             .fillMaxHeight()
             .width(SideBarWidth)
+            .padding(12.dp)
+            .clip(RoundedCornerShape(22.dp))
+            .background(Color(0xFF161616))   // панель-карточка (референс), тёмная всегда
             .windowInsetsPadding(WindowInsets.statusBars)
-            .padding(horizontal = 14.dp, vertical = 16.dp)
+            .padding(horizontal = 12.dp, vertical = 16.dp)
     ) {
         // Логотип
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 8.dp, bottom = 24.dp)) {
@@ -107,7 +110,7 @@ fun SideBar(
                 modifier = Modifier
                     .size(38.dp)
                     .clip(CircleShape)
-                    .background(if (lc.isDark) Color(0xFF2C2C2E) else Color(0xFFE5E5EA)),
+                    .background(Color(0xFF2C2C2E)),
                 contentAlignment = Alignment.Center
             ) {
                 if (!avatarUrl.isNullOrBlank()) {
@@ -118,16 +121,16 @@ fun SideBar(
                         modifier = Modifier.fillMaxWidth()
                     )
                 } else {
-                    Icon(Icons.Rounded.Person, null, tint = lc.iconMuted, modifier = Modifier.size(20.dp))
+                    Icon(Icons.Rounded.Person, null, tint = Color.White.copy(alpha = 0.5f), modifier = Modifier.size(20.dp))
                 }
             }
             Spacer(Modifier.width(10.dp))
             Column {
                 Text(
                     profileName?.takeIf { it.isNotBlank() } ?: "Guest",
-                    color = lc.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1
+                    color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1
                 )
-                Text("LiquidMusicGlass", color = lc.textTertiary, fontSize = 11.sp, maxLines = 1)
+                Text("LiquidMusicGlass", color = Color.White.copy(alpha = 0.4f), fontSize = 11.sp, maxLines = 1)
             }
         }
     }
@@ -136,7 +139,7 @@ fun SideBar(
 @Composable
 private fun SideNavRow(item: SideNavItem, selected: Boolean, onClick: () -> Unit) {
     val lc = LiquidTheme.colors
-    val inactive = if (lc.isDark) Color.White.copy(alpha = 0.6f) else Color.Black.copy(alpha = 0.55f)
+    val inactive = Color.White.copy(alpha = 0.6f)
     val color by animateColorAsState(if (selected) WaveAccent else inactive, tween(180), label = "sideColor")
     val bg by animateColorAsState(
         if (selected) WaveAccent.copy(alpha = 0.14f) else Color.Transparent, tween(180), label = "sideBg"

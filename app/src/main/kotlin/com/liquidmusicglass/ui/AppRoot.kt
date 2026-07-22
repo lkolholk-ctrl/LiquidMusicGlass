@@ -263,7 +263,13 @@ fun AppRoot() {
             // Широкое окно: слева боковая навигация (SideBar), справа — контент
             // (NavHost + оверлей эквалайзера). Компакт (телефон-портрет): сайдбара
             // нет, всё как раньше (навигация нижним баром).
-            Row(modifier = Modifier.fillMaxSize()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    // Альбом/планшет: единый тёмный фон (иначе в светлой теме
+                    // верх сайдбара оставался белым из-за rootBg).
+                    .then(if (win.useSideBySide) Modifier.background(Color(0xFF0A0A0A)) else Modifier)
+            ) {
                 if (win.useSideBySide && barsVisible) {
                     com.liquidmusicglass.ui.navigation.SideBar(
                         selectedIndex = selectedIndex,
