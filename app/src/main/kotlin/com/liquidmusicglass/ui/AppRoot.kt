@@ -444,7 +444,9 @@ fun AppRoot() {
                             onItemSelected = { index ->
                                 com.liquidmusicglass.debug.DebugLog.add("TAB -> $index")
                                 waveBarPokes++                 // взаимодействие — перезапуск таймера
-                                switchTab(index)
+                                if (index == com.liquidmusicglass.ui.navigation.SIDE_INDEX_VIDEO) {
+                                    videoOpen = true           // «Видео» — оверлей, не вкладка
+                                } else switchTab(index)
                             }
                         )
                     }

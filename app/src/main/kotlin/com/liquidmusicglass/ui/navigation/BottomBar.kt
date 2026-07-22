@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -53,6 +55,7 @@ fun BottomBar(
         listOf(
             BottomNavItem(LiquidGlyphs.Equalizer, "Wave", 0),
             BottomNavItem(LiquidGlyphs.Star, "New", 4),
+            BottomNavItem(Icons.Rounded.Movie, "Video", SIDE_INDEX_VIDEO),
             BottomNavItem(LiquidGlyphs.Playlist, "Playlist", 2),
             BottomNavItem(LiquidGlyphs.Settings, "Settings", 3)
         )
