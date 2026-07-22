@@ -419,6 +419,89 @@ object IcmAuthRepository {
         }
     }
 
+    // ═══════════════════════════════════════════════════════════
+    //  Email-вход (OTP, passwordless) — см. docs/email-auth-design.md
+    //  Вход = регистрация: ICM сам создаёт аккаунт для нового email.
+    //  Все вызовы идут через сервер-брокер (/lmg/auth/email/*).
+    // ═══════════════════════════════════════════════════════════
+
+    /** Короткоживущая OTP-сессия: держим В ПАМЯТИ (nonce — секрет, в prefs не пишем). */
+    data class EmailOtpSession(
+        val nonce: String,
+        val email: String,
+        val expiresAtMs: Long,
+        val state: String
+    )
+
+    /**
+     * Шаг 1: выслать 6-значный код на почту. partner_user_id — тот же
+     * стабильный id, что и для Telegram-линка (инвариант setTelegramAuth).
+     */
+    suspend fun requestEmailOtp(email: String): Result<EmailOtpSession> = withContext(Dispatchers.IO) {
+        val normalized = email.trim().lowercase()
+        if (!android.util.Patterns.EMAIL_ADDRESS.matcher(normalized).matches()) {
+            return@withContext Result.failure(IOException("invalid email"))
+        }
+        val userId = ensurePartnerUserId()
+        val state = java.util.UUID.randomUUID().toString()
+        IcmApi.getInstance().requestEmailLink(userId, normalized, state).map { resp ->
+            EmailOtpSession(
+                nonce = resp.nonce,
+                email = normalized,
+                expiresAtMs = System.currentTimeMillis() + resp.expiresIn * 1000L,
+                state = state
+            )
+        }
+    }
+
+    /**
+     * Шаг 2: подтвердить код → линк готов → выпустить session-токен через
+     * брокер → подтянуть профиль/подписку. Возвращает password_issued
+     * (true = ICM создал НОВЫЙ аккаунт и выслал пароль на почту — показать нотис).
+     */
+    suspend fun verifyEmailOtp(session: EmailOtpSession, otp: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        val verify = IcmApi.getInstance().verifyEmailLink(session.nonce, otp)
+            .getOrElse { return@withContext Result.failure(it) }
+        if (!verify.linked) return@withContext Result.failure(IOException("not linked"))
+        // Эхо state сверяем, если сервер его вернул (CSRF-гигиена как у Telegram).
+        if (verify.state != null && verify.state != session.state) {
+            return@withContext Result.failure(IOException("state mismatch"))
+        }
+
+        prefs?.edit()?.apply {
+            putString(KEY_EMAIL, session.email)
+            putString(KEY_AUTH_METHOD, "email")
+            // KEY_USER_ID не трогаем — линк сделан на ensurePartnerUserId()
+            apply()
+        }
+        _userEmail.value = session.email
+
+        // Сессия через брокер (первичный минт) — как после Telegram-линка.
+        val token = issueSessionToken(ensurePartnerUserId(), initial = true)
+            .getOrElse { return@withContext Result.failure(it) }
+        prefs?.edit()?.apply {
+            putString(KEY_TOKEN, token.token)
+            putLong(KEY_TOKEN_EXPIRES, token.expiresAt)
+            apply()
+        }
+        _isLoggedIn.value = true
+        syncToIcmApi()
+        runCatching { fetchUserData() }
+        Result.success(verify.passwordIssued)
+    }
+
+    /** Сменить пароль ICM-аккаунта (для вошедшего; текущий пароль обязателен). */
+    suspend fun changeIcmPassword(current: String, new: String): Result<Unit> = withContext(Dispatchers.IO) {
+        val userId = _partnerUserId.value ?: return@withContext Result.failure(IOException("Not logged in"))
+        IcmApi.getInstance().changePassword(userId, current, new).map { }
+    }
+
+    /** Сбросить пароль ICM: временный пароль уходит на почту (кулдаун 60с у ICM). */
+    suspend fun resetIcmPassword(): Result<Unit> = withContext(Dispatchers.IO) {
+        val userId = _partnerUserId.value ?: return@withContext Result.failure(IOException("Not logged in"))
+        IcmApi.getInstance().resetPassword(userId).map { }
+    }
+
     /**
      * Logout — clear all auth data.
      */

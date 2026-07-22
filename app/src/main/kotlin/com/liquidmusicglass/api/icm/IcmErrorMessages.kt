@@ -41,6 +41,16 @@ fun icmUserMessage(httpCode: Int, errorCode: String?): String {
         // Это код ОТ СЕРВЕРА (его upstream-проблема), а не отсутствие сети у юзера.
         "network_error" -> return "Server is having trouble. Please try again."
         "not_linked", "no_partner_user", "unauthorized" -> return "Sign in with Telegram to continue."
+        // ── Email-вход (OTP) и пароль ICM ──
+        "invalid_email" -> return "That email doesn't look right."
+        "invalid_otp" -> return "Wrong code. Check the email and try again."
+        "invalid_nonce" -> return "Code expired. Request a new one."
+        "nonce_locked" -> return "Too many attempts. Request a new code."
+        "nonce_belongs_to_another_partner" -> return "Code expired. Request a new one."
+        "invalid_current_password" -> return "Current password is incorrect."
+        "new_password_must_differ" -> return "New password must be different."
+        "email_account_missing" -> return "No email is linked to this account."
+        "user_not_linked" -> return "Sign in first to manage your password."
     }
     return when (httpCode) {
         429 -> "Too many requests. Please wait a moment."

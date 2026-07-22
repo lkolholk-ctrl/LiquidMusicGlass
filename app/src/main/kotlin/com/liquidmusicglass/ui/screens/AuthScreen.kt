@@ -58,6 +58,8 @@ fun AuthScreen(
         if (isLoggedIn) onAuthSuccess()
     }
 
+    var showEmailSheet by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -222,6 +224,29 @@ fun AuthScreen(
                 }
             }
 
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Email auth (OTP via broker)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
+                    .clip(RoundedCornerShape(percent = 50))
+                    .background(if (lc.isDark) Color(0xFF2C2C2E) else Color(0xFFE5E5EA))
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { showEmailSheet = true },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    "Continue with Email",
+                    color = lc.textPrimary,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 16.sp
+                )
+            }
+
             Spacer(modifier = Modifier.height(16.dp))
 
             Text(
@@ -233,6 +258,18 @@ fun AuthScreen(
             )
 
             Spacer(modifier = Modifier.weight(1f))
+        }
+
+        if (showEmailSheet) {
+            androidx.compose.material3.ModalBottomSheet(
+                onDismissRequest = { showEmailSheet = false },
+                containerColor = lc.settingsBackground
+            ) {
+                EmailAuthSheet(
+                    onSuccess = { showEmailSheet = false; onAuthSuccess() },
+                    onClose = { showEmailSheet = false }
+                )
+            }
         }
     }
 }

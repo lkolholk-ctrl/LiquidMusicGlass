@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ExitToApp
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material3.Icon
@@ -82,6 +83,8 @@ fun ProfileScreen(
     val profileName by IcmAuthRepository.profileName.collectAsState()
     val avatarUrl by IcmAuthRepository.avatarUrl.collectAsState()
     val subscription by IcmAuthRepository.subscription.collectAsState()
+
+    var showPasswordSheet by remember { mutableStateOf(false) }
 
     LaunchedEffect(isLoggedIn) {
         if (isLoggedIn) IcmAuthRepository.fetchUserData()
@@ -483,16 +486,29 @@ fun ProfileScreen(
                         .background(if (lc.isDark) SurfaceDark else Color(0xFFF2F2F7))
                 ) {
                     if (isLoggedIn) {
-                        SettingRowAction(
-                            icon = Icons.AutoMirrored.Rounded.ExitToApp,
-                            label = "Sign Out",
-                            tint = AppleRed,
-                            onClick = {
-                                LocalAuthManager.logout()
-                                IcmAuthRepository.logout()
-                                onLogout()
+                        Column {
+                            // «Пароль ICM» — только для email-входа (у Telegram
+                            // пароля нет). Пароль для входа В ПРИЛОЖЕНИЕ не нужен
+                            // (вход по коду) — это управление паролем ICM-аккаунта.
+                            if (userEmail != null) {
+                                SettingRowNavigable(
+                                    icon = Icons.Rounded.Lock,
+                                    label = "ICM Password",
+                                    value = "Change or reset",
+                                    onClick = { showPasswordSheet = true }
+                                )
                             }
-                        )
+                            SettingRowAction(
+                                icon = Icons.AutoMirrored.Rounded.ExitToApp,
+                                label = "Sign Out",
+                                tint = AppleRed,
+                                onClick = {
+                                    LocalAuthManager.logout()
+                                    IcmAuthRepository.logout()
+                                    onLogout()
+                                }
+                            )
+                        }
                     } else {
                         SettingRowNavigable(
                             icon = Icons.Rounded.Person,
@@ -824,6 +840,15 @@ private fun SubscriptionDetailCard(
                         }
                     }
                 }
+            }
+        }
+
+        if (showPasswordSheet) {
+            androidx.compose.material3.ModalBottomSheet(
+                onDismissRequest = { showPasswordSheet = false },
+                containerColor = LiquidTheme.colors.settingsBackground
+            ) {
+                IcmPasswordSheet(onClose = { showPasswordSheet = false })
             }
         }
     }
