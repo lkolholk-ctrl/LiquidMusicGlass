@@ -100,7 +100,10 @@ fun QueueSheet(
     albumColors: AlbumColors? = null,
     currentTrack: Track? = null,
     onRequestControls: () -> Unit = {},
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    // Split-режим (альбом, правая половина): свой фон не рисуем — общий фон
+    // плеера уже под нами (иначе вертикальный шов-«полоса» и другой оттенок).
+    splitMode: Boolean = false
 ) {
     val context = LocalContext.current
     val libraryRepo = remember { com.liquidmusicglass.data.local.db.LibraryRepository.getInstance(context) }
@@ -118,38 +121,49 @@ fun QueueSheet(
         modifier = modifier
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
-            // Dynamic background from album art
-            if (albumColors != null) {
-                AnimatedPlayerBackground(
-                    albumArtUri = albumArtUri,
-                    coverUrl = coverUrl,
-                    audioFileUri = audioFileUri,
-                    albumId = albumId,
-                    albumColors = albumColors
-                )
-            } else {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color(0xFF1C1C2E))
-                )
+            // Dynamic background from album art (в split НЕ рисуем — фон плеера
+            // уже под нами, свой давал бы шов и другой оттенок).
+            if (!splitMode) {
+                if (albumColors != null) {
+                    AnimatedPlayerBackground(
+                        albumArtUri = albumArtUri,
+                        coverUrl = coverUrl,
+                        audioFileUri = audioFileUri,
+                        albumId = albumId,
+                        albumColors = albumColors
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color(0xFF1C1C2E))
+                    )
+                }
             }
 
             // Dark scrim for readability — раньше плоский Black α0.65 «гасил» весь
             // цвет фона в чёрную простыню. Градиент: сверху почти прозрачный (цвет
             // виден), книзу плотнее (под текстом очереди — читаемость). Текст белый,
-            // так что верх можно держать светлым.
+            // так что верх можно держать светлым. В split — горизонтальный, с
+            // растушёванной левой кромкой (без шва).
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(
-                        Brush.verticalGradient(
-                            colorStops = arrayOf(
-                                0.00f to Color.Black.copy(alpha = 0.18f),
-                                0.45f to Color.Black.copy(alpha = 0.30f),
-                                1.00f to Color.Black.copy(alpha = 0.48f)
+                        if (splitMode)
+                            Brush.horizontalGradient(
+                                0.00f to Color.Transparent,
+                                0.14f to Color.Black.copy(alpha = 0.30f),
+                                1.00f to Color.Black.copy(alpha = 0.42f)
                             )
-                        )
+                        else
+                            Brush.verticalGradient(
+                                colorStops = arrayOf(
+                                    0.00f to Color.Black.copy(alpha = 0.18f),
+                                    0.45f to Color.Black.copy(alpha = 0.30f),
+                                    1.00f to Color.Black.copy(alpha = 0.48f)
+                                )
+                            )
                     )
             )
 

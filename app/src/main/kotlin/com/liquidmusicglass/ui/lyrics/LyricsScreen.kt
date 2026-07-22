@@ -100,7 +100,10 @@ fun LyricsScreen(
     trackId: String? = null,
     albumColors: AlbumColors? = null,
     onRequestControls: () -> Unit = {},
-    onClose: () -> Unit = {}
+    onClose: () -> Unit = {},
+    // Split-режим (альбомная ориентация, правая половина): СВОЙ фон не рисуем —
+    // общий фон плеера уже под нами (иначе жёсткий вертикальный шов-«полоса»).
+    splitMode: Boolean = false
 ) {
     val context = LocalContext.current
     val resolvedColors = albumColors ?: rememberAlbumColors(albumArtUri, coverUrl)
@@ -293,14 +296,30 @@ fun LyricsScreen(
             )
     ) {
         // ═══ Background layers ═══
-        LyricsBackground(
-            albumArtUri = albumArtUri,
-            coverUrl = coverUrl,
-            audioFileUri = audioFileUri,
-            albumId = albumId,
-            albumColors = resolvedColors,
-            modifier = Modifier.fillMaxSize()
-        )
+        if (!splitMode) {
+            LyricsBackground(
+                albumArtUri = albumArtUri,
+                coverUrl = coverUrl,
+                audioFileUri = audioFileUri,
+                albumId = albumId,
+                albumColors = resolvedColors,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            // Split: только мягкий скрим для читаемости, левая кромка
+            // растушёвана — никакого шва с обложкой слева.
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.horizontalGradient(
+                            0.00f to Color.Transparent,
+                            0.14f to Color.Black.copy(alpha = 0.30f),
+                            1.00f to Color.Black.copy(alpha = 0.42f)
+                        )
+                    )
+            )
+        }
 
         // ═══ Content ═══
         Box(
@@ -480,7 +499,7 @@ fun LyricsScreen(
             // Цвет — тот же НАСЫЩЕННЫЙ цвет обложки, что и фон лирики
             // (boostedCoverColor от vibrant), никакого серого/чёрного.
             val headerScrimColor = boostedCoverColor(resolvedColors.vibrant)
-            Box(
+            if (!splitMode) Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(HEADER_SCRIM_HEIGHT)

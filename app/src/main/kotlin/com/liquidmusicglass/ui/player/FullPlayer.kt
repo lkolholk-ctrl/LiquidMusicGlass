@@ -464,7 +464,8 @@ fun FullPlayer(
                 trackId = currentTrackObj?.id,
                 albumColors = albumColors,
                 onRequestControls = { controlsVisible = true },
-                onClose = { showLyrics = false }
+                onClose = { showLyrics = false },
+                splitMode = isLandscape
             )
         }
 
@@ -482,7 +483,8 @@ fun FullPlayer(
             // Landscape: очередь в ПРАВОЙ половине (обложка/контролы — слева).
             modifier = if (isLandscape)
                 Modifier.align(Alignment.CenterEnd).fillMaxWidth(0.5f).fillMaxHeight()
-            else Modifier
+            else Modifier,
+            splitMode = isLandscape
         )
 
         // ═══ Controls ═══
