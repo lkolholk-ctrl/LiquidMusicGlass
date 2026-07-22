@@ -503,9 +503,15 @@ fun FullPlayer(
             val scrimColor = lerp(albumColors.dominant, Color.Black, 0.24f)
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
+                    // Landscape: подложка только под ЛЕВОЙ половиной (там контролы);
+                    // правую (лирика/очередь) не затемняем.
+                    .then(
+                        if (isLandscape)
+                            Modifier.fillMaxWidth(0.5f).align(Alignment.BottomStart)
+                        else
+                            Modifier.fillMaxWidth().align(Alignment.BottomCenter)
+                    )
                     .height(460.dp)
-                    .align(Alignment.BottomCenter)
                     .background(
                         Brush.verticalGradient(
                             0.00f to Color.Transparent,
@@ -519,12 +525,15 @@ fun FullPlayer(
             modifier = Modifier
                 .then(
                     // Landscape: контролы в ПРАВОЙ половине (обложка — слева).
+                    // Но когда открыта лирика/очередь (они в правой половине) —
+                    // контролы уходят ВЛЕВО (поверх обложки), чтобы не налезать
+                    // на текст/список (Apple Music split).
                     if (isLandscape)
                         Modifier
-                            .align(Alignment.CenterEnd)
+                            .align(if (showLyrics || showQueue) Alignment.CenterStart else Alignment.CenterEnd)
                             .fillMaxHeight()
                             .fillMaxWidth(0.5f)
-                            .padding(end = 12.dp)
+                            .padding(horizontal = 12.dp)
                     else
                         Modifier.fillMaxSize()
                 )
