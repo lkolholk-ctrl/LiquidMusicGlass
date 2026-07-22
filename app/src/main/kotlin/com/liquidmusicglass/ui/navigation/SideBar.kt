@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -50,6 +51,9 @@ val SideBarWidth = 220.dp
 
 private data class SideNavItem(val icon: ImageVector, val label: String, val index: Int)
 
+// Спец-индекс пункта «Видео» (не вкладка навигации — открывает оверлей).
+const val SIDE_INDEX_VIDEO = -10
+
 @Composable
 fun SideBar(
     selectedIndex: Int,
@@ -65,6 +69,7 @@ fun SideBar(
             SideNavItem(LiquidGlyphs.Equalizer, "Home", 0),
             SideNavItem(LiquidGlyphs.Search, "Search", 1),
             SideNavItem(LiquidGlyphs.Star, "New", 4),
+            SideNavItem(Icons.Rounded.Movie, "Video", SIDE_INDEX_VIDEO),
             SideNavItem(LiquidGlyphs.Playlist, "Playlist", 2),
             SideNavItem(LiquidGlyphs.Settings, "Settings", 3),
         )

@@ -372,6 +372,21 @@ fun FullPlayer(
                         shape = artShape
                     }
             ) {
+                // Видеоклип (Apple Music): вместо обложки — Surface с видео
+                // (mp4 играет основной ExoPlayer, Apple MusicKit Android
+                // рекомендует именно Surface). Иначе — обычная обложка.
+                val isVideoClip by PlayerController.isVideoClip.collectAsState()
+                if (isVideoClip) {
+                    androidx.compose.ui.viewinterop.AndroidView(
+                        factory = { ctx ->
+                            android.view.SurfaceView(ctx).also {
+                                PlayerController.attachVideoSurface(it)
+                            }
+                        },
+                        onRelease = { PlayerController.attachVideoSurface(null) },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
                 // Кроссфейд обложек: при смене трека (авто или скип) старая
                 // растворяется, новая проявляется — вместо мгновенной подмены.
                 androidx.compose.animation.Crossfade(
@@ -388,6 +403,7 @@ fun FullPlayer(
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()
                     )
+                }
                 }
             }
         }
