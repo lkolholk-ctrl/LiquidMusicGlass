@@ -240,8 +240,14 @@ fun LyricsScreen(
     val density = LocalDensity.current
     val configuration = LocalConfiguration.current
     val screenHeightPx = with(density) { configuration.screenHeightDp.dp.toPx() }
-    // Доступная ширина строки лирики (экран минус горизонтальные паддинги 24dp×2)
-    val lineMaxWidthPx = with(density) { (configuration.screenWidthDp.dp - 48.dp).toPx().toInt() }
+    // Доступная ширина строки лирики. В split (альбом/планшет) лирика живёт в
+    // ПРАВОЙ половине — считаем от неё, иначе текст рассчитан на полный экран и
+    // обрезается справа. Плюс левый отступ меньше (текст ближе к обложке-шву).
+    val lineHPadding = if (splitMode) 16.dp else 24.dp
+    val lyricColumnWidthDp = if (splitMode) (configuration.screenWidthDp * 0.5f) else configuration.screenWidthDp.toFloat()
+    val lineMaxWidthPx = with(density) { (lyricColumnWidthDp.dp - lineHPadding * 2).toPx().toInt() }
+    // В узкой split-колонке шрифт строк меньше, чтобы влезал без обрезки.
+    val lineFontScale = if (splitMode) 0.66f else 1f
     // Ширина мягкого края sweep (px) — из настройки плавности; 0 для line-level.
     val edgeSoftPx = if (isWordLevel) (0.02f + wordSmoothness * 0.16f) * lineMaxWidthPx else 0f
 
@@ -455,7 +461,7 @@ fun LyricsScreen(
                                         ) { PlayerController.seekTo(line.timeMs) }
                                         else Modifier
                                     )
-                                    .padding(horizontal = 24.dp, vertical = 10.dp),
+                                    .padding(horizontal = lineHPadding, vertical = if (splitMode) 6.dp else 10.dp),
                                 horizontalAlignment = Alignment.Start
                             ) {
                                 LyricLineSweep(
@@ -467,7 +473,8 @@ fun LyricsScreen(
                                     maxWidthPx = lineMaxWidthPx,
                                     glowColor = duetColor ?: resolvedColors.vibrant,
                                     effect = lineEffect,
-                                    edgeSoftPx = if (isCurrent) edgeSoftPx else 0f
+                                    edgeSoftPx = if (isCurrent) edgeSoftPx else 0f,
+                                    fontSizeSp = 32f * lineFontScale
                                 )
                                 // Точки ожидания во время инструментального проигрыша
                                 // (сегментная модель LyricsTimeProcessor, VAD не используется).
@@ -621,7 +628,9 @@ internal fun LyricLineSweep(
     maxWidthPx: Int,
     glowColor: Color,
     effect: LyricsFxController.WordEffect = LyricsFxController.WordEffect.FILL,
-    edgeSoftPx: Float = 0f
+    edgeSoftPx: Float = 0f,
+    // Размер строки: в узкой split-колонке (альбом/планшет) меньше 32.
+    fontSizeSp: Float = 32f
 ) {
     if (text.isEmpty()) return
 
@@ -631,10 +640,10 @@ internal fun LyricLineSweep(
     // «Укрупнение» активной строки теперь чисто визуальное — spring-scale
     // через graphicsLayer ниже, вёрстка не меняется никогда.
     val style = TextStyle(
-        fontSize = 32.sp,
+        fontSize = fontSizeSp.sp,
         fontWeight = FontWeight.Bold,
         fontFamily = AppFontFamily,
-        lineHeight = 44.sp,
+        lineHeight = (fontSizeSp * 1.375f).sp,
         textAlign = TextAlign.Start,
         platformStyle = PlatformTextStyle(includeFontPadding = false)
     )
