@@ -191,6 +191,20 @@ fun WaveHomeScreen(
         waveContext != null &&
         backend == PlaybackBackend.EXO_STREAMING
 
+    // Широкое окно (телефон-альбом / планшет): вместо полноэкранной Волны с
+    // дымом — медиатечный двухколоночный layout (референс). return ПОСЛЕ всех
+    // hooks выше (число composable-хуков стабильно между ориентациями).
+    val win = com.liquidmusicglass.ui.rememberWindowInfo()
+    val landscapeProfileName by com.liquidmusicglass.api.icm.IcmAuthRepository.profileName.collectAsState()
+    if (win.useSideBySide) {
+        LandscapeHome(
+            onOpenPlayer = onOpenPlayer,
+            onNavigateToArtist = onNavigateToArtist,
+            profileName = landscapeProfileName,
+        )
+        return
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
 
         // ── Living aura background (own AGSL shader, reacts to the music) ──
