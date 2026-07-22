@@ -23,6 +23,7 @@ import java.util.Locale
 import java.util.concurrent.TimeUnit
 import java.io.IOException
 import kotlin.coroutines.resumeWithException
+import org.json.JSONObject
 
 /**
  * Internal file logger for IcmApi — writes to app cache dir so logs survive
