@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.sp
 private val AppleRed = Color(0xFFFC3C44)
 private val TelegramBlue = Color(0xFF0088CC)
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun AuthScreen(
     onAuthSuccess: () -> Unit = {},
@@ -58,7 +59,7 @@ fun AuthScreen(
         if (isLoggedIn) onAuthSuccess()
     }
 
-    var showEmailSheet by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    val showEmailSheet = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
 
     Box(
         modifier = Modifier
@@ -236,7 +237,7 @@ fun AuthScreen(
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null
-                    ) { showEmailSheet = true },
+                    ) { showEmailSheet.value = true },
                 contentAlignment = Alignment.Center
             ) {
                 Text(
@@ -260,14 +261,14 @@ fun AuthScreen(
             Spacer(modifier = Modifier.weight(1f))
         }
 
-        if (showEmailSheet) {
+        if (showEmailSheet.value) {
             androidx.compose.material3.ModalBottomSheet(
-                onDismissRequest = { showEmailSheet = false },
+                onDismissRequest = { showEmailSheet.value = false },
                 containerColor = lc.settingsBackground
             ) {
                 EmailAuthSheet(
-                    onSuccess = { showEmailSheet = false; onAuthSuccess() },
-                    onClose = { showEmailSheet = false }
+                    onSuccess = { showEmailSheet.value = false; onAuthSuccess() },
+                    onClose = { showEmailSheet.value = false }
                 )
             }
         }

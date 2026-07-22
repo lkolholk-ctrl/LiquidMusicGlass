@@ -65,6 +65,7 @@ private val PremiumPurple = Color(0xFF8B5CF6)
 private val SurfaceDark = Color(0xFF1C1C1E)
 private val SurfaceElevated = Color(0xFF2C2C2E)
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileScreen(
     onOpenSettings: () -> Unit = {},
@@ -562,6 +563,15 @@ fun ProfileScreen(
 
             item { Spacer(modifier = Modifier.height(24.dp)) }
         }
+
+        if (showPasswordSheet) {
+            androidx.compose.material3.ModalBottomSheet(
+                onDismissRequest = { showPasswordSheet = false },
+                containerColor = lc.settingsBackground
+            ) {
+                IcmPasswordSheet(onClose = { showPasswordSheet = false })
+            }
+        }
     }
 }
 
@@ -840,15 +850,6 @@ private fun SubscriptionDetailCard(
                         }
                     }
                 }
-            }
-        }
-
-        if (showPasswordSheet) {
-            androidx.compose.material3.ModalBottomSheet(
-                onDismissRequest = { showPasswordSheet = false },
-                containerColor = LiquidTheme.colors.settingsBackground
-            ) {
-                IcmPasswordSheet(onClose = { showPasswordSheet = false })
             }
         }
     }
