@@ -99,7 +99,8 @@ fun QueueSheet(
     albumId: Long = -1L,
     albumColors: AlbumColors? = null,
     currentTrack: Track? = null,
-    onRequestControls: () -> Unit = {}
+    onRequestControls: () -> Unit = {},
+    modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val libraryRepo = remember { com.liquidmusicglass.data.local.db.LibraryRepository.getInstance(context) }
@@ -113,7 +114,8 @@ fun QueueSheet(
     AnimatedVisibility(
         visible = visible,
         enter = fadeIn(tween(400)),
-        exit = fadeOut(tween(350))
+        exit = fadeOut(tween(350)),
+        modifier = modifier
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             // Dynamic background from album art

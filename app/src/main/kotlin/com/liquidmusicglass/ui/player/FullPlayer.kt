@@ -314,9 +314,11 @@ fun FullPlayer(
             )
 
             // ═══ Album art (inside backdrop so glass sees it) ═══
-            // При открытой лирике большая обложка скрывается — у лирики своя шапка
+            // При открытой лирике большая обложка скрывается — у лирики своя шапка.
+            // В АЛЬБОМЕ обложку НЕ прячем: она остаётся слева (split-режим Apple
+            // Music — обложка слева, лирика/очередь справа).
             val artAlpha by animateFloatAsState(
-                targetValue = if (showLyrics) 0f else 1f,
+                targetValue = if (showLyrics && !isLandscape) 0f else 1f,
                 animationSpec = tween(300),
                 label = "artAlpha"
             )
@@ -443,7 +445,11 @@ fun FullPlayer(
         AnimatedVisibility(
             visible = showLyrics,
             enter = fadeIn(tween(400, easing = FastOutSlowInEasing)),
-            exit = fadeOut(tween(350, easing = FastOutSlowInEasing))
+            exit = fadeOut(tween(350, easing = FastOutSlowInEasing)),
+            // Landscape: лирика в ПРАВОЙ половине (обложка остаётся слева).
+            modifier = if (isLandscape)
+                Modifier.align(Alignment.CenterEnd).fillMaxWidth(0.5f).fillMaxHeight()
+            else Modifier
         ) {
             LyricsScreen(
                 audioFileUri = audioFileUri,
@@ -472,7 +478,11 @@ fun FullPlayer(
             albumId = albumId,
             albumColors = albumColors,
             currentTrack = currentTrackObj,
-            onRequestControls = { controlsVisible = true }
+            onRequestControls = { controlsVisible = true },
+            // Landscape: очередь в ПРАВОЙ половине (обложка/контролы — слева).
+            modifier = if (isLandscape)
+                Modifier.align(Alignment.CenterEnd).fillMaxWidth(0.5f).fillMaxHeight()
+            else Modifier
         )
 
         // ═══ Controls ═══
