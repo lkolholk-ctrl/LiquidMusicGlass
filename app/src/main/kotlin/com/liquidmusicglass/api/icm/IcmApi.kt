@@ -1032,6 +1032,69 @@ suspend fun search(
     }
 
     // ═══════════════════════════════════════════════════════════
+    //  Video Clips (Apple Music only, scope "clips", premium).
+    //  Идут через прокси-ядро (Bearer session-token); stream_url ниже —
+    //  подписанный прямой mp3/mp4 URL, играется ExoPlayer напрямую.
+    // ═══════════════════════════════════════════════════════════
+
+    /** Поиск видеоклипов. */
+    suspend fun searchClips(
+        query: String,
+        region: String? = null,
+        limit: Int = 25
+    ): Result<IcmClipSearchResponse> {
+        val r = region ?: defaultRegion
+        val encQuery = java.net.URLEncoder.encode(query, "UTF-8")
+        return execute("/clips/search?q=$encQuery&region=$r&limit=${limit.coerceIn(1, 25)}")
+    }
+
+    /** Запросить stream_url клипа. Может вернуть status=pending (job) — тогда
+     *  поллить [pollClipJob]. quality: 720/1080/1440 (кап config). */
+    suspend fun resolveClip(
+        clipId: String,
+        region: String? = null,
+        quality: Int = 1080
+    ): Result<IcmClipResolveResponse> {
+        val body = JSONObject().apply {
+            put("clip_id", clipId)
+            put("region", region ?: defaultRegion)
+            put("quality", quality)
+        }.toString()
+        return execute("/clips/resolve", method = "POST", body = body)
+    }
+
+    /** Статус холодного клипа (poll каждые 2-3с, job живёт ~10 мин). */
+    suspend fun pollClipJob(jobId: String): Result<IcmClipResolveResponse> {
+        return execute("/clips/job/$jobId")
+    }
+
+    /**
+     * Полный резолв клипа в готовый stream_url: resolve, а на pending —
+     * поллинг job до ready/failed (кап по времени). Возвращает stream_url.
+     */
+    suspend fun resolveClipStreamUrl(
+        clipId: String,
+        quality: Int = 1080,
+        maxWaitMs: Long = 30_000
+    ): Result<String> {
+        val first = resolveClip(clipId, quality = quality).getOrElse { return Result.failure(it) }
+        first.streamUrl?.takeIf { first.status == "ready" }?.let { return Result.success(it) }
+        val jobId = first.jobId ?: return Result.failure(IcmApiException(0, "no job for cold clip"))
+        val deadline = System.currentTimeMillis() + maxWaitMs
+        var wait = (first.pollAfter ?: 3).coerceIn(2, 5) * 1000L
+        while (System.currentTimeMillis() < deadline) {
+            kotlinx.coroutines.delay(wait)
+            val job = pollClipJob(jobId).getOrElse { return Result.failure(it) }
+            when (job.status) {
+                "ready" -> job.streamUrl?.let { return Result.success(it) }
+                "failed" -> return Result.failure(IcmApiException(0, job.error ?: "clip_failed"))
+            }
+            wait = 2500L
+        }
+        return Result.failure(IcmApiException(0, "clip resolve timeout"))
+    }
+
+    // ═══════════════════════════════════════════════════════════
     //  Library (likes, subscriptions)
     //  Requires X-Partner-User-Id header and linked user
     // ═══════════════════════════════════════════════════════════

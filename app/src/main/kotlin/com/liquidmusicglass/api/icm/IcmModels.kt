@@ -949,6 +949,44 @@ data class IcmPasswordResetResponse(
 )
 
 // ═══════════════════════════════════════════════════════════
+//  Video Clips (Apple Music only, scope "clips", premium)
+//  Дока ICM (2026-07-22): /clips/search, /clips/resolve, /clips/job
+// ═══════════════════════════════════════════════════════════
+
+@Serializable
+data class IcmClipItem(
+    val id: String,
+    val title: String = "",
+    val artist: String = "",
+    val thumbnail: String? = null,
+    val duration: Int = 0,
+    @SerialName("has4K") val has4K: Boolean = false,
+    @SerialName("hasHDR") val hasHDR: Boolean = false
+)
+
+@Serializable
+data class IcmClipSearchResponse(
+    val results: List<IcmClipItem> = emptyList()
+)
+
+/** Ответ /clips/resolve и /clips/job: status ready|pending|failed. */
+@Serializable
+data class IcmClipResolveResponse(
+    val status: String = "",
+    @SerialName("clip_id") val clipId: String? = null,
+    @SerialName("file_id") val fileId: String? = null,
+    val quality: Int? = null,
+    @SerialName("stream_url") val streamUrl: String? = null,
+    @SerialName("expires_at") val expiresAt: Long? = null,
+    // pending
+    @SerialName("job_id") val jobId: String? = null,
+    @SerialName("poll_url") val pollUrl: String? = null,
+    @SerialName("poll_after") val pollAfter: Int? = null,
+    // failed
+    val error: String? = null
+)
+
+// ═══════════════════════════════════════════════════════════
 //  Home Screen Models (Banners, New Releases, Charts)
 // ═══════════════════════════════════════════════════════════
 

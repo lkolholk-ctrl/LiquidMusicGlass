@@ -163,6 +163,10 @@ object PlayerController {
     private val _currentTrack = MutableStateFlow<Track?>(null)
     val currentTrack: StateFlow<Track?> = _currentTrack
 
+    // Текущий трек — видеоклип (Apple Music): в плеере вместо обложки Surface.
+    private val _isVideoClip = MutableStateFlow(false)
+    val isVideoClip: StateFlow<Boolean> = _isVideoClip
+
     private val _isPlaying = MutableStateFlow(false)
     val isPlaying: StateFlow<Boolean> = _isPlaying
 
@@ -244,6 +248,7 @@ object PlayerController {
      */
     fun playTrackById(context: Context, trackId: String) {
         android.util.Log.d("VOIDPIXEL_MEDIA", "UI requested Playback for Track ID: $trackId")
+        _isVideoClip.value = false
 
         val currentQueue = queue
         val queueIndex = currentQueue.indexOfFirst { it.id == trackId }
@@ -481,6 +486,7 @@ object PlayerController {
             com.liquidmusicglass.engine.AppSettings.setGapless(false)
         }
 
+        _isVideoClip.value = false   // обычный трек — не видеоклип
         ioScope.launch {
             // ── ABSOLUTE QUEUE PURGE: wipe old queue before loading ──
             withContext(Dispatchers.Main) {
@@ -1289,6 +1295,58 @@ object PlayerController {
             resetPlaybackLogging(0L)
             _currentTrack.value = null
         }
+    }
+
+    /**
+     * Воспроизвести видеоклип (Apple Music) как обычный трек: mp4-[streamUrl]
+     * содержит и видео, и аудио, играет основным ExoPlayer. В FullPlayer при
+     * isVideoClip обложка заменяется на Surface (см. attachVideoSurface).
+     */
+    fun playClip(
+        context: Context,
+        streamUrl: String,
+        clipId: String,
+        title: String,
+        artist: String,
+        thumbnail: String?,
+    ) {
+        ioScope.launch {
+            withContext(Dispatchers.Main) {
+                val player = getPlayer(context) ?: return@withContext
+                val item = MediaItem.Builder()
+                    .setMediaId("clip_$clipId")
+                    .setUri(Uri.parse(streamUrl))   // прямой подписанный mp4
+                    .setMediaMetadata(
+                        MediaMetadata.Builder()
+                            .setTitle(title)
+                            .setArtist(artist)
+                            .apply { thumbnail?.let { setArtworkUri(Uri.parse(it)) } }
+                            .build()
+                    )
+                    .build()
+                player.stop()
+                player.clearMediaItems()
+                player.setMediaItem(item)
+                player.prepare()
+                player.play()
+
+                _playbackBackend.value = PlaybackBackend.EXO_STREAMING
+                _currentTrack.value = Track(
+                    id = "clip_$clipId", title = title, artist = artist, albumName = "",
+                    uri = Uri.parse(streamUrl), durationMs = 0L, albumId = -1L,
+                    coverUrl = thumbnail, source = "clip"
+                )
+                _currentPositionMs.value = 0L
+                _isBuffering.value = true
+                _isVideoClip.value = true
+            }
+        }
+    }
+
+    /** Привязать/отвязать Surface для вывода видеоклипа (зовёт FullPlayer). */
+    fun attachVideoSurface(surfaceView: android.view.SurfaceView?) {
+        val c = controller ?: return
+        if (surfaceView != null) c.setVideoSurfaceView(surfaceView) else c.clearVideoSurface()
     }
 
     private fun buildMediaItem(track: Track, uri: Uri = track.uri): MediaItem {
