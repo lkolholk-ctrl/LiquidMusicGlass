@@ -291,22 +291,23 @@ fun AppRoot() {
                         onOpenProfile = { profileOpen = true },
                         onOpenEqualizer = { equalizerOpen = true }
                     )
-
-                    // ── Equalizer ──
-                    AnimatedVisibility(
-                        visible = equalizerOpen,
-                        enter = slideInVertically(
-                            initialOffsetY = { it },
-                            animationSpec = spring(dampingRatio = 0.88f, stiffness = 300f)
-                        ) + fadeIn(tween(200)),
-                        exit = slideOutVertically(
-                            targetOffsetY = { it },
-                            animationSpec = spring(dampingRatio = 0.92f, stiffness = 400f)
-                        ) + fadeOut(tween(150))
-                    ) {
-                        AudioFxScreen(onBack = { equalizerOpen = false })
-                    }
                 }
+            }
+
+            // ── Equalizer ── (оверлей на весь фоновый Box, поверх Row/сайдбара).
+            // Вне Row: иначе RowScope.AnimatedVisibility перехватывал вызов.
+            AnimatedVisibility(
+                visible = equalizerOpen,
+                enter = slideInVertically(
+                    initialOffsetY = { it },
+                    animationSpec = spring(dampingRatio = 0.88f, stiffness = 300f)
+                ) + fadeIn(tween(200)),
+                exit = slideOutVertically(
+                    targetOffsetY = { it },
+                    animationSpec = spring(dampingRatio = 0.92f, stiffness = 400f)
+                ) + fadeOut(tween(150))
+            ) {
+                AudioFxScreen(onBack = { equalizerOpen = false })
             }
 
         }
