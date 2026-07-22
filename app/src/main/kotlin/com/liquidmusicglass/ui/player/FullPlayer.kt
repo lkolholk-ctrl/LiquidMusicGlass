@@ -318,7 +318,16 @@ fun FullPlayer(
             // В АЛЬБОМЕ обложку НЕ прячем: она остаётся слева (split-режим Apple
             // Music — обложка слева, лирика/очередь справа).
             val artAlpha by animateFloatAsState(
-                targetValue = if (showLyrics && !isLandscape) 0f else 1f,
+                targetValue = when {
+                    // Портрет: лирика прячет большую обложку (у лирики своя шапка).
+                    showLyrics && !isLandscape -> 0f
+                    // Split (альбом/планшет): обложка и контролы в ОДНОЙ левой
+                    // половине. Когда при открытой лирике/очереди всплыли контролы
+                    // — обложку прячем, чтобы кнопки/прогресс читались чисто (не
+                    // мешались поверх обложки). Контролы ушли — обложка вернулась.
+                    isLandscape && (showLyrics || showQueue) && controlsVisible -> 0f
+                    else -> 1f
+                },
                 animationSpec = tween(300),
                 label = "artAlpha"
             )
