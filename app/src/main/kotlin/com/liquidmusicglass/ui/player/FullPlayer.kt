@@ -209,10 +209,10 @@ fun FullPlayer(
     // ── Mood/Color from album art ──
     val albumColors = rememberAlbumColors(albumArtUri, coverUrl)
 
-    // Альбомная ориентация: обложка уезжает влево, контролы — в правую
-    // половину (side-by-side, как в присланном макете). Портрет не меняется.
-    val isLandscape = androidx.compose.ui.platform.LocalConfiguration.current
-        .orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+    // Широкое окно (телефон-альбом ИЛИ планшет): обложка слева, контролы/
+    // лирика/очередь — справа (side-by-side). Компактный портрет не меняется.
+    // Через единый rememberWindowInfo — так же адаптируются все экраны.
+    val isLandscape = com.liquidmusicglass.ui.rememberWindowInfo().useSideBySide
 
     // ── Gesture: horizontal swipe for skip ──
     val swipeOffsetX = remember { Animatable(0f) }
