@@ -208,6 +208,11 @@ fun FullPlayer(
     // ── Mood/Color from album art ──
     val albumColors = rememberAlbumColors(albumArtUri, coverUrl)
 
+    // Альбомная ориентация: обложка уезжает влево, контролы — в правую
+    // половину (side-by-side, как в присланном макете). Портрет не меняется.
+    val isLandscape = androidx.compose.ui.platform.LocalConfiguration.current
+        .orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+
     // ── Gesture: horizontal swipe for skip ──
     val swipeOffsetX = remember { Animatable(0f) }
     var swipeTriggered by remember { mutableStateOf(false) }
@@ -329,10 +334,21 @@ fun FullPlayer(
 
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = artPaddingH.dp)
-                    .padding(top = (80.dp * expandProgress))
-                    .aspectRatio(1f)
+                    .then(
+                        if (isLandscape)
+                            // Слева, по высоте, левая половина экрана.
+                            Modifier
+                                .align(Alignment.CenterStart)
+                                .fillMaxHeight(0.82f)
+                                .padding(start = 28.dp)
+                                .aspectRatio(1f)
+                        else
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = artPaddingH.dp)
+                                .padding(top = (80.dp * expandProgress))
+                                .aspectRatio(1f)
+                    )
                     .graphicsLayer {
                         translationX = swipeOffsetX.value
                         scaleX = artScale
@@ -490,7 +506,17 @@ fun FullPlayer(
         }
         Column(
             modifier = Modifier
-                .fillMaxSize()
+                .then(
+                    // Landscape: контролы в ПРАВОЙ половине (обложка — слева).
+                    if (isLandscape)
+                        Modifier
+                            .align(Alignment.CenterEnd)
+                            .fillMaxHeight()
+                            .fillMaxWidth(0.5f)
+                            .padding(end = 12.dp)
+                    else
+                        Modifier.fillMaxSize()
+                )
                 .windowInsetsPadding(WindowInsets.statusBars)
                 .windowInsetsPadding(WindowInsets.navigationBars),
             horizontalAlignment = Alignment.CenterHorizontally
