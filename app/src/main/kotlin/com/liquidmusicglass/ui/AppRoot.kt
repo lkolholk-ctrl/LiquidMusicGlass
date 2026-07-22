@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -95,6 +96,12 @@ fun AppRoot() {
         NavRoutes.GRAPH_NEW -> 4
         else -> 0
     }
+    // Адаптив: в широком окне (телефон-альбом / планшет) навигация уходит в
+    // боковой SideBar слева, основной нижний бар прячется.
+    val win = com.liquidmusicglass.ui.rememberWindowInfo()
+    val sideProfileName by com.liquidmusicglass.api.icm.IcmAuthRepository.profileName.collectAsState()
+    val sideAvatarUrl by com.liquidmusicglass.api.icm.IcmAuthRepository.avatarUrl.collectAsState()
+
     val onWaveHome = currentRoute == NavRoutes.WAVE_HOME
     // Раздел ЯМ — «приложение в приложении»: пока открыт его экран и юзер
     // подключён, основной бар прячется, а внизу — собственный бар ЯМ.
@@ -124,6 +131,9 @@ fun AppRoot() {
     var tagEditTrack by remember { mutableStateOf<com.liquidmusicglass.engine.Track?>(null) }
     var authOpen by remember { mutableStateOf(false) }
     var profileOpen by remember { mutableStateOf(false) }
+
+    // Бар/сайдбар видны на вкладках и деталях; прячем под полными оверлеями.
+    val barsVisible = !equalizerOpen && !settingsOpen && !authOpen && !profileOpen
 
     val currentTrack by PlayerController.currentTrack.collectAsState()
     val isPlaying by PlayerController.isPlaying.collectAsState()
@@ -250,38 +260,60 @@ fun AppRoot() {
                     // тяжёлый дым Волны, чтобы рендер не душил аудио-колбэк JUCE.
                     EffectsLifecycle.hasWindowFocus
 
-            // ── Единый NavHost: вкладки + их детали (пер-таб бэкстек) ──
-            LiquidNavHost(
-                navController = navController,
-                backdrop = rootBackdrop,
-                waveAnimationsActive = waveAnimationsActive,
-                onOpenPlayer = { animateExpand() },
-                onOpenAuth = { authOpen = true },
-                onOpenProfile = { profileOpen = true },
-                onOpenEqualizer = { equalizerOpen = true }
-            )
+            // Широкое окно: слева боковая навигация (SideBar), справа — контент
+            // (NavHost + оверлей эквалайзера). Компакт (телефон-портрет): сайдбара
+            // нет, всё как раньше (навигация нижним баром).
+            Row(modifier = Modifier.fillMaxSize()) {
+                if (win.useSideBySide && barsVisible) {
+                    com.liquidmusicglass.ui.navigation.SideBar(
+                        selectedIndex = selectedIndex,
+                        onItemSelected = { index ->
+                            if (index == 1) {
+                                // Поиск — не вкладка; открываем поиск на Волне.
+                                switchTab(0)
+                            } else switchTab(index)
+                        },
+                        onOpenProfile = { profileOpen = true },
+                        profileName = sideProfileName,
+                        avatarUrl = sideAvatarUrl
+                    )
+                }
+                androidx.compose.foundation.layout.Box(
+                    modifier = Modifier.weight(1f).fillMaxSize()
+                ) {
+                    // ── Единый NavHost: вкладки + их детали (пер-таб бэкстек) ──
+                    LiquidNavHost(
+                        navController = navController,
+                        backdrop = rootBackdrop,
+                        waveAnimationsActive = waveAnimationsActive,
+                        onOpenPlayer = { animateExpand() },
+                        onOpenAuth = { authOpen = true },
+                        onOpenProfile = { profileOpen = true },
+                        onOpenEqualizer = { equalizerOpen = true }
+                    )
 
-            // ── Equalizer ──
-            AnimatedVisibility(
-                visible = equalizerOpen,
-                enter = slideInVertically(
-                    initialOffsetY = { it },
-                    animationSpec = spring(dampingRatio = 0.88f, stiffness = 300f)
-                ) + fadeIn(tween(200)),
-                exit = slideOutVertically(
-                    targetOffsetY = { it },
-                    animationSpec = spring(dampingRatio = 0.92f, stiffness = 400f)
-                ) + fadeOut(tween(150))
-            ) {
-                AudioFxScreen(onBack = { equalizerOpen = false })
+                    // ── Equalizer ──
+                    AnimatedVisibility(
+                        visible = equalizerOpen,
+                        enter = slideInVertically(
+                            initialOffsetY = { it },
+                            animationSpec = spring(dampingRatio = 0.88f, stiffness = 300f)
+                        ) + fadeIn(tween(200)),
+                        exit = slideOutVertically(
+                            targetOffsetY = { it },
+                            animationSpec = spring(dampingRatio = 0.92f, stiffness = 400f)
+                        ) + fadeOut(tween(150))
+                    ) {
+                        AudioFxScreen(onBack = { equalizerOpen = false })
+                    }
+                }
             }
 
         }
 
-     // Бар теперь виден И на экранах-деталях (пер-таб навигация): из глубины
-     // можно сразу уйти на другую вкладку. Прячем только под полными оверлеями.
-     val barsVisible = !equalizerOpen && !settingsOpen && !authOpen && !profileOpen
-
+    // barsVisible объявлена выше (нужна и для SideBar, и для нижнего бара).
+    // Нижний бар: в широком окне скрыт (навигация в SideBar), но мини-плеер
+    // остаётся. В компакте — как раньше.
     if (barsVisible) {
             val density = androidx.compose.ui.platform.LocalDensity.current
             val bottomBarTranslateY = expandProgress.value * density.run { 160.dp.toPx() }
@@ -376,6 +408,9 @@ fun AppRoot() {
                         }
                         // ЯМ открыт, но не подключён → фокусный экран входа без бара.
                         onYandexScreen -> Unit
+                        // Широкое окно: основной бар скрыт — навигация в SideBar
+                        // слева (мини-плеер снизу остаётся).
+                        win.useSideBySide -> Unit
                         else -> BottomBar(
                             selectedIndex = selectedIndex,
                             onItemSelected = { index ->

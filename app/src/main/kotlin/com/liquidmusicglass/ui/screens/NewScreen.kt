@@ -11,9 +11,11 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -103,10 +105,15 @@ fun NewScreen(
     }
 
     val lc = LiquidTheme.colors
+    // Широкое окно (телефон-альбом ИЛИ планшет): ограничиваем ширину списка
+    // и центрируем — плоские строки/карусели не растягиваются на весь экран.
+    val win = com.liquidmusicglass.ui.rememberWindowInfo()
 
     Box(modifier = Modifier.fillMaxSize().background(lc.settingsBackground)) {
         LazyColumn(
-            modifier = Modifier.fillMaxSize(),
+            modifier = if (win.useSideBySide)
+                Modifier.fillMaxHeight().widthIn(max = 900.dp).fillMaxWidth().align(Alignment.TopCenter)
+            else Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = 178.dp)
         ) {
             item { Spacer(Modifier.windowInsetsTopHeight(WindowInsets.statusBars)) }

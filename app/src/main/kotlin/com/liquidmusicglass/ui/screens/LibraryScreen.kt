@@ -118,6 +118,13 @@ fun LibraryScreen(
 
     var currentView by remember { mutableStateOf(LibraryView.MAIN) }
 
+    // Адаптив: в широком окне (телефон-альбом / планшет) сетка плейлистов
+    // получает больше колонок, а вертикальные списки-строки центрируем узкой
+    // колонкой ~600dp боковыми отступами, чтобы строки не растягивались.
+    val win = com.liquidmusicglass.ui.rememberWindowInfo()
+    val wideSidePad = if (win.useSideBySide)
+        (((win.widthDp - 600) / 2).coerceAtLeast(20)).dp else 20.dp
+
     // Favorites state
     val favorites by viewModel.favorites.collectAsState()
     val favoriteIds by viewModel.favoriteIds.collectAsState()
@@ -217,7 +224,11 @@ fun LibraryScreen(
                 var playlistToDelete by remember { mutableStateOf<PlaylistCellData?>(null) }
 
                 androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
-                    columns = androidx.compose.foundation.lazy.grid.GridCells.Fixed(2),
+                    // В альбоме/на планшете больше колонок под плейлисты (было 2);
+                    // full-span заголовки/системная карточка тянутся во всю ширину.
+                    columns = if (win.useSideBySide)
+                        androidx.compose.foundation.lazy.grid.GridCells.Adaptive(minSize = 200.dp)
+                    else androidx.compose.foundation.lazy.grid.GridCells.Fixed(2),
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 178.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -425,7 +436,9 @@ fun LibraryScreen(
                     } else {
                         LazyColumn(
                             modifier = Modifier.weight(1f),
-                            contentPadding = PaddingValues(bottom = 178.dp)
+                            contentPadding = if (win.useSideBySide)
+                                PaddingValues(start = wideSidePad, end = wideSidePad, bottom = 178.dp)
+                            else PaddingValues(bottom = 178.dp)
                         ) {
                             items(favorites, key = { it.trackId }) { track ->
                                 FavoriteTrackItem(
@@ -507,7 +520,9 @@ fun LibraryScreen(
                     } else {
                         LazyColumn(
                             modifier = Modifier.weight(1f),
-                            contentPadding = PaddingValues(bottom = 178.dp)
+                            contentPadding = if (win.useSideBySide)
+                                PaddingValues(start = wideSidePad, end = wideSidePad, bottom = 178.dp)
+                            else PaddingValues(bottom = 178.dp)
                         ) {
                             items(downloadedTracks, key = { it.trackId }) { trackEntity ->
                                 DownloadedTrackItem(
@@ -622,7 +637,11 @@ fun LibraryScreen(
                     } else {
                         LazyColumn(
                             modifier = Modifier.weight(1f),
-                            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 120.dp)
+                            contentPadding = PaddingValues(
+                                start = if (win.useSideBySide) wideSidePad else 20.dp,
+                                end = if (win.useSideBySide) wideSidePad else 20.dp,
+                                bottom = 120.dp
+                            )
                         ) {
                             items(localPlaylists, key = { it.id }) { playlist ->
                                 LocalPlaylistRow(
@@ -724,7 +743,11 @@ fun LibraryScreen(
                         } else {
                             LazyColumn(
                                 modifier = Modifier.weight(1f),
-                                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 120.dp)
+                                contentPadding = PaddingValues(
+                                    start = if (win.useSideBySide) wideSidePad else 20.dp,
+                                    end = if (win.useSideBySide) wideSidePad else 20.dp,
+                                    bottom = 120.dp
+                                )
                             ) {
                                 // ── Yandex Music Section ──
                                 if (yandexPlaylists.isNotEmpty()) {
@@ -1189,6 +1212,11 @@ private fun LocalAudioView(
     val lc = LiquidTheme.colors
     val scope = rememberCoroutineScope()
 
+    // Адаптив: в широком окне центрируем список треков узкой колонкой ~600dp.
+    val laWin = com.liquidmusicglass.ui.rememberWindowInfo()
+    val laSidePad = if (laWin.useSideBySide)
+        (((laWin.widthDp - 600) / 2).coerceAtLeast(12)).dp else 12.dp
+
     val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         android.Manifest.permission.READ_MEDIA_AUDIO
     } else {
@@ -1270,7 +1298,7 @@ private fun LocalAudioView(
             else -> {
                 LazyColumn(
                     modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 120.dp)
+                    contentPadding = PaddingValues(start = laSidePad, end = laSidePad, bottom = 120.dp)
                 ) {
                     items(tracks, key = { it.id }) { track ->
                         LocalTrackRow(

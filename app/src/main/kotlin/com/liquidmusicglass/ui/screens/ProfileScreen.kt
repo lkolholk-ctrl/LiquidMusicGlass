@@ -8,9 +8,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -122,13 +124,21 @@ fun ProfileScreen(
         else -> "Guest"
     }
 
+    // Широкое окно (телефон-альбом ИЛИ планшет). В портрете layout не меняется.
+    val win = com.liquidmusicglass.ui.rememberWindowInfo()
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(LiquidTheme.colors.settingsBackground)
     ) {
         LazyColumn(
-            modifier = Modifier.fillMaxSize(),
+            // В альбоме/на планшете шапку профиля и карточки не растягиваем на всю
+            // ширину — ограничиваем 640dp и центрируем. Портрет остаётся как был.
+            // ModalBottomSheet (IcmPasswordSheet) — оверлей, его это не трогает.
+            modifier = if (win.useSideBySide)
+                Modifier.fillMaxHeight().widthIn(max = 640.dp).align(Alignment.TopCenter)
+            else Modifier.fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // ── Status bar spacing ──

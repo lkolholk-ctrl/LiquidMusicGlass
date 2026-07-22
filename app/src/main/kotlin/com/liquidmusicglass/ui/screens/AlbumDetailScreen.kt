@@ -14,8 +14,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.windowInsetsTopHeight
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -46,6 +51,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.liquidmusicglass.ui.glass.GlassKit
 import com.liquidmusicglass.ui.glass.liquidClickable
+import com.liquidmusicglass.ui.rememberWindowInfo
 import com.liquidmusicglass.ui.theme.LiquidMotion
 import com.liquidmusicglass.ui.theme.LiquidTheme
 import com.liquidmusicglass.api.icm.IcmAlbumResponse
@@ -131,8 +137,10 @@ fun AlbumDetailScreen(
                 }
             }
             else -> {
-                LazyColumn(modifier = Modifier.fillMaxSize()) {
-                    item {
+                val win = rememberWindowInfo()
+                // Шапка альбома: в компакте — первый элемент списка, в широком
+                // окне — левая колонка сплита (обложка сверху, треки справа).
+                val headerContent: @Composable () -> Unit = {
                         Spacer(modifier = Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
                         Spacer(modifier = Modifier.height(12.dp))
 
@@ -316,9 +324,10 @@ fun AlbumDetailScreen(
                         }
 
                         Spacer(modifier = Modifier.height(24.dp))
-                    }
+                }
 
-                    // Track list
+                // Список треков — общий блок для обоих layout.
+                val trackItems: LazyListScope.() -> Unit = {
                     itemsIndexed(albumTracks, key = { _, t -> t.id }) { index, track ->
                         Row(
                             modifier = Modifier
@@ -385,6 +394,30 @@ fun AlbumDetailScreen(
                     }
 
                     item { Spacer(modifier = Modifier.height(200.dp)) }
+                }
+
+                if (win.useSideBySide) {
+                    // Планшет/телефон-альбом: шапка слева фикс. ширины, треки справа.
+                    Row(modifier = Modifier.fillMaxSize()) {
+                        Column(
+                            modifier = Modifier
+                                .width(360.dp)
+                                .fillMaxHeight()
+                                .verticalScroll(rememberScrollState())
+                        ) { headerContent() }
+                        LazyColumn(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .windowInsetsPadding(WindowInsets.statusBars)
+                                .padding(top = 12.dp)
+                        ) { trackItems() }
+                    }
+                } else {
+                    LazyColumn(modifier = Modifier.fillMaxSize()) {
+                        item { headerContent() }
+                        trackItems()
+                    }
                 }
             }
         }

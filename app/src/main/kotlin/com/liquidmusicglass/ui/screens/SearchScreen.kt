@@ -99,6 +99,13 @@ fun SearchScreen(
     val error by viewModel.error.collectAsState()
     val selectedSource by viewModel.selectedSource.collectAsState()
 
+    // Адаптив: поле поиска и сегменты остаются во всю ширину, а списки
+    // результатов/истории в широком окне (альбом/планшет) центрируем узкой
+    // колонкой ~600dp боковыми отступами — длинные строки во всю ширину плохи.
+    val win = com.liquidmusicglass.ui.rememberWindowInfo()
+    val resultsSidePad = if (win.useSideBySide)
+        (((win.widthDp - 600) / 2).coerceAtLeast(0)).dp else 0.dp
+
     // Load categories on first composition
     LaunchedEffect(Unit) {
         viewModel.loadCategories()
@@ -324,7 +331,7 @@ fun SearchScreen(
                 ) {
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(bottom = 178.dp)
+                        contentPadding = PaddingValues(start = resultsSidePad, end = resultsSidePad, bottom = 178.dp)
                     ) {
                         if (categories.isNotEmpty()) {
                             item {
@@ -474,7 +481,7 @@ fun SearchScreen(
                                 LazyColumn(
                                     modifier = Modifier.fillMaxSize(),
                                     verticalArrangement = Arrangement.spacedBy(2.dp),
-                                    contentPadding = PaddingValues(bottom = 178.dp)
+                                    contentPadding = PaddingValues(start = resultsSidePad, end = resultsSidePad, bottom = 178.dp)
                                 ) {
                                     // Artists section
                                     if (artists.isNotEmpty()) {

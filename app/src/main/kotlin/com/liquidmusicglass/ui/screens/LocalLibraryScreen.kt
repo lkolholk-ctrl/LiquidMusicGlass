@@ -228,7 +228,10 @@ private fun ArtistsList(
 ) {
     val flow = remember { dao.artists() }
     val artists by flow.collectAsState(initial = emptyList())
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 120.dp)) {
+    // Адаптив: в широком окне центрируем список узкой колонкой ~600dp.
+    val win = com.liquidmusicglass.ui.rememberWindowInfo()
+    val sidePad = if (win.useSideBySide) (((win.widthDp - 600) / 2).coerceAtLeast(12)).dp else 12.dp
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = sidePad, end = sidePad, bottom = 120.dp)) {
         items(artists, key = { it.name }) { a -> ArtistRow(a, lc) { onOpenArtist(a.name) } }
     }
 }
@@ -241,8 +244,10 @@ private fun AlbumsGrid(
 ) {
     val flow = remember { dao.albums() }
     val albums by flow.collectAsState(initial = emptyList())
+    // В альбоме/на планшете больше колонок под обложки (было фиксированные 2).
+    val win = com.liquidmusicglass.ui.rememberWindowInfo()
     LazyVerticalGrid(
-        columns = GridCells.Fixed(2),
+        columns = if (win.useSideBySide) GridCells.Adaptive(minSize = 180.dp) else GridCells.Fixed(2),
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(12.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -272,6 +277,10 @@ private fun TracksTab(
         }
     }
     val tracks by flow.collectAsState(initial = emptyList())
+    // Адаптив: в широком окне центрируем список треков узкой колонкой ~600dp
+    // (полоса сортировки сверху остаётся во всю ширину).
+    val win = com.liquidmusicglass.ui.rememberWindowInfo()
+    val sidePad = if (win.useSideBySide) (((win.widthDp - 600) / 2).coerceAtLeast(12)).dp else 12.dp
     Column(Modifier.fillMaxSize()) {
         Row(
             Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 6.dp),
@@ -285,7 +294,7 @@ private fun TracksTab(
             labels.forEachIndexed { i, t -> SortChip(t, sort == i, lc) { sort = i } }
         }
         LazyColumn(Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = if (selectionMode) 96.dp else 120.dp)) {
+            contentPadding = PaddingValues(start = sidePad, end = sidePad, bottom = if (selectionMode) 96.dp else 120.dp)) {
             itemsIndexed(tracks) { index, e ->
                 SelectableTrackRow(
                     e, lc,
@@ -357,7 +366,9 @@ private fun SearchResultsView(
         }
         return
     }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 120.dp)) {
+    val win = com.liquidmusicglass.ui.rememberWindowInfo()
+    val sidePad = if (win.useSideBySide) (((win.widthDp - 600) / 2).coerceAtLeast(12)).dp else 12.dp
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = sidePad, end = sidePad, bottom = 120.dp)) {
         if (r.artists.isNotEmpty()) {
             item { SectionLabel("Artists", lc) }
             items(r.artists, key = { "a_" + it.name }) { a -> ArtistRow(a, lc) { onOpenArtist(a.name) } }
@@ -385,9 +396,12 @@ fun LocalArtistDetailScreen(artistName: String, onBack: () -> Unit, onOpenAlbum:
     val tracksFlow = remember(artistName) { dao.tracksOfArtist(artistName) }
     val albums by albumsFlow.collectAsState(initial = emptyList())
     val tracks by tracksFlow.collectAsState(initial = emptyList())
+    // Адаптив: в широком окне центрируем контент узкой колонкой ~600dp.
+    val win = com.liquidmusicglass.ui.rememberWindowInfo()
+    val sidePad = if (win.useSideBySide) (((win.widthDp - 600) / 2).coerceAtLeast(0)).dp else 0.dp
 
     Box(Modifier.fillMaxSize().background(lc.settingsBackground)) {
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 120.dp)) {
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = sidePad, end = sidePad, bottom = 120.dp)) {
             item {
                 Spacer(Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
                 Spacer(Modifier.height(12.dp))
@@ -427,9 +441,12 @@ fun LocalAlbumDetailScreen(albumId: Long, albumName: String, onBack: () -> Unit)
     val tracks by tracksFlow.collectAsState(initial = emptyList())
     val artist = tracks.firstOrNull()?.artist ?: ""
     val year = tracks.firstOrNull()?.year ?: 0
+    // Адаптив: в широком окне центрируем контент узкой колонкой ~600dp.
+    val win = com.liquidmusicglass.ui.rememberWindowInfo()
+    val sidePad = if (win.useSideBySide) (((win.widthDp - 600) / 2).coerceAtLeast(0)).dp else 0.dp
 
     Box(Modifier.fillMaxSize().background(lc.settingsBackground)) {
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 120.dp)) {
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = sidePad, end = sidePad, bottom = 120.dp)) {
             item {
                 Spacer(Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
                 Spacer(Modifier.height(12.dp))

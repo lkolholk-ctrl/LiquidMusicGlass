@@ -64,6 +64,12 @@ fun HistoryScreen(
     val dao = remember { AppDatabase.getInstance(context).listenHistoryDao() }
     val history by remember { dao.observe() }.collectAsState(initial = emptyList())
 
+    // Адаптив: в широком окне (телефон-альбом / планшет) не растягиваем строки
+    // на всю ширину — центрируем список узкой колонкой ~600dp боковыми отступами.
+    val win = com.liquidmusicglass.ui.rememberWindowInfo()
+    val histSidePad = if (win.useSideBySide)
+        (((win.widthDp - 600) / 2).coerceAtLeast(20)).dp else 20.dp
+
     Box(modifier = Modifier.fillMaxSize().background(lc.settingsBackground)) {
         Column(modifier = Modifier.fillMaxSize()) {
             Spacer(modifier = Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
@@ -132,7 +138,7 @@ fun HistoryScreen(
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                        start = 20.dp, end = 20.dp, bottom = 96.dp
+                        start = histSidePad, end = histSidePad, bottom = 96.dp
                     )
                 ) {
                     items(history, key = { it.trackId }) { entry ->

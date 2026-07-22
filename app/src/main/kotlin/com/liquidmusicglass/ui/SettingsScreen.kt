@@ -73,10 +73,20 @@ fun SettingsScreen(
 
     val lc = LiquidTheme.colors
 
+    // Широкое окно (телефон-альбом ИЛИ планшет). В портрете layout не меняется.
+    val win = com.liquidmusicglass.ui.rememberWindowInfo()
+
     Box(modifier = Modifier.fillMaxSize().background(lc.settingsBackground)) {
         Column(
             modifier = Modifier
-                .fillMaxSize()
+                // В альбоме/на планшете вертикальный список настроек не тянем на
+                // всю ширину (растянутые карточки некрасивы, взгляд возит далеко) —
+                // ограничиваем 640dp и центрируем. Портрет остаётся как был.
+                .then(
+                    if (win.useSideBySide)
+                        Modifier.align(Alignment.TopCenter).fillMaxHeight().widthIn(max = 640.dp)
+                    else Modifier.fillMaxSize()
+                )
                 .verticalScroll(scroll)
                 .padding(horizontal = 20.dp)
         ) {

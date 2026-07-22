@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -16,8 +17,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.windowInsetsTopHeight
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -55,6 +60,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.liquidmusicglass.ui.glass.GlassKit
 import com.liquidmusicglass.ui.glass.liquidClickable
+import com.liquidmusicglass.ui.rememberWindowInfo
 import com.liquidmusicglass.ui.theme.LiquidMotion
 import com.liquidmusicglass.ui.theme.LiquidTheme
 import com.liquidmusicglass.api.icm.IcmArtistResponse
@@ -245,8 +251,10 @@ fun ArtistDetailScreen(
                 }
             }
             else -> {
-                LazyColumn(modifier = Modifier.fillMaxSize()) {
-                    item {
+                val win = rememberWindowInfo()
+                // Шапка артиста (аватар, инфо, кнопки, секции) — общий блок:
+                // в компакте первый элемент списка, в широком окне — левая колонка.
+                val headerContent: @Composable () -> Unit = {
                         Spacer(modifier = Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
                         Spacer(modifier = Modifier.height(12.dp))
 
@@ -637,8 +645,12 @@ fun ArtistDetailScreen(
 
                             Spacer(modifier = Modifier.height(28.dp))
                         }
+                }
 
-                        // All tracks header
+                // Список треков (заголовок Songs + спиннер + треки) — общий блок.
+                val trackItems: LazyListScope.() -> Unit = {
+                    // All tracks header
+                    item {
                         Text(
                             text = "Songs",
                             color = Color.White,
@@ -649,7 +661,6 @@ fun ArtistDetailScreen(
                         Spacer(modifier = Modifier.height(8.dp))
                     }
 
-                    // Track list
                     if (isLoadingTracks) {
                         item {
                             Box(
@@ -748,6 +759,30 @@ fun ArtistDetailScreen(
                     }
 
                     item { Spacer(modifier = Modifier.height(200.dp)) }
+                }
+
+                if (win.useSideBySide) {
+                    // Планшет/телефон-альбом: инфо об артисте слева, песни справа.
+                    Row(modifier = Modifier.fillMaxSize()) {
+                        Column(
+                            modifier = Modifier
+                                .width(360.dp)
+                                .fillMaxHeight()
+                                .verticalScroll(rememberScrollState())
+                        ) { headerContent() }
+                        LazyColumn(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .windowInsetsPadding(WindowInsets.statusBars)
+                                .padding(top = 12.dp)
+                        ) { trackItems() }
+                    }
+                } else {
+                    LazyColumn(modifier = Modifier.fillMaxSize()) {
+                        item { headerContent() }
+                        trackItems()
+                    }
                 }
             }
         }

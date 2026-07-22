@@ -9,15 +9,20 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -47,6 +52,7 @@ import com.liquidmusicglass.engine.Track
 import com.liquidmusicglass.engine.PlaylistDownloadService
 import com.liquidmusicglass.ui.glass.AlbumArtImage
 import com.liquidmusicglass.ui.glass.liquidClickable
+import com.liquidmusicglass.ui.rememberWindowInfo
 import com.liquidmusicglass.ui.theme.LiquidMotion
 import com.liquidmusicglass.ui.theme.LiquidTheme
 import com.liquidmusicglass.api.icm.IcmRepository
@@ -162,309 +168,371 @@ fun PlaylistDetailScreen(
         }
     }
 
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(LiquidTheme.colors.settingsBackground)
-            .padding(horizontal = 20.dp),
-        contentPadding = PaddingValues(bottom = 120.dp)
-    ) {
-        // Header
-        item {
-            Spacer(Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
-            Spacer(Modifier.height(12.dp))
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier.fillMaxWidth()
+    val win = rememberWindowInfo()
+
+    // Имя плейлиста нужно и в шапке, и в кнопках Play/Shuffle — считаем один раз.
+    val name = if (isLocalPlaylist) {
+        com.liquidmusicglass.engine.PlaylistManager.getById(playlistId)?.name ?: "Playlist"
+    } else {
+        playlistInfo?.name ?: "Playlist"
+    }
+
+    // Верхняя панель (назад + скачать) — общий блок для обоих layout.
+    val headerBar: @Composable () -> Unit = {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .background(if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7), CircleShape)
+                    .clip(CircleShape)
+                    .liquidClickable(pressedScale = LiquidMotion.PressIcon) { onBack() },
+                contentAlignment = Alignment.Center
             ) {
+                Icon(
+                    Icons.AutoMirrored.Rounded.ArrowBack,
+                    null,
+                    tint = lc.iconDefault,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+
+            // Download button — only show if playlist has tracks
+            if (tracks.isNotEmpty()) {
                 Box(
                     modifier = Modifier
                         .size(40.dp)
                         .background(if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7), CircleShape)
                         .clip(CircleShape)
-                        .liquidClickable(pressedScale = LiquidMotion.PressIcon) { onBack() },
+                        .liquidClickable(pressedScale = LiquidMotion.PressIcon) {
+                            val trackIds = tracks.map { it.id }
+                            val playlistName = if (isLocalPlaylist) {
+                                com.liquidmusicglass.engine.PlaylistManager.getById(playlistId)?.name ?: "Playlist"
+                            } else {
+                                playlistInfo?.name ?: "Playlist"
+                            }
+                            PlaylistDownloadService.start(context, tracks, playlistName)
+                        },
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        Icons.AutoMirrored.Rounded.ArrowBack,
-                        null,
-                        tint = lc.iconDefault,
+                        Icons.Rounded.Download,
+                        contentDescription = "Download playlist",
+                        tint = AppleRed,
                         modifier = Modifier.size(22.dp)
                     )
                 }
+            }
+        }
+    }
 
-                // Download button — only show if playlist has tracks
-                if (tracks.isNotEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .background(if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7), CircleShape)
-                            .clip(CircleShape)
-                            .liquidClickable(pressedScale = LiquidMotion.PressIcon) {
-                                val trackIds = tracks.map { it.id }
-                                val playlistName = if (isLocalPlaylist) {
-                                    com.liquidmusicglass.engine.PlaylistManager.getById(playlistId)?.name ?: "Playlist"
-                                } else {
-                                    playlistInfo?.name ?: "Playlist"
-                                }
-                                PlaylistDownloadService.start(context, tracks, playlistName)
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            Icons.Rounded.Download,
-                            contentDescription = "Download playlist",
-                            tint = AppleRed,
-                            modifier = Modifier.size(22.dp)
+    // Иконка плейлиста + название + счётчик — общий блок.
+    val infoBlock: @Composable () -> Unit = {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(120.dp)
+                    .clip(RoundedCornerShape(28.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.PlaylistPlay,
+                    contentDescription = null,
+                    tint = AppleRed.copy(alpha = 0.9f),
+                    modifier = Modifier.size(72.dp)
+                )
+            }
+
+            Spacer(Modifier.height(16.dp))
+            Text(
+                name,
+                color = lc.textPrimary,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "${tracks.size} tracks",
+                color = lc.textSecondary,
+                fontSize = 15.sp
+            )
+        }
+    }
+
+    // Кнопки Play / Shuffle — общий блок.
+    val actionButtons: @Composable () -> Unit = {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Play
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(48.dp)
+                    .background(AppleRed, RoundedCornerShape(50))
+                    .clip(RoundedCornerShape(50))
+                    .liquidClickable(pressedScale = LiquidMotion.PressButton) {
+                        PlayerController.playFromList(
+                            context = context,
+                            tracks = tracks,
+                            startIndex = 0,
+                            autoRefillType = "playlist",
+                            autoRefillId = playlistId,
+                            autoRefillName = name
                         )
-                    }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Rounded.PlayArrow,
+                        null,
+                        tint = Color.White,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text("Play", color = Color.White, fontWeight = FontWeight.SemiBold)
                 }
             }
-            Spacer(Modifier.height(20.dp))
+
+            // Shuffle
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(48.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
+                    .liquidClickable(pressedScale = LiquidMotion.PressButton) {
+                        PlayerController.playFromList(
+                            context = context,
+                            tracks = tracks.shuffled(),
+                            startIndex = 0,
+                            autoRefillType = "playlist",
+                            autoRefillId = playlistId,
+                            autoRefillName = name
+                        )
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Rounded.Shuffle,
+                        null,
+                        tint = AppleRed,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        "Shuffle",
+                        color = lc.textPrimary,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+        }
+    }
+
+    // Список треков (плюс пустое состояние) — общий блок для обоих layout.
+    val trackItems: LazyListScope.() -> Unit = {
+        itemsIndexed(tracks, key = { _, t -> t.id }) { index, track ->
+            Row(
+                modifier = Modifier
+                    .animateItem()
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .liquidClickable {
+                        PlayerController.playFromList(
+                            context = context,
+                            tracks = tracks,
+                            startIndex = index,
+                            autoRefillType = "playlist",
+                            autoRefillId = playlistId,
+                            autoRefillName = name
+                        )
+                    }
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "${index + 1}",
+                    color = lc.textTertiary,
+                    fontSize = 14.sp,
+                    modifier = Modifier.width(28.dp)
+                )
+
+                AlbumArtImage(
+                    uri = track.albumArtUri,
+                    audioFileUri = track.uri,
+                    albumId = track.albumId,
+                    coverUrl = track.coverUrl,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                )
+
+                Spacer(Modifier.width(12.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            track.title,
+                            color = lc.textPrimary,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        if (track.isExplicit) {
+                            Spacer(Modifier.width(6.dp))
+                            GlassKit.ExplicitBadge()
+                        }
+                        if (track.isCustom) {
+                            Spacer(Modifier.width(6.dp))
+                            GlassKit.VerifiedBadge()
+                        }
+                    }
+                    Text(
+                        track.artist,
+                        color = lc.textSecondary,
+                        fontSize = 13.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                if (track.durationMs > 0) {
+                    Text(
+                        text = formatDuration(track.durationMs),
+                        color = lc.textSecondary,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(start = 8.dp)
+                    )
+                }
+            }
+            Spacer(Modifier.height(6.dp))
         }
 
-        if (isLoading) {
+        // Empty
+        if (tracks.isEmpty()) {
             item {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 100.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(color = AppleRed)
-                }
-            }
-        } else if (errorMsg != null) {
-            item {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 100.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = errorMsg ?: "Unknown error occurred.",
-                        color = Color.Red,
-                        fontSize = 16.sp,
-                        textAlign = TextAlign.Center
-                    )
-                }
-            }
-        } else {
-            val name = if (isLocalPlaylist) {
-                com.liquidmusicglass.engine.PlaylistManager.getById(playlistId)?.name ?: "Playlist"
-            } else {
-                playlistInfo?.name ?: "Playlist"
-            }
-            // Playlist icon + name
-            item {
-                Column(
+                Spacer(Modifier.height(40.dp))
+                Text(
+                    "No tracks in this playlist.",
+                    color = lc.textTertiary,
+                    fontSize = 16.sp,
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(120.dp)
-                            .clip(RoundedCornerShape(28.dp)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.PlaylistPlay,
-                            contentDescription = null,
-                            tint = AppleRed.copy(alpha = 0.9f),
-                            modifier = Modifier.size(72.dp)
-                        )
-                    }
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+    }
 
-                    Spacer(Modifier.height(16.dp))
-                    Text(
-                        name,
-                        color = lc.textPrimary,
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "${tracks.size} tracks",
-                        color = lc.textSecondary,
-                        fontSize = 15.sp
-                    )
+    // Загрузка/ошибка показываем в компактном виде; сплит — только когда данные
+    // готовы (широкое окно: шапка слева фикс. ширины, треки справа).
+    if (win.useSideBySide && !isLoading && errorMsg == null) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(lc.settingsBackground)
+        ) {
+            Column(
+                modifier = Modifier
+                    .width(360.dp)
+                    .fillMaxHeight()
+                    .verticalScroll(rememberScrollState())
+                    .windowInsetsPadding(WindowInsets.statusBars)
+                    .padding(horizontal = 20.dp)
+            ) {
+                Spacer(Modifier.height(12.dp))
+                headerBar()
+                Spacer(Modifier.height(20.dp))
+                infoBlock()
+                Spacer(Modifier.height(20.dp))
+                if (tracks.isNotEmpty()) {
+                    actionButtons()
                 }
+            }
+            LazyColumn(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .windowInsetsPadding(WindowInsets.statusBars)
+                    .padding(horizontal = 20.dp),
+                contentPadding = PaddingValues(top = 12.dp, bottom = 120.dp)
+            ) {
+                trackItems()
+            }
+        }
+    } else {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(lc.settingsBackground)
+                .padding(horizontal = 20.dp),
+            contentPadding = PaddingValues(bottom = 120.dp)
+        ) {
+            // Header
+            item {
+                Spacer(Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
+                Spacer(Modifier.height(12.dp))
+                headerBar()
                 Spacer(Modifier.height(20.dp))
             }
 
-            // Play / Shuffle buttons
-            if (tracks.isNotEmpty()) {
+            if (isLoading) {
                 item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        // Play
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(48.dp)
-                                .background(AppleRed, RoundedCornerShape(50))
-                                .clip(RoundedCornerShape(50))
-                                .liquidClickable(pressedScale = LiquidMotion.PressButton) {
-                                    PlayerController.playFromList(
-                                        context = context,
-                                        tracks = tracks,
-                                        startIndex = 0,
-                                        autoRefillType = "playlist",
-                                        autoRefillId = playlistId,
-                                        autoRefillName = name
-                                    )
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    Icons.Rounded.PlayArrow,
-                                    null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                                Spacer(Modifier.width(6.dp))
-                                Text("Play", color = Color.White, fontWeight = FontWeight.SemiBold)
-                            }
-                        }
-
-                        // Shuffle
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(48.dp)
-                                .clip(RoundedCornerShape(50))
-                                .background(if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
-                                .liquidClickable(pressedScale = LiquidMotion.PressButton) {
-                                    PlayerController.playFromList(
-                                        context = context,
-                                        tracks = tracks.shuffled(),
-                                        startIndex = 0,
-                                        autoRefillType = "playlist",
-                                        autoRefillId = playlistId,
-                                        autoRefillName = name
-                                    )
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    Icons.Rounded.Shuffle,
-                                    null,
-                                    tint = AppleRed,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                                Spacer(Modifier.width(6.dp))
-                                Text(
-                                    "Shuffle",
-                                    color = lc.textPrimary,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                        }
-                    }
-                    Spacer(Modifier.height(24.dp))
-                }
-            }
-
-            // Tracks
-            itemsIndexed(tracks, key = { _, t -> t.id }) { index, track ->
-                Row(
-                    modifier = Modifier
-                        .animateItem()
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .liquidClickable {
-                            PlayerController.playFromList(
-                                context = context,
-                                tracks = tracks,
-                                startIndex = index,
-                                autoRefillType = "playlist",
-                                autoRefillId = playlistId,
-                                autoRefillName = name
-                            )
-                        }
-                        .padding(horizontal = 14.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        "${index + 1}",
-                        color = lc.textTertiary,
-                        fontSize = 14.sp,
-                        modifier = Modifier.width(28.dp)
-                    )
-
-                    AlbumArtImage(
-                        uri = track.albumArtUri,
-                        audioFileUri = track.uri,
-                        albumId = track.albumId,
-                        coverUrl = track.coverUrl,
-                        contentDescription = null,
+                    Box(
                         modifier = Modifier
-                            .size(44.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                    )
-
-                    Spacer(Modifier.width(12.dp))
-
-                    Column(modifier = Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                track.title,
-                                color = lc.textPrimary,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f, fill = false)
-                            )
-                            if (track.isExplicit) {
-                                Spacer(Modifier.width(6.dp))
-                                GlassKit.ExplicitBadge()
-                            }
-                            if (track.isCustom) {
-                                Spacer(Modifier.width(6.dp))
-                                GlassKit.VerifiedBadge()
-                            }
-                        }
-                        Text(
-                            track.artist,
-                            color = lc.textSecondary,
-                            fontSize = 13.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-
-                    if (track.durationMs > 0) {
-                        Text(
-                            text = formatDuration(track.durationMs),
-                            color = lc.textSecondary,
-                            fontSize = 12.sp,
-                            modifier = Modifier.padding(start = 8.dp)
-                        )
+                            .fillMaxWidth()
+                            .padding(top = 100.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(color = AppleRed)
                     }
                 }
-                Spacer(Modifier.height(6.dp))
-            }
-
-            // Empty
-            if (tracks.isEmpty()) {
+            } else if (errorMsg != null) {
                 item {
-                    Spacer(Modifier.height(40.dp))
-                    Text(
-                        "No tracks in this playlist.",
-                        color = lc.textTertiary,
-                        fontSize = 16.sp,
-                        modifier = Modifier.fillMaxWidth(),
-                        textAlign = TextAlign.Center
-                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 100.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = errorMsg ?: "Unknown error occurred.",
+                            color = Color.Red,
+                            fontSize = 16.sp,
+                            textAlign = TextAlign.Center
+                        )
+                    }
                 }
+            } else {
+                // Playlist icon + name
+                item {
+                    infoBlock()
+                    Spacer(Modifier.height(20.dp))
+                }
+
+                // Play / Shuffle buttons
+                if (tracks.isNotEmpty()) {
+                    item {
+                        actionButtons()
+                        Spacer(Modifier.height(24.dp))
+                    }
+                }
+
+                // Tracks
+                trackItems()
             }
         }
     }

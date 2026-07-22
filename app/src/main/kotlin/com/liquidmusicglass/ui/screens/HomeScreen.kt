@@ -164,6 +164,9 @@ fun HomeScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val scroll = rememberScrollState()
+    // Широкое окно (телефон-альбом ИЛИ планшет): ограничиваем ширину контента
+    // и центрируем — карусели/секции не растягиваются на весь экран.
+    val win = com.liquidmusicglass.ui.rememberWindowInfo()
 
     val homeContent by viewModel.homeContent.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
@@ -326,7 +329,13 @@ fun HomeScreen(
         )
         Column(
             modifier = Modifier
-                .fillMaxSize()
+                .fillMaxHeight()
+                .then(
+                    // В альбоме/на планшете — ограниченная ширина по центру.
+                    if (win.useSideBySide)
+                        Modifier.widthIn(max = 1100.dp).fillMaxWidth().align(Alignment.TopCenter)
+                    else Modifier.fillMaxWidth()
+                )
                 .verticalScroll(scroll)
                 .padding(vertical = 16.dp)
         ) {

@@ -85,6 +85,9 @@ fun YandexMusicScreen(onBack: () -> Unit) {
     val focusManager = LocalFocusManager.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    // Широкое окно (телефон-альбом ИЛИ планшет): ограничиваем ширину контента
+    // и центрируем — строки списков (треки/альбомы/артисты) не растягиваются.
+    val win = com.liquidmusicglass.ui.rememberWindowInfo()
 
     val connected by YandexAuthRepository.isConnected.collectAsState()
     val label by YandexAuthRepository.displayLabel.collectAsState()
@@ -454,7 +457,17 @@ fun YandexMusicScreen(onBack: () -> Unit) {
     }
 
     Box(Modifier.fillMaxSize().background(lc.settingsBackground)) {
-        Column(Modifier.fillMaxSize().imePadding()) {
+        Column(
+            modifier = Modifier
+                .fillMaxHeight()
+                .then(
+                    // В альбоме/на планшете — ограниченная ширина по центру.
+                    if (win.useSideBySide)
+                        Modifier.widthIn(max = 720.dp).fillMaxWidth().align(Alignment.TopCenter)
+                    else Modifier.fillMaxWidth()
+                )
+                .imePadding()
+        ) {
             Spacer(Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
             Spacer(Modifier.height(12.dp))
 
@@ -1722,12 +1735,22 @@ private fun YandexDetailOverlay(
     onDownload: (YandexMusicClient.Track) -> Unit,
     onCancel: (String) -> Unit,
 ) {
+    // Оверлей деталей тоже адаптируем: в широком окне — колонка по центру.
+    val win = com.liquidmusicglass.ui.rememberWindowInfo()
     Box(
         Modifier
             .fillMaxSize()
             .background(lc.settingsBackground)
     ) {
-        Column(Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxHeight()
+                .then(
+                    if (win.useSideBySide)
+                        Modifier.widthIn(max = 720.dp).fillMaxWidth().align(Alignment.TopCenter)
+                    else Modifier.fillMaxWidth()
+                )
+        ) {
             Spacer(Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
             Spacer(Modifier.height(12.dp))
 

@@ -84,8 +84,20 @@ fun AudioFxScreen(onBack: () -> Unit) {
         )
         // ФОРЕГРАУНД-СИБЛИНГ: контент с ползунками (преломляет screenBackdrop, beside).
         CompositionLocalProvider(LocalFxBackdrop provides screenBackdrop) {
+        // Широкое окно (телефон-альбом ИЛИ планшет). В альбоме секций эффектов
+        // много по вертикали — контент не растягиваем, ограничиваем 640dp по
+        // центру (внешний Box центрирует, EQ-полосы тянутся внутри колонки).
+        // Портрет не меняется. Обёртка Box нужна: колонка лежит внутри
+        // CompositionLocalProvider, где BoxScope.align недоступен.
+        val win = com.liquidmusicglass.ui.rememberWindowInfo()
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         Column(
-            modifier = Modifier.fillMaxSize().verticalScroll(scroll).padding(horizontal = 20.dp)
+            modifier = Modifier
+                .then(
+                    if (win.useSideBySide) Modifier.widthIn(max = 640.dp).fillMaxHeight()
+                    else Modifier.fillMaxSize()
+                )
+                .verticalScroll(scroll).padding(horizontal = 20.dp)
         ) {
             Spacer(modifier = Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
             Spacer(modifier = Modifier.height(12.dp))
@@ -134,6 +146,7 @@ fun AudioFxScreen(onBack: () -> Unit) {
                 }
             }
             Spacer(modifier = Modifier.height(40.dp))
+        }
         }
         }
     }
