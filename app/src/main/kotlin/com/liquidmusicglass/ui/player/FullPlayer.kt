@@ -398,7 +398,9 @@ fun FullPlayer(
                             Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = artPaddingH.dp)
-                                .padding(top = (80.dp * expandProgress))
+                                // Клип: карточка 16:9 ниже (центр верхней зоны, как у
+                                // Apple), а не прижата к верху — обложка как раньше.
+                                .padding(top = ((if (isVideoClip) 190 else 80).dp * expandProgress))
                                 .aspectRatio(if (isVideoClip) 16f / 9f else 1f)
                     )
                     .graphicsLayer {
