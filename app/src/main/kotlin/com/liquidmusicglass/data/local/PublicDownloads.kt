@@ -29,6 +29,7 @@ object PublicDownloads {
         "m4a" -> "audio/mp4"
         "ogg" -> "audio/ogg"
         "wav" -> "audio/x-wav"
+        "mp4" -> "video/mp4"   // видеоклипы Apple Music
         else -> "audio/mpeg"
     }
 

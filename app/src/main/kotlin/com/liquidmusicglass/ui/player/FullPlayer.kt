@@ -32,7 +32,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -74,6 +76,8 @@ import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Fullscreen
+import androidx.compose.material.icons.rounded.FullscreenExit
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
@@ -85,7 +89,9 @@ import com.liquidmusicglass.api.icm.IcmAuthRepository
 import com.liquidmusicglass.engine.AppSettings
 import com.liquidmusicglass.engine.AudioDownloadManager
 import com.liquidmusicglass.data.local.db.FavoriteTrackDatabase
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -177,6 +183,27 @@ fun FullPlayer(
 
     var showPromoDialog by remember { mutableStateOf(false) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
+
+    // ── Видеоклип: флаг + фуллскрин ──
+    val isVideoClip by PlayerController.isVideoClip.collectAsState()
+    var clipFullscreen by remember { mutableStateOf(false) }
+    // Фуллскрин поворачивает экран в альбом; выход — возвращает авто-ориентацию.
+    LaunchedEffect(clipFullscreen) {
+        val act = context as? android.app.Activity ?: return@LaunchedEffect
+        act.requestedOrientation = if (clipFullscreen)
+            android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+    }
+    // Ушли с клипа (скип на музыку) — фуллскрин закрывается сам.
+    LaunchedEffect(isVideoClip) { if (!isVideoClip) clipFullscreen = false }
+    // Плеер закрыли/умер, будучи в фуллскрине — вернуть ориентацию.
+    DisposableEffect(Unit) {
+        onDispose {
+            (context as? android.app.Activity)?.requestedOrientation =
+                android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+    }
+    BackHandler(enabled = clipFullscreen) { clipFullscreen = false }
 
     var showAirPlay by remember { mutableStateOf(false) }
     var showQueue by remember { mutableStateOf(false) }
@@ -374,18 +401,41 @@ fun FullPlayer(
             ) {
                 // Видеоклип (Apple Music): вместо обложки — Surface с видео
                 // (mp4 играет основной ExoPlayer, Apple MusicKit Android
-                // рекомендует именно Surface). Иначе — обычная обложка.
-                val isVideoClip by PlayerController.isVideoClip.collectAsState()
+                // рекомендует именно Surface). Видео — 16:9 c чёрными рамками
+                // сверху/снизу (letterbox, как у Apple); тап или значок в углу
+                // разворачивают на весь экран. Иначе — обычная обложка.
                 if (isVideoClip) {
-                    androidx.compose.ui.viewinterop.AndroidView(
-                        factory = { ctx ->
-                            android.view.SurfaceView(ctx).also {
-                                PlayerController.attachVideoSurface(it)
-                            }
-                        },
-                        onRelease = { PlayerController.attachVideoSurface(null) },
-                        modifier = Modifier.fillMaxSize()
-                    )
+                    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+                        if (!clipFullscreen) {
+                            androidx.compose.ui.viewinterop.AndroidView(
+                                factory = { ctx ->
+                                    android.view.SurfaceView(ctx).also {
+                                        PlayerController.attachVideoSurface(it)
+                                    }
+                                },
+                                onRelease = { PlayerController.attachVideoSurface(null) },
+                                modifier = Modifier
+                                    .align(Alignment.Center)
+                                    .fillMaxWidth()
+                                    .aspectRatio(16f / 9f)
+                            )
+                        }
+                        // Значок разворота (правый нижний угол) — визуальная
+                        // подсказка; сам тап ловит жестовый слой (onTap выше).
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(10.dp)
+                                .size(36.dp)
+                                .background(Color.Black.copy(alpha = 0.45f), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Rounded.Fullscreen, "Fullscreen",
+                                tint = Color.White, modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
                 } else {
                 // Кроссфейд обложек: при смене трека (авто или скип) старая
                 // растворяется, новая проявляется — вместо мгновенной подмены.
@@ -460,6 +510,13 @@ fun FullPlayer(
                                     libraryRepo.toggleFavorite(track)
                                 }
                             }
+                        },
+                        // Клип: одиночный тап по видео/фону → фуллскрин. Жестовый
+                        // слой топовый в hit-test, поэтому тап обрабатываем здесь
+                        // (клики внутри арт-бокса сюда не доходят); кнопки
+                        // контролов лежат ВЫШЕ этого слоя и не задеваются.
+                        onTap = {
+                            if (isVideoClip && !showLyrics && !showQueue) clipFullscreen = true
                         }
                     )
                 }
@@ -694,7 +751,10 @@ fun FullPlayer(
                                         showDeleteConfirmDialog = true
                                     } else if (!isDownloading) {
                                         currentTrackObj?.let { track ->
-                                            AudioDownloadManager.downloadTrack(context, track)
+                                            // Клип качаем как mp4 в публичные Загрузки,
+                                            // трек — обычным путём.
+                                            if (isVideoClip) AudioDownloadManager.downloadClip(context, track)
+                                            else AudioDownloadManager.downloadTrack(context, track)
                                         }
                                     }
                                 }
@@ -1088,6 +1148,52 @@ fun FullPlayer(
             DebugPanel(
                 onDismiss = { showDebugPanel = false }
             )
+        }
+
+        // ═══ Видеоклип: фуллскрин (поверх контролов, чёрный фон, 16:9) ═══
+        // Активная ориентация — альбом (LaunchedEffect выше); тап по видео или
+        // значок сворачивают обратно, back тоже (BackHandler выше).
+        if (isVideoClip && clipFullscreen) {
+            BoxWithConstraints(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+                // Экран шире 16:9 (типичный телефон-альбом) → видео упирается в
+                // высоту (рамки по бокам); уже — в ширину (рамки сверху/снизу).
+                val heightFirst = maxWidth / maxHeight > 16f / 9f
+                androidx.compose.ui.viewinterop.AndroidView(
+                    factory = { ctx ->
+                        android.view.SurfaceView(ctx).also {
+                            PlayerController.attachVideoSurface(it)
+                        }
+                    },
+                    onRelease = { PlayerController.attachVideoSurface(null) },
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .then(if (heightFirst) Modifier.fillMaxHeight() else Modifier.fillMaxWidth())
+                        .aspectRatio(16f / 9f, matchHeightConstraintsFirst = heightFirst)
+                )
+                // Тап по любому месту — выход из фуллскрина.
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) { clipFullscreen = false }
+                )
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = 40.dp, end = 16.dp)
+                        .size(38.dp)
+                        .background(Color.Black.copy(alpha = 0.45f), CircleShape)
+                        .pressScale { clipFullscreen = false },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Rounded.FullscreenExit, "Exit fullscreen",
+                        tint = Color.White, modifier = Modifier.size(24.dp)
+                    )
+                }
+            }
         }
 
 

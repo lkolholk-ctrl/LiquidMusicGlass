@@ -105,6 +105,76 @@ object AudioDownloadManager {
         }
     }
 
+    /**
+     * Скачать ВИДЕОКЛИП (Apple Music) в публичные Загрузки как mp4.
+     * [track] — псевдо-трек клипа из PlayerController (id = "clip_<clipId>").
+     * В БД downloaded-треков НЕ пишем: клип — не аудио-трек (локальный плеер
+     * JUCE его не сыграет), файл живёт в Download/LiquidMusicGlass, открывается
+     * галереей/видеоплеером. Прогресс — та же мапа, что у треков (ключ = id),
+     * поэтому кольцо прогресса в FullPlayer работает без правок.
+     */
+    fun downloadClip(context: Context, track: Track, onComplete: (Boolean) -> Unit = {}) {
+        if (!IcmAuthRepository.isPremium.value) { onComplete(false); return }
+        val trackId = track.id
+        val clipId = trackId.removePrefix("clip_")
+        if (!activeDownloads.add(trackId)) return
+
+        CoroutineScope(Dispatchers.IO).launch {
+            val tempFile = File(context.cacheDir, "clip_dl_$clipId.tmp")
+            var ok = false
+            try {
+                updateProgress(trackId, 0.0f)
+                // Свежий подписанный URL (TTL 10 мин — тот, с которым играем,
+                // мог протухнуть). Тёплый клип резолвится мгновенно.
+                val streamUrl = com.liquidmusicglass.api.icm.IcmApi.getInstance()
+                    .resolveClipStreamUrl(clipId).getOrNull()
+                if (streamUrl != null) {
+                    val connection = URL(streamUrl).openConnection() as HttpURLConnection
+                    connection.connectTimeout = 15000
+                    connection.readTimeout = 30000
+                    connection.connect()
+                    if (connection.responseCode == HttpURLConnection.HTTP_OK) {
+                        val fileLength = connection.contentLength
+                        connection.inputStream.use { input ->
+                            FileOutputStream(tempFile).use { out ->
+                                val data = ByteArray(8192)
+                                var total = 0L
+                                var count: Int
+                                while (input.read(data).also { count = it } != -1) {
+                                    total += count
+                                    if (fileLength > 0) updateProgress(trackId, total.toFloat() / fileLength)
+                                    out.write(data, 0, count)
+                                }
+                            }
+                        }
+                        connection.disconnect()
+                        val publicUri = com.liquidmusicglass.data.local.PublicDownloads.exportAudio(
+                            context, tempFile,
+                            com.liquidmusicglass.data.local.PublicDownloads
+                                .displayName(track.artist, track.title).ifBlank { clipId },
+                            ".mp4",
+                        )
+                        ok = publicUri != null
+                    } else connection.disconnect()
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("DOWNLOAD", "Clip download failed $clipId: ${e.message}")
+            } finally {
+                tempFile.delete()
+                updateProgress(trackId, null)
+                activeDownloads.remove(trackId)
+            }
+            withContext(Dispatchers.Main) {
+                android.widget.Toast.makeText(
+                    context,
+                    if (ok) "Клип сохранён в Загрузки" else "Не удалось скачать клип",
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+                onComplete(ok)
+            }
+        }
+    }
+
     fun deleteDownloadedTrack(context: Context, trackId: String) {
         val db = FavoriteTrackDatabase.getInstance(context)
         val entity = db.getDownloadedTrack(trackId)
