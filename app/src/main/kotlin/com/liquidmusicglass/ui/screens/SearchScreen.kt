@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -1047,7 +1048,7 @@ private fun ClipResultsSection(
                 contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 178.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
-                androidx.compose.foundation.lazy.grid.items(results, key = { it.id }) { clip ->
+                gridItems(results, key = { it.id }) { clip ->
                     ClipResultCard(clip, resolving == clip.id) { openClip(clip) }
                 }
             }
