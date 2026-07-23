@@ -67,8 +67,8 @@ import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Edit
-// import androidx.compose.material.icons.rounded.ThumbUp  // DISABLED
-// import androidx.compose.material.icons.rounded.ThumbDown // DISABLED
+import androidx.compose.material.icons.rounded.ThumbUp
+import androidx.compose.material.icons.rounded.ThumbDown
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
@@ -1137,6 +1137,85 @@ fun FullPlayer(
                                 isDownloaded -> "Delete download"
                                 else -> "Download"
                             },
+                            color = Color.White,
+                            fontSize = 17.sp,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(0.5.dp)
+                            .background(Color.White.copy(alpha = 0.10f))
+                    )
+                    // 👍/👎 — фидбек волны (переехали сюда из ряда кнопок).
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                scope.launch {
+                                    trackMenuSheetState.hide()
+                                    showTrackMenu = false
+                                }
+                                currentTrackObj?.let { track ->
+                                    scope.launch {
+                                        WaveSignalQueue.sendFeedback("more_track", track.id)
+                                        track.artists.firstOrNull()?.id?.let {
+                                            WaveSignalQueue.sendFeedback("more_artist", it)
+                                        }
+                                    }
+                                    Toast.makeText(context, "Got it — more like this", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                            .padding(vertical = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Rounded.ThumbUp, null,
+                            tint = Color.White, modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Text(
+                            text = "More like this",
+                            color = Color.White,
+                            fontSize = 17.sp,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(0.5.dp)
+                            .background(Color.White.copy(alpha = 0.10f))
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                scope.launch {
+                                    trackMenuSheetState.hide()
+                                    showTrackMenu = false
+                                }
+                                currentTrackObj?.let { track ->
+                                    scope.launch {
+                                        WaveSignalQueue.sendFeedback("less_track", track.id)
+                                        track.artists.firstOrNull()?.id?.let {
+                                            WaveSignalQueue.sendFeedback("less_artist", it)
+                                        }
+                                    }
+                                    Toast.makeText(context, "Got it — less like this", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                            .padding(vertical = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Rounded.ThumbDown, null,
+                            tint = Color.White, modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Text(
+                            text = "Less like this",
                             color = Color.White,
                             fontSize = 17.sp,
                             modifier = Modifier.weight(1f)
