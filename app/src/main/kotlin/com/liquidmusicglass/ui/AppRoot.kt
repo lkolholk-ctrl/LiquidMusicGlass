@@ -321,9 +321,10 @@ fun AppRoot() {
     // Нижний бар: в широком окне скрыт (навигация в SideBar), но мини-плеер
     // остаётся. В компакте — как раньше.
     if (barsVisible && win.useSideBySide) {
-            // Альбом/планшет: полноширинный нижний мини-плеер (раскладка по
-            // референсу друга, стиль наш). Заменяет узкий портретный мини-плеер;
-            // прячется под полным плеером. Навигация — в SideBar слева.
+            // Альбом/планшет: снизу либо собственный бар раздела Яндекса (со
+            // своими вкладками — это «приложение в приложении»), либо наш
+            // полноширинный мини-плеер (раскладка по референсу друга, стиль наш).
+            // Прячется под полным плеером. Основная навигация — в SideBar слева.
             val lsBottomAlpha = if (expandProgress.value >= 0.99f) 0f else 1f
             Box(
                 modifier = Modifier
@@ -334,10 +335,31 @@ fun AppRoot() {
                         alpha = lsBottomAlpha
                     }
             ) {
-                com.liquidmusicglass.ui.player.LandscapeBottomBar(
-                    onExpand = { animateExpand() },
-                    onQueueClick = { animateExpand() }
-                )
+                when {
+                    // Яндекс подключён → его жёлтый бар с 5 вкладками (иначе в
+                    // альбоме вкладки ЯМ исчезали — навигации по разделу не было).
+                    showYandexBar -> {
+                        val ySection by com.liquidmusicglass.ui.screens.YandexSection
+                            .current.collectAsState()
+                        val yBarBg = if (LiquidTheme.colors.isDark) Color(0xFF121212) else Color(0xFFF2F2F4)
+                        Column(
+                            modifier = Modifier.fillMaxWidth().background(yBarBg),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            com.liquidmusicglass.ui.screens.YandexBottomBar(
+                                selected = ySection,
+                                onSelect = { com.liquidmusicglass.ui.screens.YandexSection.set(it) }
+                            )
+                            Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars))
+                        }
+                    }
+                    // Экран ЯМ открыт, но не подключён — фокусный вход без бара.
+                    onYandexScreen -> Unit
+                    else -> com.liquidmusicglass.ui.player.LandscapeBottomBar(
+                        onExpand = { animateExpand() },
+                        onQueueClick = { animateExpand() }
+                    )
+                }
             }
     } else if (barsVisible) {
             val density = androidx.compose.ui.platform.LocalDensity.current

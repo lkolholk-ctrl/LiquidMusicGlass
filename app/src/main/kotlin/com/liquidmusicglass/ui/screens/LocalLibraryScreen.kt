@@ -125,7 +125,11 @@ fun LocalLibraryScreen(
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                     CircleBack(lc, onBack)
                     Spacer(Modifier.width(14.dp))
-                    Text("Library", color = lc.textPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        "Library", color = lc.textPrimary,
+                        fontSize = if (com.liquidmusicglass.ui.rememberWindowInfo().useSideBySide) 20.sp else 24.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
             Spacer(Modifier.height(12.dp))
@@ -230,7 +234,7 @@ private fun ArtistsList(
     val artists by flow.collectAsState(initial = emptyList())
     // Адаптив: в широком окне центрируем список узкой колонкой ~600dp.
     val win = com.liquidmusicglass.ui.rememberWindowInfo()
-    val sidePad = if (win.useSideBySide) (((win.widthDp - 600) / 2).coerceAtLeast(12)).dp else 12.dp
+    val sidePad = if (win.useSideBySide) 24.dp else 12.dp
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = sidePad, end = sidePad, bottom = 120.dp)) {
         items(artists, key = { it.name }) { a -> ArtistRow(a, lc, compact = win.useSideBySide) { onOpenArtist(a.name) } }
     }
@@ -280,7 +284,7 @@ private fun TracksTab(
     // Адаптив: в широком окне центрируем список треков узкой колонкой ~600dp
     // (полоса сортировки сверху остаётся во всю ширину).
     val win = com.liquidmusicglass.ui.rememberWindowInfo()
-    val sidePad = if (win.useSideBySide) (((win.widthDp - 600) / 2).coerceAtLeast(12)).dp else 12.dp
+    val sidePad = if (win.useSideBySide) 24.dp else 12.dp
     Column(Modifier.fillMaxSize()) {
         Row(
             Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 6.dp),
@@ -369,7 +373,7 @@ private fun SearchResultsView(
         return
     }
     val win = com.liquidmusicglass.ui.rememberWindowInfo()
-    val sidePad = if (win.useSideBySide) (((win.widthDp - 600) / 2).coerceAtLeast(12)).dp else 12.dp
+    val sidePad = if (win.useSideBySide) 24.dp else 12.dp
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = sidePad, end = sidePad, bottom = 120.dp)) {
         if (r.artists.isNotEmpty()) {
             item { SectionLabel("Artists", lc) }
@@ -400,7 +404,7 @@ fun LocalArtistDetailScreen(artistName: String, onBack: () -> Unit, onOpenAlbum:
     val tracks by tracksFlow.collectAsState(initial = emptyList())
     // Адаптив: в широком окне центрируем контент узкой колонкой ~600dp.
     val win = com.liquidmusicglass.ui.rememberWindowInfo()
-    val sidePad = if (win.useSideBySide) (((win.widthDp - 600) / 2).coerceAtLeast(0)).dp else 0.dp
+    val sidePad = if (win.useSideBySide) 20.dp else 0.dp
 
     Box(Modifier.fillMaxSize().background(lc.settingsBackground)) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = sidePad, end = sidePad, bottom = 120.dp)) {
@@ -445,7 +449,7 @@ fun LocalAlbumDetailScreen(albumId: Long, albumName: String, onBack: () -> Unit)
     val year = tracks.firstOrNull()?.year ?: 0
     // Адаптив: в широком окне центрируем контент узкой колонкой ~600dp.
     val win = com.liquidmusicglass.ui.rememberWindowInfo()
-    val sidePad = if (win.useSideBySide) (((win.widthDp - 600) / 2).coerceAtLeast(0)).dp else 0.dp
+    val sidePad = if (win.useSideBySide) 20.dp else 0.dp
 
     Box(Modifier.fillMaxSize().background(lc.settingsBackground)) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = sidePad, end = sidePad, bottom = 120.dp)) {
@@ -592,17 +596,18 @@ private fun SectionLabel(text: String, lc: LiquidColors) {
 @Composable
 private fun Segments(selected: Int, lc: LiquidColors, onSelect: (Int) -> Unit) {
     val items = listOf("Artists", "Albums", "Tracks")
+    val compact = com.liquidmusicglass.ui.rememberWindowInfo().useSideBySide
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         items.forEachIndexed { i, t ->
             Box(
                 Modifier.weight(1f).clip(CircleShape)
                     .background(if (selected == i) lc.accent else lc.cardSurface)
                     .liquidClickable(pressedScale = LiquidMotion.PressButton) { onSelect(i) }
-                    .padding(vertical = 9.dp),
+                    .padding(vertical = if (compact) 7.dp else 9.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Text(t, color = if (selected == i) Color.White else lc.textSecondary,
-                    fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    fontSize = if (compact) 12.sp else 13.sp, fontWeight = FontWeight.SemiBold)
             }
         }
     }
@@ -622,20 +627,21 @@ private fun SortChip(text: String, selected: Boolean, lc: LiquidColors, onClick:
 
 @Composable
 private fun SearchField(query: String, lc: LiquidColors, onChange: (String) -> Unit, onClear: () -> Unit) {
+    val compact = com.liquidmusicglass.ui.rememberWindowInfo().useSideBySide
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 16.dp).height(44.dp).clip(CircleShape)
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp).height(if (compact) 38.dp else 44.dp).clip(CircleShape)
             .background(lc.searchFieldBg).padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(Icons.Rounded.Search, null, tint = lc.iconMuted, modifier = Modifier.size(20.dp))
+        Icon(Icons.Rounded.Search, null, tint = lc.iconMuted, modifier = Modifier.size(if (compact) 18.dp else 20.dp))
         Spacer(Modifier.width(10.dp))
         BasicTextField(
             value = query, onValueChange = onChange, singleLine = true,
-            textStyle = TextStyle(color = lc.textPrimary, fontSize = 16.sp),
+            textStyle = TextStyle(color = lc.textPrimary, fontSize = if (compact) 14.sp else 16.sp),
             cursorBrush = SolidColor(lc.accent), modifier = Modifier.weight(1f),
             decorationBox = { inner ->
                 Box {
-                    if (query.isEmpty()) Text("Search tracks, artists, albums", color = lc.textTertiary, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (query.isEmpty()) Text("Search tracks, artists, albums", color = lc.textTertiary, fontSize = if (compact) 13.sp else 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     inner()
                 }
             }
@@ -660,11 +666,12 @@ private fun PlayAllButton(lc: LiquidColors, onClick: () -> Unit) {
 
 @Composable
 private fun CircleBack(lc: LiquidColors, onClick: () -> Unit) {
+    val compact = com.liquidmusicglass.ui.rememberWindowInfo().useSideBySide
     Box(
-        Modifier.size(40.dp).background(if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7), CircleShape)
+        Modifier.size(if (compact) 34.dp else 40.dp).background(if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7), CircleShape)
             .clip(CircleShape).liquidClickable(pressedScale = LiquidMotion.PressIcon, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, tint = lc.iconDefault, modifier = Modifier.size(22.dp))
+        Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, tint = lc.iconDefault, modifier = Modifier.size(if (compact) 18.dp else 22.dp))
     }
 }

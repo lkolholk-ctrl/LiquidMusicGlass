@@ -67,8 +67,7 @@ fun HistoryScreen(
     // Адаптив: в широком окне (телефон-альбом / планшет) не растягиваем строки
     // на всю ширину — центрируем список узкой колонкой ~600dp боковыми отступами.
     val win = com.liquidmusicglass.ui.rememberWindowInfo()
-    val histSidePad = if (win.useSideBySide)
-        (((win.widthDp - 600) / 2).coerceAtLeast(20)).dp else 20.dp
+    val histSidePad = if (win.useSideBySide) 24.dp else 20.dp
     // В широком окне (телефон-альбом / планшет) делаем шапку и строки компактнее
     // ~на 25%, в тон LandscapeHome — чтобы не выглядело портретно-крупным.
     val compact = win.useSideBySide

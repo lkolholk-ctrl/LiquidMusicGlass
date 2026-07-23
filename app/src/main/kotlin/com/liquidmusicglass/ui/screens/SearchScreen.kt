@@ -109,8 +109,7 @@ fun SearchScreen(
     // результатов/истории в широком окне (альбом/планшет) центрируем узкой
     // колонкой ~600dp боковыми отступами — длинные строки во всю ширину плохи.
     val win = com.liquidmusicglass.ui.rememberWindowInfo()
-    val resultsSidePad = if (win.useSideBySide)
-        (((win.widthDp - 600) / 2).coerceAtLeast(0)).dp else 0.dp
+    val resultsSidePad = if (win.useSideBySide) 24.dp else 0.dp
     // В широком окне (телефон-альбом / планшет) уменьшаем шрифты/обложки/высоты
     // ~на 25%, чтобы контент не выглядел портретно-крупным на невысоком экране.
     val compact = win.useSideBySide

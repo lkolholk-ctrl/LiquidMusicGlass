@@ -122,8 +122,9 @@ fun LibraryScreen(
     // получает больше колонок, а вертикальные списки-строки центрируем узкой
     // колонкой ~600dp боковыми отступами, чтобы строки не растягивались.
     val win = com.liquidmusicglass.ui.rememberWindowInfo()
-    val wideSidePad = if (win.useSideBySide)
-        (((win.widthDp - 600) / 2).coerceAtLeast(20)).dp else 20.dp
+    // Альбом: скромный отступ, чтобы списки заполняли ширину (как шапка), а не
+    // висели узкой колонкой по центру с пустыми боками (полевой фидбек).
+    val wideSidePad = if (win.useSideBySide) 24.dp else 20.dp
 
     // Favorites state
     val favorites by viewModel.favorites.collectAsState()
@@ -1377,29 +1378,33 @@ private fun SubHeader(
     actions: @Composable RowScope.() -> Unit = {}
 ) {
     val lc = LiquidTheme.colors
+    val compact = com.liquidmusicglass.ui.rememberWindowInfo().useSideBySide
     Spacer(Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 12.dp),
+            .padding(horizontal = 20.dp, vertical = if (compact) 8.dp else 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
             modifier = Modifier
-                .size(40.dp)
+                .size(if (compact) 34.dp else 40.dp)
                 .background(lc.glassTint, CircleShape)
                 .clip(CircleShape)
                 .liquidClickable(pressedScale = LiquidMotion.PressIcon, onClick = onBack),
             contentAlignment = Alignment.Center
         ) {
-            Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, tint = lc.textPrimary, modifier = Modifier.size(20.dp))
+            Icon(
+                Icons.AutoMirrored.Rounded.ArrowBack, null, tint = lc.textPrimary,
+                modifier = Modifier.size(if (compact) 18.dp else 20.dp)
+            )
         }
 
-        Spacer(Modifier.width(16.dp))
+        Spacer(Modifier.width(if (compact) 12.dp else 16.dp))
 
         Text(
             text = title,
-            fontSize = 24.sp,
+            fontSize = if (compact) 20.sp else 24.sp,
             fontWeight = FontWeight.Bold,
             color = lc.textPrimary,
             modifier = Modifier.weight(1f)
