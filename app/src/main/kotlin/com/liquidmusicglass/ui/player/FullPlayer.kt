@@ -76,7 +76,7 @@ import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.Fullscreen
+import androidx.compose.material.icons.rounded.CropFree
 import androidx.compose.material.icons.rounded.FullscreenExit
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
@@ -331,14 +331,19 @@ fun FullPlayer(
         // ═══ All visual content captured by playerBackdrop for glass sheets ═══
         Box(modifier = Modifier.fillMaxSize().layerBackdrop(playerBackdrop)) {
             // ═══ Apple Music style animated gradient background ═══
-            AnimatedPlayerBackground(
-                albumArtUri = albumArtUri,
-                coverUrl = coverUrl,
-                audioFileUri = audioFileUri,
-                albumId = albumId,
-                albumColors = albumColors,
-                modifier = Modifier.fillMaxSize()
-            )
+            // Клип: фон чисто чёрный (как у Apple при видео) — без градиента.
+            if (isVideoClip) {
+                Box(modifier = Modifier.fillMaxSize().background(Color.Black))
+            } else {
+                AnimatedPlayerBackground(
+                    albumArtUri = albumArtUri,
+                    coverUrl = coverUrl,
+                    audioFileUri = audioFileUri,
+                    albumId = albumId,
+                    albumColors = albumColors,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
 
             // ═══ Album art (inside backdrop so glass sees it) ═══
             // При открытой лирике большая обложка скрывается — у лирики своя шапка.
@@ -374,7 +379,15 @@ fun FullPlayer(
             Box(
                 modifier = Modifier
                     .then(
-                        if (isLandscape)
+                        if (isLandscape && isVideoClip)
+                            // Клип в сплите: 16:9 ОТ ШИРИНЫ левой половины —
+                            // иначе (от высоты) карточка вылезала бы на контролы.
+                            Modifier
+                                .align(Alignment.CenterStart)
+                                .fillMaxWidth(0.46f)
+                                .padding(start = 28.dp)
+                                .aspectRatio(16f / 9f)
+                        else if (isLandscape)
                             // Слева, по высоте, левая половина экрана.
                             Modifier
                                 .align(Alignment.CenterStart)
@@ -386,7 +399,7 @@ fun FullPlayer(
                                 .fillMaxWidth()
                                 .padding(horizontal = artPaddingH.dp)
                                 .padding(top = (80.dp * expandProgress))
-                                .aspectRatio(1f)
+                                .aspectRatio(if (isVideoClip) 16f / 9f else 1f)
                     )
                     .graphicsLayer {
                         translationX = swipeOffsetX.value
@@ -401,9 +414,10 @@ fun FullPlayer(
             ) {
                 // Видеоклип (Apple Music): вместо обложки — Surface с видео
                 // (mp4 играет основной ExoPlayer, Apple MusicKit Android
-                // рекомендует именно Surface). Видео — 16:9 c чёрными рамками
-                // сверху/снизу (letterbox, как у Apple); тап или значок в углу
-                // разворачивают на весь экран. Иначе — обычная обложка.
+                // рекомендует именно Surface). Карточка сама 16:9 (контейнер
+                // выше), видео заполняет её целиком; значок-скобки в левом
+                // верхнем углу (как у Apple), тап разворачивает на весь экран.
+                // Иначе — обычная обложка.
                 if (isVideoClip) {
                     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
                         if (!clipFullscreen) {
@@ -414,27 +428,19 @@ fun FullPlayer(
                                     }
                                 },
                                 onRelease = { PlayerController.attachVideoSurface(null) },
-                                modifier = Modifier
-                                    .align(Alignment.Center)
-                                    .fillMaxWidth()
-                                    .aspectRatio(16f / 9f)
+                                modifier = Modifier.fillMaxSize()
                             )
                         }
-                        // Значок разворота (правый нижний угол) — визуальная
-                        // подсказка; сам тап ловит жестовый слой (onTap выше).
-                        Box(
+                        // Значок разворота — левый верхний угол, без подложки
+                        // (референс Apple); сам тап ловит жестовый слой (onTap).
+                        Icon(
+                            Icons.Rounded.CropFree, "Fullscreen",
+                            tint = Color.White.copy(alpha = 0.9f),
                             modifier = Modifier
-                                .align(Alignment.BottomEnd)
-                                .padding(10.dp)
-                                .size(36.dp)
-                                .background(Color.Black.copy(alpha = 0.45f), CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                Icons.Rounded.Fullscreen, "Fullscreen",
-                                tint = Color.White, modifier = Modifier.size(22.dp)
-                            )
-                        }
+                                .align(Alignment.TopStart)
+                                .padding(12.dp)
+                                .size(20.dp)
+                        )
                     }
                 } else {
                 // Кроссфейд обложек: при смене трека (авто или скип) старая
