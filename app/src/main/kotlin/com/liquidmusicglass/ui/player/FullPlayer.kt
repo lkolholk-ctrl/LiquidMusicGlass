@@ -50,8 +50,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
-import androidx.compose.material.icons.automirrored.rounded.VolumeDown
-import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.Cast
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.FastForward
@@ -65,8 +63,6 @@ import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.StarBorder
-import androidx.compose.material.icons.rounded.ThumbUp
-import androidx.compose.material.icons.rounded.ThumbDown
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Settings
@@ -217,9 +213,6 @@ fun FullPlayer(
     val trackMenuSheetState = rememberModalBottomSheetState(
         skipPartiallyExpanded = true
     )
-    // Wave feedback state: null = none, true = liked, false = disliked.
-    // Keyed on trackId → сбрасывается при смене трека.
-    var waveFeedback by remember(trackId) { mutableStateOf<Boolean?>(null) }
     // Видимость контролов плеера. Когда открыта лирика — скрываются (как в Apple Music).
     // Тап по области лирики временно показывает их снова.
     var controlsVisible by remember { mutableStateOf(true) }
@@ -273,11 +266,6 @@ fun FullPlayer(
         }
     }
 
-    // Reset wave feedback state when track changes
-    LaunchedEffect(trackId) {
-        waveFeedback = null
-    }
-
     val controlsAlpha = ((expandProgress - 0.4f) / 0.6f).coerceIn(0f, 1f)
     val bgAlpha = (expandProgress * 1.5f).coerceIn(0f, 1f)
     val controlsMounted = expandProgress > 0.35f || showLyrics || showQueue ||
@@ -292,14 +280,6 @@ fun FullPlayer(
     val bottomAlpha = ((expandProgress - 0.55f) / 0.4f).coerceIn(0f, 1f)
     // Controls slide up offset
     val controlsOffsetY = ((1f - expandProgress) * 80f)
-
-    // Volume sync — smoothed to avoid discrete jumps
-    val rawSystemVolume by rememberSystemVolume()
-    val systemVolume by animateFloatAsState(
-        targetValue = rawSystemVolume,
-        animationSpec = spring(dampingRatio = 0.9f, stiffness = 200f),
-        label = "vol_smooth"
-    )
 
     // ── Card morphing: rounded corners during transition ──
     val cardCorner = ((1f - expandProgress) * 28f).coerceIn(0f, 28f)
@@ -751,140 +731,6 @@ fun FullPlayer(
                     Box(
                         modifier = Modifier
                             .size(44.dp)
-                            .pressScale {
-                                if (!isPremium) {
-                                    showPromoDialog = true
-                                } else {
-                                    if (isDownloaded) {
-                                        showDeleteConfirmDialog = true
-                                    } else if (!isDownloading) {
-                                        currentTrackObj?.let { track ->
-                                            // Клип качаем как mp4 в публичные Загрузки,
-                                            // трек — обычным путём.
-                                            if (isVideoClip) AudioDownloadManager.downloadClip(context, track)
-                                            else AudioDownloadManager.downloadTrack(context, track)
-                                        }
-                                    }
-                                }
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        when {
-                            isDownloading -> {
-                                CircularProgressIndicator(
-                                    progress = { progress ?: 0f },
-                                    modifier = Modifier.size(24.dp),
-                                    color = Color(0xFFFC3C44),
-                                    strokeWidth = 2.5.dp
-                                )
-                            }
-                            isDownloaded -> {
-                                Icon(
-                                    imageVector = Icons.Rounded.CheckCircle,
-                                    contentDescription = "Downloaded",
-                                    tint = Color(0xFF4CAF50),
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            }
-                            else -> {
-                                Icon(
-                                    imageVector = Icons.Rounded.Download,
-                                    contentDescription = "Download",
-                                    tint = Color.White.copy(alpha = 0.70f),
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            }
-                        }
-                    }
-                    // 👍 More like this — wave/feedback (more_track + more_artist).
-                    val thumbUpBounce = remember { Animatable(1f) }
-                    Box(
-                        modifier = Modifier
-                            .size(44.dp)
-                            .pressScale {
-                                currentTrackObj?.let { track ->
-                                    waveFeedback = true
-                                    scope.launch {
-                                        thumbUpBounce.snapTo(1.35f)
-                                        thumbUpBounce.animateTo(
-                                            targetValue = 1f,
-                                            animationSpec = spring(dampingRatio = 0.30f, stiffness = 480f)
-                                        )
-                                    }
-                                    scope.launch {
-                                        WaveSignalQueue.sendFeedback("more_track", track.id)
-                                        track.artists.firstOrNull()?.id?.let {
-                                            WaveSignalQueue.sendFeedback("more_artist", it)
-                                        }
-                                    }
-                                }
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        val thumbUpTint by animateColorAsState(
-                            targetValue = if (waveFeedback == true) Color(0xFF4CAF50)
-                            else Color.White.copy(alpha = 0.70f),
-                            animationSpec = tween(200),
-                            label = "thumbUp"
-                        )
-                        Icon(
-                            imageVector = Icons.Rounded.ThumbUp,
-                            contentDescription = "More like this",
-                            tint = thumbUpTint,
-                            modifier = Modifier
-                                .size(24.dp)
-                                .graphicsLayer {
-                                    scaleX = thumbUpBounce.value
-                                    scaleY = thumbUpBounce.value
-                                }
-                        )
-                    }
-                    // 👎 Less like this — wave/feedback (less_track + less_artist).
-                    val thumbDownBounce = remember { Animatable(1f) }
-                    Box(
-                        modifier = Modifier
-                            .size(44.dp)
-                            .pressScale {
-                                currentTrackObj?.let { track ->
-                                    waveFeedback = false
-                                    scope.launch {
-                                        thumbDownBounce.snapTo(1.35f)
-                                        thumbDownBounce.animateTo(
-                                            targetValue = 1f,
-                                            animationSpec = spring(dampingRatio = 0.30f, stiffness = 480f)
-                                        )
-                                    }
-                                    scope.launch {
-                                        WaveSignalQueue.sendFeedback("less_track", track.id)
-                                        track.artists.firstOrNull()?.id?.let {
-                                            WaveSignalQueue.sendFeedback("less_artist", it)
-                                        }
-                                    }
-                                }
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        val thumbDownTint by animateColorAsState(
-                            targetValue = if (waveFeedback == false) Color(0xFFFF5252)
-                            else Color.White.copy(alpha = 0.70f),
-                            animationSpec = tween(200),
-                            label = "thumbDown"
-                        )
-                        Icon(
-                            imageVector = Icons.Rounded.ThumbDown,
-                            contentDescription = "Less like this",
-                            tint = thumbDownTint,
-                            modifier = Modifier
-                                .size(24.dp)
-                                .graphicsLayer {
-                                    scaleX = thumbDownBounce.value
-                                    scaleY = thumbDownBounce.value
-                                }
-                        )
-                    }
-                    Box(
-                        modifier = Modifier
-                            .size(44.dp)
                             .pressScale { showTrackMenu = true },
                         contentAlignment = Alignment.Center
                     ) {
@@ -958,10 +804,10 @@ fun FullPlayer(
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Shuffle
+                    // Shuffle (чуть крупнее — полевой фидбек)
                     Box(
                         Modifier
-                            .size(44.dp)
+                            .size(48.dp)
                             .pressScale { PlayerController.toggleShuffle() },
                         contentAlignment = Alignment.Center
                     ) {
@@ -969,13 +815,13 @@ fun FullPlayer(
                             Icons.Rounded.Shuffle, null,
                             tint = if (shuffleEnabled) Color(0xFFFC3C44)
                             else Color.White.copy(alpha = 0.40f),
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(24.dp)
                         )
                     }
 
                     AnimatedTransportButton(
                         icon = Icons.Rounded.FastRewind,
-                        iconSize = 50.dp,
+                        iconSize = 56.dp,
                         onClick = onSkipPrevious
                     )
                     // Пока трек буферизуется после скипа — вокруг play/pause крутится
@@ -984,27 +830,27 @@ fun FullPlayer(
                         AnimatedTransportButton(
                             icon = if (isPlaying) Icons.Rounded.Pause
                                    else Icons.Rounded.PlayArrow,
-                            iconSize = 66.dp,
+                            iconSize = 74.dp,
                             onClick = onPlayPause
                         )
                         if (isBuffering) {
                             CircularProgressIndicator(
                                 color = Color.White.copy(alpha = 0.85f),
                                 strokeWidth = 2.5.dp,
-                                modifier = Modifier.size(72.dp)
+                                modifier = Modifier.size(80.dp)
                             )
                         }
                     }
                     AnimatedTransportButton(
                         icon = Icons.Rounded.FastForward,
-                        iconSize = 50.dp,
+                        iconSize = 56.dp,
                         onClick = onSkipNext
                     )
 
-                    // Repeat
+                    // Repeat (чуть крупнее)
                     Box(
                         Modifier
-                            .size(44.dp)
+                            .size(48.dp)
                             .pressScale { PlayerController.cycleRepeatMode() },
                         contentAlignment = Alignment.Center
                     ) {
@@ -1013,64 +859,13 @@ fun FullPlayer(
                             else Icons.Rounded.Repeat, null,
                             tint = if (repeatMode > 0) Color(0xFFFC3C44)
                             else Color.White.copy(alpha = 0.40f),
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(24.dp)
                         )
                     }
                 }
 
-                // Volume — скрыта в режиме лирики и очереди
-                AnimatedVisibility(visible = !showLyrics && !showQueue) {
-                Column {
-                Spacer(modifier = Modifier.height(22.dp))
-
-                // Volume — liquid glass slider
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .pointerInput(Unit) {
-                            // Перехватываем вертикальные drag'и чтобы они не уходили
-                            // в detectVerticalDragGestures FullPlayer'а
-                            detectVerticalDragGestures(
-                                onVerticalDrag = { change, _ -> change.consume() }
-                            )
-                        },
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        Icons.AutoMirrored.Rounded.VolumeDown, null,
-                        tint = Color.White.copy(alpha = 0.40f),
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    val audioManager = remember {
-                        context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                    }
-                    val maxVolumeSteps = remember { audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC) }
-                    val lastVolumeStep = remember { intArrayOf(-1) }
-
-                    LiquidSlider(
-                        value = { systemVolume },
-                        onValueChange = { v ->
-                            val newStep = (v * maxVolumeSteps).toInt().coerceIn(0, maxVolumeSteps)
-                            if (newStep != lastVolumeStep[0]) {
-                                lastVolumeStep[0] = newStep
-                                audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, newStep, 0)
-                                com.liquidmusicglass.engine.AudioFxController.refreshSystemVolume()
-                            }
-                        },
-                        backdrop = playerBackdrop,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    Icon(
-                        Icons.AutoMirrored.Rounded.VolumeUp, null,
-                        tint = Color.White.copy(alpha = 0.40f),
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-                }
-                }
-
+                // Громкость и скорость убраны (полевой фидбек): громкость —
+                // качелькой телефона, скорость аудио не нужна.
                 Spacer(modifier = Modifier.height(18.dp))
 
                 // Bottom icons (stagger: bottomAlpha)
@@ -1093,33 +888,6 @@ fun FullPlayer(
                         }
                     }
                     BottomIcon(Icons.Rounded.Cast) { showAirPlay = true }
-
-                    // Playback Speed Button
-                    val playbackSpeed by PlayerController.playbackSpeed.collectAsState()
-                    Box(
-                        Modifier
-                            .size(48.dp)
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null
-                            ) {
-                                val speeds = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f)
-                                val currentIndex = speeds.indexOf(playbackSpeed)
-                                val nextSpeed = speeds.getOrElse(currentIndex + 1) { speeds.first() }
-                                PlayerController.setPlaybackSpeed(nextSpeed)
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = when (playbackSpeed) {
-                                1.0f -> "1×"
-                                else -> "${playbackSpeed.toString().removeSuffix(".0")}×"
-                            },
-                            color = Color.White.copy(alpha = 0.70f),
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
 
                     BottomIcon(Icons.AutoMirrored.Rounded.QueueMusic) {
                         if (showQueue) {
@@ -1311,6 +1079,64 @@ fun FullPlayer(
                         Spacer(modifier = Modifier.width(16.dp))
                         Text(
                             text = "Wave from this track",
+                            color = Color.White,
+                            fontSize = 17.sp,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(0.5.dp)
+                            .background(Color.White.copy(alpha = 0.10f))
+                    )
+                    // Скачать (переехало из ряда кнопок — полевой фидбек):
+                    // клип → mp4 в Загрузки, трек → обычная загрузка.
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                scope.launch {
+                                    trackMenuSheetState.hide()
+                                    showTrackMenu = false
+                                }
+                                if (!isPremium) {
+                                    showPromoDialog = true
+                                } else if (isDownloaded) {
+                                    showDeleteConfirmDialog = true
+                                } else if (!isDownloading) {
+                                    currentTrackObj?.let { track ->
+                                        if (isVideoClip) AudioDownloadManager.downloadClip(context, track)
+                                        else AudioDownloadManager.downloadTrack(context, track)
+                                    }
+                                }
+                            }
+                            .padding(vertical = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        when {
+                            isDownloading -> CircularProgressIndicator(
+                                progress = { progress ?: 0f },
+                                modifier = Modifier.size(24.dp),
+                                color = Color(0xFFFC3C44),
+                                strokeWidth = 2.5.dp
+                            )
+                            isDownloaded -> Icon(
+                                Icons.Rounded.CheckCircle, null,
+                                tint = Color(0xFF4CAF50), modifier = Modifier.size(24.dp)
+                            )
+                            else -> Icon(
+                                Icons.Rounded.Download, null,
+                                tint = Color.White, modifier = Modifier.size(24.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Text(
+                            text = when {
+                                isDownloading -> "Downloading… ${((progress ?: 0f) * 100).toInt()}%"
+                                isDownloaded -> "Delete download"
+                                else -> "Download"
+                            },
                             color = Color.White,
                             fontSize = 17.sp,
                             modifier = Modifier.weight(1f)
@@ -1538,11 +1364,11 @@ private fun AnimatedTransportButton(
 private fun BottomIcon(icon: ImageVector, onClick: () -> Unit = {}) {
     Box(
         Modifier
-            .size(48.dp)
+            .size(52.dp)
             .pressScale { onClick() },
         contentAlignment = Alignment.Center
     ) {
-        Icon(icon, null, tint = Color.White.copy(alpha = 0.50f), modifier = Modifier.size(22.dp))
+        Icon(icon, null, tint = Color.White.copy(alpha = 0.50f), modifier = Modifier.size(26.dp))
     }
 }
 
