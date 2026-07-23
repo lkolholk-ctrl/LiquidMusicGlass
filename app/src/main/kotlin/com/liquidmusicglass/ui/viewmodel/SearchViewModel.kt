@@ -197,7 +197,7 @@ class SearchViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 val meta = com.liquidmusicglass.api.icm.IcmApi.getInstance()
-                    .getTracksMeta(needIds).getOrNull() ?: return@launch
+                    .getBatchTrackMeta(needIds).getOrNull() ?: return@launch
                 // Пользователь уже ищет другое / сменил сегмент — не вливаем.
                 if (q != _query.value.trim() || source != _selectedSource.value) return@launch
                 val byId = meta.items
