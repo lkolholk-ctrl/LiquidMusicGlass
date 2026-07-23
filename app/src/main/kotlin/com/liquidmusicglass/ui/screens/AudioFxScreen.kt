@@ -90,6 +90,10 @@ fun AudioFxScreen(onBack: () -> Unit) {
         // Портрет не меняется. Обёртка Box нужна: колонка лежит внутри
         // CompositionLocalProvider, где BoxScope.align недоступен.
         val win = com.liquidmusicglass.ui.rememberWindowInfo()
+        // В альбоме всё компактнее: меньше вертикальные зазоры между секциями,
+        // мельче заголовок. Портрет (compact == false) не трогаем.
+        val compact = win.useSideBySide
+        val secGap = if (compact) 10.dp else 14.dp
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         Column(
             modifier = Modifier
@@ -97,49 +101,49 @@ fun AudioFxScreen(onBack: () -> Unit) {
                     if (win.useSideBySide) Modifier.widthIn(max = 640.dp).fillMaxHeight()
                     else Modifier.fillMaxSize()
                 )
-                .verticalScroll(scroll).padding(horizontal = 20.dp)
+                .verticalScroll(scroll).padding(horizontal = if (compact) 16.dp else 20.dp)
         ) {
             Spacer(modifier = Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(if (compact) 6.dp else 12.dp))
 
             // Header + master enable
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 CircleButton(lc) { onBack() }
                 Spacer(modifier = Modifier.width(16.dp))
-                Text("Audio", color = lc.textPrimary, fontSize = 24.sp,
+                Text("Audio", color = lc.textPrimary, fontSize = if (compact) 20.sp else 24.sp,
                     fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                 FxSwitch(master) { AudioFxController.setMasterEnabled(it) }
             }
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(if (compact) 12.dp else 16.dp))
 
             Box(modifier = Modifier.alpha(if (master) 1f else 0.4f)) {
                 Column {
                     DeviceProfilesSection(lc, master)
-                    Spacer(Modifier.height(14.dp))
+                    Spacer(Modifier.height(secGap))
                     PreampSection(lc, master)
-                    Spacer(Modifier.height(14.dp))
+                    Spacer(Modifier.height(secGap))
                     EqSection(lc, master)
-                    Spacer(Modifier.height(14.dp))
+                    Spacer(Modifier.height(secGap))
                     ParametricEqSection(lc, master)
-                    Spacer(Modifier.height(14.dp))
+                    Spacer(Modifier.height(secGap))
                     BassSection(lc, master)
-                    Spacer(Modifier.height(14.dp))
+                    Spacer(Modifier.height(secGap))
                     LoudnessSection(lc, master)
-                    Spacer(Modifier.height(14.dp))
+                    Spacer(Modifier.height(secGap))
                     StereoSection(lc, master)
-                    Spacer(Modifier.height(14.dp))
+                    Spacer(Modifier.height(secGap))
                     BalanceSection(lc, master)
-                    Spacer(Modifier.height(14.dp))
+                    Spacer(Modifier.height(secGap))
                     MonoSection(lc, master)
-                    Spacer(Modifier.height(14.dp))
+                    Spacer(Modifier.height(secGap))
                     CompressorSection(lc, master)
-                    Spacer(Modifier.height(14.dp))
+                    Spacer(Modifier.height(secGap))
                     LimiterSection(lc, master)
-                    Spacer(Modifier.height(14.dp))
+                    Spacer(Modifier.height(secGap))
                     ReverbSection(lc, master)
-                    Spacer(Modifier.height(14.dp))
+                    Spacer(Modifier.height(secGap))
                     SaturationSection(lc, master)
-                    Spacer(Modifier.height(14.dp))
+                    Spacer(Modifier.height(secGap))
                     VuSection(lc)
                     Spacer(Modifier.height(20.dp))
                     ResetButton(lc, master)

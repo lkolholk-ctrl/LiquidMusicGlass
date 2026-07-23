@@ -126,6 +126,9 @@ fun ProfileScreen(
 
     // Широкое окно (телефон-альбом ИЛИ планшет). В портрете layout не меняется.
     val win = com.liquidmusicglass.ui.rememberWindowInfo()
+    // Альбом/планшет: делаем всё компактнее (аватар/шрифты/строки ~20-30%),
+    // как в LandscapeHome/SideBar. В портрете compact=false → всё как было.
+    val compact = win.useSideBySide
 
     Box(
         modifier = Modifier
@@ -143,7 +146,7 @@ fun ProfileScreen(
         ) {
             // ── Status bar spacing ──
             item { Spacer(modifier = Modifier.windowInsetsTopHeight(WindowInsets.statusBars)) }
-            item { Spacer(modifier = Modifier.height(24.dp)) }
+            item { Spacer(modifier = Modifier.height(if (compact) 12.dp else 24.dp)) }
 
             // ═══════════════════════════════════════════════════════════
             //  1. PROFILE HEADER & IDENTITY BLOCK
@@ -159,7 +162,7 @@ fun ProfileScreen(
                     // с большой аватаркой»).
                     Box(
                         modifier = Modifier
-                            .size(132.dp)
+                            .size(if (compact) 92.dp else 132.dp)
                             .clip(androidx.compose.foundation.shape.CircleShape)
                             .background(if (lc.isDark) SurfaceDark else Color(0xFFF2F2F7)),
                         contentAlignment = Alignment.Center
@@ -176,12 +179,12 @@ fun ProfileScreen(
                                 Icons.Rounded.Person,
                                 null,
                                 tint = lc.iconMuted,
-                                modifier = Modifier.size(64.dp)
+                                modifier = Modifier.size(if (compact) 44.dp else 64.dp)
                             )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(18.dp))
+                    Spacer(modifier = Modifier.height(if (compact) 12.dp else 18.dp))
 
                     // Username + Premium Star inline
                     Row(
@@ -192,7 +195,7 @@ fun ProfileScreen(
                             text = displayName,
                             fontFamily = AppFontFamily,
                             color = lc.textPrimary,
-                            fontSize = 26.sp,
+                            fontSize = if (compact) 20.sp else 26.sp,
                             fontWeight = FontWeight.Bold,
                             letterSpacing = (-0.02).sp
                         )
@@ -202,7 +205,7 @@ fun ProfileScreen(
                                 imageVector = Icons.Rounded.Star,
                                 contentDescription = "Premium",
                                 tint = AppleRed,
-                                modifier = Modifier.size(18.dp)
+                                modifier = Modifier.size(if (compact) 15.dp else 18.dp)
                             )
                         }
                     }
@@ -274,7 +277,7 @@ fun ProfileScreen(
                 }
             }
 
-            item { Spacer(modifier = Modifier.height(24.dp)) }
+            item { Spacer(modifier = Modifier.height(if (compact) 14.dp else 24.dp)) }
 
             // ═══════════════════════════════════════════════════════════
             //  2. ARTISTS YOU FOLLOW — подписки ICM (/library/subscriptions)
@@ -308,7 +311,7 @@ fun ProfileScreen(
                                 Column(
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     modifier = Modifier
-                                        .width(76.dp)
+                                        .width(if (compact) 64.dp else 76.dp)
                                         .liquidClickable {
                                             // Тап = радио по артисту (мгновенный старт).
                                             com.liquidmusicglass.engine.PlayerController
@@ -318,7 +321,7 @@ fun ProfileScreen(
                                     val img = artist.image ?: artist.cover
                                     Box(
                                         modifier = Modifier
-                                            .size(64.dp)
+                                            .size(if (compact) 52.dp else 64.dp)
                                             .clip(androidx.compose.foundation.shape.CircleShape)
                                             .background(if (lc.isDark) SurfaceElevated else Color.White),
                                         contentAlignment = Alignment.Center
@@ -334,7 +337,7 @@ fun ProfileScreen(
                                             Icon(
                                                 Icons.Rounded.Person, null,
                                                 tint = lc.iconMuted,
-                                                modifier = Modifier.size(28.dp)
+                                                modifier = Modifier.size(if (compact) 24.dp else 28.dp)
                                             )
                                         }
                                     }
@@ -381,7 +384,7 @@ fun ProfileScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(56.dp)
+                                .height(if (compact) 48.dp else 56.dp)
                                 .liquidClickable { regionExpanded = !regionExpanded }
                                 .padding(horizontal = 20.dp),
                             verticalAlignment = Alignment.CenterVertically
@@ -391,7 +394,7 @@ fun ProfileScreen(
                                     text = "Region",
                                     fontFamily = AppFontFamily,
                                     color = lc.textPrimary,
-                                    fontSize = 15.sp,
+                                    fontSize = if (compact) 13.5.sp else 15.sp,
                                     fontWeight = FontWeight.Medium
                                 )
                                 Text(
@@ -419,7 +422,7 @@ fun ProfileScreen(
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .height(44.dp)
+                                        .height(if (compact) 40.dp else 44.dp)
                                         .liquidClickable(enabled = !regionBusy && !selected) {
                                             regionBusy = true
                                             scope.launch {
@@ -462,7 +465,7 @@ fun ProfileScreen(
                                         },
                                         fontFamily = AppFontFamily,
                                         color = if (selected) AppleRed else lc.textPrimary,
-                                        fontSize = 14.sp,
+                                        fontSize = if (compact) 13.sp else 14.sp,
                                         fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                                         modifier = Modifier.weight(1f)
                                     )
@@ -506,6 +509,7 @@ fun ProfileScreen(
                                     icon = Icons.Rounded.Lock,
                                     label = "ICM Password",
                                     value = "Change or reset",
+                                    compact = compact,
                                     onClick = { showPasswordSheet = true }
                                 )
                             }
@@ -513,6 +517,7 @@ fun ProfileScreen(
                                 icon = Icons.AutoMirrored.Rounded.ExitToApp,
                                 label = "Sign Out",
                                 tint = AppleRed,
+                                compact = compact,
                                 onClick = {
                                     LocalAuthManager.logout()
                                     IcmAuthRepository.logout()
@@ -525,13 +530,14 @@ fun ProfileScreen(
                             icon = Icons.Rounded.Person,
                             label = "Sign In",
                             value = "Connect your account",
+                            compact = compact,
                             onClick = onOpenAuth
                         )
                     }
                 }
             }
 
-            item { Spacer(modifier = Modifier.height(32.dp)) }
+            item { Spacer(modifier = Modifier.height(if (compact) 20.dp else 32.dp)) }
 
             // ── Footer: честная версия из BuildConfig (versionName у нас —
             // дата сборки CI), а не зашитое «v1.0». ──
@@ -608,12 +614,13 @@ private fun SettingRowNavigable(
     icon: ImageVector,
     label: String,
     value: String,
+    compact: Boolean = false,
     onClick: () -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(56.dp)
+            .height(if (compact) 48.dp else 56.dp)
             .liquidClickable(onClick = onClick)
             .padding(horizontal = 20.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -622,29 +629,29 @@ private fun SettingRowNavigable(
             icon,
             null,
             tint = LiquidTheme.colors.iconDefault.copy(alpha = 0.6f),
-            modifier = Modifier.size(22.dp)
+            modifier = Modifier.size(if (compact) 20.dp else 22.dp)
         )
-        Spacer(modifier = Modifier.width(16.dp))
+        Spacer(modifier = Modifier.width(if (compact) 14.dp else 16.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = label,
                 fontFamily = AppFontFamily,
                 color = LiquidTheme.colors.textPrimary,
-                fontSize = 15.sp,
+                fontSize = if (compact) 13.5.sp else 15.sp,
                 fontWeight = FontWeight.Medium
             )
             Text(
                 text = value,
                 fontFamily = AppFontFamily,
                 color = LiquidTheme.colors.textSecondary,
-                fontSize = 12.sp
+                fontSize = if (compact) 11.5.sp else 12.sp
             )
         }
         Icon(
             Icons.AutoMirrored.Rounded.KeyboardArrowRight,
             null,
             tint = LiquidTheme.colors.iconMuted,
-            modifier = Modifier.size(20.dp)
+            modifier = Modifier.size(if (compact) 18.dp else 20.dp)
         )
     }
 }
@@ -659,12 +666,13 @@ private fun SettingRowAction(
     label: String,
     subtitle: String? = null,
     tint: Color = LiquidTheme.colors.iconDefault,
+    compact: Boolean = false,
     onClick: () -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(if (subtitle != null) 64.dp else 56.dp)
+            .height(if (subtitle != null) (if (compact) 56.dp else 64.dp) else (if (compact) 48.dp else 56.dp))
             .liquidClickable(onClick = onClick)
             .padding(horizontal = 20.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -673,15 +681,15 @@ private fun SettingRowAction(
             icon,
             null,
             tint = tint.copy(alpha = 0.8f),
-            modifier = Modifier.size(22.dp)
+            modifier = Modifier.size(if (compact) 20.dp else 22.dp)
         )
-        Spacer(modifier = Modifier.width(16.dp))
+        Spacer(modifier = Modifier.width(if (compact) 14.dp else 16.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = label,
                 fontFamily = AppFontFamily,
                 color = tint,
-                fontSize = 15.sp,
+                fontSize = if (compact) 13.5.sp else 15.sp,
                 fontWeight = FontWeight.Medium
             )
             if (subtitle != null) {
@@ -690,7 +698,7 @@ private fun SettingRowAction(
                     text = subtitle,
                     fontFamily = AppFontFamily,
                     color = LiquidTheme.colors.textSecondary,
-                    fontSize = 12.sp
+                    fontSize = if (compact) 11.5.sp else 12.sp
                 )
             }
         }

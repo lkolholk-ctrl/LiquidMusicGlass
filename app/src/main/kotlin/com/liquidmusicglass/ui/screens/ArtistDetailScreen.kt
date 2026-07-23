@@ -252,11 +252,15 @@ fun ArtistDetailScreen(
             }
             else -> {
                 val win = rememberWindowInfo()
+                // В альбомной раскладке шапка живёт в узкой левой колонке —
+                // компактнее аватар/шрифты/отступы. Портрет (compact == false)
+                // сохраняет прежние размеры.
+                val compact = win.useSideBySide
                 // Шапка артиста (аватар, инфо, кнопки, секции) — общий блок:
                 // в компакте первый элемент списка, в широком окне — левая колонка.
                 val headerContent: @Composable () -> Unit = {
                         Spacer(modifier = Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(if (compact) 4.dp else 12.dp))
 
                         // Back + Share + Apple Music
                         Row(
@@ -333,7 +337,7 @@ fun ArtistDetailScreen(
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(20.dp))
+                        Spacer(modifier = Modifier.height(if (compact) 12.dp else 20.dp))
 
                         // Artist avatar
                         Box(
@@ -342,7 +346,7 @@ fun ArtistDetailScreen(
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(160.dp)
+                                    .size(if (compact) 128.dp else 160.dp)
                                     .clip(CircleShape)
                             ) {
                                 AlbumArtImage(
@@ -354,12 +358,12 @@ fun ArtistDetailScreen(
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(16.dp))
+                        Spacer(modifier = Modifier.height(if (compact) 10.dp else 16.dp))
 
                         Text(
                             text = artistName,
                             color = LiquidTheme.colors.textPrimary,
-                            fontSize = 26.sp,
+                            fontSize = if (compact) 20.sp else 26.sp,
                             fontWeight = FontWeight.Bold,
                             textAlign = TextAlign.Center,
                             modifier = Modifier
@@ -370,7 +374,7 @@ fun ArtistDetailScreen(
                         Text(
                             text = "${artistTracks.size} tracks · ${albums.size} albums",
                             color = LiquidTheme.colors.textSecondary,
-                            fontSize = 14.sp,
+                            fontSize = if (compact) 12.5.sp else 14.sp,
                             textAlign = TextAlign.Center,
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -401,7 +405,7 @@ fun ArtistDetailScreen(
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(20.dp))
+                        Spacer(modifier = Modifier.height(if (compact) 14.dp else 20.dp))
 
                         // Play All / Shuffle
                         Row(
@@ -413,7 +417,7 @@ fun ArtistDetailScreen(
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(44.dp)
+                                    .height(if (compact) 40.dp else 44.dp)
                                     .clip(RoundedCornerShape(50))
                                     .background(AppleRed)
                                     .liquidClickable(pressedScale = LiquidMotion.PressButton) {
@@ -439,7 +443,7 @@ fun ArtistDetailScreen(
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(44.dp)
+                                    .height(if (compact) 40.dp else 44.dp)
                                     .clip(RoundedCornerShape(50))
                                     .background(if (LiquidTheme.colors.isDark) Color(0xFF1A1A1A) else Color(0xFFF2F2F7))
                                     .liquidClickable(pressedScale = LiquidMotion.PressButton) {
@@ -475,7 +479,7 @@ fun ArtistDetailScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 20.dp)
-                                .height(44.dp)
+                                .height(if (compact) 40.dp else 44.dp)
                                 .clip(RoundedCornerShape(50))
                                 .background(if (LiquidTheme.colors.isDark) Color(0xFF1A1A1A) else Color(0xFFF2F2F7))
                                 .liquidClickable(pressedScale = LiquidMotion.PressButton) {
@@ -490,7 +494,7 @@ fun ArtistDetailScreen(
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(28.dp))
+                        Spacer(modifier = Modifier.height(if (compact) 18.dp else 28.dp))
 
                         // Similar Artists
                         val similar = similarArtistsList
@@ -498,7 +502,7 @@ fun ArtistDetailScreen(
                             Text(
                                 text = "Similar Artists",
                                 color = LiquidTheme.colors.textPrimary,
-                                fontSize = 20.sp,
+                                fontSize = if (compact) 15.sp else 20.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 modifier = Modifier.padding(horizontal = 20.dp)
                             )
@@ -512,13 +516,13 @@ fun ArtistDetailScreen(
                                     Column(
                                         modifier = Modifier
                                             .animateItem()
-                                            .width(100.dp)
+                                            .width(if (compact) 78.dp else 100.dp)
                                             .liquidClickable { onNavigateToArtist(sim.id) },
                                         horizontalAlignment = Alignment.CenterHorizontally
                                     ) {
                                         Box(
                                             modifier = Modifier
-                                                .size(100.dp)
+                                                .size(if (compact) 78.dp else 100.dp)
                                                 .clip(CircleShape)
                                         ) {
                                             AlbumArtImage(
@@ -543,7 +547,7 @@ fun ArtistDetailScreen(
                                 }
                             }
 
-                            Spacer(modifier = Modifier.height(28.dp))
+                            Spacer(modifier = Modifier.height(if (compact) 18.dp else 28.dp))
                         }
 
                         // Albums section
@@ -551,7 +555,7 @@ fun ArtistDetailScreen(
                             Text(
                                 text = "Albums",
                                 color = LiquidTheme.colors.textPrimary,
-                                fontSize = 20.sp,
+                                fontSize = if (compact) 15.sp else 20.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 modifier = Modifier.padding(horizontal = 20.dp)
                             )
@@ -565,12 +569,12 @@ fun ArtistDetailScreen(
                                     Column(
                                         modifier = Modifier
                                             .animateItem()
-                                            .width(130.dp)
+                                            .width(if (compact) 104.dp else 130.dp)
                                             .liquidClickable { onNavigateToAlbum(album.id) }
                                     ) {
                                         Box(
                                             modifier = Modifier
-                                                .size(130.dp)
+                                                .size(if (compact) 104.dp else 130.dp)
                                                 .clip(RoundedCornerShape(12.dp))
                                         ) {
                                             AlbumArtImage(
@@ -593,7 +597,7 @@ fun ArtistDetailScreen(
                                 }
                             }
 
-                            Spacer(modifier = Modifier.height(28.dp))
+                            Spacer(modifier = Modifier.height(if (compact) 18.dp else 28.dp))
                         }
 
                         // Playlists section
@@ -601,7 +605,7 @@ fun ArtistDetailScreen(
                             Text(
                                 text = "Playlists",
                                 color = LiquidTheme.colors.textPrimary,
-                                fontSize = 20.sp,
+                                fontSize = if (compact) 15.sp else 20.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 modifier = Modifier.padding(horizontal = 20.dp)
                             )
@@ -615,12 +619,12 @@ fun ArtistDetailScreen(
                                     Column(
                                         modifier = Modifier
                                             .animateItem()
-                                            .width(130.dp)
+                                            .width(if (compact) 104.dp else 130.dp)
                                             .liquidClickable { onNavigateToAlbum(playlist.id) }
                                     ) {
                                         Box(
                                             modifier = Modifier
-                                                .size(130.dp)
+                                                .size(if (compact) 104.dp else 130.dp)
                                                 .clip(RoundedCornerShape(12.dp))
                                         ) {
                                             AlbumArtImage(
@@ -643,7 +647,7 @@ fun ArtistDetailScreen(
                                 }
                             }
 
-                            Spacer(modifier = Modifier.height(28.dp))
+                            Spacer(modifier = Modifier.height(if (compact) 18.dp else 28.dp))
                         }
                 }
 
@@ -653,8 +657,8 @@ fun ArtistDetailScreen(
                     item {
                         Text(
                             text = "Songs",
-                            color = Color.White,
-                            fontSize = 20.sp,
+                            color = LiquidTheme.colors.textPrimary,
+                            fontSize = if (compact) 15.sp else 20.sp,
                             fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.padding(horizontal = 20.dp)
                         )
@@ -683,8 +687,8 @@ fun ArtistDetailScreen(
                             modifier = Modifier
                                 .animateItem()
                                 .fillMaxWidth()
-                                .padding(horizontal = 16.dp)
-                                .height(58.dp)
+                                .padding(horizontal = if (compact) 12.dp else 16.dp)
+                                .height(if (compact) 50.dp else 58.dp)
                                 .clip(RoundedCornerShape(12.dp))
                                 .liquidClickable {
                                     // Load all artist tracks as the queue so the player
@@ -705,7 +709,7 @@ fun ArtistDetailScreen(
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(44.dp)
+                                    .size(if (compact) 38.dp else 44.dp)
                                     .clip(RoundedCornerShape(8.dp))
                             ) {
                                 AlbumArtImage(
@@ -715,13 +719,13 @@ fun ArtistDetailScreen(
                                     contentScale = ContentScale.Crop
                                 )
                             }
-                            Spacer(modifier = Modifier.width(14.dp))
+                            Spacer(modifier = Modifier.width(if (compact) 10.dp else 14.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
                                         text = track.title,
                                         color = LiquidTheme.colors.textPrimary,
-                                        fontSize = 15.sp,
+                                        fontSize = if (compact) 13.5.sp else 15.sp,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                         modifier = Modifier.weight(1f, fill = false)
@@ -758,7 +762,7 @@ fun ArtistDetailScreen(
                         Spacer(modifier = Modifier.height(4.dp))
                     }
 
-                    item { Spacer(modifier = Modifier.height(200.dp)) }
+                    item { Spacer(modifier = Modifier.height(if (compact) 120.dp else 200.dp)) }
                 }
 
                 if (win.useSideBySide) {

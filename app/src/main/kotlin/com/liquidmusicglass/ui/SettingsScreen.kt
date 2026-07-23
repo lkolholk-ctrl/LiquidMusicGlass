@@ -75,6 +75,9 @@ fun SettingsScreen(
 
     // Широкое окно (телефон-альбом ИЛИ планшет). В портрете layout не меняется.
     val win = com.liquidmusicglass.ui.rememberWindowInfo()
+    // В альбоме/на планшете всё компактнее: секции ставим ближе (меньше вертикальный
+    // ход взгляда). Только для широкого окна — портрет остаётся как был.
+    val sectionGap = if (win.useSideBySide) 20.dp else 28.dp
 
     Box(modifier = Modifier.fillMaxSize().background(lc.settingsBackground)) {
         Column(
@@ -125,7 +128,7 @@ fun SettingsScreen(
                 Text(
                     text = "Settings",
                     color = lc.textPrimary,
-                    fontSize = 24.sp,
+                    fontSize = if (win.useSideBySide) 20.sp else 24.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.clickable(
                         interactionSource = remember { MutableInteractionSource() },
@@ -201,7 +204,7 @@ fun SettingsScreen(
                         Text(
                             text = displayName,
                             color = lc.textPrimary,
-                            fontSize = 17.sp,
+                            fontSize = if (win.useSideBySide) 15.sp else 17.sp,
                             fontWeight = FontWeight.SemiBold
                         )
                         Text(
@@ -213,7 +216,7 @@ fun SettingsScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(sectionGap))
 
             // PLAYBACK
             SectionLabel("PLAYBACK")
@@ -254,7 +257,7 @@ fun SettingsScreen(
                     Text(
                         text = "Audio Output",
                         color = LiquidTheme.colors.textPrimary,
-                        fontSize = 16.sp,
+                        fontSize = if (win.useSideBySide) 14.sp else 16.sp,
                         fontWeight = FontWeight.Medium,
                         modifier = Modifier.padding(horizontal = 16.dp)
                     )
@@ -342,7 +345,7 @@ fun SettingsScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(sectionGap))
 
             // SLEEP TIMER
             SectionLabel("SLEEP TIMER")
@@ -355,7 +358,7 @@ fun SettingsScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(sectionGap))
 
             // PRELOAD NEXT TRACK
             SectionLabel("PRELOAD NEXT TRACK")
@@ -377,7 +380,7 @@ fun SettingsScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(sectionGap))
 
             // STREAM QUALITY
             SectionLabel("STREAM QUALITY")
@@ -442,7 +445,7 @@ fun SettingsScreen(
                                     Text(
                                         text = quality,
                                         color = if (isSelected) Accent else lc.textPrimary,
-                                        fontSize = 16.sp,
+                                        fontSize = if (win.useSideBySide) 14.sp else 16.sp,
                                         fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
                                     )
                                     if (!isAvailable) {
@@ -487,7 +490,7 @@ fun SettingsScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(sectionGap))
 
             // WAVE
             SectionLabel("WAVE")
@@ -516,7 +519,7 @@ fun SettingsScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(sectionGap))
 
             // THEME
             SectionLabel("APPEARANCE")
@@ -566,7 +569,7 @@ fun SettingsScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(sectionGap))
 
             // ── AUTOMIX & SOUND ──
             SectionLabel("AUTOMIX & SOUND")
@@ -589,7 +592,7 @@ fun SettingsScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(sectionGap))
 
             // ── AUDIO CACHE ──
             SectionLabel("AUDIO CACHE")
@@ -647,7 +650,7 @@ fun SettingsScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(sectionGap))
 
             // ── BACKGROUND PLAYBACK ──
             // Doze/оптимизация батареи душит фоновые декод-потоки и сеть стриминга
@@ -663,7 +666,7 @@ fun SettingsScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(sectionGap))
 
             // ── ACCESSIBILITY ──
             SectionLabel("ACCESSIBILITY")
@@ -678,7 +681,7 @@ fun SettingsScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(sectionGap))
 
             // Нижний отступ под плавающий таб-бар (Settings теперь вкладка).
             Spacer(modifier = Modifier.height(110.dp))
@@ -939,6 +942,8 @@ private fun SettingsToggleItem(
     onSelect: (Boolean) -> Unit
 ) {
     val screenBackdrop = com.kyant.backdrop.backdrops.rememberLayerBackdrop()
+    // Компактный заголовок строки в широком окне (телефон-альбом/планшет).
+    val compact = com.liquidmusicglass.ui.rememberWindowInfo().useSideBySide
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -950,7 +955,7 @@ private fun SettingsToggleItem(
             Text(
                 text = title,
                 color = LiquidTheme.colors.textPrimary,
-                fontSize = 16.sp,
+                fontSize = if (compact) 14.sp else 16.sp,
                 fontWeight = FontWeight.Medium
             )
             Text(
@@ -970,6 +975,8 @@ private fun SettingsActionItem(
     icon: ImageVector,
     onClick: () -> Unit
 ) {
+    // Компактный заголовок строки в широком окне (телефон-альбом/планшет).
+    val compact = com.liquidmusicglass.ui.rememberWindowInfo().useSideBySide
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -981,7 +988,7 @@ private fun SettingsActionItem(
             Text(
                 text = title,
                 color = LiquidTheme.colors.textPrimary,
-                fontSize = 16.sp,
+                fontSize = if (compact) 14.sp else 16.sp,
                 fontWeight = FontWeight.Medium
             )
             Text(

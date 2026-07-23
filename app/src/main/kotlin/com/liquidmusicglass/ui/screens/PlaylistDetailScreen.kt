@@ -169,6 +169,9 @@ fun PlaylistDetailScreen(
     }
 
     val win = rememberWindowInfo()
+    // В альбомной раскладке шапка живёт в узкой левой колонке — компактнее
+    // иконка/шрифты/отступы. Портрет (compact == false) не меняется.
+    val compact = win.useSideBySide
 
     // Имя плейлиста нужно и в шапке, и в кнопках Play/Shuffle — считаем один раз.
     val name = if (isLocalPlaylist) {
@@ -237,7 +240,7 @@ fun PlaylistDetailScreen(
         ) {
             Box(
                 modifier = Modifier
-                    .size(120.dp)
+                    .size(if (compact) 92.dp else 120.dp)
                     .clip(RoundedCornerShape(28.dp)),
                 contentAlignment = Alignment.Center
             ) {
@@ -245,15 +248,15 @@ fun PlaylistDetailScreen(
                     imageVector = Icons.AutoMirrored.Filled.PlaylistPlay,
                     contentDescription = null,
                     tint = AppleRed.copy(alpha = 0.9f),
-                    modifier = Modifier.size(72.dp)
+                    modifier = Modifier.size(if (compact) 56.dp else 72.dp)
                 )
             }
 
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(if (compact) 10.dp else 16.dp))
             Text(
                 name,
                 color = lc.textPrimary,
-                fontSize = 24.sp,
+                fontSize = if (compact) 19.sp else 24.sp,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center
             )
@@ -261,7 +264,7 @@ fun PlaylistDetailScreen(
             Text(
                 "${tracks.size} tracks",
                 color = lc.textSecondary,
-                fontSize = 15.sp
+                fontSize = if (compact) 13.sp else 15.sp
             )
         }
     }
@@ -276,7 +279,7 @@ fun PlaylistDetailScreen(
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .height(48.dp)
+                    .height(if (compact) 42.dp else 48.dp)
                     .background(AppleRed, RoundedCornerShape(50))
                     .clip(RoundedCornerShape(50))
                     .liquidClickable(pressedScale = LiquidMotion.PressButton) {
@@ -307,7 +310,7 @@ fun PlaylistDetailScreen(
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .height(48.dp)
+                    .height(if (compact) 42.dp else 48.dp)
                     .clip(RoundedCornerShape(50))
                     .background(if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
                     .liquidClickable(pressedScale = LiquidMotion.PressButton) {
@@ -358,13 +361,13 @@ fun PlaylistDetailScreen(
                             autoRefillName = name
                         )
                     }
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                    .padding(horizontal = 14.dp, vertical = if (compact) 9.dp else 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
                     "${index + 1}",
                     color = lc.textTertiary,
-                    fontSize = 14.sp,
+                    fontSize = if (compact) 13.sp else 14.sp,
                     modifier = Modifier.width(28.dp)
                 )
 
@@ -375,7 +378,7 @@ fun PlaylistDetailScreen(
                     coverUrl = track.coverUrl,
                     contentDescription = null,
                     modifier = Modifier
-                        .size(44.dp)
+                        .size(if (compact) 38.dp else 44.dp)
                         .clip(RoundedCornerShape(8.dp))
                 )
 
@@ -386,7 +389,7 @@ fun PlaylistDetailScreen(
                         Text(
                             track.title,
                             color = lc.textPrimary,
-                            fontSize = 15.sp,
+                            fontSize = if (compact) 13.5.sp else 15.sp,
                             fontWeight = FontWeight.Medium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -404,7 +407,7 @@ fun PlaylistDetailScreen(
                     Text(
                         track.artist,
                         color = lc.textSecondary,
-                        fontSize = 13.sp,
+                        fontSize = if (compact) 12.sp else 13.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )

@@ -108,6 +108,11 @@ fun NewScreen(
     // Широкое окно (телефон-альбом ИЛИ планшет): ограничиваем ширину списка
     // и центрируем — плоские строки/карусели не растягиваются на весь экран.
     val win = com.liquidmusicglass.ui.rememberWindowInfo()
+    // Альбом/планшет: делаем всё компактнее (шрифты/карточки/отступы ~20-30%),
+    // как в LandscapeHome. В портрете compact=false → всё как было.
+    val compact = win.useSideBySide
+    val sectionGap = if (compact) 18.dp else 28.dp
+    val rowGap = if (compact) 10.dp else 14.dp
 
     Box(modifier = Modifier.fillMaxSize().background(lc.settingsBackground)) {
         LazyColumn(
@@ -121,31 +126,35 @@ fun NewScreen(
                 Text(
                     text = "New",
                     color = lc.textPrimary,
-                    fontSize = 28.sp,
+                    fontSize = if (compact) 20.sp else 28.sp,
                     fontWeight = FontWeight.Bold,
                     fontFamily = AppFontFamily,
-                    modifier = Modifier.padding(start = 20.dp, top = 12.dp, bottom = 16.dp)
+                    modifier = Modifier.padding(
+                        start = 20.dp,
+                        top = if (compact) 8.dp else 12.dp,
+                        bottom = if (compact) 10.dp else 16.dp
+                    )
                 )
             }
 
             // ── Волны по настроению (мудкарточки, переехали с экрана Wave) ──
             item {
-                NewSectionHeader("Waves by mood")
+                NewSectionHeader("Waves by mood", compact)
                 WaveMoodTiles(
                     onSelect = { mood -> viewModel.buildMoodWave(context, mood.query, mood.label) },
                     playing = isPlaying,
                     onPreview = { mood -> previewMood = mood }
                 )
-                Spacer(Modifier.height(28.dp))
+                Spacer(Modifier.height(sectionGap))
             }
 
             // ── Recently played ──
             if (recentlyPlayed.isNotEmpty()) {
                 item {
-                    NewSectionHeader("Recently played")
+                    NewSectionHeader("Recently played", compact)
                     LazyRow(
                         contentPadding = PaddingValues(horizontal = 20.dp),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                        horizontalArrangement = Arrangement.spacedBy(rowGap)
                     ) {
                         items(recentlyPlayed.take(15).distinctBy { it.id }, key = { "recent_${it.id}" }) { recent ->
                             NewTrackCard(
@@ -153,11 +162,12 @@ fun NewScreen(
                                 subtitle = recent.artist,
                                 uri = recent.displayArtUri,
                                 coverUrl = recent.coverUrl,
+                                compact = compact,
                                 onClick = { PlayerController.playFromList(context, listOf(recent)) }
                             )
                         }
                     }
-                    Spacer(Modifier.height(28.dp))
+                    Spacer(Modifier.height(sectionGap))
                 }
             }
 
@@ -167,23 +177,24 @@ fun NewScreen(
             if (homeBlocks.isEmpty() && charts.isEmpty() && (isLoading || isLoadingCharts)) {
                 items(count = 2, key = { "skeleton_$it" }) {
                     NewSectionSkeleton()
-                    Spacer(Modifier.height(28.dp))
+                    Spacer(Modifier.height(sectionGap))
                 }
             }
 
             // ── Home-блоки (popular / new_releases / recommendations …) ──
             homeBlocks.forEach { block ->
                 item(key = "block_${block.id}") {
-                    NewSectionHeader(block.title)
+                    NewSectionHeader(block.title, compact)
                     LazyRow(
                         contentPadding = PaddingValues(horizontal = 20.dp),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                        horizontalArrangement = Arrangement.spacedBy(rowGap)
                     ) {
                         items(block.items, key = { "${block.id}_${it.id}" }) { homeItem ->
                             NewTrackCard(
                                 title = homeItem.title,
                                 subtitle = homeItem.displayArtist,
                                 coverUrl = homeItem.cover,
+                                compact = compact,
                                 onClick = {
                                     when {
                                         homeItem.isArtist -> onNavigateToArtist(homeItem.artistId ?: homeItem.id)
@@ -194,23 +205,24 @@ fun NewScreen(
                             )
                         }
                     }
-                    Spacer(Modifier.height(28.dp))
+                    Spacer(Modifier.height(sectionGap))
                 }
             }
 
             // ── Charts ──
             if (charts.isNotEmpty()) {
                 item {
-                    NewSectionHeader("Charts")
+                    NewSectionHeader("Charts", compact)
                     LazyRow(
                         contentPadding = PaddingValues(horizontal = 20.dp),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                        horizontalArrangement = Arrangement.spacedBy(rowGap)
                     ) {
                         items(charts, key = { "chart_${it.id}" }) { chart ->
                             NewChartCard(
                                 name = chart.name,
                                 cover = chart.cover,
                                 trackCount = chart.tracks.size,
+                                compact = compact,
                                 onClick = {
                                     val tracks = chart.tracks.map { it.toTrack() }
                                     if (tracks.isNotEmpty()) {
@@ -227,13 +239,13 @@ fun NewScreen(
                             )
                         }
                     }
-                    Spacer(Modifier.height(28.dp))
+                    Spacer(Modifier.height(sectionGap))
                 }
             }
 
             // ── История прослушивания (Room) ──
             if (history.isNotEmpty()) {
-                item { NewSectionHeader("History") }
+                item { NewSectionHeader("History", compact) }
                 items(history, key = { "hist_${it.trackId}" }) { entry ->
                     Row(
                         modifier = Modifier
@@ -256,21 +268,21 @@ fun NewScreen(
                                     )
                                 )
                             }
-                            .padding(horizontal = 20.dp, vertical = 8.dp),
+                            .padding(horizontal = 20.dp, vertical = if (compact) 6.dp else 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         AlbumArtImage(
                             uri = null,
                             coverUrl = entry.coverUrl,
                             contentDescription = entry.title,
-                            modifier = Modifier.size(52.dp).clip(RoundedCornerShape(10.dp))
+                            modifier = Modifier.size(if (compact) 40.dp else 52.dp).clip(RoundedCornerShape(10.dp))
                         )
-                        Spacer(Modifier.width(12.dp))
+                        Spacer(Modifier.width(if (compact) 10.dp else 12.dp))
                         Column(Modifier.weight(1f)) {
                             Text(
                                 text = entry.title,
                                 color = lc.textPrimary,
-                                fontSize = 16.sp,
+                                fontSize = if (compact) 13.sp else 16.sp,
                                 fontWeight = FontWeight.Medium,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -278,7 +290,7 @@ fun NewScreen(
                             Text(
                                 text = entry.artist,
                                 color = lc.textSecondary,
-                                fontSize = 13.sp,
+                                fontSize = if (compact) 11.5.sp else 13.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -380,14 +392,14 @@ private fun NewSectionSkeleton() {
 }
 
 @Composable
-private fun NewSectionHeader(title: String) {
+private fun NewSectionHeader(title: String, compact: Boolean = false) {
     Text(
         text = title,
         color = LiquidTheme.colors.textPrimary,
-        fontSize = 20.sp,
+        fontSize = if (compact) 15.sp else 20.sp,
         fontWeight = FontWeight.Bold,
         fontFamily = AppFontFamily,
-        modifier = Modifier.padding(horizontal = 20.dp).padding(bottom = 12.dp)
+        modifier = Modifier.padding(horizontal = 20.dp).padding(bottom = if (compact) 8.dp else 12.dp)
     )
 }
 
@@ -397,29 +409,31 @@ private fun NewTrackCard(
     subtitle: String,
     coverUrl: String?,
     uri: Uri? = null,
+    compact: Boolean = false,
     onClick: () -> Unit
 ) {
     val lc = LiquidTheme.colors
-    Column(modifier = Modifier.width(140.dp).clickable(onClick = onClick)) {
+    val cardSize = if (compact) 110.dp else 140.dp
+    Column(modifier = Modifier.width(cardSize).clickable(onClick = onClick)) {
         if (uri != null) {
             AlbumArtImage(
                 uri = uri,
                 coverUrl = coverUrl,
-                modifier = Modifier.size(140.dp).clip(RoundedCornerShape(12.dp))
+                modifier = Modifier.size(cardSize).clip(RoundedCornerShape(12.dp))
             )
         } else {
             AsyncImage(
                 model = ImageRequest.Builder(LocalContext.current).data(coverUrl).crossfade(true).build(),
                 contentDescription = title,
                 contentScale = ContentScale.Crop,
-                modifier = Modifier.size(140.dp).clip(RoundedCornerShape(12.dp))
+                modifier = Modifier.size(cardSize).clip(RoundedCornerShape(12.dp))
             )
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(if (compact) 6.dp else 8.dp))
         Text(
             text = title,
             color = lc.textPrimary,
-            fontSize = 13.sp,
+            fontSize = if (compact) 12.5.sp else 13.sp,
             fontWeight = FontWeight.SemiBold,
             fontFamily = AppFontFamily,
             maxLines = 1,
@@ -429,7 +443,7 @@ private fun NewTrackCard(
         Text(
             text = subtitle,
             color = lc.textSecondary,
-            fontSize = 12.sp,
+            fontSize = if (compact) 11.sp else 12.sp,
             fontFamily = AppFontFamily,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
@@ -442,11 +456,13 @@ private fun NewChartCard(
     name: String,
     cover: String?,
     trackCount: Int,
+    compact: Boolean = false,
     onClick: () -> Unit
 ) {
     val lc = LiquidTheme.colors
-    Column(modifier = Modifier.width(160.dp).clickable(onClick = onClick)) {
-        Box(modifier = Modifier.size(160.dp).clip(RoundedCornerShape(12.dp))) {
+    val cardSize = if (compact) 128.dp else 160.dp
+    Column(modifier = Modifier.width(cardSize).clickable(onClick = onClick)) {
+        Box(modifier = Modifier.size(cardSize).clip(RoundedCornerShape(12.dp))) {
             AsyncImage(
                 model = ImageRequest.Builder(LocalContext.current).data(cover).crossfade(true).build(),
                 contentDescription = name,
@@ -461,19 +477,19 @@ private fun NewChartCard(
             Text(
                 text = name,
                 color = Color.White,
-                fontSize = 14.sp,
+                fontSize = if (compact) 13.sp else 14.sp,
                 fontWeight = FontWeight.SemiBold,
                 fontFamily = AppFontFamily,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.align(Alignment.BottomStart).padding(12.dp)
+                modifier = Modifier.align(Alignment.BottomStart).padding(if (compact) 10.dp else 12.dp)
             )
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(if (compact) 6.dp else 8.dp))
         Text(
             text = "$trackCount tracks",
             color = lc.textSecondary,
-            fontSize = 12.sp,
+            fontSize = if (compact) 11.sp else 12.sp,
             fontFamily = AppFontFamily,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis

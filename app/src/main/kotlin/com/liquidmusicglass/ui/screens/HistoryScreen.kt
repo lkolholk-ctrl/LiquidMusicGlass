@@ -69,6 +69,9 @@ fun HistoryScreen(
     val win = com.liquidmusicglass.ui.rememberWindowInfo()
     val histSidePad = if (win.useSideBySide)
         (((win.widthDp - 600) / 2).coerceAtLeast(20)).dp else 20.dp
+    // В широком окне (телефон-альбом / планшет) делаем шапку и строки компактнее
+    // ~на 25%, в тон LandscapeHome — чтобы не выглядело портретно-крупным.
+    val compact = win.useSideBySide
 
     Box(modifier = Modifier.fillMaxSize().background(lc.settingsBackground)) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -85,7 +88,7 @@ fun HistoryScreen(
                 if (showBack) {
                     Box(
                         modifier = Modifier
-                            .size(40.dp)
+                            .size(if (compact) 34.dp else 40.dp)
                             .clip(CircleShape)
                             .background(if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
                             .liquidClickable(pressedScale = LiquidMotion.PressIcon) { onBack() },
@@ -95,15 +98,15 @@ fun HistoryScreen(
                             imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
                             contentDescription = null,
                             tint = lc.iconDefault,
-                            modifier = Modifier.size(22.dp)
+                            modifier = Modifier.size(if (compact) 18.dp else 22.dp)
                         )
                     }
-                    Spacer(modifier = Modifier.width(16.dp))
+                    Spacer(modifier = Modifier.width(if (compact) 12.dp else 16.dp))
                 }
                 Text(
                     text = title,
                     color = lc.textPrimary,
-                    fontSize = 24.sp,
+                    fontSize = if (compact) 20.sp else 24.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f)
                 )
@@ -111,7 +114,7 @@ fun HistoryScreen(
                     Text(
                         text = "Clear",
                         color = lc.accent,
-                        fontSize = 15.sp,
+                        fontSize = if (compact) 13.sp else 15.sp,
                         fontWeight = FontWeight.SemiBold,
                         modifier = Modifier
                             .clip(RoundedCornerShape(50))
@@ -142,7 +145,7 @@ fun HistoryScreen(
                     )
                 ) {
                     items(history, key = { it.trackId }) { entry ->
-                        HistoryRow(entry = entry, onClick = { playEntry(context, entry) })
+                        HistoryRow(entry = entry, compact = compact, onClick = { playEntry(context, entry) })
                     }
                 }
             }
@@ -165,13 +168,13 @@ private fun playEntry(context: android.content.Context, entry: ListenHistoryEnti
 }
 
 @Composable
-private fun HistoryRow(entry: ListenHistoryEntity, onClick: () -> Unit) {
+private fun HistoryRow(entry: ListenHistoryEntity, compact: Boolean = false, onClick: () -> Unit) {
     val lc = LiquidTheme.colors
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .liquidClickable(onClick = onClick)
-            .padding(vertical = 8.dp),
+            .padding(vertical = if (compact) 5.dp else 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         AlbumArtImage(
@@ -179,15 +182,15 @@ private fun HistoryRow(entry: ListenHistoryEntity, onClick: () -> Unit) {
             coverUrl = entry.coverUrl,
             contentDescription = entry.title,
             modifier = Modifier
-                .size(52.dp)
-                .clip(RoundedCornerShape(10.dp))
+                .size(if (compact) 40.dp else 52.dp)
+                .clip(RoundedCornerShape(if (compact) 8.dp else 10.dp))
         )
-        Spacer(modifier = Modifier.width(12.dp))
+        Spacer(modifier = Modifier.width(if (compact) 10.dp else 12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = entry.title,
                 color = lc.textPrimary,
-                fontSize = 16.sp,
+                fontSize = if (compact) 14.sp else 16.sp,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -195,7 +198,7 @@ private fun HistoryRow(entry: ListenHistoryEntity, onClick: () -> Unit) {
             Text(
                 text = entry.artist,
                 color = lc.textSecondary,
-                fontSize = 13.sp,
+                fontSize = if (compact) 12.sp else 13.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -204,7 +207,7 @@ private fun HistoryRow(entry: ListenHistoryEntity, onClick: () -> Unit) {
         Text(
             text = relativeTime(entry.playedAt),
             color = lc.textTertiary,
-            fontSize = 12.sp
+            fontSize = if (compact) 11.sp else 12.sp
         )
     }
 }

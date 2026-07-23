@@ -232,7 +232,7 @@ private fun ArtistsList(
     val win = com.liquidmusicglass.ui.rememberWindowInfo()
     val sidePad = if (win.useSideBySide) (((win.widthDp - 600) / 2).coerceAtLeast(12)).dp else 12.dp
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = sidePad, end = sidePad, bottom = 120.dp)) {
-        items(artists, key = { it.name }) { a -> ArtistRow(a, lc) { onOpenArtist(a.name) } }
+        items(artists, key = { it.name }) { a -> ArtistRow(a, lc, compact = win.useSideBySide) { onOpenArtist(a.name) } }
     }
 }
 
@@ -247,13 +247,13 @@ private fun AlbumsGrid(
     // В альбоме/на планшете больше колонок под обложки (было фиксированные 2).
     val win = com.liquidmusicglass.ui.rememberWindowInfo()
     LazyVerticalGrid(
-        columns = if (win.useSideBySide) GridCells.Adaptive(minSize = 180.dp) else GridCells.Fixed(2),
+        columns = if (win.useSideBySide) GridCells.Adaptive(minSize = 150.dp) else GridCells.Fixed(2),
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(12.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        items(albums, key = { it.albumId }) { al -> AlbumCard(al, lc) { onOpenAlbum(al.albumId, al.name) } }
+        items(albums, key = { it.albumId }) { al -> AlbumCard(al, lc, compact = win.useSideBySide) { onOpenAlbum(al.albumId, al.name) } }
     }
 }
 
@@ -300,6 +300,7 @@ private fun TracksTab(
                     e, lc,
                     selectionMode = selectionMode,
                     selectedNow = selected.containsKey(e.id),
+                    compact = win.useSideBySide,
                     onClick = { if (selectionMode) onToggle(e) else LocalLibraryStore.play(context, tracks, index) },
                     onLongPress = { onLongPress(e) }
                 )
@@ -313,6 +314,7 @@ private fun TracksTab(
 private fun SelectableTrackRow(
     e: LocalTrackEntity, lc: LiquidColors,
     selectionMode: Boolean, selectedNow: Boolean,
+    compact: Boolean = false,
     onClick: () -> Unit, onLongPress: () -> Unit
 ) {
     Row(
@@ -322,23 +324,23 @@ private fun SelectableTrackRow(
                 interactionSource = remember { MutableInteractionSource() }, indication = null,
                 onClick = onClick, onLongClick = onLongPress
             )
-            .padding(horizontal = 8.dp, vertical = 8.dp),
+            .padding(horizontal = 8.dp, vertical = if (compact) 6.dp else 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (selectionMode) {
             if (selectedNow) {
-                Icon(Icons.Rounded.CheckCircle, null, tint = lc.accent, modifier = Modifier.size(24.dp))
+                Icon(Icons.Rounded.CheckCircle, null, tint = lc.accent, modifier = Modifier.size(if (compact) 20.dp else 24.dp))
             } else {
-                Box(Modifier.size(24.dp).clip(CircleShape).border(2.dp, lc.iconMuted, CircleShape))
+                Box(Modifier.size(if (compact) 20.dp else 24.dp).clip(CircleShape).border(2.dp, lc.iconMuted, CircleShape))
             }
             Spacer(Modifier.width(10.dp))
         }
-        ArtBox(albumArt(e.albumId), 48.dp, 8.dp, lc, Icons.Rounded.MusicNote)
+        ArtBox(albumArt(e.albumId), if (compact) 40.dp else 48.dp, 8.dp, lc, Icons.Rounded.MusicNote)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(e.title, color = lc.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium,
+            Text(e.title, color = lc.textPrimary, fontSize = if (compact) 13.5.sp else 15.sp, fontWeight = FontWeight.Medium,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text("${e.artist} · ${fmtDuration(e.durationMs)}", color = lc.textSecondary, fontSize = 12.sp,
+            Text("${e.artist} · ${fmtDuration(e.durationMs)}", color = lc.textSecondary, fontSize = if (compact) 11.5.sp else 12.sp,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
@@ -371,15 +373,15 @@ private fun SearchResultsView(
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = sidePad, end = sidePad, bottom = 120.dp)) {
         if (r.artists.isNotEmpty()) {
             item { SectionLabel("Artists", lc) }
-            items(r.artists, key = { "a_" + it.name }) { a -> ArtistRow(a, lc) { onOpenArtist(a.name) } }
+            items(r.artists, key = { "a_" + it.name }) { a -> ArtistRow(a, lc, compact = win.useSideBySide) { onOpenArtist(a.name) } }
         }
         if (r.albums.isNotEmpty()) {
             item { SectionLabel("Albums", lc) }
-            items(r.albums, key = { "al_" + it.albumId }) { al -> AlbumRow(al, lc) { onOpenAlbum(al.albumId, al.name) } }
+            items(r.albums, key = { "al_" + it.albumId }) { al -> AlbumRow(al, lc, compact = win.useSideBySide) { onOpenAlbum(al.albumId, al.name) } }
         }
         if (r.tracks.isNotEmpty()) {
             item { SectionLabel("Tracks", lc) }
-            itemsIndexed(r.tracks) { index, e -> TrackRow(e, lc) { LocalLibraryStore.play(context, r.tracks, index) } }
+            itemsIndexed(r.tracks) { index, e -> TrackRow(e, lc, compact = win.useSideBySide) { LocalLibraryStore.play(context, r.tracks, index) } }
         }
     }
 }
@@ -408,7 +410,7 @@ fun LocalArtistDetailScreen(artistName: String, onBack: () -> Unit, onOpenAlbum:
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                     CircleBack(lc, onBack)
                     Spacer(Modifier.width(14.dp))
-                    Text(artistName, color = lc.textPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold,
+                    Text(artistName, color = lc.textPrimary, fontSize = if (win.useSideBySide) 19.sp else 22.sp, fontWeight = FontWeight.Bold,
                         maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                     PlayAllButton(lc) { LocalLibraryStore.play(context, tracks, 0) }
                 }
@@ -417,14 +419,14 @@ fun LocalArtistDetailScreen(artistName: String, onBack: () -> Unit, onOpenAlbum:
                     SectionLabel("Albums", lc)
                     LazyRow(contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         items(albums, key = { it.albumId }) { al ->
-                            Box(Modifier.width(140.dp).animateItem()) { AlbumCard(al, lc) { onOpenAlbum(al.albumId, al.name) } }
+                            Box(Modifier.width(if (win.useSideBySide) 118.dp else 140.dp).animateItem()) { AlbumCard(al, lc, compact = win.useSideBySide) { onOpenAlbum(al.albumId, al.name) } }
                         }
                     }
                     Spacer(Modifier.height(12.dp))
                     SectionLabel("All Tracks", lc)
                 }
             }
-            itemsIndexed(tracks) { index, e -> TrackRow(e, lc, paddingH = 12.dp) { LocalLibraryStore.play(context, tracks, index) } }
+            itemsIndexed(tracks) { index, e -> TrackRow(e, lc, paddingH = 12.dp, compact = win.useSideBySide) { LocalLibraryStore.play(context, tracks, index) } }
         }
     }
 }
@@ -457,10 +459,10 @@ fun LocalAlbumDetailScreen(albumId: Long, albumName: String, onBack: () -> Unit)
                 }
                 Spacer(Modifier.height(12.dp))
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    ArtBox(albumArt(albumId), 180.dp, 16.dp, lc, Icons.Rounded.Album)
+                    ArtBox(albumArt(albumId), if (win.useSideBySide) 140.dp else 180.dp, 16.dp, lc, Icons.Rounded.Album)
                 }
                 Spacer(Modifier.height(14.dp))
-                Text(albumName, color = lc.textPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold,
+                Text(albumName, color = lc.textPrimary, fontSize = if (win.useSideBySide) 18.sp else 20.sp, fontWeight = FontWeight.Bold,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp))
                 val sub = buildString {
@@ -473,7 +475,7 @@ fun LocalAlbumDetailScreen(albumId: Long, albumName: String, onBack: () -> Unit)
                 Spacer(Modifier.height(12.dp))
             }
             itemsIndexed(tracks) { index, e ->
-                AlbumTrackRow(e, index + 1, lc) { LocalLibraryStore.play(context, tracks, index) }
+                AlbumTrackRow(e, index + 1, lc, compact = win.useSideBySide) { LocalLibraryStore.play(context, tracks, index) }
             }
         }
     }
@@ -483,87 +485,87 @@ fun LocalAlbumDetailScreen(albumId: Long, albumName: String, onBack: () -> Unit)
 //  Переиспользуемые элементы
 // ══════════════════════════════════════════════════════════════════════════════
 @Composable
-private fun ArtistRow(a: ArtistAgg, lc: LiquidColors, onClick: () -> Unit) {
+private fun ArtistRow(a: ArtistAgg, lc: LiquidColors, compact: Boolean = false, onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
             .liquidClickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 8.dp),
+            .padding(horizontal = 8.dp, vertical = if (compact) 6.dp else 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        ArtBox(albumArt(a.anyAlbumId), 48.dp, 24.dp, lc, Icons.Rounded.Person)
+        ArtBox(albumArt(a.anyAlbumId), if (compact) 40.dp else 48.dp, 24.dp, lc, Icons.Rounded.Person)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(a.name, color = lc.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium,
+            Text(a.name, color = lc.textPrimary, fontSize = if (compact) 13.5.sp else 15.sp, fontWeight = FontWeight.Medium,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text("${a.albumCount} albums · ${a.trackCount} tracks", color = lc.textSecondary, fontSize = 12.sp)
+            Text("${a.albumCount} albums · ${a.trackCount} tracks", color = lc.textSecondary, fontSize = if (compact) 11.5.sp else 12.sp)
         }
     }
 }
 
 @Composable
-private fun AlbumRow(al: AlbumAgg, lc: LiquidColors, onClick: () -> Unit) {
+private fun AlbumRow(al: AlbumAgg, lc: LiquidColors, compact: Boolean = false, onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
             .liquidClickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 8.dp),
+            .padding(horizontal = 8.dp, vertical = if (compact) 6.dp else 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        ArtBox(albumArt(al.albumId), 48.dp, 8.dp, lc, Icons.Rounded.Album)
+        ArtBox(albumArt(al.albumId), if (compact) 40.dp else 48.dp, 8.dp, lc, Icons.Rounded.Album)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(al.name, color = lc.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium,
+            Text(al.name, color = lc.textPrimary, fontSize = if (compact) 13.5.sp else 15.sp, fontWeight = FontWeight.Medium,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(al.artist, color = lc.textSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(al.artist, color = lc.textSecondary, fontSize = if (compact) 11.5.sp else 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
 
 @Composable
-private fun AlbumCard(al: AlbumAgg, lc: LiquidColors, onClick: () -> Unit) {
+private fun AlbumCard(al: AlbumAgg, lc: LiquidColors, compact: Boolean = false, onClick: () -> Unit) {
     Column(
         Modifier.clip(RoundedCornerShape(12.dp))
             .liquidClickable(onClick = onClick).padding(4.dp)
     ) {
         ArtBox(albumArt(al.albumId), null, 12.dp, lc, Icons.Rounded.Album, Modifier.fillMaxWidth().aspectRatio(1f))
         Spacer(Modifier.height(6.dp))
-        Text(al.name, color = lc.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium,
+        Text(al.name, color = lc.textPrimary, fontSize = if (compact) 13.sp else 14.sp, fontWeight = FontWeight.Medium,
             maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(al.artist, color = lc.textSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(al.artist, color = lc.textSecondary, fontSize = if (compact) 11.5.sp else 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
 @Composable
-private fun TrackRow(e: LocalTrackEntity, lc: LiquidColors, paddingH: Dp = 8.dp, onClick: () -> Unit) {
+private fun TrackRow(e: LocalTrackEntity, lc: LiquidColors, paddingH: Dp = 8.dp, compact: Boolean = false, onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
             .liquidClickable(onClick = onClick)
-            .padding(horizontal = paddingH, vertical = 8.dp),
+            .padding(horizontal = paddingH, vertical = if (compact) 6.dp else 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        ArtBox(albumArt(e.albumId), 48.dp, 8.dp, lc, Icons.Rounded.MusicNote)
+        ArtBox(albumArt(e.albumId), if (compact) 40.dp else 48.dp, 8.dp, lc, Icons.Rounded.MusicNote)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(e.title, color = lc.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium,
+            Text(e.title, color = lc.textPrimary, fontSize = if (compact) 13.5.sp else 15.sp, fontWeight = FontWeight.Medium,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text("${e.artist} · ${fmtDuration(e.durationMs)}", color = lc.textSecondary, fontSize = 12.sp,
+            Text("${e.artist} · ${fmtDuration(e.durationMs)}", color = lc.textSecondary, fontSize = if (compact) 11.5.sp else 12.sp,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
 
 @Composable
-private fun AlbumTrackRow(e: LocalTrackEntity, num: Int, lc: LiquidColors, onClick: () -> Unit) {
+private fun AlbumTrackRow(e: LocalTrackEntity, num: Int, lc: LiquidColors, compact: Boolean = false, onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
             .liquidClickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .padding(horizontal = 16.dp, vertical = if (compact) 7.dp else 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text("$num", color = lc.textTertiary, fontSize = 13.sp, modifier = Modifier.width(28.dp))
+        Text("$num", color = lc.textTertiary, fontSize = if (compact) 12.sp else 13.sp, modifier = Modifier.width(28.dp))
         Column(Modifier.weight(1f)) {
-            Text(e.title, color = lc.textPrimary, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(e.title, color = lc.textPrimary, fontSize = if (compact) 13.5.sp else 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        Text(fmtDuration(e.durationMs), color = lc.textSecondary, fontSize = 12.sp)
+        Text(fmtDuration(e.durationMs), color = lc.textSecondary, fontSize = if (compact) 11.5.sp else 12.sp)
     }
 }
 

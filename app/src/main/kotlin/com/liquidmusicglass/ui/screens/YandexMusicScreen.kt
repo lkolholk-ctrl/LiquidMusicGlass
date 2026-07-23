@@ -508,7 +508,7 @@ fun YandexMusicScreen(onBack: () -> Unit) {
                     Text(
                         "Yandex Music",
                         color = lc.textPrimary,
-                        fontSize = 22.sp,
+                        fontSize = if (win.useSideBySide) 20.sp else 22.sp,
                         fontWeight = FontWeight.Bold
                     )
                     Text(

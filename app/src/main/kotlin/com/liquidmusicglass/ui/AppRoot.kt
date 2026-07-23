@@ -268,9 +268,15 @@ fun AppRoot() {
             ) {
                 if (win.useSideBySide && barsVisible) {
                     com.liquidmusicglass.ui.navigation.SideBar(
-                        selectedIndex = selectedIndex,
+                        selectedIndex = if (currentRoute == NavRoutes.WAVE_SEARCH) 1 else selectedIndex,
                         onItemSelected = { index ->
-                            if (index == 1) switchTab(0) else switchTab(index)  // Поиск на Волне
+                            if (index == 1) {
+                                // Поиск — отдельный экран в графе Волны (тот же, что
+                                // открывает кнопка поиска на альбомной главной).
+                                navController.navigate(NavRoutes.WAVE_SEARCH) {
+                                    launchSingleTop = true
+                                }
+                            } else switchTab(index)
                         },
                         onOpenProfile = { profileOpen = true },
                         profileName = sideProfileName,

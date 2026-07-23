@@ -227,7 +227,7 @@ fun LibraryScreen(
                     // В альбоме/на планшете больше колонок под плейлисты (было 2);
                     // full-span заголовки/системная карточка тянутся во всю ширину.
                     columns = if (win.useSideBySide)
-                        androidx.compose.foundation.lazy.grid.GridCells.Adaptive(minSize = 200.dp)
+                        androidx.compose.foundation.lazy.grid.GridCells.Adaptive(minSize = 160.dp)
                     else androidx.compose.foundation.lazy.grid.GridCells.Fixed(2),
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 178.dp),
@@ -239,7 +239,7 @@ fun LibraryScreen(
                             Spacer(Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
                             Text(
                                 text = "Playlists",
-                                fontSize = 34.sp,
+                                fontSize = if (win.useSideBySide) 26.sp else 34.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = lc.textPrimary,
                                 modifier = Modifier.padding(top = 12.dp, bottom = 8.dp)
@@ -260,12 +260,13 @@ fun LibraryScreen(
                                 subtitle = "${favorites.size} tracks",
                                 icon = Icons.Default.Favorite,
                                 tint = AppleRed,
+                                compact = win.useSideBySide,
                                 onClick = { currentView = LibraryView.FAVORITES },
                                 trailing = {
                                     CoverStack(favorites.take(3).mapNotNull { it.imageUrl })
                                 }
                             )
-                            SystemRowDivider()
+                            SystemRowDivider(compact = win.useSideBySide)
                             MenuCard(
                                 title = "Downloads",
                                 subtitle = downloadsSize
@@ -273,17 +274,19 @@ fun LibraryScreen(
                                     ?: "${downloadedTracks.size} tracks",
                                 icon = Icons.Default.Download,
                                 tint = Color(0xFF29B6F6),
+                                compact = win.useSideBySide,
                                 onClick = { currentView = LibraryView.DOWNLOADS }
                             )
-                            SystemRowDivider()
+                            SystemRowDivider(compact = win.useSideBySide)
                             MenuCard(
                                 title = "On this device",
                                 subtitle = "Artists · Albums · Tracks · Search",
                                 icon = Icons.Rounded.LibraryMusic,
                                 tint = Color(0xFFFF9F0A),
+                                compact = win.useSideBySide,
                                 onClick = onOpenLocalLibrary
                             )
-                            SystemRowDivider()
+                            SystemRowDivider(compact = win.useSideBySide)
                             // Yandex Music — полноэкранный экран (не sheet)
                             BrandMenuCard(
                                 title = "Yandex Music",
@@ -295,6 +298,7 @@ fun LibraryScreen(
                                 iconRes = R.drawable.ic_service_yandex,
                                 tint = Color(0xFFFFCC00),
                                 connected = yandexConnected,
+                                compact = win.useSideBySide,
                                 onClick = onOpenYandex
                             )
                         }
@@ -309,7 +313,7 @@ fun LibraryScreen(
                         ) {
                             Text(
                                 text = "My Playlists",
-                                fontSize = 20.sp,
+                                fontSize = if (win.useSideBySide) 17.sp else 20.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = lc.textPrimary
                             )
@@ -444,6 +448,7 @@ fun LibraryScreen(
                                 FavoriteTrackItem(
                                     track = track,
                                     isLiked = track.trackId in favoriteIds,
+                                    compact = win.useSideBySide,
                                     onClick = { viewModel.playTrack(context, track.trackId) },
                                     onToggleLike = {
                                         scope.launch {
@@ -527,6 +532,7 @@ fun LibraryScreen(
                             items(downloadedTracks, key = { it.trackId }) { trackEntity ->
                                 DownloadedTrackItem(
                                     track = trackEntity,
+                                    compact = win.useSideBySide,
                                     onClick = {
                                         scope.launch(kotlinx.coroutines.Dispatchers.IO) {
                                             val tracks = downloadedTracks.map { entity ->
@@ -885,37 +891,38 @@ private fun MenuCard(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     tint: Color,
     onClick: () -> Unit,
+    compact: Boolean = false,
     trailing: @Composable () -> Unit = {}
 ) {
     val lc = LiquidTheme.colors
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(72.dp)
+            .height(if (compact) 58.dp else 72.dp)
             .liquidClickable(onClick = onClick)
             .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
             modifier = Modifier
-                .size(44.dp)
+                .size(if (compact) 36.dp else 44.dp)
                 .background(tint.copy(alpha = 0.12f), CircleShape)
                 .clip(CircleShape),
             contentAlignment = Alignment.Center
         ) {
-            Icon(icon, null, tint = tint, modifier = Modifier.size(22.dp))
+            Icon(icon, null, tint = tint, modifier = Modifier.size(if (compact) 18.dp else 22.dp))
         }
 
-        Spacer(Modifier.width(14.dp))
+        Spacer(Modifier.width(if (compact) 12.dp else 14.dp))
 
         Column(modifier = Modifier.weight(1f)) {
-            Text(title, color = lc.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            Text(subtitle, color = lc.textSecondary, fontSize = 13.sp)
+            Text(title, color = lc.textPrimary, fontSize = if (compact) 14.sp else 16.sp, fontWeight = FontWeight.Bold)
+            Text(subtitle, color = lc.textSecondary, fontSize = if (compact) 12.sp else 13.sp)
         }
 
         trailing()
 
-        Icon(Icons.Rounded.ChevronRight, null, tint = lc.textTertiary, modifier = Modifier.size(24.dp))
+        Icon(Icons.Rounded.ChevronRight, null, tint = lc.textTertiary, modifier = Modifier.size(if (compact) 20.dp else 24.dp))
     }
 }
 
@@ -927,20 +934,21 @@ private fun BrandMenuCard(
     iconRes: Int,
     tint: Color,
     connected: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    compact: Boolean = false
 ) {
     val lc = LiquidTheme.colors
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(72.dp)
+            .height(if (compact) 58.dp else 72.dp)
             .liquidClickable(onClick = onClick)
             .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
             modifier = Modifier
-                .size(44.dp)
+                .size(if (compact) 36.dp else 44.dp)
                 .background(tint.copy(alpha = 0.14f), CircleShape)
                 .clip(CircleShape),
             contentAlignment = Alignment.Center
@@ -949,35 +957,35 @@ private fun BrandMenuCard(
                 painter = painterResource(iconRes),
                 contentDescription = title,
                 tint = Color.Unspecified,
-                modifier = Modifier.size(26.dp)
+                modifier = Modifier.size(if (compact) 21.dp else 26.dp)
             )
         }
 
-        Spacer(Modifier.width(14.dp))
+        Spacer(Modifier.width(if (compact) 12.dp else 14.dp))
 
         Column(modifier = Modifier.weight(1f)) {
-            Text(title, color = lc.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text(title, color = lc.textPrimary, fontSize = if (compact) 14.sp else 16.sp, fontWeight = FontWeight.Bold)
             Text(
                 subtitle,
                 color = if (connected) Color(0xFF34C759) else lc.textSecondary,
-                fontSize = 13.sp,
+                fontSize = if (compact) 12.sp else 13.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
         }
 
-        Icon(Icons.Rounded.ChevronRight, null, tint = lc.textTertiary, modifier = Modifier.size(24.dp))
+        Icon(Icons.Rounded.ChevronRight, null, tint = lc.textTertiary, modifier = Modifier.size(if (compact) 20.dp else 24.dp))
     }
 }
 
 /** Разделитель строк внутри системной карточки (с отступом под иконку). */
 @Composable
-private fun SystemRowDivider() {
+private fun SystemRowDivider(compact: Boolean = false) {
     val lc = LiquidTheme.colors
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 74.dp, end = 16.dp)
+            .padding(start = if (compact) 64.dp else 74.dp, end = 16.dp)
             .height(0.8.dp)
             .background(lc.textPrimary.copy(alpha = 0.06f))
     )
@@ -1303,6 +1311,7 @@ private fun LocalAudioView(
                     items(tracks, key = { it.id }) { track ->
                         LocalTrackRow(
                             track = track,
+                            compact = laWin.useSideBySide,
                             onClick = {
                                 val startIndex = tracks.indexOfFirst { it.id == track.id }
                                 if (startIndex >= 0) {
@@ -1325,7 +1334,8 @@ private fun LocalAudioView(
 @Composable
 private fun LocalTrackRow(
     track: Track,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    compact: Boolean = false
 ) {
     val lc = LiquidTheme.colors
     Row(
@@ -1333,18 +1343,18 @@ private fun LocalTrackRow(
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .liquidClickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = 12.dp, vertical = if (compact) 6.dp else 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
             modifier = Modifier
-                .size(48.dp)
+                .size(if (compact) 40.dp else 48.dp)
                 .clip(RoundedCornerShape(8.dp))
                 .background(lc.glassTint),
             contentAlignment = Alignment.Center
         ) {
             // Иконка-заглушка снизу; обложка (если есть) рисуется поверх.
-            Icon(Icons.Rounded.MusicNote, null, tint = lc.iconMuted, modifier = Modifier.size(22.dp))
+            Icon(Icons.Rounded.MusicNote, null, tint = lc.iconMuted, modifier = Modifier.size(if (compact) 18.dp else 22.dp))
             AsyncImage(
                 model = track.albumArtUri,
                 contentDescription = null,
@@ -1354,8 +1364,8 @@ private fun LocalTrackRow(
         }
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(track.title, color = lc.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(track.artist, color = lc.textSecondary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(track.title, color = lc.textPrimary, fontSize = if (compact) 13.5.sp else 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(track.artist, color = lc.textSecondary, fontSize = if (compact) 11.5.sp else 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -2182,19 +2192,20 @@ private fun FavoriteTrackItem(
     track: FavoriteTrackEntity,
     isLiked: Boolean,
     onClick: () -> Unit,
-    onToggleLike: () -> Unit
+    onToggleLike: () -> Unit,
+    compact: Boolean = false
 ) {
     val lc = LiquidTheme.colors
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 16.dp, vertical = if (compact) 6.dp else 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
             modifier = Modifier
-                .size(56.dp)
+                .size(if (compact) 44.dp else 56.dp)
                 .clip(RoundedCornerShape(6.dp))
                 .background(lc.glassTint)
         ) {
@@ -2214,7 +2225,7 @@ private fun FavoriteTrackItem(
             Text(
                 text = track.title,
                 color = lc.textPrimary,
-                fontSize = 15.sp,
+                fontSize = if (compact) 13.sp else 15.sp,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -2222,7 +2233,7 @@ private fun FavoriteTrackItem(
             Text(
                 text = track.artistName ?: "Unknown Artist",
                 color = lc.textSecondary,
-                fontSize = 13.sp,
+                fontSize = if (compact) 11.5.sp else 13.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -2233,7 +2244,7 @@ private fun FavoriteTrackItem(
                 imageVector = if (isLiked) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
                 contentDescription = null,
                 tint = if (isLiked) AppleRed else lc.textTertiary,
-                modifier = Modifier.size(22.dp)
+                modifier = Modifier.size(if (compact) 19.dp else 22.dp)
             )
         }
 
@@ -2241,7 +2252,7 @@ private fun FavoriteTrackItem(
             Text(
                 text = formatDuration(track.durationMs),
                 color = lc.textSecondary,
-                fontSize = 12.sp,
+                fontSize = if (compact) 11.sp else 12.sp,
                 modifier = Modifier.padding(start = 4.dp)
             )
         }
@@ -2252,19 +2263,20 @@ private fun FavoriteTrackItem(
 private fun DownloadedTrackItem(
     track: com.liquidmusicglass.data.local.db.DownloadedTrackEntity,
     onClick: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    compact: Boolean = false
 ) {
     val lc = LiquidTheme.colors
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 16.dp, vertical = if (compact) 6.dp else 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
             modifier = Modifier
-                .size(56.dp)
+                .size(if (compact) 44.dp else 56.dp)
                 .clip(RoundedCornerShape(6.dp))
                 .background(lc.glassTint)
         ) {
@@ -2286,7 +2298,7 @@ private fun DownloadedTrackItem(
             Text(
                 text = track.title,
                 color = lc.textPrimary,
-                fontSize = 15.sp,
+                fontSize = if (compact) 13.sp else 15.sp,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -2294,7 +2306,7 @@ private fun DownloadedTrackItem(
             Text(
                 text = track.artistName ?: "Unknown Artist",
                 color = lc.textSecondary,
-                fontSize = 13.sp,
+                fontSize = if (compact) 11.5.sp else 13.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -2305,7 +2317,7 @@ private fun DownloadedTrackItem(
                 imageVector = Icons.Rounded.Close,
                 contentDescription = null,
                 tint = lc.textTertiary,
-                modifier = Modifier.size(22.dp)
+                modifier = Modifier.size(if (compact) 19.dp else 22.dp)
             )
         }
 
@@ -2313,7 +2325,7 @@ private fun DownloadedTrackItem(
             Text(
                 text = formatDuration(track.durationMs),
                 color = lc.textSecondary,
-                fontSize = 12.sp,
+                fontSize = if (compact) 11.sp else 12.sp,
                 modifier = Modifier.padding(start = 4.dp)
             )
         }

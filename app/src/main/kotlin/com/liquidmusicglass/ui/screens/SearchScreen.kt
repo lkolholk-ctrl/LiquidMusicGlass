@@ -111,6 +111,9 @@ fun SearchScreen(
     val win = com.liquidmusicglass.ui.rememberWindowInfo()
     val resultsSidePad = if (win.useSideBySide)
         (((win.widthDp - 600) / 2).coerceAtLeast(0)).dp else 0.dp
+    // В широком окне (телефон-альбом / планшет) уменьшаем шрифты/обложки/высоты
+    // ~на 25%, чтобы контент не выглядел портретно-крупным на невысоком экране.
+    val compact = win.useSideBySide
 
     // Load categories on first composition
     LaunchedEffect(Unit) {
@@ -176,7 +179,7 @@ fun SearchScreen(
             Text(
                 text = "Search",
                 fontWeight = FontWeight.Bold,
-                fontSize = 32.sp,
+                fontSize = if (compact) 22.sp else 32.sp,
                 color = LiquidTheme.colors.textPrimary,
                 modifier = Modifier.padding(horizontal = 20.dp)
             )
@@ -241,7 +244,7 @@ fun SearchScreen(
             Row(
                 modifier = Modifier
                     .weight(1f)
-                    .height(44.dp)
+                    .height(if (compact) 38.dp else 44.dp)
                     .clip(CircleShape)
                     .background(searchBarBg)
                     .border(1.5.dp, focusBorder, CircleShape)
@@ -353,7 +356,7 @@ fun SearchScreen(
                                 Text(
                                     text = "Browse",
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 22.sp,
+                                    fontSize = if (compact) 17.sp else 22.sp,
                                     color = LiquidTheme.colors.textPrimary,
                                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
                                 )
@@ -371,6 +374,7 @@ fun SearchScreen(
                                         CategoryCard(
                                             category = category,
                                             modifier = Modifier.weight(1f),
+                                            compact = compact,
                                             onClick = {
                                                 hideKeyboard()
                                                 onNavigateToArtist(category.id)
@@ -501,7 +505,7 @@ fun SearchScreen(
                                     // Artists section
                                     if (artists.isNotEmpty()) {
                                         item(key = "artists_label") {
-                                            SearchSectionLabel("Artists")
+                                            SearchSectionLabel("Artists", compact)
                                         }
                                         item(key = "artists_row") {
                                             LazyRow(
@@ -514,6 +518,7 @@ fun SearchScreen(
                                                 ) { _, artist ->
                                                     ArtistChip(
                                                         artist = artist,
+                                                        compact = compact,
                                                         onClick = {
                                                             hideKeyboard()
                                                             onNavigateToArtist(artist.id)
@@ -528,7 +533,7 @@ fun SearchScreen(
                                     // Albums section
                                     if (albums.isNotEmpty()) {
                                         item(key = "albums_label") {
-                                            SearchSectionLabel("Albums")
+                                            SearchSectionLabel("Albums", compact)
                                         }
                                         item(key = "albums_row") {
                                             LazyRow(
@@ -541,6 +546,7 @@ fun SearchScreen(
                                                 ) { _, album ->
                                                     AlbumCard(
                                                         album = album,
+                                                        compact = compact,
                                                         onClick = {
                                                             hideKeyboard()
                                                             onNavigateToAlbum(album.id)
@@ -555,7 +561,7 @@ fun SearchScreen(
                                     // Tracks section
                                     if (tracks.isNotEmpty()) {
                                         item(key = "tracks_label") {
-                                            SearchSectionLabel("Songs")
+                                            SearchSectionLabel("Songs", compact)
                                         }
                                         val playableTracks = tracks.map { it.toTrack() }
                                         itemsIndexed(
@@ -569,6 +575,7 @@ fun SearchScreen(
                                                 coverUrl = item.cover,
                                                 isExplicit = item.isExplicit,
                                                 isCustom = item.isCustom,
+                                                compact = compact,
                                                 onClick = {
                                                     hideKeyboard()
                                                     val startIdx = playableTracks.indexOfFirst { it.id == item.id }
@@ -643,6 +650,7 @@ fun SearchScreen(
 private fun CategoryCard(
     category: IcmWaveOnboardingArtist,
     modifier: Modifier = Modifier,
+    compact: Boolean = false,
     onClick: () -> Unit
 ) {
     val gradientColors = remember(category.id) {
@@ -658,11 +666,11 @@ private fun CategoryCard(
 
     Box(
         modifier = modifier
-            .height(100.dp)
+            .height(if (compact) 78.dp else 100.dp)
             .clip(RoundedCornerShape(24.dp))   // большой радиус, в тон карточкам
             .background(Brush.linearGradient(gradientColors))
             .liquidClickable { onClick() }
-            .padding(16.dp)
+            .padding(if (compact) 12.dp else 16.dp)
     ) {
         // Artist image (small, bottom-right)
         if (category.image != null) {
@@ -674,7 +682,7 @@ private fun CategoryCard(
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
-                    .size(60.dp)
+                    .size(if (compact) 46.dp else 60.dp)
                     .clip(RoundedCornerShape(8.dp))
                     .align(Alignment.BottomEnd)
             )
@@ -683,7 +691,7 @@ private fun CategoryCard(
         Text(
             text = category.name,
             color = Color.White,
-            fontSize = 16.sp,
+            fontSize = if (compact) 13.sp else 16.sp,
             fontWeight = FontWeight.Bold,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
@@ -695,12 +703,14 @@ private fun CategoryCard(
 @Composable
 private fun ArtistChip(
     artist: IcmSearchItem,
+    compact: Boolean = false,
     onClick: () -> Unit
 ) {
+    val chipSize = if (compact) 56.dp else 72.dp
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
-            .width(80.dp)
+            .width(if (compact) 64.dp else 80.dp)
             .liquidClickable { onClick() }
     ) {
         if (artist.cover != null) {
@@ -712,13 +722,13 @@ private fun ArtistChip(
                 contentDescription = artist.title,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
-                    .size(72.dp)
+                    .size(chipSize)
                     .clip(CircleShape)
             )
         } else {
             Box(
                 modifier = Modifier
-                    .size(72.dp)
+                    .size(chipSize)
                     .clip(CircleShape)
                     .background(if (LiquidTheme.colors.isDark) Color(0xFF2A2A2A) else Color(0xFFF2F2F7)),
                 contentAlignment = Alignment.Center
@@ -727,15 +737,15 @@ private fun ArtistChip(
                     imageVector = Icons.Rounded.Person,
                     contentDescription = null,
                     tint = LiquidTheme.colors.iconMuted,
-                    modifier = Modifier.size(32.dp)
+                    modifier = Modifier.size(if (compact) 26.dp else 32.dp)
                 )
             }
         }
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(if (compact) 6.dp else 8.dp))
         Text(
             text = artist.title.takeIf { it.isNotBlank() } ?: artist.displayArtist,
             color = LiquidTheme.colors.textPrimary,
-            fontSize = 12.sp,
+            fontSize = if (compact) 11.sp else 12.sp,
             fontWeight = FontWeight.Medium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -748,11 +758,13 @@ private fun ArtistChip(
 @Composable
 private fun AlbumCard(
     album: IcmSearchItem,
+    compact: Boolean = false,
     onClick: () -> Unit
 ) {
+    val cardSize = if (compact) 108.dp else 140.dp
     Column(
         modifier = Modifier
-            .width(140.dp)
+            .width(cardSize)
             .liquidClickable { onClick() }
     ) {
         AsyncImage(
@@ -763,14 +775,14 @@ private fun AlbumCard(
             contentDescription = album.title,
             contentScale = ContentScale.Crop,
             modifier = Modifier
-                .size(140.dp)
+                .size(cardSize)
                 .clip(RoundedCornerShape(8.dp))
         )
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(if (compact) 6.dp else 8.dp))
         Text(
             text = album.title,
             color = LiquidTheme.colors.textPrimary,
-            fontSize = 13.sp,
+            fontSize = if (compact) 12.sp else 13.sp,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
@@ -779,7 +791,7 @@ private fun AlbumCard(
         Text(
             text = album.displayArtist,
             color = LiquidTheme.colors.textSecondary,
-            fontSize = 12.sp,
+            fontSize = if (compact) 11.sp else 12.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
@@ -862,14 +874,16 @@ private fun SearchResultRow(
     coverUrl: String?,
     isExplicit: Boolean = false,
     isCustom: Boolean = false,
+    compact: Boolean = false,
     onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null
 ) {
+    val artSize = if (compact) 38.dp else 48.dp
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
-            .height(64.dp)
+            .height(if (compact) 52.dp else 64.dp)
             .clip(RoundedCornerShape(50))   // строки-пилюли, как в настройках
             .background(if (LiquidTheme.colors.isDark) Color(0xFF1A1A1A) else Color(0xFFF2F2F7))
             .combinedClickable(
@@ -890,13 +904,13 @@ private fun SearchResultRow(
                 contentDescription = title,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
-                    .size(48.dp)
+                    .size(artSize)
                     .clip(RoundedCornerShape(6.dp))
             )
         } else {
             Box(
                 modifier = Modifier
-                    .size(48.dp)
+                    .size(artSize)
                     .clip(RoundedCornerShape(6.dp))
                     .background(if (LiquidTheme.colors.isDark) Color(0xFF2A2A2A) else Color(0xFFF2F2F7)),
                 contentAlignment = Alignment.Center
@@ -905,7 +919,7 @@ private fun SearchResultRow(
                     imageVector = icon,
                     contentDescription = null,
                     tint = LiquidTheme.colors.iconMuted,
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(if (compact) 20.dp else 24.dp)
                 )
             }
         }
@@ -915,7 +929,7 @@ private fun SearchResultRow(
                 Text(
                     text = title,
                     color = LiquidTheme.colors.textPrimary,
-                    fontSize = 15.sp,
+                    fontSize = if (compact) 13.sp else 15.sp,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -934,7 +948,7 @@ private fun SearchResultRow(
             Text(
                 text = subtitle,
                 color = LiquidTheme.colors.textSecondary,
-                fontSize = 13.sp,
+                fontSize = if (compact) 12.sp else 13.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -974,13 +988,13 @@ private fun SourceSegment(
 }
 
 @Composable
-private fun SearchSectionLabel(text: String) {
+private fun SearchSectionLabel(text: String, compact: Boolean = false) {
     Text(
         text = text,
         fontWeight = FontWeight.Bold,
-        fontSize = 20.sp,
+        fontSize = if (compact) 15.sp else 20.sp,
         color = LiquidTheme.colors.textPrimary,
-        modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
+        modifier = Modifier.padding(horizontal = 20.dp, vertical = if (compact) 8.dp else 12.dp)
     )
 }
 
