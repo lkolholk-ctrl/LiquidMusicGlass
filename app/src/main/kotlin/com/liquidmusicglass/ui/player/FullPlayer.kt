@@ -1055,6 +1055,13 @@ fun FullPlayer(
                         .padding(horizontal = 20.dp)
                         .padding(bottom = 32.dp)
                 ) {
+                    // Стриминговые пункты (волна / скачать / 👍👎) — только для
+                    // онлайн-треков. Для локальных/оффлайн они не имеют смысла:
+                    // волна и фидбек — фичи ICM, скачивать скачанное не надо.
+                    val isLocalTrack = currentTrackObj?.let {
+                        it.source == "local" || it.uri.scheme == "content" || it.uri.scheme == "file"
+                    } ?: false
+                    if (!isLocalTrack) {
                     // Волна по треку (станция)
                     Row(
                         modifier = Modifier
@@ -1227,11 +1234,10 @@ fun FullPlayer(
                             .height(0.5.dp)
                             .background(Color.White.copy(alpha = 0.10f))
                     )
+                    } // if (!isLocalTrack) — конец стриминговых пунктов
                     // Опубликовать текст в LRCLIB — ТОЛЬКО для локального трека
                     val publishTrack = currentTrackObj
-                    val isLocalForLrc = publishTrack?.let {
-                        it.source == "local" || it.uri.scheme == "content" || it.uri.scheme == "file"
-                    } ?: false
+                    val isLocalForLrc = isLocalTrack
                     if (isLocalForLrc && publishTrack != null) {
                         Row(
                             modifier = Modifier
