@@ -3,8 +3,8 @@ package com.liquidmusicglass.ui.navigation
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -31,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -41,17 +42,15 @@ import com.liquidmusicglass.ui.theme.LiquidTheme
 
 /**
  * Боковая навигация для широких окон (телефон-альбом / планшет) — замена
- * нижнего [BottomBar]. По референсу: логотип LMG сверху, пункты навигации,
- * профиль внизу. Индексы вкладок совпадают с BottomBar/AppRoot:
+ * нижнего [BottomBar]. По референсу друга: логотип LMG сверху, пункты
+ * навигации, разделитель и профиль внизу. Стиль — НАШ: палитра из
+ * [LiquidTheme.colors], поэтому корректно работает и в светлой, и в тёмной
+ * теме. Индексы вкладок совпадают с BottomBar/AppRoot:
  *   Wave = 0, Search = 1, Playlist = 2, Settings = 3, New = 4.
  */
-private val WaveAccent = Color(0xFF88C088)
 val SideBarWidth = 220.dp
 
 private data class SideNavItem(val icon: ImageVector, val label: String, val index: Int)
-
-// Спец-индекс пункта «Видео» (не вкладка навигации — открывает оверлей).
-const val SIDE_INDEX_VIDEO = -10
 
 @Composable
 fun SideBar(
@@ -65,7 +64,7 @@ fun SideBar(
     val lc = LiquidTheme.colors
     val items = remember {
         listOf(
-            SideNavItem(LiquidGlyphs.Equalizer, "Home", 0),
+            SideNavItem(LiquidGlyphs.Home, "Home", 0),
             SideNavItem(LiquidGlyphs.Search, "Search", 1),
             SideNavItem(LiquidGlyphs.Star, "New", 4),
             SideNavItem(LiquidGlyphs.Playlist, "Playlist", 2),
@@ -79,13 +78,16 @@ fun SideBar(
             .width(SideBarWidth)
             .padding(12.dp)
             .clip(RoundedCornerShape(22.dp))
-            .background(Color(0xFF161616))   // панель-карточка (референс), тёмная всегда
+            .background(lc.cardSurface)
             .windowInsetsPadding(WindowInsets.statusBars)
-            .padding(horizontal = 12.dp, vertical = 16.dp)
+            .padding(horizontal = 14.dp, vertical = 18.dp)
     ) {
         // Логотип
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 8.dp, bottom = 24.dp)) {
-            Text("LMG", color = WaveAccent, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(start = 8.dp, bottom = 24.dp)
+        ) {
+            Text("LMG", color = lc.accent, fontSize = 26.sp, fontWeight = FontWeight.Bold)
         }
 
         // Пункты навигации
@@ -100,7 +102,14 @@ fun SideBar(
 
         Spacer(Modifier.weight(1f))
 
-        // Профиль внизу
+        // Разделитель + профиль внизу (по структуре референса)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(0.5.dp)
+                .background(lc.divider)
+        )
+        Spacer(Modifier.height(12.dp))
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
@@ -109,31 +118,32 @@ fun SideBar(
                 .liquidClickable(onClick = onOpenProfile)
                 .padding(8.dp)
         ) {
-            androidx.compose.foundation.layout.Box(
+            Box(
                 modifier = Modifier
                     .size(38.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFF2C2C2E)),
+                    .background(if (lc.isDark) Color(0xFF2C2C2E) else Color(0xFFE3E3E8)),
                 contentAlignment = Alignment.Center
             ) {
                 if (!avatarUrl.isNullOrBlank()) {
                     AsyncImage(
                         model = avatarUrl,
                         contentDescription = null,
-                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxWidth()
                     )
                 } else {
-                    Icon(Icons.Rounded.Person, null, tint = Color.White.copy(alpha = 0.5f), modifier = Modifier.size(20.dp))
+                    Icon(Icons.Rounded.Person, null, tint = lc.iconMuted, modifier = Modifier.size(20.dp))
                 }
             }
             Spacer(Modifier.width(10.dp))
             Column {
                 Text(
                     profileName?.takeIf { it.isNotBlank() } ?: "Guest",
-                    color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1
+                    color = lc.textPrimary, fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold, maxLines = 1
                 )
-                Text("LiquidMusicGlass", color = Color.White.copy(alpha = 0.4f), fontSize = 11.sp, maxLines = 1)
+                Text("LiquidMusicGlass", color = lc.textTertiary, fontSize = 11.sp, maxLines = 1)
             }
         }
     }
@@ -142,10 +152,11 @@ fun SideBar(
 @Composable
 private fun SideNavRow(item: SideNavItem, selected: Boolean, onClick: () -> Unit) {
     val lc = LiquidTheme.colors
-    val inactive = Color.White.copy(alpha = 0.6f)
-    val color by animateColorAsState(if (selected) WaveAccent else inactive, tween(180), label = "sideColor")
+    val color by animateColorAsState(
+        if (selected) lc.accent else lc.textSecondary, tween(180), label = "sideColor"
+    )
     val bg by animateColorAsState(
-        if (selected) WaveAccent.copy(alpha = 0.14f) else Color.Transparent, tween(180), label = "sideBg"
+        if (selected) lc.accent.copy(alpha = 0.14f) else Color.Transparent, tween(180), label = "sideBg"
     )
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -160,6 +171,9 @@ private fun SideNavRow(item: SideNavItem, selected: Boolean, onClick: () -> Unit
     ) {
         Icon(item.icon, contentDescription = item.label, tint = color, modifier = Modifier.size(22.dp))
         Spacer(Modifier.width(14.dp))
-        Text(item.label, color = color, fontSize = 15.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium)
+        Text(
+            item.label, color = color, fontSize = 15.sp,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
+        )
     }
 }

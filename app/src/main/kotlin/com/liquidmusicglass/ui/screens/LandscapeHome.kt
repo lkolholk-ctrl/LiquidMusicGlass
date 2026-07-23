@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -18,9 +19,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -31,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -39,21 +40,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.liquidmusicglass.ui.glass.liquidClickable
+import com.liquidmusicglass.ui.icons.LiquidGlyphs
+import com.liquidmusicglass.ui.theme.LiquidTheme
 import com.liquidmusicglass.data.local.LocalStorage
 import com.liquidmusicglass.data.local.db.FavoriteTrackEntity
 import com.liquidmusicglass.data.local.db.LibraryRepository
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.Track
 
-// Палитра альбомной главной — фиксированная тёмная (как альбомный плеер),
-// не зависит от светлой/тёмной темы приложения. По референсу.
-private val ScreenBg = Color(0xFF0A0A0A)
-private val PanelBg = Color(0xFF161616)
-private val Accent = Color(0xFF88C088)
-private val TextPrimary = Color.White
-private val TextSecondary = Color.White.copy(alpha = 0.62f)
-private val TextTertiary = Color.White.copy(alpha = 0.40f)
-private val Tile = Color(0xFF242424)
+// Высота нижнего LandscapeBottomBar — на неё делаем отступ снизу у панелей,
+// чтобы последний элемент не уезжал под мини-плеер.
+private val BottomBarInset = 108.dp
 
 private fun FavoriteTrackEntity.toTrack(): Track = Track(
     id = trackId,
@@ -67,17 +64,27 @@ private fun FavoriteTrackEntity.toTrack(): Track = Track(
     source = source,
 )
 
+private fun fmtDuration(ms: Long): String {
+    if (ms <= 0L) return ""
+    val totalSec = ms / 1000
+    return "%d:%02d".format(totalSec / 60, totalSec % 60)
+}
+
 /**
- * Альбомная/планшетная главная (референс друга): карточный layout на тёмном
- * фоне — центр (Recently Played + Favorites) и правая панель (Playing Now +
- * Queue), обе как скруглённые панели. Сайдбар и нижний плеер рисует AppRoot.
+ * Альбомная/планшетная главная. Раскладка — по референсу друга: слева
+ * центральная панель-карточка (Recently Played + Favorites) с шапкой и
+ * кнопкой поиска, справа — панель Playing Now + Queue. Сайдбар и нижний
+ * мини-плеер рисует AppRoot. Стиль — НАШ ([LiquidTheme.colors]), поэтому
+ * корректно и в светлой, и в тёмной теме.
  */
 @Composable
 fun LandscapeHome(
     onOpenPlayer: () -> Unit,
     onNavigateToArtist: (String) -> Unit,
     profileName: String?,
+    onOpenSearch: () -> Unit = {},
 ) {
+    val lc = LiquidTheme.colors
     val context = LocalContext.current
     val libraryRepo = remember { LibraryRepository.getInstance(context) }
     val favorites by libraryRepo.favoritesFlow.collectAsState(initial = emptyList())
@@ -86,102 +93,133 @@ fun LandscapeHome(
 
     val recent = remember { LocalStorage.getHistory(context).take(12) }
 
-    Row(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(ScreenBg)
-            .padding(12.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+            .background(lc.settingsBackground)
     ) {
-        // ── Центральная панель ──
-        Box(
+        Row(
             modifier = Modifier
-                .weight(1f)
-                .fillMaxHeight()
-                .clip(RoundedCornerShape(22.dp))
-                .background(PanelBg)
+                .fillMaxSize()
+                .padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp)
+            // ── Центральная панель ──
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(lc.cardSurface)
             ) {
-                item {
-                    Text("Home", color = TextSecondary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                    Text(
-                        profileName?.takeIf { it.isNotBlank() } ?: "LMG",
-                        color = TextPrimary, fontSize = 28.sp, fontWeight = FontWeight.Bold
-                    )
-                    Spacer(Modifier.height(20.dp))
-                }
-
-                if (recent.isNotEmpty()) {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 20.dp, bottom = BottomBarInset)
+                ) {
                     item {
-                        Text("Recently Played", color = TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.height(12.dp))
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                            items(recent, key = { it.trackId }) { h ->
-                                RecentCard(h.title, h.artist, h.coverUrl) {
-                                    PlayerController.playTrackById(context, h.trackId)
-                                    onOpenPlayer()
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Home", color = lc.textSecondary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                                Text(
+                                    profileName?.takeIf { it.isNotBlank() } ?: "LMG",
+                                    color = lc.textPrimary, fontSize = 28.sp, fontWeight = FontWeight.Bold
+                                )
+                            }
+                            HeaderIconButton(LiquidGlyphs.Search, "Search", onOpenSearch)
+                        }
+                        Spacer(Modifier.height(22.dp))
+                    }
+
+                    if (recent.isNotEmpty()) {
+                        item {
+                            SectionLabel(LiquidGlyphs.History, "Recently Played")
+                            Spacer(Modifier.height(12.dp))
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                                items(recent, key = { it.trackId }) { h ->
+                                    RecentCard(h.title, h.artist, h.coverUrl) {
+                                        PlayerController.playTrackById(context, h.trackId)
+                                        onOpenPlayer()
+                                    }
                                 }
                             }
+                            Spacer(Modifier.height(26.dp))
                         }
-                        Spacer(Modifier.height(24.dp))
                     }
-                }
 
-                item {
-                    Text(
-                        "Favorites  ${if (favorites.isNotEmpty()) "(${favorites.size})" else ""}",
-                        color = TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Bold
-                    )
-                    Spacer(Modifier.height(8.dp))
-                }
-                itemsIndexed(favorites, key = { _, f -> f.trackId }) { index, fav ->
-                    TrackRow(fav.title, fav.artistName ?: "Unknown Artist", fav.imageUrl) {
-                        PlayerController.playFromList(context, favorites.map { it.toTrack() }, index)
-                        onOpenPlayer()
-                    }
-                }
-                if (favorites.isEmpty()) {
                     item {
-                        Text("No liked tracks yet", color = TextTertiary, fontSize = 14.sp,
-                            modifier = Modifier.padding(vertical = 24.dp))
+                        SectionLabel(
+                            LiquidGlyphs.Heart,
+                            "Favorites" + if (favorites.isNotEmpty()) "  (${favorites.size})" else ""
+                        )
+                        Spacer(Modifier.height(10.dp))
+                    }
+                    itemsIndexed(favorites, key = { _, f -> f.trackId }) { index, fav ->
+                        TrackRow(
+                            fav.title, fav.artistName ?: "Unknown Artist", fav.imageUrl,
+                            duration = fmtDuration(fav.durationMs)
+                        ) {
+                            PlayerController.playFromList(context, favorites.map { it.toTrack() }, index)
+                            onOpenPlayer()
+                        }
+                    }
+                    if (favorites.isEmpty()) {
+                        item {
+                            Text(
+                                "No liked tracks yet", color = lc.textTertiary, fontSize = 14.sp,
+                                modifier = Modifier.padding(vertical = 24.dp)
+                            )
+                        }
                     }
                 }
             }
-        }
 
-        // ── Правая панель: Playing Now + Queue ──
-        Box(
-            modifier = Modifier
-                .width(340.dp)
-                .fillMaxHeight()
-                .clip(RoundedCornerShape(22.dp))
-                .background(PanelBg)
-        ) {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(18.dp)
+            // ── Правая панель: Playing Now + Queue ──
+            Box(
+                modifier = Modifier
+                    .width(340.dp)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(lc.cardSurface)
             ) {
-                item {
-                    Text("Playing Now", color = Accent, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(10.dp))
-                    val cur = currentTrack
-                    if (cur != null) {
-                        TrackRow(cur.title, cur.artist, cur.coverUrl ?: cur.albumArtUri.toString(),
-                            highlight = true, onClick = onOpenPlayer)
-                    } else {
-                        Text("Nothing playing", color = TextTertiary, fontSize = 14.sp)
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 18.dp, bottom = BottomBarInset)
+                ) {
+                    item {
+                        SectionLabel(LiquidGlyphs.GraphicEq, "Playing Now", accentLabel = true)
+                        Spacer(Modifier.height(12.dp))
+                        val cur = currentTrack
+                        if (cur != null) {
+                            TrackRow(
+                                cur.title, cur.artist, cur.coverUrl ?: cur.displayArtUri.toString(),
+                                duration = fmtDuration(cur.durationMs), highlight = true, onClick = onOpenPlayer
+                            )
+                        } else {
+                            Text("Nothing playing", color = lc.textTertiary, fontSize = 14.sp)
+                        }
+                        Spacer(Modifier.height(24.dp))
+                        SectionLabel(LiquidGlyphs.QueueMusic, "Queue (Up Next)", accentLabel = true)
+                        Spacer(Modifier.height(12.dp))
                     }
-                    Spacer(Modifier.height(22.dp))
-                    Text("Queue (Up Next)", color = Accent, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(10.dp))
-                }
-                items(queue, key = { it.id }) { t ->
-                    TrackRow(t.title, t.artist, t.coverUrl ?: t.albumArtUri.toString()) {
-                        val idx = queue.indexOfFirst { it.id == t.id }
-                        if (idx >= 0) PlayerController.playTrack(context, idx)
+                    if (queue.isEmpty()) {
+                        item {
+                            Text(
+                                "Queue is empty", color = lc.textTertiary, fontSize = 14.sp,
+                                modifier = Modifier.padding(top = 12.dp)
+                            )
+                        }
+                    }
+                    items(queue, key = { it.id }) { t ->
+                        TrackRow(
+                            t.title, t.artist, t.coverUrl ?: t.displayArtUri.toString(),
+                            duration = fmtDuration(t.durationMs)
+                        ) {
+                            val idx = queue.indexOfFirst { it.id == t.id }
+                            if (idx >= 0) PlayerController.playTrack(context, idx)
+                        }
                     }
                 }
             }
@@ -190,7 +228,37 @@ fun LandscapeHome(
 }
 
 @Composable
+private fun SectionLabel(icon: ImageVector, text: String, accentLabel: Boolean = false) {
+    val lc = LiquidTheme.colors
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, tint = lc.accent, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text,
+            color = if (accentLabel) lc.accent else lc.textPrimary,
+            fontSize = 16.sp, fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+@Composable
+private fun HeaderIconButton(icon: ImageVector, cd: String, onClick: () -> Unit) {
+    val lc = LiquidTheme.colors
+    Box(
+        modifier = Modifier
+            .size(42.dp)
+            .clip(CircleShape)
+            .background(lc.chipBg)
+            .liquidClickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(icon, cd, tint = lc.textPrimary, modifier = Modifier.size(20.dp))
+    }
+}
+
+@Composable
 private fun RecentCard(title: String, artist: String, cover: String?, onClick: () -> Unit) {
+    val lc = LiquidTheme.colors
     Column(
         modifier = Modifier
             .width(150.dp)
@@ -201,50 +269,71 @@ private fun RecentCard(title: String, artist: String, cover: String?, onClick: (
             modifier = Modifier
                 .size(150.dp)
                 .clip(RoundedCornerShape(14.dp))
-                .background(Tile)
+                .background(if (lc.isDark) Color(0xFF242424) else Color(0xFFE3E3E8))
         ) {
             if (!cover.isNullOrBlank()) {
-                AsyncImage(model = cover, contentDescription = null,
-                    contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                AsyncImage(
+                    model = cover, contentDescription = null,
+                    contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()
+                )
             }
         }
-        Spacer(Modifier.height(6.dp))
-        Text(title, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
-            maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(artist, color = TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            title, color = lc.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+            maxLines = 1, overflow = TextOverflow.Ellipsis
+        )
+        Text(artist, color = lc.textSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
 @Composable
-private fun TrackRow(title: String, artist: String, cover: String?, highlight: Boolean = false, onClick: () -> Unit) {
+private fun TrackRow(
+    title: String,
+    artist: String,
+    cover: String?,
+    duration: String = "",
+    highlight: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val lc = LiquidTheme.colors
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(if (highlight) Accent.copy(alpha = 0.12f) else Color.Transparent)
+            .background(if (highlight) lc.accent.copy(alpha = 0.12f) else Color.Transparent)
             .liquidClickable(onClick = onClick)
-            .padding(vertical = 6.dp, horizontal = 8.dp)
+            .padding(vertical = 7.dp, horizontal = 8.dp)
     ) {
         Box(
             modifier = Modifier
                 .size(46.dp)
                 .clip(RoundedCornerShape(8.dp))
-                .background(Tile)
+                .background(if (lc.isDark) Color(0xFF242424) else Color(0xFFE3E3E8))
         ) {
             if (!cover.isNullOrBlank()) {
-                AsyncImage(model = cover, contentDescription = null,
-                    contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                AsyncImage(
+                    model = cover, contentDescription = null,
+                    contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()
+                )
             }
         }
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(title, color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
-                maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(artist, color = TextSecondary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                title, color = lc.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                maxLines = 1, overflow = TextOverflow.Ellipsis
+            )
+            Text(artist, color = lc.textSecondary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        if (duration.isNotEmpty()) {
+            Spacer(Modifier.width(8.dp))
+            Text(duration, color = lc.textTertiary, fontSize = 12.sp)
         }
         if (highlight) {
-            Icon(Icons.Rounded.PlayArrow, null, tint = Accent, modifier = Modifier.size(22.dp))
+            Spacer(Modifier.width(8.dp))
+            Icon(LiquidGlyphs.Play, null, tint = lc.accent, modifier = Modifier.size(20.dp))
         }
     }
 }

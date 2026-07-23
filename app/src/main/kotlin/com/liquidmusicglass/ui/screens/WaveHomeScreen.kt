@@ -201,6 +201,7 @@ fun WaveHomeScreen(
             onOpenPlayer = onOpenPlayer,
             onNavigateToArtist = onNavigateToArtist,
             profileName = landscapeProfileName,
+            onOpenSearch = onNavigateToSearch,
         )
         return
     }

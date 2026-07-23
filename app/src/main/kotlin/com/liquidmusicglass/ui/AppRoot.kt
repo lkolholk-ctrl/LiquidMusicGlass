@@ -264,11 +264,7 @@ fun AppRoot() {
             // (NavHost + оверлей эквалайзера). Компакт (телефон-портрет): сайдбара
             // нет, всё как раньше (навигация нижним баром).
             Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    // Альбом/планшет: единый тёмный фон (иначе в светлой теме
-                    // верх сайдбара оставался белым из-за rootBg).
-                    .then(if (win.useSideBySide) Modifier.background(Color(0xFF0A0A0A)) else Modifier)
+                modifier = Modifier.fillMaxSize()
             ) {
                 if (win.useSideBySide && barsVisible) {
                     com.liquidmusicglass.ui.navigation.SideBar(
@@ -318,7 +314,26 @@ fun AppRoot() {
     // barsVisible объявлена выше (нужна и для SideBar, и для нижнего бара).
     // Нижний бар: в широком окне скрыт (навигация в SideBar), но мини-плеер
     // остаётся. В компакте — как раньше.
-    if (barsVisible) {
+    if (barsVisible && win.useSideBySide) {
+            // Альбом/планшет: полноширинный нижний мини-плеер (раскладка по
+            // референсу друга, стиль наш). Заменяет узкий портретный мини-плеер;
+            // прячется под полным плеером. Навигация — в SideBar слева.
+            val lsBottomAlpha = if (expandProgress.value >= 0.99f) 0f else 1f
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .graphicsLayer {
+                        translationY = expandProgress.value * 160.dp.toPx()
+                        alpha = lsBottomAlpha
+                    }
+            ) {
+                com.liquidmusicglass.ui.player.LandscapeBottomBar(
+                    onExpand = { animateExpand() },
+                    onQueueClick = { animateExpand() }
+                )
+            }
+    } else if (barsVisible) {
             val density = androidx.compose.ui.platform.LocalDensity.current
             val bottomBarTranslateY = expandProgress.value * density.run { 160.dp.toPx() }
             val bottomBarAlpha = if (expandProgress.value >= 0.99f) 0f else 1f
