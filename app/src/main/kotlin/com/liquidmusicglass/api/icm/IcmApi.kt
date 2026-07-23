@@ -1054,7 +1054,7 @@ suspend fun search(
     suspend fun resolveClip(
         clipId: String,
         region: String? = null,
-        quality: Int = 1080
+        quality: Int = 720
     ): Result<IcmClipResolveResponse> {
         val body = JSONObject().apply {
             put("clip_id", clipId)
@@ -1075,7 +1075,7 @@ suspend fun search(
      */
     suspend fun resolveClipStreamUrl(
         clipId: String,
-        quality: Int = 1080,
+        quality: Int = 720,
         // Холодный клип ICM генерит из Apple Music дольше 10с (полевой замер —
         // 30с+ мало). Ждём до 90с; повторный запрос уже тёплый (быстрый).
         maxWaitMs: Long = 90_000
