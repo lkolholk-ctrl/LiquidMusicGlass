@@ -131,10 +131,9 @@ fun AppRoot() {
     var tagEditTrack by remember { mutableStateOf<com.liquidmusicglass.engine.Track?>(null) }
     var authOpen by remember { mutableStateOf(false) }
     var profileOpen by remember { mutableStateOf(false) }
-    var videoOpen by remember { mutableStateOf(false) }   // раздел «Видео» (клипы)
 
     // Бар/сайдбар видны на вкладках и деталях; прячем под полными оверлеями.
-    val barsVisible = !equalizerOpen && !settingsOpen && !authOpen && !profileOpen && !videoOpen
+    val barsVisible = !equalizerOpen && !settingsOpen && !authOpen && !profileOpen
 
     val currentTrack by PlayerController.currentTrack.collectAsState()
     val isPlaying by PlayerController.isPlaying.collectAsState()
@@ -206,7 +205,7 @@ fun AppRoot() {
     // который сам попает деталь → старт вкладки → предыдущая вкладка → выход.
     BackHandler(
         enabled = tagEditTrack != null || lrcPublishTrack != null || settingsOpen ||
-            authOpen || profileOpen || equalizerOpen || videoOpen || expandProgress.value > 0.5f
+            authOpen || profileOpen || equalizerOpen || expandProgress.value > 0.5f
     ) {
         when {
             tagEditTrack != null -> tagEditTrack = null
@@ -215,7 +214,6 @@ fun AppRoot() {
             authOpen -> authOpen = false
             profileOpen -> profileOpen = false
             equalizerOpen -> equalizerOpen = false
-            videoOpen -> videoOpen = false
             expandProgress.value > 0.5f -> animateCollapse()
         }
     }
@@ -276,11 +274,7 @@ fun AppRoot() {
                     com.liquidmusicglass.ui.navigation.SideBar(
                         selectedIndex = selectedIndex,
                         onItemSelected = { index ->
-                            when (index) {
-                                com.liquidmusicglass.ui.navigation.SIDE_INDEX_VIDEO -> videoOpen = true
-                                1 -> switchTab(0)   // Поиск — не вкладка; поиск на Волне
-                                else -> switchTab(index)
-                            }
+                            if (index == 1) switchTab(0) else switchTab(index)  // Поиск на Волне
                         },
                         onOpenProfile = { profileOpen = true },
                         profileName = sideProfileName,
@@ -317,24 +311,6 @@ fun AppRoot() {
                 ) + fadeOut(tween(150))
             ) {
                 AudioFxScreen(onBack = { equalizerOpen = false })
-            }
-
-            // ── Раздел «Видео» (клипы Apple Music) ──
-            AnimatedVisibility(
-                visible = videoOpen,
-                enter = slideInVertically(
-                    initialOffsetY = { it },
-                    animationSpec = spring(dampingRatio = 0.88f, stiffness = 300f)
-                ) + fadeIn(tween(200)),
-                exit = slideOutVertically(
-                    targetOffsetY = { it },
-                    animationSpec = spring(dampingRatio = 0.92f, stiffness = 400f)
-                ) + fadeOut(tween(150))
-            ) {
-                com.liquidmusicglass.ui.screens.VideoClipScreen(
-                    onOpenPlayer = { videoOpen = false; animateExpand() },
-                    onBack = { videoOpen = false }
-                )
             }
 
         }
@@ -444,9 +420,7 @@ fun AppRoot() {
                             onItemSelected = { index ->
                                 com.liquidmusicglass.debug.DebugLog.add("TAB -> $index")
                                 waveBarPokes++                 // взаимодействие — перезапуск таймера
-                                if (index == com.liquidmusicglass.ui.navigation.SIDE_INDEX_VIDEO) {
-                                    videoOpen = true           // «Видео» — оверлей, не вкладка
-                                } else switchTab(index)
+                                switchTab(index)
                             }
                         )
                     }

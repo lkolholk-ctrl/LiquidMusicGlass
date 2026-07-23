@@ -51,6 +51,9 @@ fun icmUserMessage(httpCode: Int, errorCode: String?): String {
         "new_password_must_differ" -> return "New password must be different."
         "email_account_missing" -> return "No email is linked to this account."
         "user_not_linked" -> return "Sign in first to manage your password."
+        // ── Видеоклипы ──
+        "clip_preparing" -> return "Clip is being prepared — try again in a moment."
+        "clip_failed", "clip_download_failed" -> return "Couldn't load this clip. Try another."
     }
     return when (httpCode) {
         429 -> "Too many requests. Please wait a moment."

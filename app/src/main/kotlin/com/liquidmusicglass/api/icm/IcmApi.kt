@@ -1076,11 +1076,14 @@ suspend fun search(
     suspend fun resolveClipStreamUrl(
         clipId: String,
         quality: Int = 1080,
-        maxWaitMs: Long = 30_000
+        // Холодный клип ICM генерит из Apple Music дольше 10с (полевой замер —
+        // 30с+ мало). Ждём до 90с; повторный запрос уже тёплый (быстрый).
+        maxWaitMs: Long = 90_000
     ): Result<String> {
         val first = resolveClip(clipId, quality = quality).getOrElse { return Result.failure(it) }
         first.streamUrl?.takeIf { first.status == "ready" }?.let { return Result.success(it) }
-        val jobId = first.jobId ?: return Result.failure(IcmApiException(0, "no job for cold clip"))
+        // pending без job_id — считаем «готовится», не сетевой ошибкой.
+        val jobId = first.jobId ?: return Result.failure(IcmApiException(0, "clip_preparing", "clip_preparing"))
         val deadline = System.currentTimeMillis() + maxWaitMs
         var wait = (first.pollAfter ?: 3).coerceIn(2, 5) * 1000L
         while (System.currentTimeMillis() < deadline) {
@@ -1088,11 +1091,12 @@ suspend fun search(
             val job = pollClipJob(jobId).getOrElse { return Result.failure(it) }
             when (job.status) {
                 "ready" -> job.streamUrl?.let { return Result.success(it) }
-                "failed" -> return Result.failure(IcmApiException(0, job.error ?: "clip_failed"))
+                "failed" -> return Result.failure(IcmApiException(0, job.error ?: "clip_failed", "clip_failed"))
             }
-            wait = 2500L
+            wait = 3000L
         }
-        return Result.failure(IcmApiException(0, "clip resolve timeout"))
+        // Не успел за окно — клип ещё готовится (тёплым откроется быстро).
+        return Result.failure(IcmApiException(0, "clip_preparing", "clip_preparing"))
     }
 
     // ═══════════════════════════════════════════════════════════

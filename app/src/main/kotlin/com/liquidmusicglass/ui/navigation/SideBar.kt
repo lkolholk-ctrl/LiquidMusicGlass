@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -69,7 +68,6 @@ fun SideBar(
             SideNavItem(LiquidGlyphs.Equalizer, "Home", 0),
             SideNavItem(LiquidGlyphs.Search, "Search", 1),
             SideNavItem(LiquidGlyphs.Star, "New", 4),
-            SideNavItem(Icons.Rounded.Movie, "Video", SIDE_INDEX_VIDEO),
             SideNavItem(LiquidGlyphs.Playlist, "Playlist", 2),
             SideNavItem(LiquidGlyphs.Settings, "Settings", 3),
         )

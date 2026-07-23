@@ -25,6 +25,7 @@ import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.CircularProgressIndicator
@@ -80,8 +81,12 @@ private val AppleRed = Color(0xFFFC3C44)
 @Composable
 fun SearchScreen(
     onNavigateToAlbum: (String) -> Unit = {},
-    onNavigateToArtist: (String) -> Unit = {}
+    onNavigateToArtist: (String) -> Unit = {},
+    onOpenPlayer: () -> Unit = {}
 ) {
+    // Режим «Видео»: 4-й сегмент источника ищет видеоклипы (Apple Music) вместо
+    // треков; результаты — видео-карточки, тап открывает плеер с видео.
+    var videoMode by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -189,21 +194,27 @@ fun SearchScreen(
             ) {
                 SourceSegment(
                     text = "Apple Music",
-                    selected = selectedSource == IcmSearchSource.APPLE,
+                    selected = !videoMode && selectedSource == IcmSearchSource.APPLE,
                     modifier = Modifier.weight(1f),
-                    onClick = { viewModel.setSource(IcmSearchSource.APPLE) }
+                    onClick = { videoMode = false; viewModel.setSource(IcmSearchSource.APPLE) }
                 )
                 SourceSegment(
                     text = "VK",
-                    selected = selectedSource == IcmSearchSource.VK,
+                    selected = !videoMode && selectedSource == IcmSearchSource.VK,
                     modifier = Modifier.weight(1f),
-                    onClick = { viewModel.setSource(IcmSearchSource.VK) }
+                    onClick = { videoMode = false; viewModel.setSource(IcmSearchSource.VK) }
                 )
                 SourceSegment(
                     text = "All",
-                    selected = selectedSource == IcmSearchSource.ALL,
+                    selected = !videoMode && selectedSource == IcmSearchSource.ALL,
                     modifier = Modifier.weight(1f),
-                    onClick = { viewModel.setSource(IcmSearchSource.ALL) }
+                    onClick = { videoMode = false; viewModel.setSource(IcmSearchSource.ALL) }
+                )
+                SourceSegment(
+                    text = "Video",
+                    selected = videoMode,
+                    modifier = Modifier.weight(1f),
+                    onClick = { videoMode = true }
                 )
             }
 
@@ -323,6 +334,9 @@ fun SearchScreen(
                     .weight(1f)
                     .fillMaxWidth()
             ) {
+              if (videoMode) {
+                ClipResultsSection(query = query, onOpenPlayer = onOpenPlayer)
+              } else {
                 // ─── IDLE STATE: Categories + History ───
                 androidx.compose.animation.AnimatedVisibility(
                     visible = query.isBlank(),
@@ -609,6 +623,7 @@ fun SearchScreen(
                             }
                         }
                 }
+              }
             }
         }
 
@@ -966,4 +981,118 @@ private fun SearchSectionLabel(text: String) {
         color = LiquidTheme.colors.textPrimary,
         modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
     )
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Встроенный поиск видеоклипов (сегмент «Video» в обычном поиске)
+// ═══════════════════════════════════════════════════════════
+
+@Composable
+private fun ClipResultsSection(
+    query: String,
+    onOpenPlayer: () -> Unit,
+) {
+    val lc = LiquidTheme.colors
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    var results by remember { mutableStateOf<List<com.liquidmusicglass.api.icm.IcmClipItem>>(emptyList()) }
+    var loading by remember { mutableStateOf(false) }
+    var resolving by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    // Дебаунс поиска клипов по общему полю запроса.
+    LaunchedEffect(query) {
+        val q = query.trim()
+        if (q.length < 2) { results = emptyList(); error = null; loading = false; return@LaunchedEffect }
+        error = null; loading = true
+        kotlinx.coroutines.delay(350)
+        val r = com.liquidmusicglass.api.icm.IcmApi.getInstance().searchClips(q)
+        loading = false
+        r.onSuccess { results = it.results }
+            .onFailure { error = com.liquidmusicglass.api.icm.icmUserMessage(it); results = emptyList() }
+    }
+
+    fun openClip(clip: com.liquidmusicglass.api.icm.IcmClipItem) {
+        if (resolving != null) return
+        resolving = clip.id; error = null
+        scope.launch {
+            val r = com.liquidmusicglass.api.icm.IcmApi.getInstance().resolveClipStreamUrl(clip.id)
+            resolving = null
+            r.onSuccess { url ->
+                PlayerController.playClip(context, url, clip.id, clip.title, clip.artist, clip.thumbnail)
+                onOpenPlayer()
+            }.onFailure { error = com.liquidmusicglass.api.icm.icmUserMessage(it) }
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        error?.let {
+            Text(it, color = Color(0xFFFC3C44), fontSize = 13.sp,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp))
+        }
+        if (loading && results.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = Color(0xFF88C088))
+            }
+        } else if (results.isEmpty() && query.trim().length >= 2 && !loading) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("No videos found", color = lc.textTertiary, fontSize = 15.sp)
+            }
+        } else {
+            androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
+                columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(minSize = 200.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 178.dp),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                androidx.compose.foundation.lazy.grid.items(results, key = { it.id }) { clip ->
+                    ClipResultCard(clip, resolving == clip.id) { openClip(clip) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ClipResultCard(
+    clip: com.liquidmusicglass.api.icm.IcmClipItem,
+    isResolving: Boolean,
+    onClick: () -> Unit,
+) {
+    val lc = LiquidTheme.colors
+    Column(modifier = Modifier.liquidClickable(onClick = onClick)) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(16f / 9f)
+                .clip(RoundedCornerShape(12.dp))
+                .background(if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFE5E5EA)),
+            contentAlignment = Alignment.Center
+        ) {
+            if (!clip.thumbnail.isNullOrBlank()) {
+                AsyncImage(model = clip.thumbnail, contentDescription = null,
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            }
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.5f)),
+                contentAlignment = Alignment.Center
+            ) {
+                if (isResolving) {
+                    CircularProgressIndicator(color = Color.White, modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                } else {
+                    Icon(Icons.Rounded.PlayArrow, null, tint = Color.White, modifier = Modifier.size(28.dp))
+                }
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(clip.title, color = lc.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+            maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+        Text(clip.artist, color = lc.textSecondary, fontSize = 12.sp,
+            maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+    }
 }

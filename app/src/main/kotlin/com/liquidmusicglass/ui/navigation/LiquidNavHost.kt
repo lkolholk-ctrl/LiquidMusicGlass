@@ -98,7 +98,8 @@ fun LiquidNavHost(
             composable(NavRoutes.WAVE_SEARCH) {
                 SearchScreen(
                     onNavigateToAlbum = { navController.navigate(NavRoutes.album(NavRoutes.TAB_WAVE, it)) },
-                    onNavigateToArtist = { navController.navigate(NavRoutes.artist(NavRoutes.TAB_WAVE, it)) }
+                    onNavigateToArtist = { navController.navigate(NavRoutes.artist(NavRoutes.TAB_WAVE, it)) },
+                    onOpenPlayer = onOpenPlayer
                 )
             }
             musicDetailDestinations(NavRoutes.TAB_WAVE, navController)
