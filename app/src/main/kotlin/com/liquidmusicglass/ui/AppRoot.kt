@@ -131,9 +131,14 @@ fun AppRoot() {
     var tagEditTrack by remember { mutableStateOf<com.liquidmusicglass.engine.Track?>(null) }
     var authOpen by remember { mutableStateOf(false) }
     var profileOpen by remember { mutableStateOf(false) }
+    // Поиск — полноэкранный ОВЕРЛЕЙ (как настройки/профиль), а НЕ пункт нав-графа.
+    // Иначе экран поиска попадал в пер-таб бэкстек Волны и через saveState/
+    // restoreState «прилипал» к вкладке — при возврате на таб вместо его старта
+    // показывался поиск (полевой фидбек: «поиск повесился на вкладку»).
+    var searchOpen by remember { mutableStateOf(false) }
 
     // Бар/сайдбар видны на вкладках и деталях; прячем под полными оверлеями.
-    val barsVisible = !equalizerOpen && !settingsOpen && !authOpen && !profileOpen
+    val barsVisible = !equalizerOpen && !settingsOpen && !authOpen && !profileOpen && !searchOpen
 
     val currentTrack by PlayerController.currentTrack.collectAsState()
     val isPlaying by PlayerController.isPlaying.collectAsState()
@@ -205,7 +210,7 @@ fun AppRoot() {
     // который сам попает деталь → старт вкладки → предыдущая вкладка → выход.
     BackHandler(
         enabled = tagEditTrack != null || lrcPublishTrack != null || settingsOpen ||
-            authOpen || profileOpen || equalizerOpen || expandProgress.value > 0.5f
+            authOpen || profileOpen || equalizerOpen || searchOpen || expandProgress.value > 0.5f
     ) {
         when {
             tagEditTrack != null -> tagEditTrack = null
@@ -214,6 +219,7 @@ fun AppRoot() {
             authOpen -> authOpen = false
             profileOpen -> profileOpen = false
             equalizerOpen -> equalizerOpen = false
+            searchOpen -> searchOpen = false
             expandProgress.value > 0.5f -> animateCollapse()
         }
     }
@@ -268,20 +274,26 @@ fun AppRoot() {
             ) {
                 if (win.useSideBySide && barsVisible) {
                     com.liquidmusicglass.ui.navigation.SideBar(
-                        selectedIndex = if (currentRoute == NavRoutes.WAVE_SEARCH) 1 else selectedIndex,
+                        selectedIndex = if (searchOpen) 1 else selectedIndex,
                         onItemSelected = { index ->
-                            if (index == 1) {
-                                // Поиск — отдельный экран в графе Волны (тот же, что
-                                // открывает кнопка поиска на альбомной главной).
-                                navController.navigate(NavRoutes.WAVE_SEARCH) {
-                                    launchSingleTop = true
-                                }
-                            } else switchTab(index)
+                            // Поиск — оверлей (не переключение вкладки), поэтому не
+                            // трогает бэкстек и не прилипает к вкладкам.
+                            if (index == 1) searchOpen = true else switchTab(index)
                         },
                         onOpenProfile = { profileOpen = true },
                         profileName = sideProfileName,
                         avatarUrl = sideAvatarUrl
                     )
+                    // Раздел Яндекса — его вкладки вертикальной полоской рядом с
+                    // сайдбаром (в альбоме нижнего бара нет; по просьбе — сбоку).
+                    if (showYandexBar) {
+                        val ySection by com.liquidmusicglass.ui.screens.YandexSection
+                            .current.collectAsState()
+                        com.liquidmusicglass.ui.screens.YandexSideStrip(
+                            selected = ySection,
+                            onSelect = { com.liquidmusicglass.ui.screens.YandexSection.set(it) }
+                        )
+                    }
                 }
                 androidx.compose.foundation.layout.Box(
                     modifier = Modifier.weight(1f).fillMaxSize()
@@ -294,7 +306,8 @@ fun AppRoot() {
                         onOpenPlayer = { animateExpand() },
                         onOpenAuth = { authOpen = true },
                         onOpenProfile = { profileOpen = true },
-                        onOpenEqualizer = { equalizerOpen = true }
+                        onOpenEqualizer = { equalizerOpen = true },
+                        onOpenSearch = { searchOpen = true }
                     )
                 }
             }
@@ -336,24 +349,8 @@ fun AppRoot() {
                     }
             ) {
                 when {
-                    // Яндекс подключён → его жёлтый бар с 5 вкладками (иначе в
-                    // альбоме вкладки ЯМ исчезали — навигации по разделу не было).
-                    showYandexBar -> {
-                        val ySection by com.liquidmusicglass.ui.screens.YandexSection
-                            .current.collectAsState()
-                        val yBarBg = if (LiquidTheme.colors.isDark) Color(0xFF121212) else Color(0xFFF2F2F4)
-                        Column(
-                            modifier = Modifier.fillMaxWidth().background(yBarBg),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            com.liquidmusicglass.ui.screens.YandexBottomBar(
-                                selected = ySection,
-                                onSelect = { com.liquidmusicglass.ui.screens.YandexSection.set(it) }
-                            )
-                            Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars))
-                        }
-                    }
-                    // Экран ЯМ открыт, но не подключён — фокусный вход без бара.
+                    // Раздел Яндекса: вкладки теперь вертикальной полоской у
+                    // сайдбара (см. Row выше), внизу ничего не рисуем.
                     onYandexScreen -> Unit
                     else -> com.liquidmusicglass.ui.player.LandscapeBottomBar(
                         onExpand = { animateExpand() },
@@ -590,6 +587,32 @@ fun AppRoot() {
                     onBack = { tagEditTrack = null }
                 )
             }
+        }
+
+        // ── Поиск (оверлей поверх всего, из сайдбара или кнопки на главной) ──
+        AnimatedVisibility(
+            visible = searchOpen,
+            enter = slideInVertically(
+                initialOffsetY = { it },
+                animationSpec = spring(dampingRatio = 0.88f, stiffness = 300f)
+            ) + fadeIn(tween(200)),
+            exit = slideOutVertically(
+                targetOffsetY = { it },
+                animationSpec = spring(dampingRatio = 0.92f, stiffness = 400f)
+            ) + fadeOut(tween(150))
+        ) {
+            com.liquidmusicglass.ui.screens.SearchScreen(
+                onNavigateToAlbum = { id ->
+                    searchOpen = false
+                    navController.navigate(NavRoutes.album(NavRoutes.TAB_WAVE, id))
+                },
+                onNavigateToArtist = { id ->
+                    searchOpen = false
+                    navController.navigate(NavRoutes.artist(NavRoutes.TAB_WAVE, id))
+                },
+                onOpenPlayer = { searchOpen = false; animateExpand() },
+                onBack = { searchOpen = false }
+            )
         }
 
         AnimatedVisibility(

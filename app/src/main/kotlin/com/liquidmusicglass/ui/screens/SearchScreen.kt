@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.History
@@ -83,7 +84,8 @@ private val AppleRed = Color(0xFFFC3C44)
 fun SearchScreen(
     onNavigateToAlbum: (String) -> Unit = {},
     onNavigateToArtist: (String) -> Unit = {},
-    onOpenPlayer: () -> Unit = {}
+    onOpenPlayer: () -> Unit = {},
+    onBack: (() -> Unit)? = null,
 ) {
     // Режим «Видео»: 4-й сегмент источника ищет видеоклипы (Apple Music) вместо
     // треков; результаты — видео-карточки, тап открывает плеер с видео.
@@ -175,13 +177,35 @@ fun SearchScreen(
         ) {
             Spacer(modifier = Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
 
-            Text(
-                text = "Search",
-                fontWeight = FontWeight.Bold,
-                fontSize = if (compact) 22.sp else 32.sp,
-                color = LiquidTheme.colors.textPrimary,
-                modifier = Modifier.padding(horizontal = 20.dp)
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (onBack != null) {
+                    Box(
+                        modifier = Modifier
+                            .size(if (compact) 34.dp else 40.dp)
+                            .clip(CircleShape)
+                            .background(LiquidTheme.colors.glassTint)
+                            .liquidClickable(pressedScale = LiquidMotion.PressIcon) { onBack() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Rounded.ArrowBack,
+                            contentDescription = "Back",
+                            tint = LiquidTheme.colors.textPrimary,
+                            modifier = Modifier.size(if (compact) 18.dp else 22.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                }
+                Text(
+                    text = "Search",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = if (compact) 22.sp else 32.sp,
+                    color = LiquidTheme.colors.textPrimary
+                )
+            }
 
             Spacer(modifier = Modifier.height(12.dp))
 

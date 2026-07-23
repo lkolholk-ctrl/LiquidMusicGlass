@@ -52,6 +52,7 @@ fun LiquidNavHost(
     onOpenAuth: () -> Unit,
     onOpenProfile: () -> Unit,
     onOpenEqualizer: () -> Unit,
+    onOpenSearch: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     NavHost(
@@ -88,7 +89,7 @@ fun LiquidNavHost(
                 val waveHome: @Composable () -> Unit = {
                     WaveHomeScreen(
                         viewModel = homeViewModel,
-                        onNavigateToSearch = { navController.navigate(NavRoutes.WAVE_SEARCH) },
+                        onNavigateToSearch = onOpenSearch,
                         onOpenPlayer = onOpenPlayer,
                         onNavigateToAlbum = { navController.navigate(NavRoutes.album(NavRoutes.TAB_WAVE, it)) },
                         onNavigateToArtist = { navController.navigate(NavRoutes.artist(NavRoutes.TAB_WAVE, it)) },
