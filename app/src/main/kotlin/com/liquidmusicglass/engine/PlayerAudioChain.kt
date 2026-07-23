@@ -3,11 +3,8 @@ package com.liquidmusicglass.engine
 import android.content.Context
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultRenderersFactory
-import androidx.media3.exoplayer.Renderer
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
-import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
-import androidx.media3.exoplayer.video.VideoRendererEventListener
 
 /**
  * Единая аудио-цепочка для ВСЕХ ExoPlayer'ов приложения (основной сервисный
@@ -43,19 +40,14 @@ object PlayerAudioChain {
                     .build()
             }
 
-            // Audio-only: без видео-рендереров (см. комментарий в AudioService —
-            // их создание на холодном старте цепляло startup ANR).
-            override fun buildVideoRenderers(
-                context: Context,
-                extensionRendererMode: Int,
-                mediaCodecSelector: MediaCodecSelector,
-                enableDecoderFallback: Boolean,
-                eventHandler: android.os.Handler,
-                eventListener: VideoRendererEventListener,
-                allowedVideoJoiningTimeMs: Long,
-                out: ArrayList<Renderer>
-            ) {
-                // intentionally empty
-            }
+            // Видео-рендерер НУЖЕН: видеоклипы Apple Music играют этим же
+            // сервисным ExoPlayer (mp4 → SurfaceView в FullPlayer). Раньше метод
+            // был намеренно пустым («audio-only — создание видео-рендереров на
+            // холодном старте цепляло startup ANR») — из-за этого клип играл
+            // только звуком, а Surface оставался чёрным. Конструктор
+            // MediaCodecVideoRenderer лёгкий: сам кодек инициализируется только
+            // когда в потоке реально есть видео-трек, на чистом аудио оверхеда
+            // нет. Если startup ANR вдруг вернётся — профилировать причину, а
+            // не снова выпиливать рендерер (это молча ломает клипы).
         }
 }
