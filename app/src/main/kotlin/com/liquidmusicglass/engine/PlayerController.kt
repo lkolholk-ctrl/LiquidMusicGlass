@@ -635,6 +635,7 @@ object PlayerController {
                 _durationMs.value = startTrack.durationMs
                 _currentPositionMs.value = 0L
                 _isBuffering.value = false
+                _isVideoClip.value = false   // локальные файлы — не видеоклип
 
                 // Поднять сервис/контроллер (после этого audioServiceRef установлен).
                 getPlayer(context)
@@ -825,6 +826,11 @@ object PlayerController {
     }
 
     fun onTrackChanged(mediaId: String) {
+        // Клип ↔ музыка: mediaId клипа всегда "clip_<id>", поэтому флаг видео
+        // выводим из самого id на КАЖДОЙ смене медиа (bridge зовёт нас на любой
+        // transition). Раньше флаг сбрасывала только пара play*-путей — после
+        // клипа переход на музыку оставлял чёрный Surface вместо обложки.
+        _isVideoClip.value = mediaId.startsWith("clip_")
         val currentQueue = queue
         val index = currentQueue.indexOfFirst { it.id == mediaId }
         if (index == -1) {
@@ -1478,6 +1484,7 @@ object PlayerController {
                 _currentTrack.value = null
                 _currentPositionMs.value = 0L
                 _durationMs.value = 0L
+                _isVideoClip.value = false
             }
         }
     }
