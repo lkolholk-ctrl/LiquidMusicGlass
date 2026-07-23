@@ -80,8 +80,12 @@ fun LiquidNavHost(
                 // This VM belongs to this destination's NavBackStackEntry. Android now
                 // clears it when the entry is removed instead of leaving a remembered VM alive.
                 val homeViewModel = ViewModelProvider(entry)[com.liquidmusicglass.ui.viewmodel.HomeViewModel::class.java]
-                // Волна всегда тёмная — эффекты завязаны на тёмный фон.
-                ForceDarkContent {
+                // Волна (портрет) всегда тёмная — эффекты/дым завязаны на тёмный
+                // фон. В широком окне (телефон-альбом/планшет) вместо дыма —
+                // карточная LandscapeHome, у неё ауры нет, поэтому НЕ форсим тёмную:
+                // она должна следовать теме приложения, как и сайдбар слева.
+                val win = com.liquidmusicglass.ui.rememberWindowInfo()
+                val waveHome: @Composable () -> Unit = {
                     WaveHomeScreen(
                         viewModel = homeViewModel,
                         onNavigateToSearch = { navController.navigate(NavRoutes.WAVE_SEARCH) },
@@ -94,6 +98,7 @@ fun LiquidNavHost(
                         animationsActive = waveAnimationsActive
                     )
                 }
+                if (win.useSideBySide) waveHome() else ForceDarkContent { waveHome() }
             }
             composable(NavRoutes.WAVE_SEARCH) {
                 SearchScreen(

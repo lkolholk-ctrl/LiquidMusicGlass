@@ -81,26 +81,26 @@ fun LandscapeBottomBar(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(12.dp)
-            .clip(RoundedCornerShape(22.dp))
+            .padding(10.dp)
+            .clip(RoundedCornerShape(16.dp))
             .background(lc.cardSurface)
             .navigationBarsPadding()
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .padding(horizontal = 12.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         // ── Слева: обложка + название/артист ──
         Row(
             modifier = Modifier
-                .width(240.dp)
-                .clip(RoundedCornerShape(12.dp))
+                .width(200.dp)
+                .clip(RoundedCornerShape(10.dp))
                 .liquidClickable(onClick = onExpand)
-                .padding(4.dp),
+                .padding(3.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
                 modifier = Modifier
-                    .size(46.dp)
-                    .clip(RoundedCornerShape(10.dp))
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(9.dp))
                     .background(if (lc.isDark) Color(0xFF242424) else Color(0xFFE3E3E8)),
                 contentAlignment = Alignment.Center
             ) {
@@ -111,36 +111,36 @@ fun LandscapeBottomBar(
                         contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()
                     )
                 } else {
-                    Icon(LiquidGlyphs.MusicNote, null, tint = lc.iconMuted, modifier = Modifier.size(20.dp))
+                    Icon(LiquidGlyphs.MusicNote, null, tint = lc.iconMuted, modifier = Modifier.size(18.dp))
                 }
             }
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(10.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    cur.title, color = lc.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                    cur.title, color = lc.textPrimary, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold,
                     maxLines = 1, overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    cur.artist, color = lc.textSecondary, fontSize = 12.sp,
+                    cur.artist, color = lc.textSecondary, fontSize = 10.5.sp,
                     maxLines = 1, overflow = TextOverflow.Ellipsis
                 )
             }
         }
 
-        Spacer(Modifier.width(16.dp))
+        Spacer(Modifier.width(14.dp))
 
         // ── По центру: управление + прогресс ──
         Column(
             modifier = Modifier.weight(1f),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                CircleIconButton(LiquidGlyphs.Previous, "Previous", 34.dp, 20.dp, lc.textPrimary) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                CircleIconButton(LiquidGlyphs.Previous, "Previous", 30.dp, 18.dp, lc.textPrimary) {
                     PlayerController.skipPrevious(context)
                 }
                 Box(
                     modifier = Modifier
-                        .size(42.dp)
+                        .size(36.dp)
                         .clip(CircleShape)
                         .background(lc.accent)
                         .liquidClickable { PlayerController.togglePlayPause(context) },
@@ -150,10 +150,10 @@ fun LandscapeBottomBar(
                         if (isPlaying) LiquidGlyphs.Pause else LiquidGlyphs.Play,
                         if (isPlaying) "Pause" else "Play",
                         tint = if (lc.isDark) Color.Black else Color.White,
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(18.dp)
                     )
                 }
-                CircleIconButton(LiquidGlyphs.Next, "Next", 34.dp, 20.dp, lc.textPrimary) {
+                CircleIconButton(LiquidGlyphs.Next, "Next", 30.dp, 18.dp, lc.textPrimary) {
                     PlayerController.skipNext(context)
                 }
             }
@@ -163,7 +163,7 @@ fun LandscapeBottomBar(
             ) {
                 Text(
                     formatMs(if (isDragging) (dragFraction * safeDuration).toLong() else positionMs),
-                    color = lc.textTertiary, fontSize = 11.sp
+                    color = lc.textTertiary, fontSize = 10.sp
                 )
                 Slider(
                     value = displayFraction,
@@ -177,29 +177,29 @@ fun LandscapeBottomBar(
                         activeTrackColor = lc.accent,
                         inactiveTrackColor = lc.divider
                     ),
-                    modifier = Modifier.weight(1f).padding(horizontal = 10.dp).height(20.dp)
+                    modifier = Modifier.weight(1f).padding(horizontal = 8.dp).height(18.dp)
                 )
-                Text(formatMs(durationMs), color = lc.textTertiary, fontSize = 11.sp)
+                Text(formatMs(durationMs), color = lc.textTertiary, fontSize = 10.sp)
             }
         }
 
-        Spacer(Modifier.width(16.dp))
+        Spacer(Modifier.width(14.dp))
 
         // ── Справа: shuffle / repeat / favorite / queue ──
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
             CircleIconButton(
-                Icons.Rounded.Shuffle, "Shuffle", 34.dp, 18.dp,
+                Icons.Rounded.Shuffle, "Shuffle", 30.dp, 16.dp,
                 if (shuffleEnabled) lc.accent else lc.iconMuted
             ) { PlayerController.toggleShuffle() }
             CircleIconButton(
-                LiquidGlyphs.Repeat, "Repeat", 34.dp, 18.dp,
+                LiquidGlyphs.Repeat, "Repeat", 30.dp, 16.dp,
                 if (repeatMode != 0) lc.accent else lc.iconMuted
             ) { PlayerController.cycleRepeatMode() }
             CircleIconButton(
-                LiquidGlyphs.Heart, "Favorite", 34.dp, 18.dp,
+                LiquidGlyphs.Heart, "Favorite", 30.dp, 16.dp,
                 if (isFavorite) lc.accentRed else lc.iconMuted
             ) { PlayerController.toggleFavorite(cur.id) }
-            CircleIconButton(LiquidGlyphs.QueueMusic, "Queue", 34.dp, 18.dp, lc.iconMuted) {
+            CircleIconButton(LiquidGlyphs.QueueMusic, "Queue", 30.dp, 16.dp, lc.iconMuted) {
                 onQueueClick()
             }
         }

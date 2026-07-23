@@ -48,7 +48,7 @@ import com.liquidmusicglass.ui.theme.LiquidTheme
  * теме. Индексы вкладок совпадают с BottomBar/AppRoot:
  *   Wave = 0, Search = 1, Playlist = 2, Settings = 3, New = 4.
  */
-val SideBarWidth = 220.dp
+val SideBarWidth = 176.dp
 
 private data class SideNavItem(val icon: ImageVector, val label: String, val index: Int)
 
@@ -76,18 +76,18 @@ fun SideBar(
         modifier = modifier
             .fillMaxHeight()
             .width(SideBarWidth)
-            .padding(12.dp)
-            .clip(RoundedCornerShape(22.dp))
+            .padding(10.dp)
+            .clip(RoundedCornerShape(18.dp))
             .background(lc.cardSurface)
             .windowInsetsPadding(WindowInsets.statusBars)
-            .padding(horizontal = 14.dp, vertical = 18.dp)
+            .padding(horizontal = 10.dp, vertical = 12.dp)
     ) {
         // Логотип
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(start = 8.dp, bottom = 24.dp)
+            modifier = Modifier.padding(start = 6.dp, bottom = 16.dp)
         ) {
-            Text("LMG", color = lc.accent, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+            Text("LMG", color = lc.accent, fontSize = 19.sp, fontWeight = FontWeight.Bold)
         }
 
         // Пункты навигации
@@ -97,7 +97,7 @@ fun SideBar(
                 selected = item.index == selectedIndex,
                 onClick = { onItemSelected(item.index) }
             )
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(2.dp))
         }
 
         Spacer(Modifier.weight(1f))
@@ -109,18 +109,18 @@ fun SideBar(
                 .height(0.5.dp)
                 .background(lc.divider)
         )
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(10.dp))
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
+                .clip(RoundedCornerShape(12.dp))
                 .liquidClickable(onClick = onOpenProfile)
-                .padding(8.dp)
+                .padding(6.dp)
         ) {
             Box(
                 modifier = Modifier
-                    .size(38.dp)
+                    .size(30.dp)
                     .clip(CircleShape)
                     .background(if (lc.isDark) Color(0xFF2C2C2E) else Color(0xFFE3E3E8)),
                 contentAlignment = Alignment.Center
@@ -133,17 +133,17 @@ fun SideBar(
                         modifier = Modifier.fillMaxWidth()
                     )
                 } else {
-                    Icon(Icons.Rounded.Person, null, tint = lc.iconMuted, modifier = Modifier.size(20.dp))
+                    Icon(Icons.Rounded.Person, null, tint = lc.iconMuted, modifier = Modifier.size(16.dp))
                 }
             }
-            Spacer(Modifier.width(10.dp))
+            Spacer(Modifier.width(8.dp))
             Column {
                 Text(
                     profileName?.takeIf { it.isNotBlank() } ?: "Guest",
-                    color = lc.textPrimary, fontSize = 14.sp,
+                    color = lc.textPrimary, fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold, maxLines = 1
                 )
-                Text("LiquidMusicGlass", color = lc.textTertiary, fontSize = 11.sp, maxLines = 1)
+                Text("LiquidMusicGlass", color = lc.textTertiary, fontSize = 9.5.sp, maxLines = 1)
             }
         }
     }
@@ -163,16 +163,16 @@ private fun SideNavRow(item: SideNavItem, selected: Boolean, onClick: () -> Unit
         horizontalArrangement = Arrangement.Start,
         modifier = Modifier
             .fillMaxWidth()
-            .height(46.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .height(38.dp)
+            .clip(RoundedCornerShape(10.dp))
             .background(bg)
             .liquidClickable(onClick = onClick)
-            .padding(horizontal = 12.dp)
+            .padding(horizontal = 10.dp)
     ) {
-        Icon(item.icon, contentDescription = item.label, tint = color, modifier = Modifier.size(22.dp))
-        Spacer(Modifier.width(14.dp))
+        Icon(item.icon, contentDescription = item.label, tint = color, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(10.dp))
         Text(
-            item.label, color = color, fontSize = 15.sp,
+            item.label, color = color, fontSize = 13.sp,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
         )
     }
