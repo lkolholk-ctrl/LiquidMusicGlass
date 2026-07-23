@@ -387,13 +387,15 @@ fun AlbumDetailScreen(
                                     overflow = TextOverflow.Ellipsis
                                 )
                             }
-                            val min = (track.durationMs / 1000 / 60).toInt()
-                            val sec = ((track.durationMs / 1000) % 60).toInt()
-                            Text(
-                                text = "$min:${sec.toString().padStart(2, '0')}",
-                                color = LiquidTheme.colors.textTertiary,
-                                fontSize = 12.sp
-                            )
+                            if (track.durationMs > 0) {
+                                val min = (track.durationMs / 1000 / 60).toInt()
+                                val sec = ((track.durationMs / 1000) % 60).toInt()
+                                Text(
+                                    text = "$min:${sec.toString().padStart(2, '0')}",
+                                    color = LiquidTheme.colors.textTertiary,
+                                    fontSize = 12.sp
+                                )
+                            }
                         }
                     }
 

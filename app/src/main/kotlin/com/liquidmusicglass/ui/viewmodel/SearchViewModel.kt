@@ -150,11 +150,27 @@ class SearchViewModel : ViewModel() {
                 // новый debounce мог ещё не выстрелить).
                 if (q != _query.value.trim() && _query.value.trim().length >= 2)
                     return@launch
-                _searchResults.value = result?.items ?: emptyList()
+                // Жёсткое разделение источников (полевой фидбек «Apple и VK
+                // смешиваются»): сервер фильтрует сам, но при переключении
+                // сегментов/гонках в выдачу могли попасть чужие items —
+                // отбрасываем всё, что не соответствует выбранному сегменту.
+                val requestedSource = _selectedSource.value
+                val items = (result?.items ?: emptyList()).let { list ->
+                    when (requestedSource) {
+                        IcmSearchSource.APPLE -> list.filter { !it.isVk }
+                        IcmSearchSource.VK -> list.filter { it.isVk }
+                        else -> list
+                    }
+                }
+                _searchResults.value = items
                 if (result == null) {
                     // Человекочитаемое сообщение вместо сырого JSON тела ответа.
                     _error.value = icmUserMessage(IcmRepository.lastApiException.value)
                 }
+                // Apple-поиск не отдаёт duration ВООБЩЕ (по доке /search) —
+                // длительности треков дотягиваем батчем /tracks/meta и вливаем
+                // в выдачу (иначе в строках пусто/0:00 — полевой фидбек).
+                enrichDurations(q, requestedSource, items)
             } catch (ce: CancellationException) {
                 throw ce   // отмена — не ошибка, не показываем её пользователю
             } catch (e: Exception) {
@@ -163,6 +179,39 @@ class SearchViewModel : ViewModel() {
                 // Отменённый job не гасит спиннер нового (тот уже поставил true).
                 if (isActive) _isLoading.value = false
             }
+        }
+    }
+
+    /**
+     * Дотянуть длительности треков, у которых их нет в выдаче (Apple /search
+     * не отдаёт duration), батчем POST /tracks/meta (до 50 id). Ошибки тихие —
+     * длительность декоративна; без неё просто не показываем время.
+     */
+    private fun enrichDurations(q: String, source: String, items: List<IcmSearchItem>) {
+        val needIds = items
+            .filter { it.isTrack && it.durationMs <= 0L }
+            .map { it.id }
+            .distinct()
+            .take(50)
+        if (needIds.isEmpty()) return
+        viewModelScope.launch {
+            try {
+                val meta = com.liquidmusicglass.api.icm.IcmApi.getInstance()
+                    .getTracksMeta(needIds).getOrNull() ?: return@launch
+                // Пользователь уже ищет другое / сменил сегмент — не вливаем.
+                if (q != _query.value.trim() || source != _selectedSource.value) return@launch
+                val byId = meta.items
+                    .filter { it.isSuccess && it.durationMs > 0L }
+                    .associateBy { it.trackId ?: it.id }
+                if (byId.isEmpty()) return@launch
+                _searchResults.value = _searchResults.value.map { item ->
+                    val m = byId[item.id]
+                    // durationMs уже нормализован в мс; source не трогаем —
+                    // значение > 30с не попадёт под повторную конвертацию.
+                    if (m != null && item.durationMs <= 0L) item.copy(duration = m.durationMs)
+                    else item
+                }
+            } catch (_: Exception) { /* тихо — время появится в детальных экранах */ }
         }
     }
 

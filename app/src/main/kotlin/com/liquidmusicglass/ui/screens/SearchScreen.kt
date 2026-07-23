@@ -599,6 +599,7 @@ fun SearchScreen(
                                                 isExplicit = item.isExplicit,
                                                 isCustom = item.isCustom,
                                                 compact = compact,
+                                                durationMs = item.durationMs,
                                                 onClick = {
                                                     hideKeyboard()
                                                     val startIdx = playableTracks.indexOfFirst { it.id == item.id }
@@ -898,6 +899,7 @@ private fun SearchResultRow(
     isExplicit: Boolean = false,
     isCustom: Boolean = false,
     compact: Boolean = false,
+    durationMs: Long = 0L,
     onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null
 ) {
@@ -974,6 +976,16 @@ private fun SearchResultRow(
                 fontSize = if (compact) 12.sp else 13.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
+            )
+        }
+        // Длительность справа. 0 (нет данных) — НЕ показываем, никаких «0:00».
+        if (durationMs > 0L) {
+            Spacer(modifier = Modifier.width(8.dp))
+            val totalSec = durationMs / 1000
+            Text(
+                text = "%d:%02d".format(totalSec / 60, totalSec % 60),
+                color = LiquidTheme.colors.textTertiary,
+                fontSize = if (compact) 11.sp else 12.sp
             )
         }
     }
