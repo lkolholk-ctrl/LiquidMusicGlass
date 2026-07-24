@@ -199,8 +199,13 @@ fun AppRoot() {
     val miniAlpha = (1f - expandProgress.value * 3f).coerceIn(0f, 1f)
 
     // ── Apple-style parallax: background scales down when player opens ──
+    // Морф (масштаб/скругление/альфа фона) синхронно по прогрессу, а само
+    // скругление — по апловской кривой (мягче «оседает»), как у их морфа обложки.
+    val morphE = com.liquidmusicglass.ui.theme.AppleEasings.Standard.transform(
+        expandProgress.value.coerceIn(0f, 1f)
+    )
     val bgScale = (1f - expandProgress.value * 0.08f).coerceIn(0.9f, 1f)
-    val bgCorner = (expandProgress.value * 24f).coerceAtLeast(0f)
+    val bgCorner = (morphE * 24f).coerceAtLeast(0f)
     val bgAlpha = (1f - expandProgress.value * 0.15f).coerceIn(0.8f, 1f)
 
     val rootBackdrop: LayerBackdrop = rememberLayerBackdrop()
@@ -619,11 +624,11 @@ fun AppRoot() {
             visible = settingsOpen,
             enter = slideInHorizontally(
                 initialOffsetX = { it },
-                animationSpec = tween(340, easing = FastOutSlowInEasing)
+                animationSpec = tween(340, easing = com.liquidmusicglass.ui.theme.AppleEasings.Standard)
             ) + fadeIn(animationSpec = tween(250)),
             exit = slideOutHorizontally(
                 targetOffsetX = { it },
-                animationSpec = tween(300, easing = FastOutSlowInEasing)
+                animationSpec = tween(300, easing = com.liquidmusicglass.ui.theme.AppleEasings.Standard)
             ) + fadeOut(animationSpec = tween(200))
         ) {
             SettingsScreen(

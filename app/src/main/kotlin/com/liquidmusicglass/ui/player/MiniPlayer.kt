@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
@@ -150,7 +151,8 @@ fun MiniPlayer(
                 fontWeight = FontWeight.Bold,
                 fontSize = 15.sp,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                softWrap = false,
+                modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE)
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(

@@ -18,6 +18,7 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -537,8 +538,12 @@ fun FullPlayer(
         // Рисуется ДО контролов — чтобы контролы (по тапу) всплывали поверх лирики.
         AnimatedVisibility(
             visible = showLyrics,
-            enter = fadeIn(tween(400, easing = FastOutSlowInEasing)),
-            exit = fadeOut(tween(350, easing = FastOutSlowInEasing)),
+            // Морф-переход к лирике (как у Apple song↔lyrics): fade + лёгкий
+            // масштаб на их кривой, а не сухой fade.
+            enter = fadeIn(tween(360, easing = com.liquidmusicglass.ui.theme.AppleEasings.Standard)) +
+                scaleIn(initialScale = 0.94f, animationSpec = tween(360, easing = com.liquidmusicglass.ui.theme.AppleEasings.Standard)),
+            exit = fadeOut(tween(280, easing = com.liquidmusicglass.ui.theme.AppleEasings.Sharp)) +
+                scaleOut(targetScale = 0.94f, animationSpec = tween(280, easing = com.liquidmusicglass.ui.theme.AppleEasings.Sharp)),
             // Landscape: лирика в ПРАВОЙ половине (обложка остаётся слева).
             modifier = if (isLandscape)
                 Modifier.align(Alignment.CenterEnd).fillMaxWidth(0.5f).fillMaxHeight()
@@ -687,7 +692,10 @@ fun FullPlayer(
                             fontWeight = FontWeight.Bold,
                             fontSize = 22.sp,
                             maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            // Длинное название едет бегущей строкой (как у Apple),
+                            // а не обрезается «…».
+                            softWrap = false,
+                            modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE)
                         )
                         Spacer(Modifier.height(4.dp))
                         // Артист кликабелен: один — сразу на его страницу,
@@ -698,8 +706,10 @@ fun FullPlayer(
                             color = Color.White.copy(alpha = 0.60f),
                             fontSize = 16.sp,
                             maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.clickable(
+                            softWrap = false,
+                            modifier = Modifier
+                                .basicMarquee(iterations = Int.MAX_VALUE)
+                                .clickable(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null
                             ) {
