@@ -60,12 +60,17 @@ object IcmApiFileLogger {
     }
 
     fun log(level: String, tag: String, message: String) {
-        // Echo в logcat сразу (дёшево, на потоке вызова)
-        when (level) {
-            "D" -> android.util.Log.d(tag, message)
-            "E" -> android.util.Log.e(tag, message)
-            "W" -> android.util.Log.w(tag, message)
-            "I" -> android.util.Log.i(tag, message)
+        // Echo в logcat — ТОЛЬКО в debug-сборке: в релизе тела ответов API
+        // (поиск, сессии, стрим-URL) не должны светиться в общем logcat.
+        // Файловый лог (ниже) остаётся всегда: он app-private, ограничен
+        // 256 КБ и нужен для «Copy ICM logs» в поддержке.
+        if (com.liquidmusicglass.BuildConfig.DEBUG) {
+            when (level) {
+                "D" -> android.util.Log.d(tag, message)
+                "E" -> android.util.Log.e(tag, message)
+                "W" -> android.util.Log.w(tag, message)
+                "I" -> android.util.Log.i(tag, message)
+            }
         }
         val ts = System.currentTimeMillis()
         try {
