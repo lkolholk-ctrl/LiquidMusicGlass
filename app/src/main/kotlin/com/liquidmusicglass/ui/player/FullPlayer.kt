@@ -183,20 +183,36 @@ fun FullPlayer(
     // ── Видеоклип: флаг + фуллскрин ──
     val isVideoClip by PlayerController.isVideoClip.collectAsState()
     var clipFullscreen by remember { mutableStateOf(false) }
-    // Фуллскрин поворачивает экран в альбом; выход — возвращает авто-ориентацию.
+    // Фуллскрин: поворот в альбом + immersive (прячем статус/нав-бары — иначе
+    // часы/батарея висят поверх видео). Выход — авто-ориентация и бары назад;
+    // свайп от края временно показывает бары (BEHAVIOR_..._BY_SWIPE).
     LaunchedEffect(clipFullscreen) {
         val act = context as? android.app.Activity ?: return@LaunchedEffect
         act.requestedOrientation = if (clipFullscreen)
             android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        val controller = androidx.core.view.WindowCompat
+            .getInsetsController(act.window, act.window.decorView)
+        if (clipFullscreen) {
+            controller.systemBarsBehavior = androidx.core.view
+                .WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+        } else {
+            controller.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+        }
     }
     // Ушли с клипа (скип на музыку) — фуллскрин закрывается сам.
     LaunchedEffect(isVideoClip) { if (!isVideoClip) clipFullscreen = false }
-    // Плеер закрыли/умер, будучи в фуллскрине — вернуть ориентацию.
+    // Плеер закрыли/умер, будучи в фуллскрине — вернуть ориентацию и бары.
     DisposableEffect(Unit) {
         onDispose {
-            (context as? android.app.Activity)?.requestedOrientation =
-                android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            (context as? android.app.Activity)?.let { act ->
+                act.requestedOrientation =
+                    android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                androidx.core.view.WindowCompat
+                    .getInsetsController(act.window, act.window.decorView)
+                    .show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+            }
         }
     }
     BackHandler(enabled = clipFullscreen) { clipFullscreen = false }
