@@ -883,8 +883,8 @@ object PlayerController {
     }
     private var lastAnalyzedPairKey: String? = null
 
-    /** За сколько до конца трека анализировать пару (как оффлайн-движок: ~40 c). */
-    private val AUTOMIX_ANALYZE_LEAD_MS = 40_000L
+    /** За сколько до конца анализировать пару: max свод (30 c) + запас на сетевой декод. */
+    private val AUTOMIX_ANALYZE_LEAD_MS = 60_000L
 
     private fun maybeAnalyzePairForCrossfade(index: Int) {
         val enabled = PlayerSettings.autoMix.value
@@ -903,6 +903,11 @@ object PlayerController {
         lastAnalyzedPairKey = pairKey
 
         val controller = autoMixController ?: return
+        DebugLog.add(
+            "AutoMix.analyze START ${current.title.take(18)} -> ${next.title.take(18)} " +
+                "rem=${current.durationMs - _currentPositionMs.value}ms"
+        )
+        val startedAtMs = SystemClock.elapsedRealtime()
         ioScope.launch {
             runCatching {
                 // КРИТИЧНО: track.uri у стриминговых треков — это идентификатор
@@ -921,8 +926,12 @@ object PlayerController {
                     "AutoMix.stream ready=${f.readyForTransition} " +
                         "compat=${"%.2f".format(f.compatibility)} " +
                         "xfade=${f.crossfadeDurationMs}ms entry=${f.entryOffsetMs}ms " +
-                        "type=${f.transitionType}"
+                        "type=${f.transitionType} " +
+                        "took=${SystemClock.elapsedRealtime() - startedAtMs}ms"
                 )
+                // Полная строка предиктора (сырые выходы + контрольные суммы мелов) —
+                // именно она разводит классы 1/2/3 при разборе.
+                DebugLog.add("AutoMix.dbg ${f.debugInfo.take(220)}")
                 if (f.readyForTransition) {
                     androidx.media3.exoplayer.CrossfadeConfig.applyRecipe(
                         f.crossfadeDurationMs,
