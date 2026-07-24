@@ -53,7 +53,7 @@ jobs:
 
       - name: Fetch forked media3 (crossfade) AARs
         run: |
-          VER=1.5.1-lmg8
+          VER=1.5.1-lmg9
           curl -sSL -o media3-m2.zip \
             "https://github.com/lkolholk-ctrl/media3-lmg/releases/download/v${VER}/media3-${VER}-m2.zip"
           mkdir -p media3-m2
