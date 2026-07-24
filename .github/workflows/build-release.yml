@@ -51,6 +51,15 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x gradlew
 
+      - name: Fetch forked media3 (crossfade) AARs
+        run: |
+          VER=1.5.1-lmg1
+          curl -sSL -o media3-m2.zip \
+            "https://github.com/lkolholk-ctrl/media3-lmg/releases/download/v${VER}/media3-${VER}-m2.zip"
+          mkdir -p media3-m2
+          unzip -q media3-m2.zip -d media3-m2
+          echo "media3 fork AARs: $(find media3-m2 -name '*.aar' | wc -l)"
+
       - name: Build Release APK
         env:
           KEYSTORE_PATH: ${{ github.workspace }}/release-key.jks

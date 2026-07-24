@@ -14,3 +14,7 @@ release-key.jks
 # Secrets / environment
 .env*
 !.env.example
+
+# Форк media3 (скачивается в CI)
+media3-m2/
+media3-m2.zip
