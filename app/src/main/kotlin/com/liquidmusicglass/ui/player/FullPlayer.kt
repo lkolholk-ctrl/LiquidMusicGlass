@@ -182,6 +182,8 @@ fun FullPlayer(
 
     // ── Видеоклип: флаг + фуллскрин ──
     val isVideoClip by PlayerController.isVideoClip.collectAsState()
+    // Аспект клипа из реального размера потока (как AspectRatioFrameLayout у Apple).
+    val videoAspect by PlayerController.videoAspect.collectAsState()
     var clipFullscreen by remember { mutableStateOf(false) }
     // Фуллскрин: поворот в альбом + immersive (прячем статус/нав-бары — иначе
     // часы/батарея висят поверх видео). Выход — авто-ориентация и бары назад;
@@ -382,7 +384,7 @@ fun FullPlayer(
                                 .align(Alignment.CenterStart)
                                 .fillMaxWidth(0.46f)
                                 .padding(start = 28.dp)
-                                .aspectRatio(16f / 9f)
+                                .aspectRatio(videoAspect)
                         else if (isLandscape)
                             // Слева, по высоте, левая половина экрана.
                             Modifier
@@ -397,7 +399,7 @@ fun FullPlayer(
                                 // Клип: карточка 16:9 ниже (центр верхней зоны, как у
                                 // Apple), а не прижата к верху — обложка как раньше.
                                 .padding(top = ((if (isVideoClip) 190 else 80).dp * expandProgress))
-                                .aspectRatio(if (isVideoClip) 16f / 9f else 1f)
+                                .aspectRatio(if (isVideoClip) videoAspect else 1f)
                     )
                     .graphicsLayer {
                         translationX = swipeOffsetX.value
@@ -419,13 +421,17 @@ fun FullPlayer(
                 if (isVideoClip) {
                     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
                         if (!clipFullscreen) {
+                            // Инлайн-видео — TextureView (как у Apple в
+                            // NowPlayingContentView): клипается по скруглённым
+                            // углам карточки и морфит с ней, в отличие от
+                            // SurfaceView (тот отдельный слой, углы квадратные).
                             androidx.compose.ui.viewinterop.AndroidView(
                                 factory = { ctx ->
-                                    android.view.SurfaceView(ctx).also {
-                                        PlayerController.attachVideoSurface(it)
+                                    android.view.TextureView(ctx).also {
+                                        PlayerController.attachVideoTextureView(it)
                                     }
                                 },
-                                onRelease = { PlayerController.attachVideoSurface(null) },
+                                onRelease = { PlayerController.attachVideoTextureView(null) },
                                 modifier = Modifier.fillMaxSize()
                             )
                         }
@@ -947,9 +953,9 @@ fun FullPlayer(
         // значок сворачивают обратно, back тоже (BackHandler выше).
         if (isVideoClip && clipFullscreen) {
             BoxWithConstraints(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-                // Экран шире 16:9 (типичный телефон-альбом) → видео упирается в
-                // высоту (рамки по бокам); уже — в ширину (рамки сверху/снизу).
-                val heightFirst = maxWidth / maxHeight > 16f / 9f
+                // Экран шире видео → упираемся в высоту (рамки по бокам); уже —
+                // в ширину (рамки сверху/снизу). Аспект — реальный из потока.
+                val heightFirst = maxWidth / maxHeight > videoAspect
                 androidx.compose.ui.viewinterop.AndroidView(
                     factory = { ctx ->
                         android.view.SurfaceView(ctx).also {
@@ -960,7 +966,7 @@ fun FullPlayer(
                     modifier = Modifier
                         .align(Alignment.Center)
                         .then(if (heightFirst) Modifier.fillMaxHeight() else Modifier.fillMaxWidth())
-                        .aspectRatio(16f / 9f, matchHeightConstraintsFirst = heightFirst)
+                        .aspectRatio(videoAspect, matchHeightConstraintsFirst = heightFirst)
                 )
                 // Тап по любому месту — выход из фуллскрина.
                 Box(

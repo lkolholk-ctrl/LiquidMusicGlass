@@ -1345,15 +1345,30 @@ object PlayerController {
                 _currentPositionMs.value = 0L
                 _isBuffering.value = true
                 _isVideoClip.value = true
+                _videoAspect.value = 16f / 9f   // до прихода onVideoSizeChanged
             }
         }
     }
 
-    /** Привязать/отвязать Surface для вывода видеоклипа (зовёт FullPlayer). */
+    /** Привязать/отвязать Surface для вывода видеоклипа (фуллскрин — как у Apple:
+     *  SurfaceView, отдельный слой, быстрее). */
     fun attachVideoSurface(surfaceView: android.view.SurfaceView?) {
         val c = controller ?: return
         if (surfaceView != null) c.setVideoSurfaceView(surfaceView) else c.clearVideoSurface()
     }
+
+    /** Инлайн-видео в карточке плеера — TextureView (как у Apple в
+     *  NowPlayingContentView): клипается по скруглённым углам и морфит с
+     *  карточкой, в отличие от SurfaceView. */
+    fun attachVideoTextureView(textureView: android.view.TextureView?) {
+        val c = controller ?: return
+        if (textureView != null) c.setVideoTextureView(textureView) else c.clearVideoSurface()
+    }
+
+    // Аспект видеоклипа из реального размера потока (onVideoSizeChanged), а не
+    // хардкод 16:9 — как AspectRatioFrameLayout.setAspectRatio у Apple.
+    private val _videoAspect = MutableStateFlow(16f / 9f)
+    val videoAspect: StateFlow<Float> = _videoAspect
 
     private fun buildMediaItem(track: Track, uri: Uri = track.uri): MediaItem {
         val mediaUri = if (track.isOnlineTrack && uri.scheme != "file") {
@@ -1450,6 +1465,12 @@ object PlayerController {
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             setPlaying(isPlaying)
+        }
+
+        override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+            val w = videoSize.width * videoSize.pixelWidthHeightRatio
+            val h = videoSize.height.toFloat()
+            if (w > 0f && h > 0f) _videoAspect.value = (w / h).coerceIn(0.4f, 3.0f)
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
