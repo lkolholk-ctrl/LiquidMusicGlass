@@ -1066,13 +1066,10 @@ fun YandexMusicScreen(onBack: () -> Unit) {
                 },
                 onCancel = { sid -> YandexDownloadManager.cancel(sid) },
                 onPlayClip = { clip ->
-                    val pid = clip.playerId
-                    if (pid.isNullOrBlank()) {
-                        android.widget.Toast.makeText(context, "Clip unavailable", android.widget.Toast.LENGTH_SHORT).show()
-                    } else {
+                    run {
                         // Резолв VH — на устройстве (гео!), в IO. Widevine → не сыграем.
                         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                            val stream = YandexAuthRepository.clientOrNull()?.resolveClipHls(pid)
+                            val stream = YandexAuthRepository.clientOrNull()?.resolveClipHls(clip.clipId)
                             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                                 when {
                                     stream == null -> android.widget.Toast.makeText(
