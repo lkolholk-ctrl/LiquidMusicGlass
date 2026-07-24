@@ -52,8 +52,11 @@ class LyricsTimeProcessor(
         /** Blur radius для фона. */
         const val BACKGROUND_BLUR_DP = 25
 
-        /** Интерполятор для плавного наплыва цвета (PathInterpolator). */
-        val LYRIC_PROGRESS_INTERPOLATOR = PathInterpolator(0.25f, 0.1f, 0.25f, 1.0f)
+        /** Кривая наплыва заливки слова — ТОЧНО как у Apple Music (реверс их
+         *  Android-плеера: PlayerLyricsViewFragment использует ровно этот
+         *  PathInterpolator для заливки слова/перехода строки). Резкая ease-in-out:
+         *  медленный старт → быстрый разгон → мягкое торможение. */
+        val LYRIC_PROGRESS_INTERPOLATOR = PathInterpolator(0.75f, 0.0f, 0.25f, 1.0f)
 
         /** Порог скачка позиции для сброса курсора (ручная перемотка). */
         const val SEEK_JUMP_THRESHOLD_MS = 500L
@@ -329,7 +332,9 @@ class LyricsTimeProcessor(
             val holdEnd = fillEnd + seg.holdMs
             when {
                 now < fillEnd -> {
-                    val f = if (seg.fillMs > 0) (now - acc).toFloat() / seg.fillMs else 1f
+                    val raw = if (seg.fillMs > 0) (now - acc).toFloat() / seg.fillMs else 1f
+                    // Апловская кривая заливки (bloom) вместо линейной.
+                    val f = LYRIC_PROGRESS_INTERPOLATOR.getInterpolation(raw.coerceIn(0f, 1f))
                     return (charsBefore + seg.charLen * f.coerceIn(0f, 1f)) / lf.totalChars
                 }
                 now < holdEnd -> {
@@ -353,7 +358,9 @@ class LyricsTimeProcessor(
             when {
                 posMs >= w.endMs -> filled = (w.charStart + w.charLen).toFloat()
                 posMs >= w.startMs -> {
-                    val f = (posMs - w.startMs).toFloat() / (w.endMs - w.startMs).coerceAtLeast(1L)
+                    val raw = (posMs - w.startMs).toFloat() / (w.endMs - w.startMs).coerceAtLeast(1L)
+                    // Заливка внутри слова идёт по апловской кривой (bloom), не линейно.
+                    val f = LYRIC_PROGRESS_INTERPOLATOR.getInterpolation(raw.coerceIn(0f, 1f))
                     return ((w.charStart + w.charLen * f.coerceIn(0f, 1f)) / lf.totalChars).coerceIn(0f, 1f)
                 }
                 else -> return (w.charStart.toFloat() / lf.totalChars).coerceIn(0f, 1f)
