@@ -31,7 +31,6 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asAndroidBitmap
-import androidx.compose.ui.graphics.drawscope.drawLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -98,8 +97,11 @@ fun LyricShareOverlay(
                     .aspectRatio(4f / 5f)
                     .clip(RoundedCornerShape(24.dp))
                     .drawWithContent {
+                        // Записываем содержимое в offscreen-слой для захвата в PNG
+                        // и одновременно рисуем его на экран (без drawLayer — его
+                        // нет в нашей версии Compose как DrawScope-расширения).
                         graphicsLayer.record { this@drawWithContent.drawContent() }
-                        drawLayer(graphicsLayer)
+                        drawContent()
                     }
             ) {
                 AlbumArtImage(
