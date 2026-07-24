@@ -787,6 +787,13 @@ object PlayerController {
         lastPlayerPositionMs = positionMs
         lastSyncTimeMs = SystemClock.elapsedRealtime()
 
+        // AutoMix: анализ пары запускаем БЛИЖЕ К КОНЦУ трека (как оффлайн-движок),
+        // а не на старте. На старте плеер как раз буферизует новый трек, и тяжёлый
+        // анализ (сетевой декод + FFT + модель) отбирал бы у него сеть и CPU.
+        if (durationMs > 0L && durationMs - positionMs <= AUTOMIX_ANALYZE_LEAD_MS) {
+            maybeAnalyzePairForCrossfade(currentIndex)
+        }
+
         if (durationMs > 0L && _durationMs.value != durationMs) {
             _durationMs.value = durationMs
             _currentTrack.value?.let { track ->
@@ -853,10 +860,6 @@ object PlayerController {
             prefetchAhead(it, index, depth = 1)
             // Аудио следующих двух — в кэш, сразу (не ждём конца трека).
             scheduleAudioPreCache(it, index)
-            // AutoMix: анализ пары «этот → следующий» и рецепт свода для media3-форка.
-            // Идёт в фоне на low-priority потоке анализатора; к моменту свода
-            // (последние xfade секунд трека) рецепт уже будет готов.
-            maybeAnalyzePairForCrossfade(index)
         }
     }
 
@@ -879,6 +882,9 @@ object PlayerController {
         appContext?.let { com.liquidmusicglass.automix.AutoMixController(it) }
     }
     private var lastAnalyzedPairKey: String? = null
+
+    /** За сколько до конца трека анализировать пару (как оффлайн-движок: ~40 c). */
+    private val AUTOMIX_ANALYZE_LEAD_MS = 40_000L
 
     private fun maybeAnalyzePairForCrossfade(index: Int) {
         val enabled = PlayerSettings.autoMix.value
