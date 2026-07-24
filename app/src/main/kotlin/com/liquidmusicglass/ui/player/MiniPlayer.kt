@@ -70,8 +70,15 @@ fun MiniPlayer(
 ) {
     val cardShape = RoundedCornerShape(18.dp)
     val artShape = RoundedCornerShape(12.dp)
-    // Карточка темнее подкраса: подкрас — оттенок, не заливка цветом обложки.
-    val cardColor = lerp(tint, Color.Black, 0.45f)
+    // Тема: в тёмной карточка темнее подкраса (оттенок обложки, не заливка);
+    // в светлой — светлая карточка с лёгким подкрасом и тёмным текстом
+    // (раньше мини-плеер был всегда тёмным — в светлой теме выглядел инородно).
+    val lc = com.liquidmusicglass.ui.theme.LiquidTheme.colors
+    val cardColor = if (lc.isDark) lerp(tint, Color.Black, 0.45f)
+                    else lerp(tint, Color.White, 0.82f)
+    val fgPrimary = if (lc.isDark) Color.White else Color.Black.copy(alpha = 0.88f)
+    val fgSecondary = if (lc.isDark) Color.White.copy(alpha = 0.55f)
+                      else Color.Black.copy(alpha = 0.55f)
 
     // Свайп по карточке: влево = следующий, вправо = предыдущий.
     // Резинка с сопротивлением и упругий возврат — как у обложки на главной.
@@ -139,7 +146,7 @@ fun MiniPlayer(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = trackTitle,
-                color = Color.White,
+                color = fgPrimary,
                 fontWeight = FontWeight.Bold,
                 fontSize = 15.sp,
                 maxLines = 1,
@@ -148,7 +155,7 @@ fun MiniPlayer(
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = artistName,
-                color = Color.White.copy(alpha = 0.55f),
+                color = fgSecondary,
                 fontSize = 13.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -161,6 +168,8 @@ fun MiniPlayer(
             isLiked = isLiked,
             modifier = Modifier.size(44.dp),
             iconSize = 24.dp,
+            idleTint = if (lc.isDark) Color.White.copy(alpha = 0.70f)
+                       else Color.Black.copy(alpha = 0.55f),
             onToggle = onToggleLike
         )
 
@@ -174,7 +183,7 @@ fun MiniPlayer(
                 imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                 contentDescription = if (isPlaying) "Pause" else "Play",
                 modifier = Modifier.size(28.dp),
-                tint = Color.White
+                tint = fgPrimary
             )
         }
     }
