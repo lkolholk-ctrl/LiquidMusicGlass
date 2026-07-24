@@ -333,10 +333,10 @@ class YandexMusicClient(
         return YandexClipStream(hlsUrl = hls, isDrm = isDrm)
     }
 
-    /** URL VH-плеера для playerId. Точный формат подтверждается с устройства —
-     *  дефолт по реверсу music-web; при 4xx логируем для доработки. */
+    /** URL VH-плеера для playerId — точный формат снят с music.yandex.ru
+     *  (DevTools): /player/{id}.json?service=ya-music&from=ya-music&hidden=* */
     private fun vhPlayerUrl(playerId: String): String =
-        "https://frontend.vh.yandex.ru/v23/player/$playerId.json?service=ya-music&from=ya-music"
+        "https://frontend.vh.yandex.ru/player/$playerId.json?service=ya-music&from=ya-music&hidden=*"
 
     /** Альбом с треками: GET /albums/{id}/with-tracks. */
     fun fetchAlbum(albumId: Long): AlbumPage? {
