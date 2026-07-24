@@ -39,6 +39,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -968,28 +969,94 @@ fun FullPlayer(
                         .then(if (heightFirst) Modifier.fillMaxHeight() else Modifier.fillMaxWidth())
                         .aspectRatio(videoAspect, matchHeightConstraintsFirst = heightFirst)
                 )
-                // Тап по любому месту — выход из фуллскрина.
+
+                // Контролы поверх видео (как у Apple VideoFullScreenActivity):
+                // тап показывает/скрывает панель; авто-скрытие через 3с во время
+                // проигрывания; выход — иконка/back (тап НЕ выходит).
+                var fsControls by remember { mutableStateOf(true) }
+                LaunchedEffect(fsControls, isPlaying) {
+                    if (fsControls && isPlaying) { kotlinx.coroutines.delay(3000); fsControls = false }
+                }
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null
-                        ) { clipFullscreen = false }
+                        ) { fsControls = !fsControls }
                 )
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(top = 40.dp, end = 16.dp)
-                        .size(38.dp)
-                        .background(Color.Black.copy(alpha = 0.45f), CircleShape)
-                        .pressScale { clipFullscreen = false },
-                    contentAlignment = Alignment.Center
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = fsControls,
+                    enter = fadeIn(tween(150)),
+                    exit = fadeOut(tween(250)),
+                    modifier = Modifier.fillMaxSize()
                 ) {
-                    Icon(
-                        Icons.Rounded.FullscreenExit, "Exit fullscreen",
-                        tint = Color.White, modifier = Modifier.size(24.dp)
-                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.28f))
+                    ) {
+                        // Выход из фуллскрина (правый верх).
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(top = 40.dp, end = 16.dp)
+                                .size(38.dp)
+                                .background(Color.Black.copy(alpha = 0.45f), CircleShape)
+                                .pressScale { clipFullscreen = false },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Rounded.FullscreenExit, "Exit fullscreen",
+                                tint = Color.White, modifier = Modifier.size(24.dp)
+                            )
+                        }
+                        // Play/pause по центру.
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.Center)
+                                .size(64.dp)
+                                .background(Color.Black.copy(alpha = 0.4f), CircleShape)
+                                .pressScale { onPlayPause() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                if (isPlaying) "Pause" else "Play",
+                                tint = Color.White, modifier = Modifier.size(38.dp)
+                            )
+                        }
+                        // Скраббер со временем (снизу).
+                        var fsDrag by remember { mutableStateOf(false) }
+                        var fsDragVal by remember { mutableFloatStateOf(0f) }
+                        val fsFrac = if (fsDrag) fsDragVal
+                            else if (durationMs > 0) (currentPositionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
+                        Row(
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .fillMaxWidth()
+                                .navigationBarsPadding()
+                                .padding(horizontal = 20.dp, vertical = 18.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                formatTime(if (fsDrag) (fsDragVal * durationMs).toLong() else currentPositionMs),
+                                color = Color.White, fontSize = 12.sp
+                            )
+                            androidx.compose.material3.Slider(
+                                value = fsFrac,
+                                onValueChange = { fsDrag = true; fsDragVal = it },
+                                onValueChangeFinished = { onSeek((fsDragVal * durationMs).toLong()); fsDrag = false },
+                                colors = androidx.compose.material3.SliderDefaults.colors(
+                                    thumbColor = Color.White,
+                                    activeTrackColor = Color.White,
+                                    inactiveTrackColor = Color.White.copy(alpha = 0.3f)
+                                ),
+                                modifier = Modifier.weight(1f).padding(horizontal = 12.dp)
+                            )
+                            Text(formatTime(durationMs), color = Color.White, fontSize = 12.sp)
+                        }
+                    }
                 }
             }
         }
