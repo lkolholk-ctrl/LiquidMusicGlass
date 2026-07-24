@@ -5,7 +5,9 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
@@ -19,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.Download
@@ -1061,7 +1064,37 @@ fun YandexMusicScreen(onBack: () -> Unit) {
                         if (out == YandexDownloadManager.Outcome.DONE) refreshOffline()
                     }
                 },
-                onCancel = { sid -> YandexDownloadManager.cancel(sid) }
+                onCancel = { sid -> YandexDownloadManager.cancel(sid) },
+                onPlayClip = { clip ->
+                    val pid = clip.playerId
+                    if (pid.isNullOrBlank()) {
+                        android.widget.Toast.makeText(context, "Clip unavailable", android.widget.Toast.LENGTH_SHORT).show()
+                    } else {
+                        // Резолв VH — на устройстве (гео!), в IO. Widevine → не сыграем.
+                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                            val stream = client?.resolveClipHls(pid)
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                when {
+                                    stream == null -> android.widget.Toast.makeText(
+                                        context, "Couldn't load clip", android.widget.Toast.LENGTH_SHORT).show()
+                                    stream.isDrm -> android.widget.Toast.makeText(
+                                        context, "Clip is DRM-protected", android.widget.Toast.LENGTH_LONG).show()
+                                    else -> {
+                                        PlayerController.playClip(
+                                            context = context,
+                                            streamUrl = stream.hlsUrl,
+                                            clipId = "yx_${clip.clipId}",
+                                            title = clip.title,
+                                            artist = artistPage?.name ?: "",
+                                            thumbnail = clip.thumbnailUrl,
+                                        )
+                                        com.liquidmusicglass.engine.NotificationRouter.emitOpenLargePlayer()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             )
         }
     }
@@ -1734,6 +1767,7 @@ private fun YandexDetailOverlay(
     onRadio: (YandexMusicClient.Track) -> Unit,
     onDownload: (YandexMusicClient.Track) -> Unit,
     onCancel: (String) -> Unit,
+    onPlayClip: (YandexMusicClient.YandexClip) -> Unit = {},
 ) {
     // Оверлей деталей тоже адаптируем: в широком окне — колонка по центру.
     val win = com.liquidmusicglass.ui.rememberWindowInfo()
@@ -1823,6 +1857,19 @@ private fun YandexDetailOverlay(
                     if (!artist.coverUrl.isNullOrBlank()) {
                         item { DetailHeaderArt(artist.coverUrl, null, null) }
                     }
+                    if (artist.clips.isNotEmpty()) {
+                        item { SectionLabel("Video clips", lc) }
+                        item {
+                            LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                contentPadding = PaddingValues(vertical = 4.dp)
+                            ) {
+                                items(artist.clips, key = { "clip${it.clipId}" }) { clip ->
+                                    YandexClipCard(clip, lc) { onPlayClip(clip) }
+                                }
+                            }
+                        }
+                    }
                     if (artist.topTracks.isNotEmpty()) {
                         item { SectionLabel("Popular", lc) }
                         itemsIndexed(artist.topTracks, key = { i, t -> "t$i:${t.id}" }) { index, track ->
@@ -1857,6 +1904,48 @@ private fun YandexDetailOverlay(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun YandexClipCard(
+    clip: YandexMusicClient.YandexClip,
+    lc: com.liquidmusicglass.ui.theme.LiquidColors,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .width(200.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .liquidClickable(pressedScale = LiquidMotion.PressCard, onClick = onClick)
+    ) {
+        Box(
+            modifier = Modifier
+                .width(200.dp)
+                .height(112.dp)   // 16:9
+                .clip(RoundedCornerShape(12.dp))
+                .background(if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFE3E3E8)),
+            contentAlignment = Alignment.Center
+        ) {
+            if (!clip.thumbnailUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = clip.thumbnailUrl, contentDescription = clip.title,
+                    contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()
+                )
+            }
+            Box(
+                modifier = Modifier.size(40.dp).clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.45f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Rounded.PlayArrow, null, tint = Color.White, modifier = Modifier.size(24.dp))
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            clip.title, color = lc.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+            maxLines = 1, overflow = TextOverflow.Ellipsis
+        )
     }
 }
 

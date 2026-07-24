@@ -166,7 +166,20 @@ class YandexMusicClient(
         val topTracks: List<Track>,
         val albums: List<AlbumBrief>,
         val similar: List<ArtistBrief>,
+        val clips: List<YandexClip> = emptyList(),
     )
+
+    /** Видеоклип артиста (brief-info.clips). playerId → поток видеохостинга. */
+    data class YandexClip(
+        val clipId: String,
+        val title: String,
+        val playerId: String?,
+        val thumbnailUrl: String?,
+        val durationSec: Int,
+    )
+
+    /** Разрешённый поток клипа: HLS-ссылка + флаг DRM (Widevine → нам не сыграть). */
+    data class YandexClipStream(val hlsUrl: String, val isDrm: Boolean)
 
     data class AlbumPage(
         val id: Long,
@@ -234,7 +247,66 @@ class YandexMusicClient(
             }
         }
 
-        return ArtistPage(artistId, name, cover, topTracks, albums, similar)
+        // Клипы артиста (brief-info.clips). Структуру логируем на первом
+        // устройстве — VH/поля клипов реверс-инжинирятся, гео-блок не даёт
+        // проверить с сервера (см. resolveClipHls).
+        val clips = ArrayList<YandexClip>()
+        result.optJSONArray("clips")?.let { arr ->
+            if (arr.length() > 0) {
+                com.liquidmusicglass.debug.DebugLog.add(
+                    "YM clips[0] raw: " + (arr.optJSONObject(0)?.toString()?.take(500) ?: "null")
+                )
+            }
+            for (i in 0 until arr.length()) {
+                val c = arr.optJSONObject(i) ?: continue
+                val pid = c.optString("playerId").ifBlank { c.optString("player_id") }
+                    .takeIf { it.isNotBlank() }
+                val cid = c.opt("clipId")?.toString()
+                    ?: c.opt("clip_id")?.toString() ?: continue
+                clips += YandexClip(
+                    clipId = cid,
+                    title = c.optString("title").ifBlank { name },
+                    playerId = pid,
+                    thumbnailUrl = c.optString("thumbnail").takeIf { it.isNotBlank() }
+                        ?: coverUriToUrl(
+                            c.optJSONObject("cover")?.optString("uri")?.takeIf { it.isNotBlank() },
+                            size = "400x400"
+                        ),
+                    durationSec = c.optInt("duration", 0),
+                )
+            }
+        }
+
+        return ArtistPage(artistId, name, cover, topTracks, albums, similar, clips)
+    }
+
+    /**
+     * Разрешить [playerId] клипа в играбельный HLS. Видеохостинг Яндекса (VH)
+     * недокументирован и гео-залочен (с не-RU IP — 451), поэтому логику
+     * подтверждает только запуск на устройстве в разрешённом регионе. Тут:
+     * дёргаем VH-плеер, СЫРОЙ ответ в DebugLog, из него достаём любой .m3u8 и
+     * ловим признаки DRM (drmConfig/widevine). Если Widevine — вернём isDrm=true
+     * (UI покажет «клип защищён»), нам такой поток не сыграть без лицензии.
+     */
+    fun resolveClipHls(playerId: String): YandexClipStream? {
+        val vhUrl = "https://frontend.vh.yandex.ru/v23/player/$playerId.json" +
+            "?service=music-web&video_content_id=$playerId"
+        val raw = try {
+            getJson(vhUrl).toString()
+        } catch (e: Exception) {
+            com.liquidmusicglass.debug.DebugLog.add("YM clip VH error: ${e.message}")
+            return null
+        }
+        com.liquidmusicglass.debug.DebugLog.add("YM clip VH ok len=${raw.length}")
+        val isDrm = raw.contains("drmConfig", ignoreCase = true) ||
+            raw.contains("widevine", ignoreCase = true) ||
+            raw.contains("playready", ignoreCase = true)
+        val m3u8 = Regex("""https?://[^"\\ ]+\.m3u8[^"\\ ]*""").find(raw)?.value
+        if (m3u8 == null) {
+            com.liquidmusicglass.debug.DebugLog.add("YM clip: .m3u8 не найден в VH-ответе")
+            return null
+        }
+        return YandexClipStream(hlsUrl = m3u8, isDrm = isDrm)
     }
 
     /** Альбом с треками: GET /albums/{id}/with-tracks. */
