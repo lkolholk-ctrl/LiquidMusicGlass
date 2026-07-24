@@ -1072,7 +1072,7 @@ fun YandexMusicScreen(onBack: () -> Unit) {
                     } else {
                         // Резолв VH — на устройстве (гео!), в IO. Widevine → не сыграем.
                         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                            val stream = client?.resolveClipHls(pid)
+                            val stream = YandexAuthRepository.clientOrNull()?.resolveClipHls(pid)
                             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                                 when {
                                     stream == null -> android.widget.Toast.makeText(
