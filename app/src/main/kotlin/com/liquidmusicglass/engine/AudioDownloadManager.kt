@@ -167,7 +167,7 @@ object AudioDownloadManager {
             withContext(Dispatchers.Main) {
                 android.widget.Toast.makeText(
                     context,
-                    if (ok) "Клип сохранён в Загрузки" else "Не удалось скачать клип",
+                    if (ok) "Clip saved to Downloads" else "Clip download failed",
                     android.widget.Toast.LENGTH_SHORT
                 ).show()
                 onComplete(ok)
