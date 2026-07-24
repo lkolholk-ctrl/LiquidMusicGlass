@@ -528,8 +528,10 @@ fun AppRoot() {
                     }
                 }
             },
-            onDragEnd = {
-                if (expandProgress.value < 0.85f) animateCollapse()
+            onDragEnd = { flungDown ->
+                // Как у Apple: закрываем при резком флике ВНИЗ (velocity) ИЛИ
+                // если утащили ниже ~28% (порог мягче прежних 15%).
+                if (flungDown || expandProgress.value < 0.72f) animateCollapse()
                 else animateExpand()
             },
             onPlayPause = { PlayerController.togglePlayPause(context) },

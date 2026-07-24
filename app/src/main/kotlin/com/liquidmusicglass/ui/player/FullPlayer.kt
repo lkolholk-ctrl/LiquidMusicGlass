@@ -105,6 +105,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -153,7 +154,7 @@ fun FullPlayer(
     volume: Float,
     onClose: () -> Unit,
     onDrag: (Float) -> Unit,
-    onDragEnd: () -> Unit,
+    onDragEnd: (flungDown: Boolean) -> Unit,
     onPlayPause: () -> Unit,
     onSkipNext: () -> Unit,
     onSkipPrevious: () -> Unit,
@@ -301,9 +302,15 @@ fun FullPlayer(
     // Controls slide up offset
     val controlsOffsetY = ((1f - expandProgress) * 80f)
 
-    // ── Card morphing: rounded corners during transition ──
-    val cardCorner = ((1f - expandProgress) * 28f).coerceIn(0f, 28f)
-    val cardOffsetY = ((1f - expandProgress).coerceAtLeast(0f) * 60f)
+    // ── Card morphing: плеер СЖИМАЕТСЯ к мини-плееру при вытягивании (как у
+    //    Apple: BottomSheet + m5048c — контент масштабируется между размером
+    //    мини и полного по offset слайда). expandProgress: 1=фулл, 0=мини.
+    val e = expandProgress.coerceIn(0f, 1f)
+    // Масштаб от полного (1.0) к «мини» (0.86) — карточка уезжает вниз и мельчает.
+    val dismissScale = 0.86f + 0.14f * e
+    // Пивот ближе к низу-центру → сжимается В СТОРОНУ мини-бара, а не в центр.
+    val cardCorner = ((1f - e) * 28f).coerceIn(0f, 28f)
+    val cardOffsetY = ((1f - e).coerceAtLeast(0f) * 90f)
 
     Box(
         modifier = Modifier
@@ -311,20 +318,30 @@ fun FullPlayer(
             .graphicsLayer {
                 alpha = bgAlpha
                 translationY = cardOffsetY
+                scaleX = dismissScale
+                scaleY = dismissScale
+                transformOrigin = TransformOrigin(0.5f, 0.96f)
                 clip = true
-                shape = RoundedCornerShape(cardCorner.dp)
+                // Радиус в локальных координатах: делим на scale, чтобы визуально
+                // угол не «раздувался» при сжатии (как cardView.setRadius(r/scale)).
+                shape = RoundedCornerShape((cardCorner / dismissScale).dp)
             }
             .background(Color.Black)
             .pointerInput(Unit) {
+                // Велосити-трекер как у Apple: резкий флик вниз закрывает плеер
+                // даже коротким движением (не только по позиции).
+                val tracker = androidx.compose.ui.input.pointer.util.VelocityTracker()
                 detectVerticalDragGestures(
+                    onDragStart = { tracker.resetTracking() },
                     onVerticalDrag = { change, dragAmount ->
                         if (dragAmount > 0) {
                             change.consume()
                             onDrag(dragAmount)
                         }
+                        tracker.addPosition(change.uptimeMillis, change.position)
                     },
-                    onDragEnd = { onDragEnd() },
-                    onDragCancel = { onDragEnd() }
+                    onDragEnd = { onDragEnd(tracker.calculateVelocity().y > 1200f) },
+                    onDragCancel = { onDragEnd(false) }
                 )
             }
     ) {
