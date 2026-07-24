@@ -853,6 +853,10 @@ object PlayerController {
             prefetchAhead(it, index, depth = 1)
             // Аудио следующих двух — в кэш, сразу (не ждём конца трека).
             scheduleAudioPreCache(it, index)
+            // AutoMix: анализ пары «этот → следующий» и рецепт свода для media3-форка.
+            // Идёт в фоне на low-priority потоке анализатора; к моменту свода
+            // (последние xfade секунд трека) рецепт уже будет готов.
+            maybeAnalyzePairForCrossfade(index)
         }
     }
 
@@ -862,6 +866,60 @@ object PlayerController {
         if (nextIndex < currentQueue.size) {
             val nextTrackId = currentQueue.getOrNull(nextIndex)?.id
             android.util.Log.d("VOIDPIXEL_MEDIA", "onTrackEnded: nextIndex=$nextIndex, nextTrackId=$nextTrackId")
+        }
+    }
+
+    // ── AutoMix для СТРИМИНГА (ExoPlayer) ────────────────────────────────────
+    // Оффлайн-движок (JUCE) уже водит кроссфейд рецептом модели. Здесь то же для
+    // стриминга: анализируем пару «текущий → следующий» и кладём рецепт в
+    // CrossfadeConfig — форк media3 подхватит его при взводе свода (длительность,
+    // кривая, точка входа). Момент старта берём НЕ из модели (её transitionStartMs
+    // ненадёжен) — свод якорится к концу трека, как и в оффлайне.
+    private val autoMixController by lazy {
+        appContext?.let { com.liquidmusicglass.automix.AutoMixController(it) }
+    }
+    private var lastAnalyzedPairKey: String? = null
+
+    private fun maybeAnalyzePairForCrossfade(index: Int) {
+        val enabled = PlayerSettings.autoMix.value
+        androidx.media3.exoplayer.CrossfadeConfig.setEnabled(enabled)
+        if (!enabled) return
+
+        val snapshot = queue
+        val current = snapshot.getOrNull(index) ?: return
+        val next = snapshot.getOrNull(index + 1) ?: return
+        // Клипы не сводим, и анализ имеет смысл только для нормальных длительностей.
+        if (current.id.startsWith("clip_") || next.id.startsWith("clip_")) return
+        if (current.durationMs <= 0L) return
+
+        val pairKey = "${current.id}->${next.id}"
+        if (pairKey == lastAnalyzedPairKey) return
+        lastAnalyzedPairKey = pairKey
+
+        val controller = autoMixController ?: return
+        ioScope.launch {
+            runCatching {
+                val f = controller.analyzeTrackPair(current.uri, next.uri, current.durationMs)
+                DebugLog.add(
+                    "AutoMix.stream ready=${f.readyForTransition} " +
+                        "compat=${"%.2f".format(f.compatibility)} " +
+                        "xfade=${f.crossfadeDurationMs}ms entry=${f.entryOffsetMs}ms " +
+                        "type=${f.transitionType}"
+                )
+                if (f.readyForTransition) {
+                    androidx.media3.exoplayer.CrossfadeConfig.applyRecipe(
+                        f.crossfadeDurationMs,
+                        f.transitionType,
+                        f.entryOffsetMs
+                    )
+                } else {
+                    // Модель против свода этой пары — вернём фолбэк-параметры.
+                    androidx.media3.exoplayer.CrossfadeConfig.clearRecipe()
+                }
+            }.onFailure {
+                DebugLog.add("AutoMix.stream FAILED ${it.message}")
+                androidx.media3.exoplayer.CrossfadeConfig.clearRecipe()
+            }
         }
     }
 

@@ -174,14 +174,14 @@ dependencies {
 
     // media3 — из НАШЕГО форка (media3-lmg), версия 1.5.1-lmg2. Содержит патч
     // кроссфейда (AudioFadeControl + 2 аудио-рендерера, MANUAL 6c для теста).
-    implementation("androidx.media3:media3-common:1.5.1-lmg12")
-    implementation("androidx.media3:media3-exoplayer:1.5.1-lmg12")
+    implementation("androidx.media3:media3-common:1.5.1-lmg14")
+    implementation("androidx.media3:media3-exoplayer:1.5.1-lmg14")
     // HLS — для видеоклипов Яндекса (видеохостинг отдаёт .m3u8-поток).
-    implementation("androidx.media3:media3-exoplayer-hls:1.5.1-lmg12")
-    implementation("androidx.media3:media3-extractor:1.5.1-lmg12")
-    implementation("androidx.media3:media3-session:1.5.1-lmg12")
-    implementation("androidx.media3:media3-common-ktx:1.5.1-lmg12")
-    implementation("androidx.media3:media3-ui:1.5.1-lmg12")
+    implementation("androidx.media3:media3-exoplayer-hls:1.5.1-lmg14")
+    implementation("androidx.media3:media3-extractor:1.5.1-lmg14")
+    implementation("androidx.media3:media3-session:1.5.1-lmg14")
+    implementation("androidx.media3:media3-common-ktx:1.5.1-lmg14")
+    implementation("androidx.media3:media3-ui:1.5.1-lmg14")
 
     implementation("androidx.mediarouter:mediarouter:1.7.0")
 
