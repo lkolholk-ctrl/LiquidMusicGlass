@@ -24,9 +24,8 @@ object AppSettings {
     private lateinit var prefs: SharedPreferences
     private val scope = CoroutineScope(Dispatchers.Main + Job())
 
-    // ── Playback Settings ──
-    private val _gaplessEnabled = MutableStateFlow(true)
-    val gaplessEnabled: StateFlow<Boolean> = _gaplessEnabled
+    // Gapless: у ExoPlayer он бесшовный по умолчанию, отключить нечем — флаг
+    // и тумблер удалены как мёртвые (см. историю). Отдельной настройки нет.
 
     // ── Stage 7: JUCE AutoMix в реальном потоке (beta) ──
     // OFF по умолчанию: пока не на глобальном тумблере (это 7d). Когда включён —
@@ -145,11 +144,6 @@ object AppSettings {
     // ═══════════════════════════════════════════
     //  Setters (save immediately)
     // ═══════════════════════════════════════════
-
-    fun setGapless(enabled: Boolean) {
-        _gaplessEnabled.value = enabled
-        safePrefs()?.edit()?.putBoolean("gapless", enabled)?.apply()
-    }
 
     fun setJuceAutoMix(enabled: Boolean) {
         _juceAutoMixEnabled.value = enabled
@@ -393,7 +387,6 @@ object AppSettings {
 
     private fun loadAll() {
         val p = safePrefs() ?: return
-        _gaplessEnabled.value = p.getBoolean("gapless", true)
         _juceAutoMixEnabled.value = p.getBoolean("juce_automix", false)
         // Sleep timer НЕ восстанавливаем: это живой обратный отсчёт сессии, а не
         // персистентная настройка. Раньше loadAll выставлял сохранённые минуты,

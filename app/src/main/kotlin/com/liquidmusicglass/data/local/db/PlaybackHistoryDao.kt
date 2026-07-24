@@ -192,4 +192,59 @@ interface PlaybackHistoryDao {
         LIMIT :limit
     """)
     suspend fun getTopGenres(limit: Int = 3): List<String>
+
+    // ═══════════════════════════════════════════════════════════
+    //  Aggregates for the "Listening Stats" screen (Apple Replay-style)
+    //  Читаем из listening_history — там есть имя артиста, жанр и
+    //  реально прослушанное время (durationPlayedMs).
+    // ═══════════════════════════════════════════════════════════
+
+    @Query("SELECT COALESCE(SUM(durationPlayedMs), 0) FROM listening_history")
+    suspend fun getTotalListenedMs(): Long
+
+    @Query("SELECT COUNT(*) FROM listening_history")
+    suspend fun getTotalPlayEvents(): Int
+
+    @Query("SELECT COUNT(DISTINCT trackId) FROM listening_history")
+    suspend fun getDistinctTrackCount(): Int
+
+    @Query("SELECT COUNT(DISTINCT artist) FROM listening_history WHERE artist IS NOT NULL AND artist != ''")
+    suspend fun getDistinctArtistCount(): Int
+
+    @Query("""
+        SELECT artist AS artist, COUNT(*) AS plays, SUM(durationPlayedMs) AS listenedMs
+        FROM listening_history
+        WHERE artist IS NOT NULL AND artist != ''
+        GROUP BY artist
+        ORDER BY plays DESC, listenedMs DESC
+        LIMIT :limit
+    """)
+    suspend fun getTopArtistsDetailed(limit: Int = 8): List<ArtistPlayStat>
+
+    @Query("""
+        SELECT lh.trackId AS trackId, lh.title AS title, lh.artist AS artist,
+               COUNT(*) AS plays, SUM(lh.durationPlayedMs) AS listenedMs
+        FROM listening_history lh
+        WHERE lh.title IS NOT NULL AND lh.title != ''
+        GROUP BY lh.trackId
+        ORDER BY plays DESC, listenedMs DESC
+        LIMIT :limit
+    """)
+    suspend fun getTopTracksDetailed(limit: Int = 10): List<TrackPlayStat>
 }
+
+/** Строка «топ-артист» для экрана статистики. */
+data class ArtistPlayStat(
+    val artist: String,
+    val plays: Int,
+    val listenedMs: Long
+)
+
+/** Строка «топ-трек» для экрана статистики. */
+data class TrackPlayStat(
+    val trackId: String,
+    val title: String,
+    val artist: String,
+    val plays: Int,
+    val listenedMs: Long
+)

@@ -10,4 +10,8 @@
     <cache-path
         name="logs"
         path="logs/" />
+    <!-- Карточки лирики для шеринга: cache/share/*.png -->
+    <cache-path
+        name="share"
+        path="share/" />
 </paths>

@@ -9,6 +9,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -176,6 +178,8 @@ fun LyricsScreen(
         mutableLongStateOf(LyricsSyncStore.get(context, resolvedTrackId))
     }
     var syncUiOpen by remember { mutableStateOf(false) }
+    // Долгий тап по строке лирики → карточка «поделиться» (как у Apple).
+    var shareLine by remember { mutableStateOf<String?>(null) }
     fun adjustSync(deltaMs: Long) {
         syncOffsetMs = (syncOffsetMs + deltaMs).coerceIn(-10_000L, 10_000L)
         LyricsSyncStore.set(context, resolvedTrackId, syncOffsetMs)
@@ -455,11 +459,17 @@ fun LyricsScreen(
                                     // Тап по строке = перемотка на неё (Apple Music).
                                     // Только для синхронной лирики.
                                     .then(
-                                        if (lyrics.isSynced) Modifier.clickable(
-                                            interactionSource = remember { MutableInteractionSource() },
-                                            indication = null
-                                        ) { PlayerController.seekTo(line.timeMs) }
-                                        else Modifier
+                                        // Тап = перемотка на строку; долгий тап =
+                                        // карточка «поделиться» (Apple Music).
+                                        if (lyrics.isSynced) Modifier.pointerInput(line.timeMs) {
+                                            detectTapGestures(
+                                                onTap = { PlayerController.seekTo(line.timeMs) },
+                                                onLongPress = { shareLine = cleanText }
+                                            )
+                                        }
+                                        else Modifier.pointerInput(line.text) {
+                                            detectTapGestures(onLongPress = { shareLine = cleanText })
+                                        }
                                     )
                                     .padding(horizontal = lineHPadding, vertical = if (splitMode) 6.dp else 10.dp),
                                 horizontalAlignment = Alignment.Start
@@ -587,6 +597,19 @@ fun LyricsScreen(
                     }
                 }
             }
+        }
+
+        // Оверлей «поделиться строкой лирики» (долгий тап по строке).
+        shareLine?.let { txt ->
+            LyricShareOverlay(
+                lineText = txt,
+                trackTitle = trackTitle,
+                trackArtist = trackArtist,
+                albumArtUri = albumArtUri,
+                coverUrl = coverUrl,
+                albumColors = resolvedColors,
+                onDismiss = { shareLine = null }
+            )
         }
     }
 }

@@ -478,14 +478,6 @@ object PlayerController {
             else -> PlaybackContext.Global
         }
 
-        // ── Check camp capabilities for crossfade ──
-        val campManager = com.liquidmusicglass.camp.FeatureAccessManager.getInstance(context)
-        val campCaps = campManager.capabilities.value
-        if (!campCaps.flags[com.liquidmusicglass.camp.Feature.BACKGROUND_PLAYBACK]!!) {
-            // Лагерь без фонового плейбека — глушим gapless/кроссфейд
-            com.liquidmusicglass.engine.AppSettings.setGapless(false)
-        }
-
         _isVideoClip.value = false   // обычный трек — не видеоклип
         ioScope.launch {
             // ── ABSOLUTE QUEUE PURGE: wipe old queue before loading ──

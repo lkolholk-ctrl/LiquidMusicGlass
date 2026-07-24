@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ExitToApp
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Star
@@ -72,7 +73,8 @@ private val SurfaceElevated = Color(0xFF2C2C2E)
 fun ProfileScreen(
     onOpenSettings: () -> Unit = {},
     onLogout: () -> Unit = {},
-    onOpenAuth: () -> Unit = {}
+    onOpenAuth: () -> Unit = {},
+    onOpenStats: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -483,6 +485,26 @@ fun ProfileScreen(
                     }
                 }
                 item { Spacer(modifier = Modifier.height(16.dp)) }
+            }
+
+            // ── Listening Stats (Apple Replay-стиль) ──
+            item {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                        .clip(RoundedCornerShape(28.dp))
+                        .background(if (lc.isDark) SurfaceDark else Color(0xFFF2F2F7))
+                ) {
+                    SettingRowNavigable(
+                        icon = Icons.Rounded.BarChart,
+                        label = "Listening Stats",
+                        value = "Your top songs & artists",
+                        compact = compact,
+                        onClick = onOpenStats
+                    )
+                }
+                Spacer(modifier = Modifier.height(16.dp))
             }
 
             // ═══════════════════════════════════════════════════════════
