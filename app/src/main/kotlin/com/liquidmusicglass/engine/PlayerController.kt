@@ -647,6 +647,12 @@ object PlayerController {
         }
     }
 
+    /** Пауза без тоггла (для sleep timer): по истечении таймера музыка должна
+     *  ТОЛЬКО останавливаться, никогда не включаться. */
+    fun pause(context: Context) {
+        mainScope.launch { getPlayer(context)?.pause() }
+    }
+
     fun togglePlayPause(context: Context) {
         mainScope.launch {
             val player = getPlayer(context) ?: return@launch

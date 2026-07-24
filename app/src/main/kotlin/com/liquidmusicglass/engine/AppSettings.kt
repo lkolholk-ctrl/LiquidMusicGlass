@@ -368,10 +368,11 @@ object AppSettings {
                 _sleepTimerRemainingMs.value = remaining.coerceAtLeast(0)
             }
 
-            // Timer expired — pause playback via PlayerController
+            // Timer expired — ТОЛЬКО пауза (не toggle: иначе на уже-паузе
+            // таймер бы включил музыку — полевой баг).
             val ctx = appContext
             if (ctx != null) {
-                PlayerController.togglePlayPause(ctx)
+                PlayerController.pause(ctx)
             }
 
             _sleepTimerMinutes.value = 0
@@ -394,7 +395,11 @@ object AppSettings {
         val p = safePrefs() ?: return
         _gaplessEnabled.value = p.getBoolean("gapless", true)
         _juceAutoMixEnabled.value = p.getBoolean("juce_automix", false)
-        _sleepTimerMinutes.value = p.getInt("sleep_timer", 0)
+        // Sleep timer НЕ восстанавливаем: это живой обратный отсчёт сессии, а не
+        // персистентная настройка. Раньше loadAll выставлял сохранённые минуты,
+        // но таймер не запускался → селектор показывал «30 мин», а отсчёта нет.
+        _sleepTimerMinutes.value = 0
+        _sleepTimerRemainingMs.value = 0L
         _ignoreShortEnabled.value = p.getBoolean("ignore_short", false)
         _ignoreThresholdSec.value = p.getFloat("ignore_threshold", 30f)
         // Пользователь/watchdog ещё не выбирали режим → вендорная таблица
