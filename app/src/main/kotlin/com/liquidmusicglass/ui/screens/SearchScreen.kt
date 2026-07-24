@@ -89,7 +89,11 @@ fun SearchScreen(
 ) {
     // Режим «Видео»: 4-й сегмент источника ищет видеоклипы (Apple Music) вместо
     // треков; результаты — видео-карточки, тап открывает плеер с видео.
+    // Клипы у ICM доступны только подписчикам → без премиума сегмент серый,
+    // тап показывает премиум-окно (как у загрузок).
     var videoMode by remember { mutableStateOf(false) }
+    val isPremiumUser by IcmAuthRepository.isPremium.collectAsState()
+    var showVideoPromo by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -240,8 +244,11 @@ fun SearchScreen(
                 SourceSegment(
                     text = "Video",
                     selected = videoMode,
+                    enabled = isPremiumUser,
                     modifier = Modifier.weight(1f),
-                    onClick = { videoMode = true }
+                    onClick = {
+                        if (isPremiumUser) videoMode = true else showVideoPromo = true
+                    }
                 )
             }
 
@@ -663,6 +670,33 @@ fun SearchScreen(
         actionsTrack?.let { t ->
             TrackActionsSheet(track = t, onDismiss = { actionsTrack = null })
         }
+
+        // Премиум-окно для сегмента Video (то же, что у загрузок).
+        com.liquidmusicglass.ui.glass.GlassDialog(
+            visible = showVideoPromo,
+            onDismiss = { showVideoPromo = false },
+            icon = Icons.Rounded.PlayArrow,
+            iconTint = Color(0xFFFC3C44),
+            title = "Premium Required",
+            message = "Music videos are an exclusive feature for Premium subscribers. Upgrade to search and watch full video clips.",
+            primaryButton = com.liquidmusicglass.ui.glass.GlassDialogButton(
+                text = "Upgrade",
+                onClick = {
+                    showVideoPromo = false
+                    val intent = android.content.Intent(
+                        android.content.Intent.ACTION_VIEW,
+                        android.net.Uri.parse("https://t.me/byicmbot")
+                    )
+                    context.startActivity(intent)
+                }
+            ),
+            secondaryButton = com.liquidmusicglass.ui.glass.GlassDialogButton(
+                text = "Cancel",
+                onClick = { showVideoPromo = false },
+                backgroundColor = Color.White.copy(alpha = 0.08f),
+                textColor = Color.White.copy(alpha = 0.7f)
+            )
+        )
     }
 }
 
@@ -997,10 +1031,11 @@ private fun SourceSegment(
     text: String,
     selected: Boolean,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
     onClick: () -> Unit
 ) {
     val bg by animateColorAsState(
-        targetValue = if (selected) AppleRed else Color.Transparent,
+        targetValue = if (selected && enabled) AppleRed else Color.Transparent,
         animationSpec = tween(220),
         label = "segBg"
     )
@@ -1009,12 +1044,17 @@ private fun SourceSegment(
             .height(32.dp)
             .clip(RoundedCornerShape(50))
             .background(bg)
+            // Клик активен и у «серого» сегмента — он показывает премиум-окно.
             .liquidClickable(pressedScale = LiquidMotion.PressButton) { onClick() },
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = text,
-            color = if (selected) Color.White else LiquidTheme.colors.textSecondary,
+            color = when {
+                !enabled -> LiquidTheme.colors.textTertiary   // серый: без премиума
+                selected -> Color.White
+                else -> LiquidTheme.colors.textSecondary
+            },
             fontSize = 13.sp,
             fontWeight = FontWeight.Medium,
             maxLines = 1
