@@ -259,13 +259,23 @@ class YandexMusicClient(
      * (playerId тут НЕТ — берётся при воспроизведении через resolveClipHls).
      */
     fun fetchArtistClips(artistId: Long): List<YandexClip> {
-        val result = try {
-            getJson("$API/artists/$artistId/clips?page=0").optJSONObject("result")
+        // Эндпоинт как на music.yandex.ru (DevTools): блок artist-clips.
+        val root = try {
+            getJson("$API/artists/$artistId/blocks/artist-clips?page=0")
         } catch (e: Exception) {
             com.liquidmusicglass.debug.DebugLog.add("YM artist-clips error: ${e.message}")
-            null
-        } ?: return emptyList()
-        val items = result.optJSONArray("items") ?: return emptyList()
+            return emptyList()
+        }
+        // items может быть на верхнем уровне ИЛИ под result (у разных ручек ЯМ
+        // по-разному) — берём оба варианта.
+        val items = root.optJSONObject("result")?.optJSONArray("items")
+            ?: root.optJSONArray("items")
+        if (items == null) {
+            com.liquidmusicglass.debug.DebugLog.add(
+                "YM artist-clips: items нет. raw=" + root.toString().take(300)
+            )
+            return emptyList()
+        }
         val out = ArrayList<YandexClip>()
         for (i in 0 until items.length()) {
             val clip = items.optJSONObject(i)?.optJSONObject("data")?.optJSONObject("clip") ?: continue

@@ -534,7 +534,12 @@ fun IcmSearchItem.toTrack(uri: String? = null): com.liquidmusicglass.engine.Trac
         title = title,
         artist = displayArtist,
         albumName = album ?: collectionId ?: "Single",
-        uri = android.net.Uri.parse(uri ?: preview ?: "https://byicloud.online/track/$id"),
+        // ВАЖНО: НЕ падать на `preview` — это 30-сек сэмпл Apple. Для плеера
+        // всегда resolvable-URL трека (PlayerController резолвит через POST
+        // /track в полный поток). Полевой баг: поиск играл 30 сек, т.к. у
+        // IcmSearchItem есть только этот extension (не member), и preview
+        // подставлялся как playback-URI.
+        uri = android.net.Uri.parse(uri ?: "https://byicloud.online/track/$id"),
         // `secondary_*` / `vk_*` tracks come back with `duration` in seconds; Apple in ms.
         // Reuse the model's normalized accessor so the progress bar shows the right scale.
         durationMs = durationMs,
