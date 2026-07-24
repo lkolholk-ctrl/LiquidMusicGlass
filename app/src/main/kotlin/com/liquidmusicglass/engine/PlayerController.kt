@@ -905,7 +905,18 @@ object PlayerController {
         val controller = autoMixController ?: return
         ioScope.launch {
             runCatching {
-                val f = controller.analyzeTrackPair(current.uri, next.uri, current.durationMs)
+                // КРИТИЧНО: track.uri у стриминговых треков — это идентификатор
+                // (https://byicloud.online/track/<id>), а НЕ аудиопоток. Если отдать
+                // его анализатору, MediaExtractor читает не-аудио → mel_a/mel_b
+                // вырождаются (тишина, одинаковые на любой паре) и модель выдаёт
+                // один и тот же рецепт на все переходы. Резолвим настоящие URL.
+                val curUri =
+                    if (current.isOnlineTrack) resolveStreamUrlSync(current.id) ?: return@runCatching
+                    else current.uri
+                val nextUri =
+                    if (next.isOnlineTrack) resolveStreamUrlSync(next.id) ?: return@runCatching
+                    else next.uri
+                val f = controller.analyzeTrackPair(curUri, nextUri, current.durationMs)
                 DebugLog.add(
                     "AutoMix.stream ready=${f.readyForTransition} " +
                         "compat=${"%.2f".format(f.compatibility)} " +

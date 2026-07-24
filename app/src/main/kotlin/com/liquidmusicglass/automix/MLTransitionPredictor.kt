@@ -140,6 +140,29 @@ class MLTransitionPredictor(context: Context) {
      * Конвертирует [1, 431, 128] в ByteBuffer формата [1, 431, 128, 1]
      * который ожидает TFLite модель (Conv2D требует channel dimension).
      */
+    /**
+     * Компактная статистика лог-мела для диагностики входов: `[min/max/mean, sum]`.
+     * Тишина упирается в кламп −80 (min=max=−80) — сразу видно вырожденный вход;
+     * одинаковые sum на разных парах треков означают, что подан один и тот же
+     * (или пустой) PCM.
+     */
+    private fun melStats(mel: Array<Array<FloatArray>>): String {
+        var mn = Float.MAX_VALUE
+        var mx = -Float.MAX_VALUE
+        var sum = 0.0
+        var n = 0
+        for (frame in mel[0]) {
+            for (v in frame) {
+                if (v < mn) mn = v
+                if (v > mx) mx = v
+                sum += v
+                n++
+            }
+        }
+        val mean = if (n > 0) sum / n else 0.0
+        return "[%.1f/%.1f/%.1f sum=%.0f]".format(mn, mx, mean, sum)
+    }
+
     private fun melToByteBuffer(mel: Array<Array<FloatArray>>): ByteBuffer {
         val frames = mel[0]
         val numFrames = frames.size       // 431
@@ -222,11 +245,18 @@ class MLTransitionPredictor(context: Context) {
         val rawStart = outStart[0][0]
         // Сырые выходы голов — чтобы по экранному логу видеть, ЖИВЫ ли головы
         // entry_offset/transition_type, или они реально близки к нулю/argmax=0.
-        val debug = "raw[c=%.3f d=%.3f o=%.3f s=%.3f] tlogits=[%s] %s | feat: %s".format(
-            rawCompat, rawDuration, rawOffset, rawStart,
-            transProbs.joinToString(",") { "%.2f".format(it) },
-            mapInfo, features.debug
-        )
+        // Контрольные суммы входных мелов — разводят «класс 2» (вырожденные входы):
+        // если melA≈melB на одной паре, либо суммы совпадают на РАЗНЫХ парах треков,
+        // значит в модель уехала тишина/мусор (не тот URI, не набрался B-head и т.п.),
+        // и одинаковый рецепт на всех переходах — следствие входов, а не модели.
+        val statA = melStats(features.melA)
+        val statB = melStats(features.melB)
+        val debug =
+            ("raw[c=%.3f d=%.3f o=%.3f s=%.3f] tlogits=[%s] %s | melA%s melB%s | feat: %s").format(
+                rawCompat, rawDuration, rawOffset, rawStart,
+                transProbs.joinToString(",") { "%.2f".format(it) },
+                mapInfo, statA, statB, features.debug
+            )
 
         return Prediction(
             compatibility = rawCompat.coerceIn(0f, 1f),
