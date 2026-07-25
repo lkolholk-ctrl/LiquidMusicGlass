@@ -592,6 +592,16 @@ class AudioService : MediaSessionService() {
                     .setUsage(C.USAGE_MEDIA)
                     .build()
 
+                // Свод стартует только когда СЛЕДУЮЩИЙ период уже подготовлен.
+                // По умолчанию media3 берётся за него поздно, и 12-секундный
+                // кроссфейд успевал отработать лишь частью: к моменту готовности
+                // до конца трека оставалось меньше заданной длительности.
+                setPreloadConfiguration(
+                    androidx.media3.exoplayer.ExoPlayer.PreloadConfiguration(
+                        /* targetPreloadDurationUs= */ 30_000_000L
+                    )
+                )
+
                 setAudioAttributes(audioAttributes, false)
                 setHandleAudioBecomingNoisy(true)
                 // NETWORK: Exo у нас — стриминговый бэкенд; держит wake+wifi lock
