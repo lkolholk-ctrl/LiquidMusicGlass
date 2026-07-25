@@ -145,7 +145,11 @@ class AutoMixController(
             bpmB = plan.bpmB,
             keyA = plan.keyA,
             keyB = plan.keyB,
-            debugInfo = "Algo: ${plan.debugInfo}",
+            // Маркеры тишины кладёт FeatureExtractor, но он работает только на
+            // ML-пути. Без модели вырожденный вход иначе прошёл бы как рецепт.
+            debugInfo = "Algo: ${plan.debugInfo}" +
+                (if (energyA.avgEnergy < 1e-6f && energyA.peakEnergy < 1e-6f) " !A_SILENT" else "") +
+                (if (energyB.avgEnergy < 1e-6f && energyB.peakEnergy < 1e-6f) " !B_SILENT" else ""),
             readyForTransition = plan.compatibility > MIN_COMPATIBILITY
         )
     }

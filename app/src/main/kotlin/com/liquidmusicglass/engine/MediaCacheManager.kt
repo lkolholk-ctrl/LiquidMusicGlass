@@ -273,10 +273,19 @@ object MediaCacheManager {
                 androidx.media3.datasource.DataSpec.Builder()
                     .setUri(url).setPosition(0L).setLength(1L).build()
             )
-            val header = ds.responseHeaders.entries
-                .firstOrNull { it.key?.equals("Content-Range", ignoreCase = true) == true }
+            fun header(name: String) = ds.responseHeaders.entries
+                .firstOrNull { it.key?.equals(name, ignoreCase = true) == true }
                 ?.value?.firstOrNull()
-            androidx.media3.datasource.HttpUtil.getDocumentSize(header)
+            val fromRange = androidx.media3.datasource.HttpUtil.getDocumentSize(
+                header("Content-Range")
+            )
+            if (fromRange > 0L) {
+                fromRange
+            } else {
+                // Сервер проигнорировал Range и отдал файл целиком (200): тогда
+                // размер документа — это Content-Length, мы ведь просили с нуля.
+                header("Content-Length")?.toLongOrNull() ?: -1L
+            }
         } catch (e: Exception) {
             com.liquidmusicglass.debug.DebugLog.add("AutoMix.probe failed: ${e.message}")
             -1L
@@ -290,12 +299,21 @@ object MediaCacheManager {
      * узнал. После этого isFullyCached снова осмыслен и самолечится: он читает
      * фактическое покрытие кэша, а не запоминает былые успехи.
      */
+    /** Когда можно снова спрашивать длину: неудачный probe открывает отдачу файла. */
+    private val probeRetryAtMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
     fun ensureContentLength(trackId: String, url: android.net.Uri): Long {
         val known = cachedContentLength(trackId)
         if (known > 0L) return known
         val c = cache ?: return 0L
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now < (probeRetryAtMs[trackId] ?: 0L)) return 0L
         val size = probeDocumentLength(url)
-        if (size <= 0L) return 0L
+        if (size <= 0L) {
+            probeRetryAtMs[trackId] = now + 60_000L
+            return 0L
+        }
+        probeRetryAtMs.remove(trackId)
         runCatching {
             val mutations = androidx.media3.datasource.cache.ContentMetadataMutations()
             androidx.media3.datasource.cache.ContentMetadataMutations.setContentLength(
@@ -426,6 +444,8 @@ object MediaCacheManager {
         // за провал: данные всё равно появятся.
         if (activePreCacheKey == key) return isFullyCached(trackId)
         if (exclusive) {
+            // Раньше отменялся любой активный writer — новый префетч обрывал
+            // докачку предыдущего трека, которую сам же и ждал.
             try { activePreCache?.cancel() } catch (_: Throwable) {}
         }
 

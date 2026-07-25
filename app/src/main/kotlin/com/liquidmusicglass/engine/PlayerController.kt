@@ -249,6 +249,9 @@ object PlayerController {
     fun playTrackById(context: Context, trackId: String) {
         android.util.Log.d("VOIDPIXEL_MEDIA", "UI requested Playback for Track ID: $trackId")
         _isVideoClip.value = false
+        // Иначе после локальной JUCE-сессии флаг оставался JUCE_LOCAL, и анализ
+        // на стриминге глох с «juce active» до следующего playFromList.
+        _playbackBackend.value = PlaybackBackend.EXO_STREAMING
 
         val currentQueue = queue
         val queueIndex = currentQueue.indexOfFirst { it.id == trackId }
@@ -790,6 +793,9 @@ object PlayerController {
         // AutoMix: анализ пары запускаем БЛИЖЕ К КОНЦУ трека (как оффлайн-движок),
         // а не на старте. На старте плеер как раз буферизует новый трек, и тяжёлый
         // анализ (сетевой декод + FFT + модель) отбирал бы у него сеть и CPU.
+        if (durationMs > 0L && durationMs - positionMs <= AUTOMIX_PREWARM_LEAD_MS) {
+            maybePrewarmPairFiles(currentIndex)
+        }
         if (durationMs > 0L && durationMs - positionMs <= AUTOMIX_ANALYZE_LEAD_MS) {
             maybeAnalyzePairForCrossfade(currentIndex, durationMs)
         }
@@ -884,10 +890,40 @@ object PlayerController {
     @Volatile private var autoMixControllerRef: com.liquidmusicglass.automix.AutoMixController? = null
     @Volatile private var lastAnalyzedPairKey: String? = null
     @Volatile private var autoMixJob: kotlinx.coroutines.Job? = null
-    private var lastSkipLogMs = 0L
+    private val lastSkipLogMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     /** За сколько до конца анализировать пару — как оффлайн-движок (~40 c). */
     private val AUTOMIX_ANALYZE_LEAD_MS = 40_000L
+
+    /**
+     * За сколько до конца готовить ФАЙЛЫ пары. Предсказание остаётся на 40 c, но
+     * оффлайну файлы даны сразу, а стримингу их ещё надо докачать: без форы
+     * докачка съедала окно, и рецепт опаздывал к моменту взвода свода.
+     */
+    private val AUTOMIX_PREWARM_LEAD_MS = 75_000L
+
+    @Volatile private var prewarmedPairKey: String? = null
+    @Volatile private var prewarmJob: kotlinx.coroutines.Job? = null
+
+    /** Тихо готовит локальные копии пары — ничего не анализирует. */
+    private fun maybePrewarmPairFiles(index: Int) {
+        if (!PlayerSettings.autoMix.value || isLocalJucePlaybackActive) return
+        val snapshot = queue
+        val current = snapshot.getOrNull(index) ?: return
+        val next = snapshot.getOrNull(index + 1) ?: return
+        val pairKey = "${current.id}->${next.id}"
+        if (pairKey == prewarmedPairKey) return
+        if (prewarmJob?.isActive == true) return
+        prewarmedPairKey = pairKey
+        prewarmJob = ioScope.launch {
+            runCatching {
+                if (current.isOnlineTrack) localCopyForAnalysis(current.id)
+                if (next.isOnlineTrack) localCopyForAnalysis(next.id)
+            }.onFailure {
+                if (it !is kotlinx.coroutines.CancellationException) prewarmedPairKey = null
+            }
+        }
+    }
 
     /**
      * Не раньше этого момента повторять анализ после неудачи. Тикер идёт каждые
@@ -895,6 +931,12 @@ object PlayerController {
      * получается шторм запросов до самого конца трека.
      */
     @Volatile private var retryAnalyzeAfterMs = 0L
+
+    /**
+     * Анализ уже идёт. Без этого повтор, назначенный изнутри работающей задачи,
+     * запускал вторую такую же: обе вставали на один лок экспорта и жгли окно.
+     */
+    @Volatile private var analyzeInFlight = false
 
     /** Разрешает повтор пары, но не мгновенно. */
     private fun retryAnalyzeLater() {
@@ -905,8 +947,10 @@ object PlayerController {
     /** Логирует причину пропуска анализа, но не чаще раза в 10 c (чтобы не залить лог). */
     private fun logAutoMixSkip(reason: String) {
         val now = SystemClock.elapsedRealtime()
-        if (now - lastSkipLogMs < 10_000L) return
-        lastSkipLogMs = now
+        // Ключ — сама причина: общий троттл прятал редкую причину за частой.
+        val key = reason.substringBefore(" (")
+        if (now - (lastSkipLogMs[key] ?: 0L) < 10_000L) return
+        lastSkipLogMs[key] = now
         DebugLog.add("AutoMix.skip $reason")
     }
 
@@ -920,7 +964,11 @@ object PlayerController {
         runCatching {
             val now = System.currentTimeMillis()
             val files = dir.listFiles()
-                ?.filterNot { it.name.endsWith(".part") || now - it.lastModified() < 60_000L }
+                ?.filterNot {
+                    // .part трогаем только если он явно осиротел (писателя нет).
+                    (it.name.endsWith(".part") && now - it.lastModified() < 600_000L) ||
+                        now - it.lastModified() < 60_000L
+                }
                 ?.sortedByDescending { it.lastModified() } ?: return
             files.drop(keep).forEach { it.delete() }
         }
@@ -935,7 +983,9 @@ object PlayerController {
             // Оффлайн-движок анализирует ПОЛНЫЙ файл с диска — приводим стриминг
             // к тому же. Длину узнаём у сервера (ICM не шлёт Content-Length), а
             // полноту меряем по кэшу: недокачанный m4a декодер откроет как тишину.
-            if (!MediaCacheManager.isCacheEnabled()) {
+            if (!MediaCacheManager.isCacheEnabled() ||
+                MediaCacheManager.getCacheDataSourceFactory() == null
+            ) {
                 // Кэш выключен настройкой: локальной копии взяться неоткуда.
                 // Анализ по сети медленный, но живой — это лучше, чем немой AutoMix.
                 DebugLog.add("AutoMix.cacheoff $trackId — анализ по сети")
@@ -1000,13 +1050,12 @@ object PlayerController {
 
         val pairKey = "${current.id}->${next.id}"
         if (pairKey == lastAnalyzedPairKey) return // тихо: это штатный дедуп каждый тик
+        if (analyzeInFlight) return // предыдущая попытка ещё работает
         if (SystemClock.elapsedRealtime() < retryAnalyzeAfterMs) return // пауза после неудачи
         lastAnalyzedPairKey = pairKey
 
         val ctx = appContext
         if (ctx == null) { logAutoMixSkip("no appContext"); lastAnalyzedPairKey = null; return }
-        val controller = autoMixControllerRef
-            ?: com.liquidmusicglass.automix.AutoMixController(ctx).also { autoMixControllerRef = it }
         DebugLog.add(
             "AutoMix.analyze START ${current.title.take(18)} -> ${next.title.take(18)} " +
                 "rem=${playerDurationMs - _currentPositionMs.value}ms"
@@ -1017,8 +1066,14 @@ object PlayerController {
         autoMixJob?.cancel()
         // §5.1: штамп пары — применяем рецепт только если трек с тех пор не сменился.
         val analyzedIndex = index
+        analyzeInFlight = true
         autoMixJob = ioScope.launch {
             runCatching {
+                // Создаём здесь, а не в тикере: конструктор грузит TFLite, а тикер
+                // живёт на главном потоке — это был риск фриза UI.
+                val controller = autoMixControllerRef
+                    ?: com.liquidmusicglass.automix.AutoMixController(ctx)
+                        .also { autoMixControllerRef = it }
                 // КРИТИЧНО: track.uri у стриминговых треков — это идентификатор
                 // (https://byicloud.online/track/<id>), а НЕ аудиопоток. Если отдать
                 // его анализатору, MediaExtractor читает не-аудио → mel_a/mel_b
@@ -1059,12 +1114,11 @@ object PlayerController {
                     retryAnalyzeLater() // дать шанс повторить, но не каждые 500 мс
                     return@runCatching
                 }
-                // §5.2: дедлайн — анализ, который не успевает до свода, бесполезен.
-                val budgetMs = AUTOMIX_ANALYZE_LEAD_MS -
-                    androidx.media3.exoplayer.CrossfadeConfig.MAX_XFADE_MS
-                val f = kotlinx.coroutines.withTimeout(budgetMs.coerceAtLeast(5_000L)) {
-                    controller.analyzeTrackPair(curUri, nextUri, playerDurationMs)
-                }
+                // Таймаута здесь нет — как в оффлайн-движке. Анализ блокирующий и
+                // непрерываемый: дедлайн не останавливал работу, а лишь выбрасывал
+                // уже посчитанный результат, и повтор стоил ровно столько же.
+                // От устаревания защищает проверка индекса ниже.
+                val f = controller.analyzeTrackPair(curUri, nextUri, playerDurationMs)
                 if (currentIndex != analyzedIndex) {
                     DebugLog.add("AutoMix.stale drop (idx $analyzedIndex -> $currentIndex)")
                     return@launch
@@ -1127,6 +1181,7 @@ object PlayerController {
                 retryAnalyzeLater() // не блокируем пару навсегда после сбоя
             }
         }
+        autoMixJob?.invokeOnCompletion { analyzeInFlight = false }
     }
 
     fun onPlaybackError(errorCodeName: String) {
