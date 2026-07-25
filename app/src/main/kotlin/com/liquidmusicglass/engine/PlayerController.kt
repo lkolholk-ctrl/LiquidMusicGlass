@@ -883,6 +883,7 @@ object PlayerController {
     // мёртвым до перезапуска процесса. Создаём при первой возможности.
     @Volatile private var autoMixControllerRef: com.liquidmusicglass.automix.AutoMixController? = null
     private var lastAnalyzedPairKey: String? = null
+    @Volatile private var autoMixJob: kotlinx.coroutines.Job? = null
     private var lastSkipLogMs = 0L
 
     /** За сколько до конца анализировать пару — как оффлайн-движок (~40 c). */
@@ -901,11 +902,20 @@ object PlayerController {
      * префетчатся целиком) и кладём во временный файл. Если в кэше пусто —
      * возвращаем сетевой URL как раньше (анализ будет медленным, но не сорвётся).
      */
+    /** §5.5: держим не больше N временных копий — иначе cacheDir пухнет без границ. */
+    private fun trimAnalysisCache(dir: java.io.File, keep: Int = 6) {
+        runCatching {
+            val files = dir.listFiles()?.sortedByDescending { it.lastModified() } ?: return
+            files.drop(keep).forEach { it.delete() }
+        }
+    }
+
     private fun localCopyForAnalysis(trackId: String): android.net.Uri? {
         val ctx = appContext ?: return null
         val streamUrl = resolveStreamUrlSync(trackId) ?: return null
         return try {
             val dir = java.io.File(ctx.cacheDir, "automix").apply { mkdirs() }
+            trimAnalysisCache(dir)
             val f = java.io.File(dir, "$trackId.audio")
             if (f.exists() && f.length() > 0L) return android.net.Uri.fromFile(f)
             if (MediaCacheManager.exportCachedTrackToFile(trackId, streamUrl, f)) {
@@ -953,7 +963,12 @@ object PlayerController {
                 "rem=${playerDurationMs - _currentPositionMs.value}ms"
         )
         val startedAtMs = SystemClock.elapsedRealtime()
-        ioScope.launch {
+        // §5.3: старый анализ мог бы дописать свой (уже неактуальный) рецепт поверх
+        // свежего — CrossfadeConfig статический, last-writer-wins. Отменяем предыдущий.
+        autoMixJob?.cancel()
+        // §5.1: штамп пары — применяем рецепт только если трек с тех пор не сменился.
+        val analyzedIndex = index
+        autoMixJob = ioScope.launch {
             runCatching {
                 // КРИТИЧНО: track.uri у стриминговых треков — это идентификатор
                 // (https://byicloud.online/track/<id>), а НЕ аудиопоток. Если отдать
@@ -975,7 +990,16 @@ object PlayerController {
                     lastAnalyzedPairKey = null // дать шанс повторить на следующем тике
                     return@runCatching
                 }
-                val f = controller.analyzeTrackPair(curUri, nextUri, playerDurationMs)
+                // §5.2: дедлайн — анализ, который не успевает до свода, бесполезен.
+                val budgetMs = AUTOMIX_ANALYZE_LEAD_MS -
+                    androidx.media3.exoplayer.CrossfadeConfig.MAX_XFADE_MS
+                val f = kotlinx.coroutines.withTimeout(budgetMs.coerceAtLeast(5_000L)) {
+                    controller.analyzeTrackPair(curUri, nextUri, playerDurationMs)
+                }
+                if (currentIndex != analyzedIndex) {
+                    DebugLog.add("AutoMix.stale drop (idx $analyzedIndex -> $currentIndex)")
+                    return@launch
+                }
                 DebugLog.add(
                     "AutoMix.stream ready=${f.readyForTransition} " +
                         "compat=${"%.2f".format(f.compatibility)} " +
@@ -986,6 +1010,22 @@ object PlayerController {
                 // Полная строка предиктора (сырые выходы + контрольные суммы мелов) —
                 // именно она разводит классы 1/2/3 при разборе.
                 DebugLog.add("AutoMix.dbg ${f.debugInfo.take(220)}")
+                // §5.4: рецепт, чья точка свода попадает в начало трека или в
+                // прошлое, бессмысленен — отбрасываем, а не исполняем.
+                val xfadeMs = f.crossfadeDurationMs.coerceIn(
+                    androidx.media3.exoplayer.CrossfadeConfig.MIN_XFADE_MS,
+                    androidx.media3.exoplayer.CrossfadeConfig.MAX_XFADE_MS
+                )
+                val remainingMs = playerDurationMs - _currentPositionMs.value
+                val sane = remainingMs > xfadeMs &&
+                    playerDurationMs - xfadeMs > 10_000L
+                if (f.readyForTransition && !sane) {
+                    DebugLog.add(
+                        "AutoMix.insane drop xfade=${xfadeMs}ms rem=${remainingMs}ms dur=$playerDurationMs"
+                    )
+                    androidx.media3.exoplayer.CrossfadeConfig.clearRecipe()
+                    return@launch
+                }
                 if (f.readyForTransition) {
                     androidx.media3.exoplayer.CrossfadeConfig.applyRecipe(
                         f.crossfadeDurationMs,
