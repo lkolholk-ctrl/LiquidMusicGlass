@@ -218,6 +218,47 @@ object MediaCacheManager {
      * закэшированного трека выходит быстро (CacheWriter пропускает готовые
      * куски). Новый префетч отменяет предыдущий незавершённый.
      */
+    /**
+     * Выгружает УЖЕ ЗАКЭШИРОВАННЫЙ трек в обычный файл — для анализа AutoMix.
+     *
+     * Зачем: анализатор использует [android.media.MediaExtractor], а тот не умеет
+     * читать media3-кэш и по сетевому URL тянет файл почти целиком (чтобы дойти
+     * до хвоста трека) — на 4G это ~60 c, из-за чего рецепт опаздывал на целый
+     * трек. Данные уже лежат в кэше после preCacheTrack, поэтому читаем их
+     * локально: копирование занимает доли секунды.
+     *
+     * Возвращает файл или null, если в кэше нет данных. Блокирующий — звать с IO.
+     */
+    fun exportCachedTrackToFile(trackId: String, url: android.net.Uri, out: File): Boolean {
+        val factory = getCacheDataSourceFactory() ?: return false
+        val key = "icm_$trackId"
+        val spec = androidx.media3.datasource.DataSpec.Builder()
+            .setUri(url)
+            .setKey(key)
+            .build()
+        // Только кэш: если данных нет, честно возвращаем false и не лезем в сеть
+        // (иначе получим ту же минутную загрузку, от которой уходим).
+        val source = factory.createDataSourceForDownloading()
+        return try {
+            source.open(spec)
+            out.outputStream().use { fos ->
+                val buf = ByteArray(64 * 1024)
+                while (true) {
+                    val n = source.read(buf, 0, buf.size)
+                    if (n == androidx.media3.common.C.RESULT_END_OF_INPUT) break
+                    fos.write(buf, 0, n)
+                }
+            }
+            out.length() > 0L
+        } catch (e: Exception) {
+            android.util.Log.d("MediaCacheManager", "exportCached failed for $trackId: ${e.message}")
+            runCatching { out.delete() }
+            false
+        } finally {
+            runCatching { source.close() }
+        }
+    }
+
     fun preCacheTrack(trackId: String, url: android.net.Uri): Boolean {
         val factory = getCacheDataSourceFactory() ?: return false
         val key = "icm_$trackId"

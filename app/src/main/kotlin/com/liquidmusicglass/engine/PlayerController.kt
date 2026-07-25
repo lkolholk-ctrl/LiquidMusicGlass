@@ -885,8 +885,8 @@ object PlayerController {
     private var lastAnalyzedPairKey: String? = null
     private var lastSkipLogMs = 0L
 
-    /** За сколько до конца анализировать пару: max свод (30 c) + запас на сетевой декод. */
-    private val AUTOMIX_ANALYZE_LEAD_MS = 60_000L
+    /** За сколько до конца анализировать пару — как оффлайн-движок (~40 c). */
+    private val AUTOMIX_ANALYZE_LEAD_MS = 40_000L
 
     /** Логирует причину пропуска анализа, но не чаще раза в 10 c (чтобы не залить лог). */
     private fun logAutoMixSkip(reason: String) {
@@ -894,6 +894,29 @@ object PlayerController {
         if (now - lastSkipLogMs < 10_000L) return
         lastSkipLogMs = now
         DebugLog.add("AutoMix.skip $reason")
+    }
+
+    /**
+     * Локальная копия трека для анализа: берём УЖЕ закэшированные байты (треки
+     * префетчатся целиком) и кладём во временный файл. Если в кэше пусто —
+     * возвращаем сетевой URL как раньше (анализ будет медленным, но не сорвётся).
+     */
+    private fun localCopyForAnalysis(trackId: String): android.net.Uri? {
+        val ctx = appContext ?: return null
+        val streamUrl = resolveStreamUrlSync(trackId) ?: return null
+        return try {
+            val dir = java.io.File(ctx.cacheDir, "automix").apply { mkdirs() }
+            val f = java.io.File(dir, "$trackId.audio")
+            if (f.exists() && f.length() > 0L) return android.net.Uri.fromFile(f)
+            if (MediaCacheManager.exportCachedTrackToFile(trackId, streamUrl, f)) {
+                android.net.Uri.fromFile(f)
+            } else {
+                streamUrl // в кэше нет — работаем по сети (как раньше)
+            }
+        } catch (t: Throwable) {
+            DebugLog.add("AutoMix.localCopy FAILED ${t.message}")
+            streamUrl
+        }
     }
 
     private fun maybeAnalyzePairForCrossfade(index: Int, playerDurationMs: Long) {
@@ -937,10 +960,13 @@ object PlayerController {
                 // его анализатору, MediaExtractor читает не-аудио → mel_a/mel_b
                 // вырождаются (тишина, одинаковые на любой паре) и модель выдаёт
                 // один и тот же рецепт на все переходы. Резолвим настоящие URL.
+                // Онлайн-треки анализируем из ЛОКАЛЬНОЙ копии кэша: MediaExtractor
+                // по сетевому URL тянул файл почти целиком (хвост трека = конец
+                // файла) — на 4G ~60 c, и рецепт опаздывал на целый трек.
                 val curUri =
-                    if (current.isOnlineTrack) resolveStreamUrlSync(current.id) else current.uri
+                    if (current.isOnlineTrack) localCopyForAnalysis(current.id) else current.uri
                 val nextUri =
-                    if (next.isOnlineTrack) resolveStreamUrlSync(next.id) else next.uri
+                    if (next.isOnlineTrack) localCopyForAnalysis(next.id) else next.uri
                 if (curUri == null || nextUri == null) {
                     // Раньше здесь был молчаливый выход — анализ «пропадал» без следа.
                     DebugLog.add(
