@@ -916,12 +916,25 @@ object PlayerController {
         return try {
             val dir = java.io.File(ctx.cacheDir, "automix").apply { mkdirs() }
             trimAnalysisCache(dir)
+            // Трек ещё качается → анализировать нечего: частичный файл декодер не
+            // откроет (moov-атом m4a лежит в конце). Лучше пропустить пару, чем
+            // кормить модель тишиной или уходить в минутную сетевую загрузку.
+            if (!MediaCacheManager.isFullyCached(trackId)) {
+                DebugLog.add("AutoMix.notcached $trackId")
+                return null
+            }
             val f = java.io.File(dir, "$trackId.audio")
-            if (f.exists() && f.length() > 0L) return android.net.Uri.fromFile(f)
+            // Переиспользуем копию ТОЛЬКО если она совпадает по размеру с кэшем:
+            // однажды записанный обрезок иначе жил бы вечно.
+            val expected = MediaCacheManager.cachedContentLength(trackId)
+            if (f.exists() && expected > 0L && f.length() == expected) {
+                return android.net.Uri.fromFile(f)
+            }
             if (MediaCacheManager.exportCachedTrackToFile(trackId, streamUrl, f)) {
                 android.net.Uri.fromFile(f)
             } else {
-                streamUrl // в кэше нет — работаем по сети (как раньше)
+                DebugLog.add("AutoMix.export failed $trackId")
+                null
             }
         } catch (t: Throwable) {
             DebugLog.add("AutoMix.localCopy FAILED ${t.message}")

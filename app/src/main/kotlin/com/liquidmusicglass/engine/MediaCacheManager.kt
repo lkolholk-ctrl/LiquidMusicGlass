@@ -218,27 +218,71 @@ object MediaCacheManager {
      * закэшированного трека выходит быстро (CacheWriter пропускает готовые
      * куски). Новый префетч отменяет предыдущий незавершённый.
      */
+    private fun cacheKey(trackId: String) = "icm_$trackId"
+
     /**
-     * Выгружает УЖЕ ЗАКЭШИРОВАННЫЙ трек в обычный файл — для анализа AutoMix.
+     * Полностью ли трек лежит в кэше. Проверяем ДО экспорта: частичный файл
+     * бесполезен — у m4a/mp4 moov-атом в конце, и MediaExtractor такой файл
+     * просто не откроет (признаки трека вырождаются в тишину).
      *
-     * Зачем: анализатор использует [android.media.MediaExtractor], а тот не умеет
-     * читать media3-кэш и по сетевому URL тянет файл почти целиком (чтобы дойти
-     * до хвоста трека) — на 4G это ~60 c, из-за чего рецепт опаздывал на целый
-     * трек. Данные уже лежат в кэше после preCacheTrack, поэтому читаем их
-     * локально: копирование занимает доли секунды.
+     * exo_len проставляется в первые миллисекунды закачки, поэтому проверка
+     * работает и для недокачанного трека. isCached меряет НЕПРЕРЫВНОЕ покрытие
+     * [0, len) и бросает на LENGTH_UNSET — поэтому сначала длина, потом проверка.
+     */
+    /** Полная длина контента в кэше или 0, если неизвестна. */
+    fun cachedContentLength(trackId: String): Long {
+        val c = cache ?: return 0L
+        val len = androidx.media3.datasource.cache.ContentMetadata.getContentLength(
+            c.getContentMetadata(cacheKey(trackId))
+        )
+        return if (len > 0L) len else 0L
+    }
+
+    fun isFullyCached(trackId: String): Boolean {
+        val c = cache ?: return false
+        val key = cacheKey(trackId)
+        val len = androidx.media3.datasource.cache.ContentMetadata.getContentLength(
+            c.getContentMetadata(key)
+        )
+        if (len <= 0L) return false
+        return try {
+            c.isCached(key, 0L, len)
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    /**
+     * Выгружает ЦЕЛИКОМ закэшированный трек в обычный файл — для анализа AutoMix.
      *
-     * Возвращает файл или null, если в кэше нет данных. Блокирующий — звать с IO.
+     * Анализатор использует [android.media.MediaExtractor], который не умеет читать
+     * media3-кэш и по сетевому URL тянет файл почти целиком (чтобы дойти до хвоста
+     * трека) — на 4G это ~60 c. Данные уже лежат в кэше после preCacheTrack.
+     *
+     * ВАЖНО: читаем СТРОГО из кэша. createDataSourceForDownloading() для этого не
+     * годится — он сохраняет upstream и на дырке уходит в сеть. Здесь берём
+     * источник без upstream (внутри PlaceholderDataSource, который физически не
+     * может открыть сеть) и сверяем длину: недописанный файл удаляем, а не отдаём.
      */
     fun exportCachedTrackToFile(trackId: String, url: android.net.Uri, out: File): Boolean {
+        val c = cache ?: return false
         val factory = getCacheDataSourceFactory() ?: return false
-        val key = "icm_$trackId"
+        val key = cacheKey(trackId)
+        val contentLength = androidx.media3.datasource.cache.ContentMetadata.getContentLength(
+            c.getContentMetadata(key)
+        )
+        if (contentLength <= 0L || !isFullyCached(trackId)) {
+            return false // ещё качается — анализировать нечего
+        }
         val spec = androidx.media3.datasource.DataSpec.Builder()
             .setUri(url)
             .setKey(key)
+            .setPosition(0)
+            .setLength(contentLength)
             .build()
-        // Только кэш: если данных нет, честно возвращаем false и не лезем в сеть
-        // (иначе получим ту же минутную загрузку, от которой уходим).
-        val source = factory.createDataSourceForDownloading()
+        // upstream принудительно null → в сеть уйти невозможно.
+        val source = factory.createDataSourceForRemovingDownload()
+        var written = 0L
         return try {
             source.open(spec)
             out.outputStream().use { fos ->
@@ -247,9 +291,19 @@ object MediaCacheManager {
                     val n = source.read(buf, 0, buf.size)
                     if (n == androidx.media3.common.C.RESULT_END_OF_INPUT) break
                     fos.write(buf, 0, n)
+                    written += n
                 }
             }
-            out.length() > 0L
+            // Строгая сверка: LRU мог вытеснить спаны прямо во время чтения.
+            val ok = written == contentLength && out.length() == contentLength
+            if (!ok) {
+                android.util.Log.d(
+                    "MediaCacheManager",
+                    "exportCached INCOMPLETE $trackId: $written/$contentLength"
+                )
+                runCatching { out.delete() }
+            }
+            ok
         } catch (e: Exception) {
             android.util.Log.d("MediaCacheManager", "exportCached failed for $trackId: ${e.message}")
             runCatching { out.delete() }
