@@ -889,6 +889,19 @@ object PlayerController {
     /** За сколько до конца анализировать пару — как оффлайн-движок (~40 c). */
     private val AUTOMIX_ANALYZE_LEAD_MS = 40_000L
 
+    /**
+     * Не раньше этого момента повторять анализ после неудачи. Тикер идёт каждые
+     * 500 мс, а попытка теперь тяжёлая (запрос длины + докачка) — без паузы
+     * получается шторм запросов до самого конца трека.
+     */
+    @Volatile private var retryAnalyzeAfterMs = 0L
+
+    /** Разрешает повтор пары, но не мгновенно. */
+    private fun retryAnalyzeLater() {
+        lastAnalyzedPairKey = null
+        retryAnalyzeAfterMs = SystemClock.elapsedRealtime() + 5_000L
+    }
+
     /** Логирует причину пропуска анализа, но не чаще раза в 10 c (чтобы не залить лог). */
     private fun logAutoMixSkip(reason: String) {
         val now = SystemClock.elapsedRealtime()
@@ -931,7 +944,7 @@ object PlayerController {
             val known = MediaCacheManager.ensureContentLength(trackId, streamUrl)
             if (known <= 0L) {
                 DebugLog.add("AutoMix.nolen $trackId")
-                lastAnalyzedPairKey = null
+                retryAnalyzeLater()
                 return null
             }
             if (!MediaCacheManager.isFullyCached(trackId)) {
@@ -940,7 +953,7 @@ object PlayerController {
                 )
                 if (!MediaCacheManager.preCacheTrack(trackId, streamUrl, exclusive = false)) {
                     DebugLog.add("AutoMix.notcached $trackId")
-                    lastAnalyzedPairKey = null // иначе пара похоронена до конца трека
+                    retryAnalyzeLater() // иначе пара похоронена до конца трека
                     return null
                 }
             }
@@ -987,6 +1000,7 @@ object PlayerController {
 
         val pairKey = "${current.id}->${next.id}"
         if (pairKey == lastAnalyzedPairKey) return // тихо: это штатный дедуп каждый тик
+        if (SystemClock.elapsedRealtime() < retryAnalyzeAfterMs) return // пауза после неудачи
         lastAnalyzedPairKey = pairKey
 
         val ctx = appContext
@@ -1032,7 +1046,7 @@ object PlayerController {
                 }
                 if (uris == null) {
                     DebugLog.add("AutoMix.prep TIMEOUT")
-                    lastAnalyzedPairKey = null
+                    retryAnalyzeLater()
                     return@runCatching
                 }
                 val curUri = uris.first
@@ -1042,7 +1056,7 @@ object PlayerController {
                     DebugLog.add(
                         "AutoMix.stream SKIP: no stream url (cur=${curUri != null} next=${nextUri != null})"
                     )
-                    lastAnalyzedPairKey = null // дать шанс повторить на следующем тике
+                    retryAnalyzeLater() // дать шанс повторить, но не каждые 500 мс
                     return@runCatching
                 }
                 // §5.2: дедлайн — анализ, который не успевает до свода, бесполезен.
@@ -1075,7 +1089,7 @@ object PlayerController {
                     // недостоверен. Как в оффлайне: нет плана → обычный переход.
                     DebugLog.add("AutoMix.silent drop — вход вырожден, рецепт не применяем")
                     androidx.media3.exoplayer.CrossfadeConfig.clearRecipe()
-                    lastAnalyzedPairKey = null
+                    retryAnalyzeLater()
                     return@launch
                 }
                 // §5.4: рецепт, чья точка свода попадает в начало трека или в
@@ -1110,7 +1124,7 @@ object PlayerController {
                 if (it is kotlinx.coroutines.CancellationException) return@onFailure
                 DebugLog.add("AutoMix.stream FAILED ${it.javaClass.simpleName}: ${it.message}")
                 androidx.media3.exoplayer.CrossfadeConfig.clearRecipe()
-                lastAnalyzedPairKey = null // не блокируем пару навсегда после сбоя
+                retryAnalyzeLater() // не блокируем пару навсегда после сбоя
             }
         }
     }
