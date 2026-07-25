@@ -878,37 +878,53 @@ object PlayerController {
     // CrossfadeConfig — форк media3 подхватит его при взводе свода (длительность,
     // кривая, точка входа). Момент старта берём НЕ из модели (её transitionStartMs
     // ненадёжен) — свод якорится к концу трека, как и в оффлайне.
-    private val autoMixController by lazy {
-        appContext?.let { com.liquidmusicglass.automix.AutoMixController(it) }
-    }
+    // Контроллер НЕ через by lazy: lazy кэширует результат навсегда, и если первое
+    // обращение случится до init(context) (appContext == null), AutoMix останется
+    // мёртвым до перезапуска процесса. Создаём при первой возможности.
+    @Volatile private var autoMixControllerRef: com.liquidmusicglass.automix.AutoMixController? = null
     private var lastAnalyzedPairKey: String? = null
+    private var lastSkipLogMs = 0L
 
     /** За сколько до конца анализировать пару: max свод (30 c) + запас на сетевой декод. */
     private val AUTOMIX_ANALYZE_LEAD_MS = 60_000L
 
+    /** Логирует причину пропуска анализа, но не чаще раза в 10 c (чтобы не залить лог). */
+    private fun logAutoMixSkip(reason: String) {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastSkipLogMs < 10_000L) return
+        lastSkipLogMs = now
+        DebugLog.add("AutoMix.skip $reason")
+    }
+
     private fun maybeAnalyzePairForCrossfade(index: Int, playerDurationMs: Long) {
         val enabled = PlayerSettings.autoMix.value
         androidx.media3.exoplayer.CrossfadeConfig.setEnabled(enabled)
-        if (!enabled) return
+        if (!enabled) { logAutoMixSkip("toggle off"); return }
 
         val snapshot = queue
-        val current = snapshot.getOrNull(index) ?: return
-        val next = snapshot.getOrNull(index + 1) ?: return
-        // Клипы не сводим, и анализ имеет смысл только для нормальных длительностей.
-        if (current.id.startsWith("clip_") || next.id.startsWith("clip_")) return
+        val current = snapshot.getOrNull(index)
+        if (current == null) { logAutoMixSkip("no current (idx=$index size=${snapshot.size})"); return }
+        val next = snapshot.getOrNull(index + 1)
+        if (next == null) { logAutoMixSkip("no next track (idx=$index size=${snapshot.size})"); return }
+        if (current.id.startsWith("clip_") || next.id.startsWith("clip_")) {
+            logAutoMixSkip("video clip"); return
+        }
         // Длительность берём ИЗ ПЛЕЕРА: у стриминговых треков Track.durationMs в
         // очереди часто 0 (реальная приходит позже и попадает только в
         // _currentTrack). Раньше ранний return по ней глушил анализ полностью.
-        if (playerDurationMs <= 1000L) return
+        if (playerDurationMs <= 1000L) { logAutoMixSkip("no duration"); return }
         // Как в оффлайне: не анализируем, если играть уже нечего (свод не успеет).
-        if (playerDurationMs - _currentPositionMs.value < 1500L) return
-        if (!_isPlaying.value) return
+        if (playerDurationMs - _currentPositionMs.value < 1500L) { logAutoMixSkip("too late"); return }
+        if (!_isPlaying.value) { logAutoMixSkip("not playing"); return }
 
         val pairKey = "${current.id}->${next.id}"
-        if (pairKey == lastAnalyzedPairKey) return
+        if (pairKey == lastAnalyzedPairKey) return // тихо: это штатный дедуп каждый тик
         lastAnalyzedPairKey = pairKey
 
-        val controller = autoMixController ?: return
+        val ctx = appContext
+        if (ctx == null) { logAutoMixSkip("no appContext"); lastAnalyzedPairKey = null; return }
+        val controller = autoMixControllerRef
+            ?: com.liquidmusicglass.automix.AutoMixController(ctx).also { autoMixControllerRef = it }
         DebugLog.add(
             "AutoMix.analyze START ${current.title.take(18)} -> ${next.title.take(18)} " +
                 "rem=${playerDurationMs - _currentPositionMs.value}ms"
@@ -922,11 +938,17 @@ object PlayerController {
                 // вырождаются (тишина, одинаковые на любой паре) и модель выдаёт
                 // один и тот же рецепт на все переходы. Резолвим настоящие URL.
                 val curUri =
-                    if (current.isOnlineTrack) resolveStreamUrlSync(current.id) ?: return@runCatching
-                    else current.uri
+                    if (current.isOnlineTrack) resolveStreamUrlSync(current.id) else current.uri
                 val nextUri =
-                    if (next.isOnlineTrack) resolveStreamUrlSync(next.id) ?: return@runCatching
-                    else next.uri
+                    if (next.isOnlineTrack) resolveStreamUrlSync(next.id) else next.uri
+                if (curUri == null || nextUri == null) {
+                    // Раньше здесь был молчаливый выход — анализ «пропадал» без следа.
+                    DebugLog.add(
+                        "AutoMix.stream SKIP: no stream url (cur=${curUri != null} next=${nextUri != null})"
+                    )
+                    lastAnalyzedPairKey = null // дать шанс повторить на следующем тике
+                    return@runCatching
+                }
                 val f = controller.analyzeTrackPair(curUri, nextUri, playerDurationMs)
                 DebugLog.add(
                     "AutoMix.stream ready=${f.readyForTransition} " +
@@ -949,8 +971,9 @@ object PlayerController {
                     androidx.media3.exoplayer.CrossfadeConfig.clearRecipe()
                 }
             }.onFailure {
-                DebugLog.add("AutoMix.stream FAILED ${it.message}")
+                DebugLog.add("AutoMix.stream FAILED ${it.javaClass.simpleName}: ${it.message}")
                 androidx.media3.exoplayer.CrossfadeConfig.clearRecipe()
+                lastAnalyzedPairKey = null // не блокируем пару навсегда после сбоя
             }
         }
     }
