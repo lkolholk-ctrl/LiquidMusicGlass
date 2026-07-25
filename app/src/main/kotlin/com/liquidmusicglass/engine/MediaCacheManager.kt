@@ -316,15 +316,16 @@ object MediaCacheManager {
                 runCatching { out.delete() }
                 tmp.renameTo(out)
             } else {
-                android.util.Log.d(
-                    "MediaCacheManager",
-                    "exportCached INCOMPLETE $trackId: $written/$contentLength"
+                // Через DebugLog, а не Log.d: R8 вырезает Log.d в релизе,
+                // и причина провала экспорта была бы не видна на устройстве.
+                com.liquidmusicglass.debug.DebugLog.add(
+                    "AutoMix.export INCOMPLETE $trackId $written/$contentLength"
                 )
                 runCatching { tmp.delete() }
             }
             ok
         } catch (e: Exception) {
-            android.util.Log.d("MediaCacheManager", "exportCached failed for $trackId: ${e.message}")
+            com.liquidmusicglass.debug.DebugLog.add("AutoMix.export FAILED $trackId: ${e.message}")
             runCatching { tmp.delete() }
             false
         } finally {
@@ -354,7 +355,7 @@ object MediaCacheManager {
         } catch (e: Exception) {
             // отмена/сеть — не страшно: вызывающий ретраит, а недокачанное
             // доберётся при воспроизведении (CacheWriter пропускает готовые куски).
-            android.util.Log.d("MediaCacheManager", "Pre-cache stopped for $trackId: ${e.message}")
+            com.liquidmusicglass.debug.DebugLog.add("AutoMix.precache stopped $trackId: ${e.message}")
             false
         } finally {
             if (activePreCacheKey == key) {

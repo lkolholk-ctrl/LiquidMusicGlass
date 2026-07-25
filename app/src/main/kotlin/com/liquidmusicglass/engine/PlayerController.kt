@@ -883,6 +883,9 @@ object PlayerController {
     // мёртвым до перезапуска процесса. Создаём при первой возможности.
     @Volatile private var autoMixControllerRef: com.liquidmusicglass.automix.AutoMixController? = null
     private var lastAnalyzedPairKey: String? = null
+    private val pullAttemptedFor = java.util.Collections.newSetFromMap(
+        java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+    )
     @Volatile private var autoMixJob: kotlinx.coroutines.Job? = null
     private var lastSkipLogMs = 0L
 
@@ -919,6 +922,14 @@ object PlayerController {
             // Трек ещё качается → анализировать нечего: частичный файл декодер не
             // откроет (moov-атом m4a лежит в конце). Лучше пропустить пару, чем
             // кормить модель тишиной или уходить в минутную сетевую загрузку.
+            if (!MediaCacheManager.isFullyCached(trackId)) {
+                // Одна попытка дотянуть трек: фоновый пре-кэш мог не стартовать
+                // или быть отменён, и тогда поллинг ждал бы вечно.
+                if (pullAttemptedFor.add(trackId)) {
+                    DebugLog.add("AutoMix.pull $trackId")
+                    MediaCacheManager.preCacheTrack(trackId, streamUrl)
+                }
+            }
             if (!MediaCacheManager.isFullyCached(trackId)) {
                 DebugLog.add("AutoMix.notcached $trackId")
                 // F4: пара не должна хорониться из-за того, что B ещё качается —
