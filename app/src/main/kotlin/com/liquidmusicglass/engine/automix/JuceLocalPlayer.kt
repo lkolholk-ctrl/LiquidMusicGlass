@@ -244,11 +244,25 @@ class JuceLocalPlayer(
 
     // ── Handlers ──────────────────────────────────────────────────────────────
 
+    /** JUCE играет только файлы с устройства. */
+    private fun isLocalUri(uri: Uri): Boolean =
+        uri.scheme == "file" || uri.scheme == "content"
+
+    private fun List<MediaItem>.localOnly(): List<MediaItem> =
+        filter { it.localConfiguration?.uri?.let(::isLocalUri) == true }
+
     override fun handleSetMediaItems(
         mediaItems: MutableList<MediaItem>,
         startIndex: Int,
         startPositionMs: Long
     ): ListenableFuture<*> {
+        // Чужие (сетевые) элементы в локальный плеер не пускаем вовсе.
+        @Suppress("NAME_SHADOWING") val mediaItems = mediaItems.localOnly().toMutableList()
+        if (mediaItems.isEmpty()) {
+            DebugLog.add("JUCE.setItems пусто после фильтра — очередь не наша")
+            invalidateState()
+            return Futures.immediateVoidFuture()
+        }
         val incomingIds = mediaItems.map { it.mediaId }
         val currentIds = playlist.map { it.mediaId }
         val sameQueue = incomingIds.isNotEmpty() && incomingIds == currentIds
@@ -294,6 +308,9 @@ class JuceLocalPlayer(
         index: Int,
         mediaItems: MutableList<MediaItem>
     ): ListenableFuture<*> {
+        // Эндлесс-дозаправка отдаёт онлайн-треки — в локальную очередь их нельзя.
+        @Suppress("NAME_SHADOWING") val mediaItems = mediaItems.localOnly().toMutableList()
+        if (mediaItems.isEmpty()) return Futures.immediateVoidFuture()
         val list = playlist.toMutableList()
         val at = index.coerceIn(0, list.size)
         list.addAll(at, mediaItems)
@@ -501,6 +518,22 @@ class JuceLocalPlayer(
     private fun loadCurrent(positionMs: Long) {
         val mi = playlist.getOrNull(currentIndex) ?: return
         val uri = mi.localConfiguration?.uri ?: return
+
+        // Онлайн-трек движок открыть не может: раньше это была мёртвая остановка
+        // (JUCE_LOAD_FAILED без скипа) — воспроизведение вставало до ручного тапа.
+        if (!isLocalUri(uri)) {
+            DebugLog.add("JUCE.skip чужой uri=$uri idx=$currentIndex")
+            if (currentIndex < playlist.lastIndex) {
+                currentIndex++
+                loadCurrent(0L)
+            } else {
+                playWhenReadyFlag = false
+                ended = true
+                engine.silenceOutput()
+                invalidateState()
+            }
+            return
+        }
 
         DebugLog.add("JUCE.loadCurrent idx=$currentIndex pos=$positionMs pwr=$playWhenReadyFlag")
         // Прямая загрузка трека (скип/сик/новая очередь) ОТМЕНЯЕТ любой идущий

@@ -107,6 +107,11 @@ class EndlessPlaybackEngine(
      * @return true, если дозагрузка была успешно выполнена.
      */
     suspend fun checkAndRefillIfNeeded(remainingCount: Int = -1, force: Boolean = false): Boolean {
+        // Дозаправка волной осмысленна только для стриминга: в локальную очередь
+        // она подмешивала онлайн-треки, а JUCE такой трек не откроет.
+        if (com.liquidmusicglass.engine.PlayerController.isLocalJucePlaybackActive) {
+            return false
+        }
         // Дозаправка работает ВЕЗДЕ (полевой фидбек: «одно и то же по кругу —
         // не по кайфу»):
         //  - волна (Global) — продолжаем волну: личную или станцию по seed;

@@ -90,6 +90,50 @@ object PlayerController {
     val isLocalJucePlaybackActive: Boolean
         get() = _playbackBackend.value == PlaybackBackend.JUCE_LOCAL
 
+    /** Тип трека по схеме URI: file/content — локальный файл, всё прочее — сеть. */
+    enum class TrackKind { ONLINE, LOCAL }
+
+    fun kindOf(track: Track): TrackKind {
+        val scheme = track.uri.scheme
+        return if (scheme == "file" || scheme == "content") TrackKind.LOCAL else TrackKind.ONLINE
+    }
+
+    /**
+     * Единая точка старта воспроизведения: бэкенд выбирается по СТАРТОВОМУ треку,
+     * чужие треки в плеер не попадают.
+     *
+     * Стриминговый плеер физически умеет открыть content://, а JUCE — нет, поэтому
+     * раньше локальные треки молча игрались через ExoPlayer мимо JUCE, а онлайн-трек
+     * в локальной очереди вставал намертво (JUCE_LOAD_FAILED без скипа).
+     */
+    fun play(
+        context: Context,
+        tracks: List<Track>,
+        startIndex: Int = 0,
+        autoRefillType: String? = null,
+        autoRefillId: String? = null,
+        autoRefillName: String? = null,
+        seedTrackId: String? = null,
+        seedPool: List<String> = emptyList()
+    ) {
+        if (tracks.isEmpty() || startIndex !in tracks.indices) return
+        val startTrack = tracks[startIndex]
+        val kind = kindOf(startTrack)
+        val pure = tracks.filter { kindOf(it) == kind }
+        val newStart = pure.indexOfFirst { it.id == startTrack.id }.coerceAtLeast(0)
+        if (pure.size != tracks.size) {
+            DebugLog.add("PC.play kind=$kind отброшено чужих: ${tracks.size - pure.size}")
+        }
+        if (kind == TrackKind.LOCAL) {
+            playLocalOnJuce(context, pure, newStart)
+        } else {
+            playFromList(
+                context, pure, newStart,
+                autoRefillType, autoRefillId, autoRefillName, seedTrackId, seedPool
+            )
+        }
+    }
+
     // ── Endless Playback (AutoMix) ──
     private val endlessEngine = EndlessPlaybackEngine(
         scope = ioScope,
@@ -257,6 +301,19 @@ object PlayerController {
             return
         }
 
+        // Тап по треку чужого типа = смена бэкенда. Раньше команды уходили в тот
+        // плеер, который стоял в сессии, и после локального сеанса первый онлайн-трек
+        // просто не запускался (play() съедал JUCE, а Exo оставался на паузе).
+        val tapped = currentQueue[queueIndex]
+        val wantBackend =
+            if (kindOf(tapped) == TrackKind.LOCAL) PlaybackBackend.JUCE_LOCAL
+            else PlaybackBackend.EXO_STREAMING
+        if (_playbackBackend.value != wantBackend) {
+            DebugLog.add("PC.playTrackById смена бэкенда → $wantBackend")
+            play(context, currentQueue, queueIndex)
+            return
+        }
+
         ioScope.launch {
             val track = currentQueue.getOrNull(queueIndex) ?: return@launch
 
@@ -398,6 +455,13 @@ object PlayerController {
 
     fun addTracksToQueue(newTracks: List<Track>) {
         if (newTracks.isEmpty()) return
+        // Волна/эндлесс отдаёт онлайн-треки: в локальную очередь их подмешивать
+        // нельзя — JUCE такой трек не откроет и воспроизведение встанет.
+        @Suppress("NAME_SHADOWING") val newTracks = run {
+            val kind = _currentTrack.value?.let { kindOf(it) } ?: TrackKind.ONLINE
+            newTracks.filter { kindOf(it) == kind }
+        }
+        if (newTracks.isEmpty()) return
         mainScope.launch {
             // Anti-repeat: не добавляем то, что уже есть в очереди (защита от дублей,
             // даже если сервер/refill вернул пересекающийся трек).
@@ -456,6 +520,9 @@ object PlayerController {
             return
         }
 
+        @Suppress("NAME_SHADOWING") val tracks = tracks.filter { kindOf(it) == TrackKind.ONLINE }
+        if (tracks.isEmpty()) return // очередь была целиком локальной — не наш бэкенд
+        @Suppress("NAME_SHADOWING") val startIndex = startIndex.coerceAtMost(tracks.lastIndex)
         val startTrack = tracks[startIndex]
         DebugLog.add("PC.playFromList(EXO) n=${tracks.size} start=$startIndex online=${startTrack.isOnlineTrack} | ${DebugLog.caller()}")
 
@@ -604,6 +671,9 @@ object PlayerController {
             android.util.Log.e("VOIDPIXEL_MEDIA", "playLocalOnJuce: empty tracks or bad startIndex=$startIndex")
             return
         }
+        @Suppress("NAME_SHADOWING") val tracks = tracks.filter { kindOf(it) == TrackKind.LOCAL }
+        if (tracks.isEmpty()) return // онлайн-очередь в JUCE не отдаём
+        @Suppress("NAME_SHADOWING") val startIndex = startIndex.coerceAtMost(tracks.lastIndex)
         val startTrack = tracks[startIndex]
         DebugLog.add("PC.playLocalOnJuce n=${tracks.size} start=$startIndex id=${startTrack.id} | ${DebugLog.caller()}")
 
@@ -789,6 +859,7 @@ object PlayerController {
     @Volatile private var lastAppliedCrossfadeMs = -1
 
     private fun applyCrossfadeSetting() {
+        if (isLocalJucePlaybackActive) return // у локального движка свой кроссфейд
         val ms = PlayerSettings.crossfadeMs.value
         if (ms == lastAppliedCrossfadeMs) return
         lastAppliedCrossfadeMs = ms

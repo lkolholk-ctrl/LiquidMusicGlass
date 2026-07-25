@@ -198,6 +198,8 @@ class AudioService : MediaSessionService() {
 
     private val playerListener = object : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) {
+            if (!exoOwnsSession()) return // события неактивного плеера — чужие
+
             _playbackState.value = playbackState
             _isBuffering.value = (playbackState == Player.STATE_BUFFERING)
 
@@ -222,6 +224,8 @@ class AudioService : MediaSessionService() {
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
+            if (!exoOwnsSession()) return // события неактивного плеера — чужие
+
             PlayerController.setPlaying(isPlaying)
             manageWakeLock()
             // Фокус берём при РЕАЛЬНОМ старте плейбека (P1, аудит): раньше он
@@ -232,6 +236,8 @@ class AudioService : MediaSessionService() {
         }
 
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            if (!exoOwnsSession()) return // события неактивного плеера — чужие
+
             android.util.Log.d("VOIDPIXEL_MEDIA", "[PAUSE_TRIGGER] playWhenReady changed to $playWhenReady, Reason ID: $reason")
             when (reason) {
                 Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS ->
@@ -253,6 +259,8 @@ class AudioService : MediaSessionService() {
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            if (!exoOwnsSession()) return // события неактивного плеера — чужие
+
             mediaItem?.let {
                 android.util.Log.d("AudioService", "onMediaItemTransition: id=${it.mediaId}, reason=$reason")
                 android.util.Log.d("VOIDPIXEL_MEDIA", "[SERVICE_TRANSITION] id=${it.mediaId}, reason=$reason")
@@ -272,6 +280,8 @@ class AudioService : MediaSessionService() {
         }
 
         override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
+            if (!exoOwnsSession()) return // события неактивного плеера — чужие
+
             // ── Duration recovery: timeline changes often carry resolved duration ──
             val duration = player.duration
             if (duration > 0 && duration != C.TIME_UNSET) {
@@ -281,6 +291,8 @@ class AudioService : MediaSessionService() {
         }
 
         override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
+            if (!exoOwnsSession()) return // события неактивного плеера — чужие
+
             // ── Duration recovery: tracks info may resolve after playback starts ──
             val duration = player.duration
             if (duration > 0 && duration != C.TIME_UNSET) {
@@ -364,6 +376,8 @@ class AudioService : MediaSessionService() {
 
     private val jucePlayerListener = object : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) {
+            if (!juceOwnsSession()) return // события неактивного плеера — чужие
+
             _playbackState.value = playbackState
             _isBuffering.value = (playbackState == Player.STATE_BUFFERING)
             manageWakeLock()
@@ -375,6 +389,8 @@ class AudioService : MediaSessionService() {
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
+            if (!juceOwnsSession()) return // события неактивного плеера — чужие
+
             PlayerController.setPlaying(isPlaying)
             manageWakeLock()
             // См. Exo-листенер: фокус — при реальном старте плейбека.
@@ -382,6 +398,8 @@ class AudioService : MediaSessionService() {
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            if (!juceOwnsSession()) return // события неактивного плеера — чужие
+
             mediaItem?.let {
                 android.util.Log.d("AudioService", "JUCE onMediaItemTransition: id=${it.mediaId}, reason=$reason")
                 PlayerController.onTrackChanged(it.mediaId)
@@ -824,7 +842,7 @@ class AudioService : MediaSessionService() {
         ): ListenableFuture<List<MediaItem>> {
             // Accept and append items to our solid queue reference
             currentQueueItems = currentQueueItems + mediaItems
-            player.addMediaItems(mediaItems)
+            activePlayer().addMediaItems(mediaItems)
             return Futures.immediateFuture(mediaItems)
         }
 
@@ -837,7 +855,7 @@ class AudioService : MediaSessionService() {
         ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
             // Hard timeline population: replace entire queue
             currentQueueItems = mediaItems.toList()
-            player.setMediaItems(currentQueueItems, startIndex, startPositionMs)
+            activePlayer().setMediaItems(currentQueueItems, startIndex, startPositionMs)
             player.prepare()
             return Futures.immediateFuture(
                 MediaSession.MediaItemsWithStartPosition(currentQueueItems, startIndex, startPositionMs)
@@ -978,7 +996,7 @@ class AudioService : MediaSessionService() {
             bindExoPlayer()                            // стриминг → ExoPlayer (с JUCE при необходимости)
             player.stop()
             player.clearMediaItems()
-            player.setMediaItems(currentQueueItems, startIndex, startPositionMs)
+            activePlayer().setMediaItems(currentQueueItems, startIndex, startPositionMs)
             player.prepare()
             android.util.Log.d("AudioService", "[QUEUE_SET] ${currentQueueItems.size} items injected, startIndex=$startIndex")
             // ── AGGRESSIVE DEBUG: verify injection ──
@@ -993,7 +1011,7 @@ class AudioService : MediaSessionService() {
     fun addToQueue(mediaItems: List<MediaItem>) {
         currentQueueItems = currentQueueItems + mediaItems
         mainScope.launch {
-            player.addMediaItems(mediaItems)
+            activePlayer().addMediaItems(mediaItems)
             android.util.Log.d("AudioService", "[QUEUE_ADD] ${mediaItems.size} items appended. Total=${currentQueueItems.size}")
         }
     }
@@ -1048,11 +1066,19 @@ class AudioService : MediaSessionService() {
     }
 
     /** Поставить сессию на ExoPlayer (стриминг). Идемпотентно. */
+    /** Владеет ли сессией стриминговый плеер (иначе его события — чужие). */
+    private fun exoOwnsSession() = session?.player === player
+
+    private fun juceOwnsSession() = juceLocalPlayer != null && session?.player === juceLocalPlayer
+
     private fun bindExoPlayer() {
         if (session?.player !== player) {
             DebugLog.add("SVC.bindExoPlayer (session JUCE->EXO) | ${DebugLog.caller()}")
             cancelCrossfadeFade(resetVolume = true)
-            runCatching { juceLocalPlayer?.stop() }    // заглушить JUCE — без двойного звука
+            runCatching {
+                juceLocalPlayer?.stop()
+                juceLocalPlayer?.clearMediaItems() // иначе JUCE остаётся с чужой очередью
+            }
             session?.player = player
         }
     }
@@ -1070,7 +1096,10 @@ class AudioService : MediaSessionService() {
             val juce = ensureJucePlayer()
             if (session?.player !== juce) {
                 DebugLog.add("SVC.playLocalQueue (session EXO->JUCE)")
-                runCatching { player.pause() }         // заглушить Exo — без двойного звука
+                runCatching {
+                    player.stop()
+                    player.clearMediaItems() // pause() оставлял таймлайн, события и wifi-lock
+                }
                 session?.player = juce
             }
             juce.setMediaItems(mediaItems, startIndex.coerceAtLeast(0), 0L)
