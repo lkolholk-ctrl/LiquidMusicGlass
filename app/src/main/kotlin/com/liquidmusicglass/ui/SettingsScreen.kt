@@ -361,6 +361,28 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(sectionGap))
 
             // PRELOAD NEXT TRACK
+            // CROSSFADE
+            SectionLabel("CROSSFADE")
+
+            val crossfadeMs by PlayerSettings.crossfadeMs.collectAsState()
+            PlainCard {
+                Column(modifier = Modifier.padding(vertical = 6.dp)) {
+                    CrossfadeSelector(
+                        options = listOf(0, 5, 8, 10, 12),
+                        selectedMs = crossfadeMs,
+                        onSelect = { PlayerSettings.setCrossfadeMs(it * 1000) }
+                    )
+                    Text(
+                        text = "Fade between tracks. Off plays them back to back.",
+                        color = lc.textSecondary,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(sectionGap))
+
             SectionLabel("PRELOAD NEXT TRACK")
 
             val preloadLead by AppSettings.preloadLeadSeconds.collectAsState()
@@ -1003,6 +1025,53 @@ private fun SettingsActionItem(
             tint = LiquidTheme.colors.iconDefault,
             modifier = Modifier.size(20.dp)
         )
+    }
+}
+
+@Composable
+private fun CrossfadeSelector(
+    options: List<Int>,
+    selectedMs: Int,
+    onSelect: (Int) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        options.forEach { sec ->
+            val isSelected = selectedMs / 1000 == sec
+            val isDark = LiquidTheme.colors.isDark
+            val itemBg = if (isSelected) Accent else (if (isDark) Color(0xFF1C1C1E) else Color(0xFFE5E5EA))
+            val unselectedTextColor =
+                if (isDark) Color.White.copy(alpha = 0.45f) else Color.Black.copy(alpha = 0.45f)
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(36.dp)
+                    .background(itemBg, RoundedCornerShape(50))
+                    .clip(RoundedCornerShape(50))
+                    .liquidClickable(
+                        pressedScale = LiquidMotion.PressButton,
+                        onClick = { onSelect(sec) }
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                val textColor by animateColorAsState(
+                    targetValue = if (isSelected) Color.White else unselectedTextColor,
+                    animationSpec = tween(200),
+                    label = "crossfadeText"
+                )
+                Text(
+                    text = if (sec == 0) "Off" else "${sec}s",
+                    color = textColor,
+                    fontSize = 13.sp,
+                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+                )
+            }
+        }
     }
 }
 

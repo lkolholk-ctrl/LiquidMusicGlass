@@ -249,9 +249,6 @@ object PlayerController {
     fun playTrackById(context: Context, trackId: String) {
         android.util.Log.d("VOIDPIXEL_MEDIA", "UI requested Playback for Track ID: $trackId")
         _isVideoClip.value = false
-        // Иначе после локальной JUCE-сессии флаг оставался JUCE_LOCAL, и анализ
-        // на стриминге глох с «juce active» до следующего playFromList.
-        _playbackBackend.value = PlaybackBackend.EXO_STREAMING
 
         val currentQueue = queue
         val queueIndex = currentQueue.indexOfFirst { it.id == trackId }
@@ -785,20 +782,31 @@ object PlayerController {
         }
     }
 
+    // ── Кроссфейд ──
+    // Длительность задаёт пользователь (Settings → Crossfade). ML-модель решала
+    // это сама, но на стриминге себя не оправдала и со стриминга убрана; оффлайн
+    // (JUCE) продолжает работать по своей модели и сюда не ходит.
+    @Volatile private var lastAppliedCrossfadeMs = -1
+
+    private fun applyCrossfadeSetting() {
+        val ms = PlayerSettings.crossfadeMs.value
+        if (ms == lastAppliedCrossfadeMs) return
+        lastAppliedCrossfadeMs = ms
+        androidx.media3.exoplayer.CrossfadeConfig.setEnabled(ms > 0)
+        if (ms > 0) {
+            // curveType = -1 → кривая по умолчанию (log-in/exp-out), точка входа 0.
+            androidx.media3.exoplayer.CrossfadeConfig.applyRecipe(ms.toLong(), -1, 0L)
+        } else {
+            androidx.media3.exoplayer.CrossfadeConfig.clearRecipe()
+        }
+        DebugLog.add("Crossfade ${if (ms > 0) "${ms}ms" else "off"}")
+    }
+
     fun updatePosition(positionMs: Long, durationMs: Long) {
+        applyCrossfadeSetting()
         _currentPositionMs.value = positionMs
         lastPlayerPositionMs = positionMs
         lastSyncTimeMs = SystemClock.elapsedRealtime()
-
-        // AutoMix: анализ пары запускаем БЛИЖЕ К КОНЦУ трека (как оффлайн-движок),
-        // а не на старте. На старте плеер как раз буферизует новый трек, и тяжёлый
-        // анализ (сетевой декод + FFT + модель) отбирал бы у него сеть и CPU.
-        if (durationMs > 0L && durationMs - positionMs <= AUTOMIX_PREWARM_LEAD_MS) {
-            maybePrewarmPairFiles(currentIndex)
-        }
-        if (durationMs > 0L && durationMs - positionMs <= AUTOMIX_ANALYZE_LEAD_MS) {
-            maybeAnalyzePairForCrossfade(currentIndex, durationMs)
-        }
 
         if (durationMs > 0L && _durationMs.value != durationMs) {
             _durationMs.value = durationMs
@@ -876,312 +884,6 @@ object PlayerController {
             val nextTrackId = currentQueue.getOrNull(nextIndex)?.id
             android.util.Log.d("VOIDPIXEL_MEDIA", "onTrackEnded: nextIndex=$nextIndex, nextTrackId=$nextTrackId")
         }
-    }
-
-    // ── AutoMix для СТРИМИНГА (ExoPlayer) ────────────────────────────────────
-    // Оффлайн-движок (JUCE) уже водит кроссфейд рецептом модели. Здесь то же для
-    // стриминга: анализируем пару «текущий → следующий» и кладём рецепт в
-    // CrossfadeConfig — форк media3 подхватит его при взводе свода (длительность,
-    // кривая, точка входа). Момент старта берём НЕ из модели (её transitionStartMs
-    // ненадёжен) — свод якорится к концу трека, как и в оффлайне.
-    // Контроллер НЕ через by lazy: lazy кэширует результат навсегда, и если первое
-    // обращение случится до init(context) (appContext == null), AutoMix останется
-    // мёртвым до перезапуска процесса. Создаём при первой возможности.
-    @Volatile private var autoMixControllerRef: com.liquidmusicglass.automix.AutoMixController? = null
-    @Volatile private var lastAnalyzedPairKey: String? = null
-    @Volatile private var autoMixJob: kotlinx.coroutines.Job? = null
-    private val lastSkipLogMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
-
-    /** За сколько до конца анализировать пару — как оффлайн-движок (~40 c). */
-    private val AUTOMIX_ANALYZE_LEAD_MS = 40_000L
-
-    /**
-     * За сколько до конца готовить ФАЙЛЫ пары. Предсказание остаётся на 40 c, но
-     * оффлайну файлы даны сразу, а стримингу их ещё надо докачать: без форы
-     * докачка съедала окно, и рецепт опаздывал к моменту взвода свода.
-     */
-    private val AUTOMIX_PREWARM_LEAD_MS = 75_000L
-
-    @Volatile private var prewarmedPairKey: String? = null
-    @Volatile private var prewarmJob: kotlinx.coroutines.Job? = null
-
-    /** Тихо готовит локальные копии пары — ничего не анализирует. */
-    private fun maybePrewarmPairFiles(index: Int) {
-        if (!PlayerSettings.autoMix.value || isLocalJucePlaybackActive) return
-        val snapshot = queue
-        val current = snapshot.getOrNull(index) ?: return
-        val next = snapshot.getOrNull(index + 1) ?: return
-        val pairKey = "${current.id}->${next.id}"
-        if (pairKey == prewarmedPairKey) return
-        if (prewarmJob?.isActive == true) return
-        prewarmedPairKey = pairKey
-        prewarmJob = ioScope.launch {
-            runCatching {
-                if (current.isOnlineTrack) localCopyForAnalysis(current.id)
-                if (next.isOnlineTrack) localCopyForAnalysis(next.id)
-            }.onFailure {
-                if (it !is kotlinx.coroutines.CancellationException) prewarmedPairKey = null
-            }
-        }
-    }
-
-    /**
-     * Не раньше этого момента повторять анализ после неудачи. Тикер идёт каждые
-     * 500 мс, а попытка теперь тяжёлая (запрос длины + докачка) — без паузы
-     * получается шторм запросов до самого конца трека.
-     */
-    @Volatile private var retryAnalyzeAfterMs = 0L
-
-    /**
-     * Анализ уже идёт. Без этого повтор, назначенный изнутри работающей задачи,
-     * запускал вторую такую же: обе вставали на один лок экспорта и жгли окно.
-     */
-    @Volatile private var analyzeInFlight = false
-
-    /** Разрешает повтор пары, но не мгновенно. */
-    private fun retryAnalyzeLater() {
-        lastAnalyzedPairKey = null
-        retryAnalyzeAfterMs = SystemClock.elapsedRealtime() + 5_000L
-    }
-
-    /** Логирует причину пропуска анализа, но не чаще раза в 10 c (чтобы не залить лог). */
-    private fun logAutoMixSkip(reason: String) {
-        val now = SystemClock.elapsedRealtime()
-        // Ключ — сама причина: общий троттл прятал редкую причину за частой.
-        val key = reason.substringBefore(" (")
-        if (now - (lastSkipLogMs[key] ?: 0L) < 10_000L) return
-        lastSkipLogMs[key] = now
-        DebugLog.add("AutoMix.skip $reason")
-    }
-
-    /**
-     * Локальная копия трека для анализа: берём УЖЕ закэшированные байты (треки
-     * префетчатся целиком) и кладём во временный файл. Если в кэше пусто —
-     * возвращаем сетевой URL как раньше (анализ будет медленным, но не сорвётся).
-     */
-    /** §5.5: держим не больше N временных копий — иначе cacheDir пухнет без границ. */
-    private fun trimAnalysisCache(dir: java.io.File, keep: Int = 6) {
-        runCatching {
-            val now = System.currentTimeMillis()
-            val files = dir.listFiles()
-                ?.filterNot {
-                    // .part трогаем только если он явно осиротел (писателя нет).
-                    (it.name.endsWith(".part") && now - it.lastModified() < 600_000L) ||
-                        now - it.lastModified() < 60_000L
-                }
-                ?.sortedByDescending { it.lastModified() } ?: return
-            files.drop(keep).forEach { it.delete() }
-        }
-    }
-
-    private fun localCopyForAnalysis(trackId: String): android.net.Uri? {
-        val ctx = appContext ?: return null
-        val streamUrl = resolveStreamUrlSync(trackId) ?: return null
-        return try {
-            val dir = java.io.File(ctx.cacheDir, "automix").apply { mkdirs() }
-            trimAnalysisCache(dir)
-            // Оффлайн-движок анализирует ПОЛНЫЙ файл с диска — приводим стриминг
-            // к тому же. Длину узнаём у сервера (ICM не шлёт Content-Length), а
-            // полноту меряем по кэшу: недокачанный m4a декодер откроет как тишину.
-            if (!MediaCacheManager.isCacheEnabled() ||
-                MediaCacheManager.getCacheDataSourceFactory() == null
-            ) {
-                // Кэш выключен настройкой: локальной копии взяться неоткуда.
-                // Анализ по сети медленный, но живой — это лучше, чем немой AutoMix.
-                DebugLog.add("AutoMix.cacheoff $trackId — анализ по сети")
-                return streamUrl
-            }
-            val known = MediaCacheManager.ensureContentLength(trackId, streamUrl)
-            if (known <= 0L) {
-                DebugLog.add("AutoMix.nolen $trackId")
-                retryAnalyzeLater()
-                return null
-            }
-            if (!MediaCacheManager.isFullyCached(trackId)) {
-                DebugLog.add(
-                    "AutoMix.pull $trackId ${MediaCacheManager.cachedPrefixLength(trackId)}/$known"
-                )
-                if (!MediaCacheManager.preCacheTrack(trackId, streamUrl, exclusive = false)) {
-                    DebugLog.add("AutoMix.notcached $trackId")
-                    retryAnalyzeLater() // иначе пара похоронена до конца трека
-                    return null
-                }
-            }
-            val f = java.io.File(dir, "$trackId.audio")
-            // Переиспользуем копию ТОЛЬКО если она совпадает по размеру с кэшем:
-            // однажды записанный обрезок иначе жил бы вечно.
-            if (f.exists() && f.length() == known) {
-                return android.net.Uri.fromFile(f)
-            }
-            if (MediaCacheManager.exportCachedTrackToFile(trackId, streamUrl, f)) {
-                android.net.Uri.fromFile(f)
-            } else {
-                DebugLog.add("AutoMix.export failed $trackId")
-                null
-            }
-        } catch (t: Throwable) {
-            DebugLog.add("AutoMix.localCopy FAILED ${t.message}")
-            streamUrl
-        }
-    }
-
-    private fun maybeAnalyzePairForCrossfade(index: Int, playerDurationMs: Long) {
-        val enabled = PlayerSettings.autoMix.value
-        androidx.media3.exoplayer.CrossfadeConfig.setEnabled(enabled)
-        if (!enabled) { logAutoMixSkip("toggle off"); return }
-
-        if (isLocalJucePlaybackActive) { logAutoMixSkip("juce active"); return }
-
-        val snapshot = queue
-        val current = snapshot.getOrNull(index)
-        if (current == null) { logAutoMixSkip("no current (idx=$index size=${snapshot.size})"); return }
-        val next = snapshot.getOrNull(index + 1)
-        if (next == null) { logAutoMixSkip("no next track (idx=$index size=${snapshot.size})"); return }
-        if (current.id.startsWith("clip_") || next.id.startsWith("clip_")) {
-            logAutoMixSkip("video clip"); return
-        }
-        // Длительность берём ИЗ ПЛЕЕРА: у стриминговых треков Track.durationMs в
-        // очереди часто 0 (реальная приходит позже и попадает только в
-        // _currentTrack). Раньше ранний return по ней глушил анализ полностью.
-        if (playerDurationMs <= 1000L) { logAutoMixSkip("no duration"); return }
-        // Как в оффлайне: не анализируем, если играть уже нечего (свод не успеет).
-        if (playerDurationMs - _currentPositionMs.value < 1500L) { logAutoMixSkip("too late"); return }
-        if (!_isPlaying.value) { logAutoMixSkip("not playing"); return }
-
-        val pairKey = "${current.id}->${next.id}"
-        if (pairKey == lastAnalyzedPairKey) return // тихо: это штатный дедуп каждый тик
-        if (analyzeInFlight) return // предыдущая попытка ещё работает
-        if (SystemClock.elapsedRealtime() < retryAnalyzeAfterMs) return // пауза после неудачи
-        lastAnalyzedPairKey = pairKey
-
-        val ctx = appContext
-        if (ctx == null) { logAutoMixSkip("no appContext"); lastAnalyzedPairKey = null; return }
-        DebugLog.add(
-            "AutoMix.analyze START ${current.title.take(18)} -> ${next.title.take(18)} " +
-                "rem=${playerDurationMs - _currentPositionMs.value}ms"
-        )
-        val startedAtMs = SystemClock.elapsedRealtime()
-        // §5.3: старый анализ мог бы дописать свой (уже неактуальный) рецепт поверх
-        // свежего — CrossfadeConfig статический, last-writer-wins. Отменяем предыдущий.
-        autoMixJob?.cancel()
-        // §5.1: штамп пары — применяем рецепт только если трек с тех пор не сменился.
-        val analyzedIndex = index
-        analyzeInFlight = true
-        autoMixJob = ioScope.launch {
-            runCatching {
-                // Создаём здесь, а не в тикере: конструктор грузит TFLite, а тикер
-                // живёт на главном потоке — это был риск фриза UI.
-                val controller = autoMixControllerRef
-                    ?: com.liquidmusicglass.automix.AutoMixController(ctx)
-                        .also { autoMixControllerRef = it }
-                // КРИТИЧНО: track.uri у стриминговых треков — это идентификатор
-                // (https://byicloud.online/track/<id>), а НЕ аудиопоток. Если отдать
-                // его анализатору, MediaExtractor читает не-аудио → mel_a/mel_b
-                // вырождаются (тишина, одинаковые на любой паре) и модель выдаёт
-                // один и тот же рецепт на все переходы. Резолвим настоящие URL.
-                // Онлайн-треки анализируем из ЛОКАЛЬНОЙ копии кэша: MediaExtractor
-                // по сетевому URL тянул файл почти целиком (хвост трека = конец
-                // файла) — на 4G ~60 c, и рецепт опаздывал на целый трек.
-                // localCopyForAnalysis может блокировать (докачка, ожидание чужого
-                // писателя в кэше) и не реагирует на cancel — держим её в бюджете.
-                // Докачка 6-10 МБ по мобильной сети — это не «остаток окна»:
-                // отдаём ей большую часть лида, анализу хватает нескольких секунд.
-                val prepMs = AUTOMIX_ANALYZE_LEAD_MS -
-                    androidx.media3.exoplayer.CrossfadeConfig.MIN_XFADE_MS - 10_000L
-                val uris = kotlinx.coroutines.withTimeoutOrNull(prepMs.coerceAtLeast(5_000L)) {
-                    kotlinx.coroutines.runInterruptible {
-                        val a = if (current.isOnlineTrack) {
-                            localCopyForAnalysis(current.id)
-                        } else {
-                            current.uri
-                        }
-                        val b = if (next.isOnlineTrack) localCopyForAnalysis(next.id) else next.uri
-                        a to b
-                    }
-                }
-                if (uris == null) {
-                    DebugLog.add("AutoMix.prep TIMEOUT")
-                    retryAnalyzeLater()
-                    return@runCatching
-                }
-                val curUri = uris.first
-                val nextUri = uris.second
-                if (curUri == null || nextUri == null) {
-                    // Раньше здесь был молчаливый выход — анализ «пропадал» без следа.
-                    DebugLog.add(
-                        "AutoMix.stream SKIP: no stream url (cur=${curUri != null} next=${nextUri != null})"
-                    )
-                    retryAnalyzeLater() // дать шанс повторить, но не каждые 500 мс
-                    return@runCatching
-                }
-                // Таймаута здесь нет — как в оффлайн-движке. Анализ блокирующий и
-                // непрерываемый: дедлайн не останавливал работу, а лишь выбрасывал
-                // уже посчитанный результат, и повтор стоил ровно столько же.
-                // От устаревания защищает проверка индекса ниже.
-                val f = controller.analyzeTrackPair(curUri, nextUri, playerDurationMs)
-                if (currentIndex != analyzedIndex) {
-                    DebugLog.add("AutoMix.stale drop (idx $analyzedIndex -> $currentIndex)")
-                    return@launch
-                }
-                DebugLog.add(
-                    "AutoMix.stream ready=${f.readyForTransition} " +
-                        "compat=${"%.2f".format(f.compatibility)} " +
-                        "xfade=${f.crossfadeDurationMs}ms entry=${f.entryOffsetMs}ms " +
-                        "type=${f.transitionType} bpm=${f.bpmA}->${f.bpmB} " +
-                        "took=${SystemClock.elapsedRealtime() - startedAtMs}ms"
-                )
-                // Полная строка предиктора (сырые выходы + контрольные суммы мелов) —
-                // именно она разводит классы 1/2/3 при разборе.
-                // F1: take(220) обрезал строку ровно на " mel" — melB и блок feat
-                // не логировались НИ РАЗУ, из-за чего «B не анализируется» нельзя
-                // было ни подтвердить, ни опровергнуть. Пишем целиком, кусками.
-                f.debugInfo.chunked(200).forEachIndexed { i, part ->
-                    DebugLog.add("AutoMix.dbg$i $part")
-                }
-                if (f.debugInfo.contains("!A_SILENT") || f.debugInfo.contains("!B_SILENT")) {
-                    // Декодер отдал тишину — признаки вырождены, рецепт по ним
-                    // недостоверен. Как в оффлайне: нет плана → обычный переход.
-                    DebugLog.add("AutoMix.silent drop — вход вырожден, рецепт не применяем")
-                    androidx.media3.exoplayer.CrossfadeConfig.clearRecipe()
-                    retryAnalyzeLater()
-                    return@launch
-                }
-                // §5.4: рецепт, чья точка свода попадает в начало трека или в
-                // прошлое, бессмысленен — отбрасываем, а не исполняем.
-                val xfadeMs = f.crossfadeDurationMs.coerceIn(
-                    androidx.media3.exoplayer.CrossfadeConfig.MIN_XFADE_MS,
-                    androidx.media3.exoplayer.CrossfadeConfig.MAX_XFADE_MS
-                )
-                val remainingMs = playerDurationMs - _currentPositionMs.value
-                val sane = remainingMs > xfadeMs &&
-                    playerDurationMs - xfadeMs > 10_000L
-                if (f.readyForTransition && !sane) {
-                    DebugLog.add(
-                        "AutoMix.insane drop xfade=${xfadeMs}ms rem=${remainingMs}ms dur=$playerDurationMs"
-                    )
-                    androidx.media3.exoplayer.CrossfadeConfig.clearRecipe()
-                    return@launch
-                }
-                if (f.readyForTransition) {
-                    androidx.media3.exoplayer.CrossfadeConfig.applyRecipe(
-                        xfadeMs,
-                        f.transitionType,
-                        f.entryOffsetMs.coerceIn(0L, 10_000L)
-                    )
-                } else {
-                    // Модель против свода этой пары — вернём фолбэк-параметры.
-                    androidx.media3.exoplayer.CrossfadeConfig.clearRecipe()
-                }
-            }.onFailure {
-                // Отмена — не сбой: этот job уступил место более свежему, и его
-                // clearRecipe() стёр бы уже применённый рецепт живого анализа.
-                if (it is kotlinx.coroutines.CancellationException) return@onFailure
-                DebugLog.add("AutoMix.stream FAILED ${it.javaClass.simpleName}: ${it.message}")
-                androidx.media3.exoplayer.CrossfadeConfig.clearRecipe()
-                retryAnalyzeLater() // не блокируем пару навсегда после сбоя
-            }
-        }
-        autoMixJob?.invokeOnCompletion { analyzeInFlight = false }
     }
 
     fun onPlaybackError(errorCodeName: String) {

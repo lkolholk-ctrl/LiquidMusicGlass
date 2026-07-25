@@ -126,7 +126,6 @@ object MediaCacheManager {
                 "User-Agent" to "LiquidMusicGlass/1.0"
             ))
 
-        httpDataSourceFactory = httpFactory
         cacheDataSourceFactory = CacheDataSource.Factory()
             .setCache(simpleCache)
             .setUpstreamDataSourceFactory(httpFactory)
@@ -138,8 +137,6 @@ object MediaCacheManager {
         )
     }
 
-    @Volatile private var httpDataSourceFactory: DefaultHttpDataSource.Factory? = null
-
     private fun releaseInternal() {
         try {
             cache?.release()
@@ -148,7 +145,6 @@ object MediaCacheManager {
         }
         cache = null
         cacheDataSourceFactory = null
-        httpDataSourceFactory = null
     }
 
     /**
@@ -222,232 +218,11 @@ object MediaCacheManager {
      * закэшированного трека выходит быстро (CacheWriter пропускает готовые
      * куски). Новый префетч отменяет предыдущий незавершённый.
      */
-    private fun cacheKey(trackId: String) = "icm_$trackId"
-
-    /** F5: экспорт одного трека не должен идти в двух потоках одновременно. */
-    private val exportLocks = java.util.concurrent.ConcurrentHashMap<String, Any>()
-
-    /**
-     * Полностью ли трек лежит в кэше. Проверяем ДО экспорта: частичный файл
-     * бесполезен — у m4a/mp4 moov-атом в конце, и MediaExtractor такой файл
-     * просто не откроет (признаки трека вырождаются в тишину).
-     *
-     * exo_len проставляется в первые миллисекунды закачки, поэтому проверка
-     * работает и для недокачанного трека. isCached меряет НЕПРЕРЫВНОЕ покрытие
-     * [0, len) и бросает на LENGTH_UNSET — поэтому сначала длина, потом проверка.
-     */
-    /** Полная длина контента в кэше или 0, если неизвестна. */
-    fun cachedContentLength(trackId: String): Long {
-        val c = cache ?: return 0L
-        val len = androidx.media3.datasource.cache.ContentMetadata.getContentLength(
-            c.getContentMetadata(cacheKey(trackId))
-        )
-        return if (len > 0L) len else 0L
-    }
-
-    /**
-     * Длина НЕПРЕРЫВНОГО закэшированного куска от начала трека.
-     *
-     * Мерить полноту по метаданным (exo_len) нельзя: ICM отдаёт поток без
-     * Content-Length, и для играющего трека длина так и остаётся неизвестной —
-     * проверка «закэширован целиком» тогда всегда ложно-отрицательна. Фактическое
-     * покрытие кэша от этого не зависит.
-     */
-    fun cachedPrefixLength(trackId: String): Long = runCatching {
-        val c = cache ?: return@runCatching 0L
-        val n = c.getCachedLength(
-            cacheKey(trackId), 0L, androidx.media3.common.C.LENGTH_UNSET.toLong()
-        )
-        if (n > 0L) n else 0L
-    }.getOrDefault(0L)
-
-    /**
-     * Настоящий размер файла: запрашиваем один байт и читаем Content-Range.
-     * ICM отдаёт поток без Content-Length, поэтому иначе полноту кэша знать
-     * неоткуда — а без неё анализатору можно скормить обрезок вместо трека.
-     */
-    private fun probeDocumentLength(url: android.net.Uri): Long {
-        val ds = (httpDataSourceFactory ?: return -1L).createDataSource()
-        return try {
-            ds.open(
-                androidx.media3.datasource.DataSpec.Builder()
-                    .setUri(url).setPosition(0L).setLength(1L).build()
-            )
-            fun header(name: String) = ds.responseHeaders.entries
-                .firstOrNull { it.key?.equals(name, ignoreCase = true) == true }
-                ?.value?.firstOrNull()
-            val fromRange = androidx.media3.datasource.HttpUtil.getDocumentSize(
-                header("Content-Range")
-            )
-            if (fromRange > 0L) {
-                fromRange
-            } else {
-                // Сервер проигнорировал Range и отдал файл целиком (200): тогда
-                // размер документа — это Content-Length, мы ведь просили с нуля.
-                header("Content-Length")?.toLongOrNull() ?: -1L
-            }
-        } catch (e: Exception) {
-            com.liquidmusicglass.debug.DebugLog.add("AutoMix.probe failed: ${e.message}")
-            -1L
-        } finally {
-            runCatching { ds.close() }
-        }
-    }
-
-    /**
-     * Возвращает длину трека, дописывая её в метаданные кэша, если media3 её не
-     * узнал. После этого isFullyCached снова осмыслен и самолечится: он читает
-     * фактическое покрытие кэша, а не запоминает былые успехи.
-     */
-    /** Когда можно снова спрашивать длину: неудачный probe открывает отдачу файла. */
-    private val probeRetryAtMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
-
-    fun ensureContentLength(trackId: String, url: android.net.Uri): Long {
-        val known = cachedContentLength(trackId)
-        if (known > 0L) return known
-        val c = cache ?: return 0L
-        val now = android.os.SystemClock.elapsedRealtime()
-        if (now < (probeRetryAtMs[trackId] ?: 0L)) return 0L
-        val size = probeDocumentLength(url)
-        if (size <= 0L) {
-            probeRetryAtMs[trackId] = now + 60_000L
-            return 0L
-        }
-        probeRetryAtMs.remove(trackId)
-        runCatching {
-            val mutations = androidx.media3.datasource.cache.ContentMetadataMutations()
-            androidx.media3.datasource.cache.ContentMetadataMutations.setContentLength(
-                mutations, size
-            )
-            c.applyContentMetadataMutations(cacheKey(trackId), mutations)
-        }
-        return size
-    }
-
-    fun isFullyCached(trackId: String): Boolean {
-        val c = cache ?: return false
-        val key = cacheKey(trackId)
-        val len = androidx.media3.datasource.cache.ContentMetadata.getContentLength(
-            c.getContentMetadata(key)
-        )
-        if (len <= 0L) return false
-        return try {
-            c.isCached(key, 0L, len)
-        } catch (_: Throwable) {
-            false
-        }
-    }
-
-    /**
-     * Выгружает ЦЕЛИКОМ закэшированный трек в обычный файл — для анализа AutoMix.
-     *
-     * Анализатор использует [android.media.MediaExtractor], который не умеет читать
-     * media3-кэш и по сетевому URL тянет файл почти целиком (чтобы дойти до хвоста
-     * трека) — на 4G это ~60 c. Данные уже лежат в кэше после preCacheTrack.
-     *
-     * ВАЖНО: читаем СТРОГО из кэша. createDataSourceForDownloading() для этого не
-     * годится — он сохраняет upstream и на дырке уходит в сеть. Здесь берём
-     * источник без upstream (внутри PlaceholderDataSource, который физически не
-     * может открыть сеть) и сверяем длину: недописанный файл удаляем, а не отдаём.
-     */
-    fun exportCachedTrackToFile(trackId: String, url: android.net.Uri, out: File): Boolean {
-        val lock = exportLocks.computeIfAbsent(trackId) { Any() }
-        synchronized(lock) { return exportCachedTrackToFileLocked(trackId, url, out) }
-    }
-
-    private fun exportCachedTrackToFileLocked(
-        trackId: String,
-        url: android.net.Uri,
-        out: File
-    ): Boolean {
-        val c = cache ?: return false
-        val factory = getCacheDataSourceFactory() ?: return false
-        val key = cacheKey(trackId)
-        val contentLength = androidx.media3.datasource.cache.ContentMetadata.getContentLength(
-            c.getContentMetadata(key)
-        )
-        // Без известной длины «полнота» проверялась бы сама собой: сколько
-        // прочитали из кэша, столько и ожидали. Тогда обрезок проходит как годный.
-        val exportLength = contentLength
-        if (exportLength <= 0L) {
-            com.liquidmusicglass.debug.DebugLog.add("AutoMix.export NOLEN $trackId")
-            return false
-        }
-        val prefix = cachedPrefixLength(trackId)
-        if (prefix < contentLength) {
-            com.liquidmusicglass.debug.DebugLog.add(
-                "AutoMix.export PARTIAL $trackId $prefix/$contentLength"
-            )
-            return false // ещё качается — анализировать нечего
-        }
-        val spec = androidx.media3.datasource.DataSpec.Builder()
-            .setUri(url)
-            .setKey(key)
-            .setPosition(0)
-            .setLength(exportLength)
-            .build()
-        // upstream принудительно null → в сеть уйти невозможно.
-        val source = factory.createDataSourceForRemovingDownload()
-        var written = 0L
-        // Пишем во временный файл и переименовываем: иначе частично записанный
-        // файл виден как «готовый» (и переиспользуется), а два параллельных
-        // экспорта одного трека писали бы в один поток вперемешку.
-        val tmp = File(out.parentFile, out.name + ".part")
-        return try {
-            source.open(spec)
-            tmp.outputStream().use { fos ->
-                val buf = ByteArray(64 * 1024)
-                while (true) {
-                    val n = source.read(buf, 0, buf.size)
-                    if (n == androidx.media3.common.C.RESULT_END_OF_INPUT) break
-                    fos.write(buf, 0, n)
-                    written += n
-                }
-            }
-            // Строгая сверка: LRU мог вытеснить спаны прямо во время чтения.
-            val ok = written == exportLength && tmp.length() == exportLength
-            if (ok) {
-                runCatching { out.delete() }
-                tmp.renameTo(out)
-            } else {
-                // Через DebugLog, а не Log.d: R8 вырезает Log.d в релизе,
-                // и причина провала экспорта была бы не видна на устройстве.
-                com.liquidmusicglass.debug.DebugLog.add(
-                    "AutoMix.export INCOMPLETE $trackId $written/$exportLength"
-                )
-                runCatching { tmp.delete() }
-            }
-            ok
-        } catch (e: Exception) {
-            com.liquidmusicglass.debug.DebugLog.add("AutoMix.export FAILED $trackId: ${e.message}")
-            runCatching { tmp.delete() }
-            false
-        } finally {
-            runCatching { source.close() }
-        }
-    }
-
-    @JvmOverloads
-    fun preCacheTrack(
-        trackId: String,
-        url: android.net.Uri,
-        /**
-         * false — докачка «для себя» (анализ AutoMix): не отменяет фоновую
-         * предзагрузку и не занимает её слот. Иначе два контура глушили друг
-         * друга: анализ отменял PRELOAD следующего трека, PRELOAD — докачку анализа.
-         */
-        exclusive: Boolean = true
-    ): Boolean {
+    fun preCacheTrack(trackId: String, url: android.net.Uri): Boolean {
         val factory = getCacheDataSourceFactory() ?: return false
         val key = "icm_$trackId"
-        // Тот же трек уже качается — не отменяем чужой writer и не выдаём это
-        // за провал: данные всё равно появятся.
-        if (activePreCacheKey == key) return isFullyCached(trackId)
-        if (exclusive) {
-            // Раньше отменялся любой активный writer — новый префетч обрывал
-            // докачку предыдущего трека, которую сам же и ждал.
-            try { activePreCache?.cancel() } catch (_: Throwable) {}
-        }
+        if (activePreCacheKey == key) return false
+        try { activePreCache?.cancel() } catch (_: Throwable) {}
 
         val spec = androidx.media3.datasource.DataSpec.Builder()
             .setUri(url)
@@ -456,24 +231,19 @@ object MediaCacheManager {
         val writer = androidx.media3.datasource.cache.CacheWriter(
             factory.createDataSourceForDownloading(), spec, null, null
         )
-        if (exclusive) {
-            activePreCache = writer
-            activePreCacheKey = key
-        }
+        activePreCache = writer
+        activePreCacheKey = key
         return try {
             writer.cache()
+            android.util.Log.d("MediaCacheManager", "Pre-cached audio for $trackId")
             true
         } catch (e: Exception) {
             // отмена/сеть — не страшно: вызывающий ретраит, а недокачанное
             // доберётся при воспроизведении (CacheWriter пропускает готовые куски).
-            com.liquidmusicglass.debug.DebugLog.add("AutoMix.precache stopped $trackId: ${e.message}")
-            // Не гадаем по коду ответа: 416 media3 сам обрабатывает, когда мы
-            // действительно на EOF (DefaultHttpDataSource сверяет Content-Range и
-            // проставляет exo_len). Долетевший сюда 416 — признак рассогласования
-            // кэша с документом, и полнотой его считать нельзя.
-            isFullyCached(trackId)
+            android.util.Log.d("MediaCacheManager", "Pre-cache stopped for $trackId: ${e.message}")
+            false
         } finally {
-            if (exclusive && activePreCacheKey == key) {
+            if (activePreCacheKey == key) {
                 activePreCache = null
                 activePreCacheKey = null
             }

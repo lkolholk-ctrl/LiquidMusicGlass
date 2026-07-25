@@ -45,9 +45,15 @@ object PlayerSettings {
     )
     private const val DEFAULT_CACHE_BYTES = 500L * 1024 * 1024
 
+    /** Кроссфейд: 0 = выкл, дальше шаг в секунду. Верх — как у Apple Music. */
+    const val MIN_CROSSFADE_MS = 1_000
+    const val MAX_CROSSFADE_MS = 12_000
+    private const val DEFAULT_CROSSFADE_MS = 0
+
     private val KEY_CACHE_BYTES = longPreferencesKey("audio_cache_bytes")
     private val KEY_THEME_MODE = intPreferencesKey("theme_mode")  // 0=System 1=Dark 2=Light
     private val KEY_AUTO_MIX = booleanPreferencesKey("auto_mix")
+    private val KEY_CROSSFADE_MS = intPreferencesKey("crossfade_ms")
     private val KEY_VOLUME_NORMALIZATION = booleanPreferencesKey("volume_normalization")
     private val KEY_INCREASE_CONTRAST = booleanPreferencesKey("increase_contrast")
 
@@ -66,6 +72,16 @@ object PlayerSettings {
     // подписывается на этот же Flow). По умолчанию ВКЛЮЧЕН.
     private val _autoMix = MutableStateFlow(true)
     val autoMix: StateFlow<Boolean> = _autoMix
+
+    /**
+     * Длительность кроссфейда на стриминге, мс. 0 = выключен.
+     *
+     * Фиксированная величина от пользователя: ML-модель решала это сама, но на
+     * стриминге она себя не оправдала. Оффлайн-движок (JUCE) её по-прежнему
+     * использует и этой настройкой не управляется.
+     */
+    private val _crossfadeMs = MutableStateFlow(DEFAULT_CROSSFADE_MS)
+    val crossfadeMs: StateFlow<Int> = _crossfadeMs
 
     private val _volumeNormalization = MutableStateFlow(false)
     val volumeNormalization: StateFlow<Boolean> = _volumeNormalization
@@ -94,6 +110,7 @@ object PlayerSettings {
         if (cacheChanged) MediaCacheManager.applyCacheSizeChange()
         _themeMode.value = p[KEY_THEME_MODE] ?: 0
         _autoMix.value = p[KEY_AUTO_MIX] ?: true
+        _crossfadeMs.value = p[KEY_CROSSFADE_MS] ?: DEFAULT_CROSSFADE_MS
         _volumeNormalization.value = p[KEY_VOLUME_NORMALIZATION] ?: false
         _increaseContrast.value = p[KEY_INCREASE_CONTRAST] ?: false
     }
@@ -120,6 +137,13 @@ object PlayerSettings {
     fun setAutoMix(enabled: Boolean) {
         _autoMix.value = enabled
         persist { it[KEY_AUTO_MIX] = enabled }
+    }
+
+    /** @param ms 0 = выключить, иначе зажимается в [MIN_CROSSFADE_MS, MAX_CROSSFADE_MS]. */
+    fun setCrossfadeMs(ms: Int) {
+        val v = if (ms <= 0) 0 else ms.coerceIn(MIN_CROSSFADE_MS, MAX_CROSSFADE_MS)
+        _crossfadeMs.value = v
+        persist { it[KEY_CROSSFADE_MS] = v }
     }
 
     fun setVolumeNormalization(enabled: Boolean) {
