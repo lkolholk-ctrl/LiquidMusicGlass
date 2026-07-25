@@ -368,7 +368,7 @@ fun SettingsScreen(
             PlainCard {
                 Column(modifier = Modifier.padding(vertical = 6.dp)) {
                     CrossfadeSelector(
-                        options = listOf(0, 5, 8, 10, 12),
+                        options = listOf(0, 2, 4, 6, 9, 12),
                         selectedMs = crossfadeMs,
                         onSelect = { PlayerSettings.setCrossfadeMs(it * 1000) }
                     )
