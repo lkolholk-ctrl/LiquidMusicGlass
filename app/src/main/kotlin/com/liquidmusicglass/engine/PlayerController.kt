@@ -922,6 +922,12 @@ object PlayerController {
             // Оффлайн-движок анализирует ПОЛНЫЙ файл с диска — приводим стриминг
             // к тому же. Длину узнаём у сервера (ICM не шлёт Content-Length), а
             // полноту меряем по кэшу: недокачанный m4a декодер откроет как тишину.
+            if (!MediaCacheManager.isCacheEnabled()) {
+                // Кэш выключен настройкой: локальной копии взяться неоткуда.
+                // Анализ по сети медленный, но живой — это лучше, чем немой AutoMix.
+                DebugLog.add("AutoMix.cacheoff $trackId — анализ по сети")
+                return streamUrl
+            }
             val known = MediaCacheManager.ensureContentLength(trackId, streamUrl)
             if (known <= 0L) {
                 DebugLog.add("AutoMix.nolen $trackId")
@@ -932,7 +938,7 @@ object PlayerController {
                 DebugLog.add(
                     "AutoMix.pull $trackId ${MediaCacheManager.cachedPrefixLength(trackId)}/$known"
                 )
-                if (!MediaCacheManager.preCacheTrack(trackId, streamUrl)) {
+                if (!MediaCacheManager.preCacheTrack(trackId, streamUrl, exclusive = false)) {
                     DebugLog.add("AutoMix.notcached $trackId")
                     lastAnalyzedPairKey = null // иначе пара похоронена до конца трека
                     return null
@@ -960,6 +966,8 @@ object PlayerController {
         val enabled = PlayerSettings.autoMix.value
         androidx.media3.exoplayer.CrossfadeConfig.setEnabled(enabled)
         if (!enabled) { logAutoMixSkip("toggle off"); return }
+
+        if (isLocalJucePlaybackActive) { logAutoMixSkip("juce active"); return }
 
         val snapshot = queue
         val current = snapshot.getOrNull(index)
@@ -1007,8 +1015,10 @@ object PlayerController {
                 // файла) — на 4G ~60 c, и рецепт опаздывал на целый трек.
                 // localCopyForAnalysis может блокировать (докачка, ожидание чужого
                 // писателя в кэше) и не реагирует на cancel — держим её в бюджете.
+                // Докачка 6-10 МБ по мобильной сети — это не «остаток окна»:
+                // отдаём ей большую часть лида, анализу хватает нескольких секунд.
                 val prepMs = AUTOMIX_ANALYZE_LEAD_MS -
-                    androidx.media3.exoplayer.CrossfadeConfig.MAX_XFADE_MS
+                    androidx.media3.exoplayer.CrossfadeConfig.MIN_XFADE_MS - 10_000L
                 val uris = kotlinx.coroutines.withTimeoutOrNull(prepMs.coerceAtLeast(5_000L)) {
                     kotlinx.coroutines.runInterruptible {
                         val a = if (current.isOnlineTrack) {
@@ -1060,6 +1070,14 @@ object PlayerController {
                 f.debugInfo.chunked(200).forEachIndexed { i, part ->
                     DebugLog.add("AutoMix.dbg$i $part")
                 }
+                if (f.debugInfo.contains("!A_SILENT") || f.debugInfo.contains("!B_SILENT")) {
+                    // Декодер отдал тишину — признаки вырождены, рецепт по ним
+                    // недостоверен. Как в оффлайне: нет плана → обычный переход.
+                    DebugLog.add("AutoMix.silent drop — вход вырожден, рецепт не применяем")
+                    androidx.media3.exoplayer.CrossfadeConfig.clearRecipe()
+                    lastAnalyzedPairKey = null
+                    return@launch
+                }
                 // §5.4: рецепт, чья точка свода попадает в начало трека или в
                 // прошлое, бессмысленен — отбрасываем, а не исполняем.
                 val xfadeMs = f.crossfadeDurationMs.coerceIn(
@@ -1078,15 +1096,18 @@ object PlayerController {
                 }
                 if (f.readyForTransition) {
                     androidx.media3.exoplayer.CrossfadeConfig.applyRecipe(
-                        f.crossfadeDurationMs,
+                        xfadeMs,
                         f.transitionType,
-                        f.entryOffsetMs
+                        f.entryOffsetMs.coerceIn(0L, 10_000L)
                     )
                 } else {
                     // Модель против свода этой пары — вернём фолбэк-параметры.
                     androidx.media3.exoplayer.CrossfadeConfig.clearRecipe()
                 }
             }.onFailure {
+                // Отмена — не сбой: этот job уступил место более свежему, и его
+                // clearRecipe() стёр бы уже применённый рецепт живого анализа.
+                if (it is kotlinx.coroutines.CancellationException) return@onFailure
                 DebugLog.add("AutoMix.stream FAILED ${it.javaClass.simpleName}: ${it.message}")
                 androidx.media3.exoplayer.CrossfadeConfig.clearRecipe()
                 lastAnalyzedPairKey = null // не блокируем пару навсегда после сбоя

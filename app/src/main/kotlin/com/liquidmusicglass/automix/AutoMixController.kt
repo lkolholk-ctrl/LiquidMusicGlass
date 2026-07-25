@@ -226,7 +226,11 @@ class AutoMixController(
         if (energyCache.size >= maxCacheSize) {
             energyCache.remove(energyCache.keys.first())
         }
-        energyCache[key] = energy
+        // Результат по тишине не кэшируем: один неудачный декод иначе фиксировал
+        // бы нулевую энергию трека до конца сессии, даже когда файл уже полный.
+        if (energy.avgEnergy > 1e-6f || energy.peakEnergy > 1e-6f) {
+            energyCache[key] = energy
+        }
 
         return energy
     }

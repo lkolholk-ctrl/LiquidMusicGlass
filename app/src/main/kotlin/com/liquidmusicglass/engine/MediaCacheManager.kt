@@ -424,8 +424,10 @@ object MediaCacheManager {
         val writer = androidx.media3.datasource.cache.CacheWriter(
             factory.createDataSourceForDownloading(), spec, null, null
         )
-        activePreCache = writer
-        activePreCacheKey = key
+        if (exclusive) {
+            activePreCache = writer
+            activePreCacheKey = key
+        }
         return try {
             writer.cache()
             true
@@ -439,7 +441,7 @@ object MediaCacheManager {
             // кэша с документом, и полнотой его считать нельзя.
             isFullyCached(trackId)
         } finally {
-            if (activePreCacheKey == key) {
+            if (exclusive && activePreCacheKey == key) {
                 activePreCache = null
                 activePreCacheKey = null
             }
