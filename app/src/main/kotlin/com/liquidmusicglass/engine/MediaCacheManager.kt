@@ -409,13 +409,25 @@ object MediaCacheManager {
         }
     }
 
-    fun preCacheTrack(trackId: String, url: android.net.Uri): Boolean {
+    @JvmOverloads
+    fun preCacheTrack(
+        trackId: String,
+        url: android.net.Uri,
+        /**
+         * false — докачка «для себя» (анализ AutoMix): не отменяет фоновую
+         * предзагрузку и не занимает её слот. Иначе два контура глушили друг
+         * друга: анализ отменял PRELOAD следующего трека, PRELOAD — докачку анализа.
+         */
+        exclusive: Boolean = true
+    ): Boolean {
         val factory = getCacheDataSourceFactory() ?: return false
         val key = "icm_$trackId"
-        // Тот же трек уже качается — не отменяем чужой writer (это убивало
-        // предзагрузку следующего трека) и не выдаём это за провал.
+        // Тот же трек уже качается — не отменяем чужой writer и не выдаём это
+        // за провал: данные всё равно появятся.
         if (activePreCacheKey == key) return isFullyCached(trackId)
-        try { activePreCache?.cancel() } catch (_: Throwable) {}
+        if (exclusive) {
+            try { activePreCache?.cancel() } catch (_: Throwable) {}
+        }
 
         val spec = androidx.media3.datasource.DataSpec.Builder()
             .setUri(url)
