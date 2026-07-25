@@ -791,7 +791,7 @@ object PlayerController {
         // а не на старте. На старте плеер как раз буферизует новый трек, и тяжёлый
         // анализ (сетевой декод + FFT + модель) отбирал бы у него сеть и CPU.
         if (durationMs > 0L && durationMs - positionMs <= AUTOMIX_ANALYZE_LEAD_MS) {
-            maybeAnalyzePairForCrossfade(currentIndex)
+            maybeAnalyzePairForCrossfade(currentIndex, durationMs)
         }
 
         if (durationMs > 0L && _durationMs.value != durationMs) {
@@ -886,7 +886,7 @@ object PlayerController {
     /** За сколько до конца анализировать пару: max свод (30 c) + запас на сетевой декод. */
     private val AUTOMIX_ANALYZE_LEAD_MS = 60_000L
 
-    private fun maybeAnalyzePairForCrossfade(index: Int) {
+    private fun maybeAnalyzePairForCrossfade(index: Int, playerDurationMs: Long) {
         val enabled = PlayerSettings.autoMix.value
         androidx.media3.exoplayer.CrossfadeConfig.setEnabled(enabled)
         if (!enabled) return
@@ -896,7 +896,13 @@ object PlayerController {
         val next = snapshot.getOrNull(index + 1) ?: return
         // Клипы не сводим, и анализ имеет смысл только для нормальных длительностей.
         if (current.id.startsWith("clip_") || next.id.startsWith("clip_")) return
-        if (current.durationMs <= 0L) return
+        // Длительность берём ИЗ ПЛЕЕРА: у стриминговых треков Track.durationMs в
+        // очереди часто 0 (реальная приходит позже и попадает только в
+        // _currentTrack). Раньше ранний return по ней глушил анализ полностью.
+        if (playerDurationMs <= 1000L) return
+        // Как в оффлайне: не анализируем, если играть уже нечего (свод не успеет).
+        if (playerDurationMs - _currentPositionMs.value < 1500L) return
+        if (!_isPlaying.value) return
 
         val pairKey = "${current.id}->${next.id}"
         if (pairKey == lastAnalyzedPairKey) return
@@ -905,7 +911,7 @@ object PlayerController {
         val controller = autoMixController ?: return
         DebugLog.add(
             "AutoMix.analyze START ${current.title.take(18)} -> ${next.title.take(18)} " +
-                "rem=${current.durationMs - _currentPositionMs.value}ms"
+                "rem=${playerDurationMs - _currentPositionMs.value}ms"
         )
         val startedAtMs = SystemClock.elapsedRealtime()
         ioScope.launch {
@@ -921,7 +927,7 @@ object PlayerController {
                 val nextUri =
                     if (next.isOnlineTrack) resolveStreamUrlSync(next.id) ?: return@runCatching
                     else next.uri
-                val f = controller.analyzeTrackPair(curUri, nextUri, current.durationMs)
+                val f = controller.analyzeTrackPair(curUri, nextUri, playerDurationMs)
                 DebugLog.add(
                     "AutoMix.stream ready=${f.readyForTransition} " +
                         "compat=${"%.2f".format(f.compatibility)} " +
