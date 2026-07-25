@@ -220,6 +220,9 @@ object MediaCacheManager {
      */
     private fun cacheKey(trackId: String) = "icm_$trackId"
 
+    /** F5: экспорт одного трека не должен идти в двух потоках одновременно. */
+    private val exportLocks = java.util.concurrent.ConcurrentHashMap<String, Any>()
+
     /**
      * Полностью ли трек лежит в кэше. Проверяем ДО экспорта: частичный файл
      * бесполезен — у m4a/mp4 moov-атом в конце, и MediaExtractor такой файл
@@ -265,6 +268,15 @@ object MediaCacheManager {
      * может открыть сеть) и сверяем длину: недописанный файл удаляем, а не отдаём.
      */
     fun exportCachedTrackToFile(trackId: String, url: android.net.Uri, out: File): Boolean {
+        val lock = exportLocks.computeIfAbsent(trackId) { Any() }
+        synchronized(lock) { return exportCachedTrackToFileLocked(trackId, url, out) }
+    }
+
+    private fun exportCachedTrackToFileLocked(
+        trackId: String,
+        url: android.net.Uri,
+        out: File
+    ): Boolean {
         val c = cache ?: return false
         val factory = getCacheDataSourceFactory() ?: return false
         val key = cacheKey(trackId)
@@ -283,9 +295,13 @@ object MediaCacheManager {
         // upstream принудительно null → в сеть уйти невозможно.
         val source = factory.createDataSourceForRemovingDownload()
         var written = 0L
+        // Пишем во временный файл и переименовываем: иначе частично записанный
+        // файл виден как «готовый» (и переиспользуется), а два параллельных
+        // экспорта одного трека писали бы в один поток вперемешку.
+        val tmp = File(out.parentFile, out.name + ".part")
         return try {
             source.open(spec)
-            out.outputStream().use { fos ->
+            tmp.outputStream().use { fos ->
                 val buf = ByteArray(64 * 1024)
                 while (true) {
                     val n = source.read(buf, 0, buf.size)
@@ -295,18 +311,21 @@ object MediaCacheManager {
                 }
             }
             // Строгая сверка: LRU мог вытеснить спаны прямо во время чтения.
-            val ok = written == contentLength && out.length() == contentLength
-            if (!ok) {
+            val ok = written == contentLength && tmp.length() == contentLength
+            if (ok) {
+                runCatching { out.delete() }
+                tmp.renameTo(out)
+            } else {
                 android.util.Log.d(
                     "MediaCacheManager",
                     "exportCached INCOMPLETE $trackId: $written/$contentLength"
                 )
-                runCatching { out.delete() }
+                runCatching { tmp.delete() }
             }
             ok
         } catch (e: Exception) {
             android.util.Log.d("MediaCacheManager", "exportCached failed for $trackId: ${e.message}")
-            runCatching { out.delete() }
+            runCatching { tmp.delete() }
             false
         } finally {
             runCatching { source.close() }

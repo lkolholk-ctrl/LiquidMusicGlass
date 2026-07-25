@@ -921,6 +921,9 @@ object PlayerController {
             // кормить модель тишиной или уходить в минутную сетевую загрузку.
             if (!MediaCacheManager.isFullyCached(trackId)) {
                 DebugLog.add("AutoMix.notcached $trackId")
+                // F4: пара не должна хорониться из-за того, что B ещё качается —
+                // сбрасываем дедуп, и тикер повторит попытку через полсекунды.
+                lastAnalyzedPairKey = null
                 return null
             }
             val f = java.io.File(dir, "$trackId.audio")
@@ -1017,12 +1020,17 @@ object PlayerController {
                     "AutoMix.stream ready=${f.readyForTransition} " +
                         "compat=${"%.2f".format(f.compatibility)} " +
                         "xfade=${f.crossfadeDurationMs}ms entry=${f.entryOffsetMs}ms " +
-                        "type=${f.transitionType} " +
+                        "type=${f.transitionType} bpm=${f.bpmA}->${f.bpmB} " +
                         "took=${SystemClock.elapsedRealtime() - startedAtMs}ms"
                 )
                 // Полная строка предиктора (сырые выходы + контрольные суммы мелов) —
                 // именно она разводит классы 1/2/3 при разборе.
-                DebugLog.add("AutoMix.dbg ${f.debugInfo.take(220)}")
+                // F1: take(220) обрезал строку ровно на " mel" — melB и блок feat
+                // не логировались НИ РАЗУ, из-за чего «B не анализируется» нельзя
+                // было ни подтвердить, ни опровергнуть. Пишем целиком, кусками.
+                f.debugInfo.chunked(200).forEachIndexed { i, part ->
+                    DebugLog.add("AutoMix.dbg$i $part")
+                }
                 // §5.4: рецепт, чья точка свода попадает в начало трека или в
                 // прошлое, бессмысленен — отбрасываем, а не исполняем.
                 val xfadeMs = f.crossfadeDurationMs.coerceIn(

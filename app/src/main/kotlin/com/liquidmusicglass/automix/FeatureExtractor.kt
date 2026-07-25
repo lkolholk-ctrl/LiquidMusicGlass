@@ -72,8 +72,16 @@ object FeatureExtractor {
         val rmsA = computeRms(samplesA)
         val rmsB = computeRms(samplesB)
         val (melAmin, melAmax) = rawRange(melA)
-        val debug = "rmsA=%.4f rmsB=%.4f bpmA=%.0f bpmB=%.0f melRaw[%.2f..%.2f] nA=%d nB=%d".format(
-            rmsA, rmsB, auxA[0] * 200f, auxB[0] * 200f, melAmin, melAmax, samplesA.size, samplesB.size
+        // F6: декодер при любой ошибке отдаёт тишину МОЛЧА (5 разных веток), и
+        // отличить «трек не проанализирован» от «трек тихий» по цифрам сложно.
+        // Ставим явные маркеры — они сразу видны в логе.
+        val silentMark = buildString {
+            if (rmsA < 1e-6f) append(" !A_SILENT")
+            if (rmsB < 1e-6f) append(" !B_SILENT")
+        }
+        val debug = "rmsA=%.4f rmsB=%.4f bpmA=%.0f bpmB=%.0f melRaw[%.2f..%.2f] nA=%d nB=%d%s".format(
+            rmsA, rmsB, auxA[0] * 200f, auxB[0] * 200f, melAmin, melAmax,
+            samplesA.size, samplesB.size, silentMark
         )
 
         return PairFeatures(

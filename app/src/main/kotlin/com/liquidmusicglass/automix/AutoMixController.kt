@@ -68,7 +68,10 @@ class AutoMixController(
 
         // 1. Декодируем и анализируем оба трека
         val energyA = getOrAnalyze(currentTrackUri, currentTrackDurationMs)
-        val nextDurationMs = estimateDuration(nextTrackUri) ?: currentTrackDurationMs
+        // F7: подстановка длительности A вместо неизвестной длительности B сбивала
+        // seek внутри анализа B (при durB > 60 c он прыгает на 20% трека).
+        // Неизвестна — пусть будет 0: гейт длинного трека просто не сработает.
+        val nextDurationMs = estimateDuration(nextTrackUri) ?: 0L
         val energyB = getOrAnalyze(nextTrackUri, nextDurationMs)
 
         // 2. ML предсказание (если модель доступна)
