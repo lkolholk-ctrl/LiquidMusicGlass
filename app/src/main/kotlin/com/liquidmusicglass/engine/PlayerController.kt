@@ -882,10 +882,7 @@ object PlayerController {
     // обращение случится до init(context) (appContext == null), AutoMix останется
     // мёртвым до перезапуска процесса. Создаём при первой возможности.
     @Volatile private var autoMixControllerRef: com.liquidmusicglass.automix.AutoMixController? = null
-    private var lastAnalyzedPairKey: String? = null
-    private val pullAttemptedFor = java.util.Collections.newSetFromMap(
-        java.util.concurrent.ConcurrentHashMap<String, Boolean>()
-    )
+    @Volatile private var lastAnalyzedPairKey: String? = null
     @Volatile private var autoMixJob: kotlinx.coroutines.Job? = null
     private var lastSkipLogMs = 0L
 
@@ -908,7 +905,10 @@ object PlayerController {
     /** §5.5: держим не больше N временных копий — иначе cacheDir пухнет без границ. */
     private fun trimAnalysisCache(dir: java.io.File, keep: Int = 6) {
         runCatching {
-            val files = dir.listFiles()?.sortedByDescending { it.lastModified() } ?: return
+            val now = System.currentTimeMillis()
+            val files = dir.listFiles()
+                ?.filterNot { it.name.endsWith(".part") || now - it.lastModified() < 60_000L }
+                ?.sortedByDescending { it.lastModified() } ?: return
             files.drop(keep).forEach { it.delete() }
         }
     }
@@ -919,29 +919,29 @@ object PlayerController {
         return try {
             val dir = java.io.File(ctx.cacheDir, "automix").apply { mkdirs() }
             trimAnalysisCache(dir)
-            // Трек ещё качается → анализировать нечего: частичный файл декодер не
-            // откроет (moov-атом m4a лежит в конце). Лучше пропустить пару, чем
-            // кормить модель тишиной или уходить в минутную сетевую загрузку.
-            if (!MediaCacheManager.isFullyCached(trackId)) {
-                // Одна попытка дотянуть трек: фоновый пре-кэш мог не стартовать
-                // или быть отменён, и тогда поллинг ждал бы вечно.
-                if (pullAttemptedFor.add(trackId)) {
-                    DebugLog.add("AutoMix.pull $trackId")
-                    MediaCacheManager.preCacheTrack(trackId, streamUrl)
-                }
-            }
-            if (!MediaCacheManager.isFullyCached(trackId)) {
-                DebugLog.add("AutoMix.notcached $trackId")
-                // F4: пара не должна хорониться из-за того, что B ещё качается —
-                // сбрасываем дедуп, и тикер повторит попытку через полсекунды.
+            // Оффлайн-движок анализирует ПОЛНЫЙ файл с диска — приводим стриминг
+            // к тому же. Длину узнаём у сервера (ICM не шлёт Content-Length), а
+            // полноту меряем по кэшу: недокачанный m4a декодер откроет как тишину.
+            val known = MediaCacheManager.ensureContentLength(trackId, streamUrl)
+            if (known <= 0L) {
+                DebugLog.add("AutoMix.nolen $trackId")
                 lastAnalyzedPairKey = null
                 return null
+            }
+            if (!MediaCacheManager.isFullyCached(trackId)) {
+                DebugLog.add(
+                    "AutoMix.pull $trackId ${MediaCacheManager.cachedPrefixLength(trackId)}/$known"
+                )
+                if (!MediaCacheManager.preCacheTrack(trackId, streamUrl)) {
+                    DebugLog.add("AutoMix.notcached $trackId")
+                    lastAnalyzedPairKey = null // иначе пара похоронена до конца трека
+                    return null
+                }
             }
             val f = java.io.File(dir, "$trackId.audio")
             // Переиспользуем копию ТОЛЬКО если она совпадает по размеру с кэшем:
             // однажды записанный обрезок иначе жил бы вечно.
-            val expected = MediaCacheManager.cachedContentLength(trackId)
-            if (f.exists() && expected > 0L && f.length() == expected) {
+            if (f.exists() && f.length() == known) {
                 return android.net.Uri.fromFile(f)
             }
             if (MediaCacheManager.exportCachedTrackToFile(trackId, streamUrl, f)) {
@@ -1005,10 +1005,28 @@ object PlayerController {
                 // Онлайн-треки анализируем из ЛОКАЛЬНОЙ копии кэша: MediaExtractor
                 // по сетевому URL тянул файл почти целиком (хвост трека = конец
                 // файла) — на 4G ~60 c, и рецепт опаздывал на целый трек.
-                val curUri =
-                    if (current.isOnlineTrack) localCopyForAnalysis(current.id) else current.uri
-                val nextUri =
-                    if (next.isOnlineTrack) localCopyForAnalysis(next.id) else next.uri
+                // localCopyForAnalysis может блокировать (докачка, ожидание чужого
+                // писателя в кэше) и не реагирует на cancel — держим её в бюджете.
+                val prepMs = AUTOMIX_ANALYZE_LEAD_MS -
+                    androidx.media3.exoplayer.CrossfadeConfig.MAX_XFADE_MS
+                val uris = kotlinx.coroutines.withTimeoutOrNull(prepMs.coerceAtLeast(5_000L)) {
+                    kotlinx.coroutines.runInterruptible {
+                        val a = if (current.isOnlineTrack) {
+                            localCopyForAnalysis(current.id)
+                        } else {
+                            current.uri
+                        }
+                        val b = if (next.isOnlineTrack) localCopyForAnalysis(next.id) else next.uri
+                        a to b
+                    }
+                }
+                if (uris == null) {
+                    DebugLog.add("AutoMix.prep TIMEOUT")
+                    lastAnalyzedPairKey = null
+                    return@runCatching
+                }
+                val curUri = uris.first
+                val nextUri = uris.second
                 if (curUri == null || nextUri == null) {
                     // Раньше здесь был молчаливый выход — анализ «пропадал» без следа.
                     DebugLog.add(
