@@ -147,6 +147,12 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
     }
 }
 
+configurations.configureEach {
+    // Любая зависимость, притащившая оригинальный media3, отсекается: форк живёт
+    // в тех же Java-пакетах, и две копии классов ломают сборку.
+    exclude(group = "androidx.media3")
+}
+
 dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.appcompat:appcompat:1.7.0")
@@ -172,16 +178,19 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("androidx.palette:palette-ktx:1.0.0")
 
-    // media3 — из НАШЕГО форка (media3-lmg), версия 1.5.1-lmg2. Содержит патч
-    // кроссфейда (AudioFadeControl + 2 аудио-рендерера, MANUAL 6c для теста).
-    implementation("androidx.media3:media3-common:1.5.1-lmg22")
-    implementation("androidx.media3:media3-exoplayer:1.5.1-lmg22")
+    // media3 — из НАШЕГО форка (media3-lmg). Публикуется под своими координатами
+    // (com.liquidmusicglass.media3), чтобы Gradle не мог подставить оригинальный
+    // androidx.media3 вместо форка. Java-пакеты при этом остались androidx.media3.*,
+    // поэтому оригинал в сборке рядом жить не может — и это намеренно: попытка
+    // притащить его транзитивно уронит сборку на дублирующихся классах.
+    implementation("com.liquidmusicglass.media3:media3-common:1.5.1-lmg24")
+    implementation("com.liquidmusicglass.media3:media3-exoplayer:1.5.1-lmg24")
     // HLS — для видеоклипов Яндекса (видеохостинг отдаёт .m3u8-поток).
-    implementation("androidx.media3:media3-exoplayer-hls:1.5.1-lmg22")
-    implementation("androidx.media3:media3-extractor:1.5.1-lmg22")
-    implementation("androidx.media3:media3-session:1.5.1-lmg22")
-    implementation("androidx.media3:media3-common-ktx:1.5.1-lmg22")
-    implementation("androidx.media3:media3-ui:1.5.1-lmg22")
+    implementation("com.liquidmusicglass.media3:media3-exoplayer-hls:1.5.1-lmg24")
+    implementation("com.liquidmusicglass.media3:media3-extractor:1.5.1-lmg24")
+    implementation("com.liquidmusicglass.media3:media3-session:1.5.1-lmg24")
+    implementation("com.liquidmusicglass.media3:media3-common-ktx:1.5.1-lmg24")
+    implementation("com.liquidmusicglass.media3:media3-ui:1.5.1-lmg24")
 
     implementation("androidx.mediarouter:mediarouter:1.7.0")
 
