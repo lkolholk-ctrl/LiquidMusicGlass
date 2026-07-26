@@ -6,6 +6,7 @@ import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.GlanceTheme
 import androidx.glance.action.ActionParameters
+import androidx.glance.action.actionParametersOf
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
@@ -108,9 +109,7 @@ class NowPlayingWidget : GlanceAppWidget() {
             ),
             modifier = GlanceModifier.clickable(
                 actionRunCallback<WidgetControlCallback>(
-                    ActionParameters.Builder()
-                        .apply { this[WidgetControlCallback.actionKey] = action.name }
-                        .build()
+                    actionParametersOf(WidgetControlCallback.actionKey to action.name)
                 )
             )
         )

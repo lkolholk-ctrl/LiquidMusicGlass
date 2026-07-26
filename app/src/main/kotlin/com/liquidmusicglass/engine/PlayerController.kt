@@ -11,6 +11,7 @@ import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.MoreExecutors
+import androidx.glance.appwidget.updateAll
 import com.liquidmusicglass.debug.DebugLog
 import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.api.icm.IcmTrackResponse
@@ -853,9 +854,7 @@ object PlayerController {
         val ctx = appContext ?: return
         ioScope.launch {
             runCatching {
-                androidx.glance.appwidget.updateAll(
-                    com.liquidmusicglass.widget.NowPlayingWidget(), ctx
-                )
+                com.liquidmusicglass.widget.NowPlayingWidget().updateAll(ctx)
             }
         }
     }
