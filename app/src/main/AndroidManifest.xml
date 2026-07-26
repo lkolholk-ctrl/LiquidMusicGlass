@@ -86,6 +86,19 @@
             </intent-filter>
         </service>
 
+        <!-- Виджет «Сейчас играет». updatePeriodMillis=0: система не будит
+             приложение по таймеру, виджет перерисовывается по событиям плеера. -->
+        <receiver
+            android:name=".widget.NowPlayingWidgetReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/now_playing_widget_info" />
+        </receiver>
+
         <!-- Playlist Import Foreground Service -->
         <service
             android:name=".data.playlistimport.PlaylistImportService"

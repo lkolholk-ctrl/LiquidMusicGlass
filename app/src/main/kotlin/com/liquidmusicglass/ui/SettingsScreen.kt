@@ -361,6 +361,30 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(sectionGap))
 
             // PRELOAD NEXT TRACK
+            // SING (KARAOKE)
+            SectionLabel("SING")
+
+            val vocalReduction by PlayerSettings.vocalReductionPercent.collectAsState()
+            PlainCard {
+                Column(modifier = Modifier.padding(vertical = 6.dp)) {
+                    VocalReductionSelector(
+                        options = listOf(0, 50, 75, 100),
+                        selectedPercent = vocalReduction,
+                        onSelect = { PlayerSettings.setVocalReductionPercent(it) }
+                    )
+                    Text(
+                        text = "Lower the lead vocal and sing along with the lyrics. " +
+                            "Works on stereo tracks where the vocal sits centre; " +
+                            "live and older mixes react less.",
+                        color = lc.textSecondary,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(sectionGap))
+
             // CROSSFADE
             SectionLabel("CROSSFADE")
 
@@ -1025,6 +1049,53 @@ private fun SettingsActionItem(
             tint = LiquidTheme.colors.iconDefault,
             modifier = Modifier.size(20.dp)
         )
+    }
+}
+
+@Composable
+private fun VocalReductionSelector(
+    options: List<Int>,
+    selectedPercent: Int,
+    onSelect: (Int) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        options.forEach { percent ->
+            val isSelected = selectedPercent == percent
+            val isDark = LiquidTheme.colors.isDark
+            val itemBg = if (isSelected) Accent else (if (isDark) Color(0xFF1C1C1E) else Color(0xFFE5E5EA))
+            val unselectedTextColor =
+                if (isDark) Color.White.copy(alpha = 0.45f) else Color.Black.copy(alpha = 0.45f)
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(36.dp)
+                    .background(itemBg, RoundedCornerShape(50))
+                    .clip(RoundedCornerShape(50))
+                    .liquidClickable(
+                        pressedScale = LiquidMotion.PressButton,
+                        onClick = { onSelect(percent) }
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                val textColor by animateColorAsState(
+                    targetValue = if (isSelected) Color.White else unselectedTextColor,
+                    animationSpec = tween(200),
+                    label = "vocalText"
+                )
+                Text(
+                    text = if (percent == 0) "Off" else "$percent%",
+                    color = textColor,
+                    fontSize = 13.sp,
+                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+                )
+            }
+        }
     }
 }
 

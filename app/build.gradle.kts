@@ -194,6 +194,10 @@ dependencies {
 
     implementation("androidx.mediarouter:mediarouter:1.7.0")
 
+    // Виджет «Сейчас играет» на домашний экран (Compose-подобный API для RemoteViews).
+    implementation("androidx.glance:glance-appwidget:1.1.1")
+    implementation("androidx.glance:glance-material3:1.1.1")
+
     implementation("com.google.ai.edge.litert:litert:1.0.1")
 
     implementation("com.github.wendykierp:JTransforms:3.2")

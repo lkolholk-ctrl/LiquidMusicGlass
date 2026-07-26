@@ -842,11 +842,33 @@ object PlayerController {
         }
     }
 
+    /**
+     * Перерисовать виджет на домашнем экране.
+     *
+     * Дёргаем на смене трека и на паузе/воспроизведении: у виджета
+     * updatePeriodMillis = 0, то есть система его сама не будит — иначе он
+     * показывал бы трек, который закончился полчаса назад.
+     */
+    private fun refreshHomeWidget() {
+        val ctx = appContext ?: return
+        ioScope.launch {
+            runCatching {
+                androidx.glance.appwidget.updateAll(
+                    com.liquidmusicglass.widget.NowPlayingWidget(), ctx
+                )
+            }
+        }
+    }
+
     fun setPlaying(playing: Boolean) {
         // re-anchor smooth position at the play/pause transition (uses old state)
         reanchorSmoothPosition()
         _isPlaying.value = playing
         lastIsPlaying = playing
+        if (lastWidgetPlaying != playing) {
+            lastWidgetPlaying = playing
+            refreshHomeWidget()
+        }
         if (!playing && _isBuffering.value) {
             _isBuffering.value = false
         }
@@ -857,6 +879,8 @@ object PlayerController {
     // это сама, но на стриминге себя не оправдала и со стриминга убрана; оффлайн
     // (JUCE) продолжает работать по своей модели и сюда не ходит.
     @Volatile private var lastAppliedCrossfadeMs = -1
+    @Volatile private var lastWidgetPlaying: Boolean? = null
+    @Volatile private var lastWidgetTrackId: String? = null
 
     private fun applyCrossfadeSetting() {
         if (isLocalJucePlaybackActive) return // у локального движка свой кроссфейд
@@ -922,6 +946,10 @@ object PlayerController {
         // transition). Раньше флаг сбрасывала только пара play*-путей — после
         // клипа переход на музыку оставлял чёрный Surface вместо обложки.
         _isVideoClip.value = mediaId.startsWith("clip_")
+        if (lastWidgetTrackId != mediaId) {
+            lastWidgetTrackId = mediaId
+            refreshHomeWidget()
+        }
         val currentQueue = queue
         val index = currentQueue.indexOfFirst { it.id == mediaId }
         if (index == -1) {

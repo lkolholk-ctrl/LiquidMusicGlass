@@ -34,6 +34,7 @@ object PlayerAudioChain {
                         arrayOf(
                             BassAudioProcessor(),
                             DjFxAudioProcessor(),
+                            VocalReductionProcessor(),
                             VolumeNormalizationProcessor()
                         )
                     )
