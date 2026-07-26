@@ -48,7 +48,7 @@ object LmgSyncApi {
     )
 
     /** true, если этот пользователь ведёт комнату. */
-    fun isHost(room: Room): Boolean = room.hostPid == IcmApi.partnerUserId
+    fun isHost(room: Room): Boolean = room.hostPid == IcmApi.getInstance().partnerUserId
 
     // ── Continuity ───────────────────────────────────────────────────────────
 
@@ -136,14 +136,15 @@ object LmgSyncApi {
     }
 
     private fun Request.Builder.applyIdentity(): Request.Builder {
-        IcmApi.partnerUserId?.takeIf { it.isNotBlank() }?.let { header("X-Partner-User-Id", it) }
+        IcmApi.getInstance().partnerUserId?.takeIf { it.isNotBlank() }
+            ?.let { header("X-Partner-User-Id", it) }
         com.liquidmusicglass.logging.ClientTelemetry.deviceId
             .takeIf { it.isNotBlank() }?.let { header("X-Device-Id", it) }
         return this
     }
 
     private fun execute(request: Request): JSONObject? {
-        IcmApi.sharedClient.newCall(request).execute().use { response ->
+        IcmApi.getInstance().sharedClient.newCall(request).execute().use { response ->
             if (!response.isSuccessful) return null
             val text = response.body?.string().orEmpty()
             if (text.isBlank()) return null
