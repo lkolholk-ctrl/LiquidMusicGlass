@@ -198,6 +198,55 @@ object LmgSyncApi {
             .getOrDefault(false)
     }
 
+    // ── Кредиты трека ────────────────────────────────────────────────────────
+
+    /** Человек и его роль в записи: автор, продюсер, сведение и т.п. */
+    data class CreditPerson(val name: String, val role: String)
+
+    data class TrackCredits(
+        val found: Boolean,
+        val label: String,
+        val year: String,
+        val people: List<CreditPerson>
+    )
+
+    /**
+     * Кто написал, спродюсировал и издал трек.
+     *
+     * Считает сервер: у каталога таких полей нет, и данные берутся из внешней
+     * открытой базы, куда нельзя ходить с каждого устройства отдельно.
+     * Сопоставление идёт по названию, исполнителю и длительности — на редких
+     * релизах совпадения может не быть, и тогда возвращается «не найдено».
+     */
+    suspend fun fetchCredits(
+        trackId: String,
+        title: String,
+        artist: String,
+        durationMs: Long
+    ): TrackCredits? = withContext(Dispatchers.IO) {
+        val path = "/credits?trackId=" + enc(trackId) +
+            "&title=" + enc(title) +
+            "&artist=" + enc(artist) +
+            "&durationMs=" + durationMs
+        val json = runCatching { get(path) }.getOrNull() ?: return@withContext null
+        val people = mutableListOf<CreditPerson>()
+        json.optJSONArray("people")?.let { array ->
+            for (i in 0 until array.length()) {
+                val item = array.optJSONObject(i) ?: continue
+                people += CreditPerson(item.optString("name"), item.optString("role"))
+            }
+        }
+        TrackCredits(
+            found = json.optBoolean("found", false),
+            label = json.optString("label"),
+            year = json.optString("year"),
+            people = people
+        )
+    }
+
+    private fun enc(value: String): String =
+        java.net.URLEncoder.encode(value, "UTF-8")
+
     // ── HTTP ─────────────────────────────────────────────────────────────────
 
     private fun get(path: String): JSONObject? {

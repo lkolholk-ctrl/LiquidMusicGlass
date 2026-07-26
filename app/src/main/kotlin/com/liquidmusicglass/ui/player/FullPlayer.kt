@@ -67,6 +67,7 @@ import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.ThumbUp
@@ -228,6 +229,7 @@ fun FullPlayer(
     var showArtistSheet by remember { mutableStateOf(false) }
     var showDebugPanel by remember { mutableStateOf(false) }
     var showTrackMenu by remember { mutableStateOf(false) }
+    var showCredits by remember { mutableStateOf(false) }
     val artistSheetState = rememberModalBottomSheetState(
         skipPartiallyExpanded = true
     )
@@ -1158,6 +1160,26 @@ fun FullPlayer(
         }
 
         // ═══ Track options menu (Волна по треку / Настройки) ═══
+        if (showCredits) {
+            val creditsTrack = currentTrackObj
+            if (creditsTrack != null) {
+                ModalBottomSheet(
+                    onDismissRequest = { showCredits = false },
+                    containerColor = Color(0xFF1C1C1E),
+                    shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+                ) {
+                    Column(modifier = Modifier.padding(bottom = 32.dp)) {
+                        CreditsContent(
+                            track = creditsTrack,
+                            durationMs = PlayerController.durationMs.value
+                        )
+                    }
+                }
+            } else {
+                showCredits = false
+            }
+        }
+
         if (showTrackMenu) {
             ModalBottomSheet(
                 onDismissRequest = { showTrackMenu = false },
@@ -1177,6 +1199,43 @@ fun FullPlayer(
                     val isLocalTrack = currentTrackObj?.let {
                         it.source == "local" || it.uri.scheme == "content" || it.uri.scheme == "file"
                     } ?: false
+
+                    // Кредиты доступны и для локальных файлов: база ищет по
+                    // названию и исполнителю, а не по нашему каталогу.
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                scope.launch {
+                                    trackMenuSheetState.hide()
+                                    showTrackMenu = false
+                                    showCredits = true
+                                }
+                            }
+                            .padding(vertical = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Info,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Text(
+                            text = "Credits",
+                            color = Color.White,
+                            fontSize = 17.sp,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(0.5.dp)
+                            .background(Color.White.copy(alpha = 0.10f))
+                    )
+
                     if (!isLocalTrack) {
                     // Волна по треку (станция)
                     Row(
