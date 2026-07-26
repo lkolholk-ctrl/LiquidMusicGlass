@@ -115,6 +115,89 @@ object LmgSyncApi {
             .getOrDefault(false)
     }
 
+    // ── Совместные плейлисты ─────────────────────────────────────────────────
+
+    /** Трек в совместном списке: кто добавил — видно всем участникам. */
+    data class SharedTrack(
+        val trackId: String,
+        val title: String,
+        val artist: String,
+        val coverUrl: String,
+        val addedBy: String
+    )
+
+    data class SharedPlaylist(
+        val code: String,
+        val title: String,
+        val ownerPid: String,
+        val tracks: List<SharedTrack>,
+        val editorNames: List<String>
+    )
+
+    /** Краткая карточка для списка «мои совместные». */
+    data class SharedPlaylistSummary(
+        val code: String,
+        val title: String,
+        val trackCount: Int,
+        val editorCount: Int
+    )
+
+    suspend fun createPlaylist(title: String, name: String): SharedPlaylist? =
+        withContext(Dispatchers.IO) {
+            val body = JSONObject().put("title", title).put("name", name)
+            runCatching { post("/playlists", body)?.let(::parsePlaylist) }.getOrNull()
+        }
+
+    suspend fun listPlaylists(): List<SharedPlaylistSummary> = withContext(Dispatchers.IO) {
+        val json = runCatching { get("/playlists") }.getOrNull() ?: return@withContext emptyList()
+        val array = json.optJSONArray("playlists") ?: return@withContext emptyList()
+        (0 until array.length()).mapNotNull { i ->
+            array.optJSONObject(i)?.let {
+                SharedPlaylistSummary(
+                    code = it.optString("code"),
+                    title = it.optString("title"),
+                    trackCount = it.optInt("trackCount"),
+                    editorCount = it.optInt("editorCount")
+                )
+            }
+        }
+    }
+
+    suspend fun openPlaylist(code: String): SharedPlaylist? = withContext(Dispatchers.IO) {
+        runCatching { get("/playlists/${code.uppercase()}")?.let(::parsePlaylist) }.getOrNull()
+    }
+
+    suspend fun joinPlaylist(code: String, name: String): SharedPlaylist? =
+        withContext(Dispatchers.IO) {
+            val body = JSONObject().put("name", name)
+            runCatching { post("/playlists/${code.uppercase()}/join", body)?.let(::parsePlaylist) }
+                .getOrNull()
+        }
+
+    suspend fun addTrackToPlaylist(code: String, track: SharedTrack): SharedPlaylist? =
+        withContext(Dispatchers.IO) {
+            val body = JSONObject().apply {
+                put("trackId", track.trackId)
+                put("title", track.title)
+                put("artist", track.artist)
+                put("coverUrl", track.coverUrl)
+            }
+            runCatching { post("/playlists/${code.uppercase()}/tracks", body)?.let(::parsePlaylist) }
+                .getOrNull()
+        }
+
+    suspend fun removeTrackFromPlaylist(code: String, trackId: String): SharedPlaylist? =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                delete("/playlists/${code.uppercase()}/tracks?trackId=$trackId")?.let(::parsePlaylist)
+            }.getOrNull()
+        }
+
+    suspend fun leavePlaylist(code: String): Boolean = withContext(Dispatchers.IO) {
+        runCatching { post("/playlists/${code.uppercase()}/leave", JSONObject()) != null }
+            .getOrDefault(false)
+    }
+
     // ── HTTP ─────────────────────────────────────────────────────────────────
 
     private fun get(path: String): JSONObject? {
@@ -130,6 +213,15 @@ object LmgSyncApi {
         val request = Request.Builder()
             .url(IcmApi.SERVER_BASE + path)
             .post(body.toString().toRequestBody(JSON))
+            .applyIdentity()
+            .build()
+        return execute(request)
+    }
+
+    private fun delete(path: String): JSONObject? {
+        val request = Request.Builder()
+            .url(IcmApi.SERVER_BASE + path)
+            .delete()
             .applyIdentity()
             .build()
         return execute(request)
@@ -163,6 +255,38 @@ object LmgSyncApi {
         deviceName = json.optString("deviceName"),
         updatedAt = json.optLong("updatedAt")
     )
+
+    private fun parsePlaylist(json: JSONObject): SharedPlaylist {
+        val tracks = mutableListOf<SharedTrack>()
+        json.optJSONArray("tracks")?.let { array ->
+            for (i in 0 until array.length()) {
+                val item = array.optJSONObject(i) ?: continue
+                tracks += SharedTrack(
+                    trackId = item.optString("trackId"),
+                    title = item.optString("title"),
+                    artist = item.optString("artist"),
+                    coverUrl = item.optString("coverUrl"),
+                    addedBy = item.optString("addedBy")
+                )
+            }
+        }
+        val editors = mutableListOf<String>()
+        json.optJSONObject("editors")?.let { obj ->
+            val keys = obj.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                obj.optJSONObject(key)?.optString("name")?.takeIf { it.isNotBlank() }
+                    ?.let(editors::add)
+            }
+        }
+        return SharedPlaylist(
+            code = json.optString("code"),
+            title = json.optString("title"),
+            ownerPid = json.optString("ownerPid"),
+            tracks = tracks,
+            editorNames = editors
+        )
+    }
 
     private fun parseRoom(json: JSONObject): Room {
         val members = mutableListOf<String>()

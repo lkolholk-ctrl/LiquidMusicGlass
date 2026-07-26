@@ -8,6 +8,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -17,6 +19,8 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Equalizer
 import androidx.compose.material.icons.rounded.Person
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -426,22 +430,66 @@ fun SettingsScreen(
                                     }
                                 )
                         )
-                        androidx.compose.material3.OutlinedTextField(
-                            value = roomCodeInput,
-                            onValueChange = { roomCodeInput = it.uppercase().take(6) },
-                            label = { Text("Room code", color = lc.textSecondary) },
-                            singleLine = true,
+                        // Поле в том же виде, что и поиск: круглая пилюля с
+                        // подсказкой внутри — иначе один экран выглядит собранным
+                        // из двух разных приложений.
+                        val isDarkTheme = LiquidTheme.colors.isDark
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(top = 10.dp)
-                        )
-                        Text(
-                            text = "Join",
-                            color = if (roomCodeInput.length == 6) Accent else lc.textSecondary,
-                            fontSize = 14.sp,
-                            modifier = Modifier
-                                .padding(top = 8.dp)
-                                .liquidClickable(
+                                .padding(top = 12.dp)
+                                .height(44.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (isDarkTheme) Color.White.copy(alpha = 0.08f)
+                                    else Color.Black.copy(alpha = 0.05f)
+                                )
+                                .border(
+                                    1.5.dp,
+                                    if (roomCodeInput.length == 6) Accent else Color.Transparent,
+                                    CircleShape
+                                )
+                                .padding(horizontal = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            BasicTextField(
+                                value = roomCodeInput,
+                                onValueChange = { roomCodeInput = it.uppercase().take(6) },
+                                textStyle = TextStyle(
+                                    color = lc.textPrimary,
+                                    fontSize = 16.sp,
+                                    // Код читают и диктуют по символам — моноширинный
+                                    // разбивается на знаки заметно легче.
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                    letterSpacing = 2.sp
+                                ),
+                                singleLine = true,
+                                cursorBrush = SolidColor(Accent),
+                                modifier = Modifier.weight(1f),
+                                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                                    imeAction = androidx.compose.ui.text.input.ImeAction.Done,
+                                    capitalization =
+                                        androidx.compose.ui.text.input.KeyboardCapitalization.Characters
+                                ),
+                                decorationBox = { innerTextField ->
+                                    Box {
+                                        if (roomCodeInput.isEmpty()) {
+                                            Text(
+                                                text = "Room code",
+                                                color = lc.textSecondary,
+                                                fontSize = 16.sp
+                                            )
+                                        }
+                                        innerTextField()
+                                    }
+                                }
+                            )
+                            Text(
+                                text = "Join",
+                                color = if (roomCodeInput.length == 6) Accent else lc.textSecondary,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.liquidClickable(
                                     pressedScale = LiquidMotion.PressButton,
                                     onClick = {
                                         if (roomCodeInput.length == 6) {
@@ -450,7 +498,8 @@ fun SettingsScreen(
                                         }
                                     }
                                 )
-                        )
+                            )
+                        }
                     }
 
                     val pending = continuity
@@ -488,25 +537,137 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(sectionGap))
 
-            // SING (KARAOKE)
-            SectionLabel("SING")
+            // SHARED PLAYLISTS
+            SectionLabel("SHARED PLAYLISTS")
 
-            val vocalReduction by PlayerSettings.vocalReductionPercent.collectAsState()
+            var myPlaylists by remember {
+                mutableStateOf<List<com.liquidmusicglass.api.lmg.LmgSyncApi.SharedPlaylistSummary>>(
+                    emptyList()
+                )
+            }
+            var playlistCodeInput by remember { mutableStateOf("") }
+            var playlistsRefresh by remember { mutableStateOf(0) }
+            val playlistScope = rememberCoroutineScope()
+
+            LaunchedEffect(playlistsRefresh) {
+                myPlaylists = com.liquidmusicglass.api.lmg.LmgSyncApi.listPlaylists()
+            }
+
             PlainCard {
-                Column(modifier = Modifier.padding(vertical = 6.dp)) {
-                    VocalReductionSelector(
-                        options = listOf(0, 50, 75, 100),
-                        selectedPercent = vocalReduction,
-                        onSelect = { PlayerSettings.setVocalReductionPercent(it) }
-                    )
+                Column(modifier = Modifier.padding(vertical = 12.dp, horizontal = 16.dp)) {
                     Text(
-                        text = "Lower the lead vocal and sing along with the lyrics. " +
-                            "Works on stereo tracks where the vocal sits centre; " +
-                            "live and older mixes react less.",
+                        text = "A playlist several people can add to. Share the code and " +
+                            "everyone with it can add songs.",
                         color = lc.textSecondary,
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                        fontSize = 12.sp
                     )
+
+                    myPlaylists.forEach { playlist ->
+                        Text(
+                            text = "${playlist.title} · ${playlist.code}",
+                            color = lc.textPrimary,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.padding(top = 12.dp)
+                        )
+                        Text(
+                            text = "${playlist.trackCount} songs · ${playlist.editorCount} people",
+                            color = lc.textSecondary,
+                            fontSize = 12.sp
+                        )
+                    }
+
+                    Text(
+                        text = "Create a shared playlist",
+                        color = Accent,
+                        fontSize = 14.sp,
+                        modifier = Modifier
+                            .padding(top = 12.dp)
+                            .liquidClickable(
+                                pressedScale = LiquidMotion.PressButton,
+                                onClick = {
+                                    playlistScope.launch {
+                                        com.liquidmusicglass.api.lmg.LmgSyncApi.createPlaylist(
+                                            title = "Shared playlist",
+                                            name = android.os.Build.MODEL ?: "Android"
+                                        )
+                                        playlistsRefresh++
+                                    }
+                                }
+                            )
+                    )
+
+                    val isDarkPl = LiquidTheme.colors.isDark
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 12.dp)
+                            .height(44.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (isDarkPl) Color.White.copy(alpha = 0.08f)
+                                else Color.Black.copy(alpha = 0.05f)
+                            )
+                            .border(
+                                1.5.dp,
+                                if (playlistCodeInput.length == 6) Accent else Color.Transparent,
+                                CircleShape
+                            )
+                            .padding(horizontal = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        BasicTextField(
+                            value = playlistCodeInput,
+                            onValueChange = { playlistCodeInput = it.uppercase().take(6) },
+                            textStyle = TextStyle(
+                                color = lc.textPrimary,
+                                fontSize = 16.sp,
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                letterSpacing = 2.sp
+                            ),
+                            singleLine = true,
+                            cursorBrush = SolidColor(Accent),
+                            modifier = Modifier.weight(1f),
+                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                                imeAction = androidx.compose.ui.text.input.ImeAction.Done,
+                                capitalization =
+                                    androidx.compose.ui.text.input.KeyboardCapitalization.Characters
+                            ),
+                            decorationBox = { innerTextField ->
+                                Box {
+                                    if (playlistCodeInput.isEmpty()) {
+                                        Text(
+                                            text = "Playlist code",
+                                            color = lc.textSecondary,
+                                            fontSize = 16.sp
+                                        )
+                                    }
+                                    innerTextField()
+                                }
+                            }
+                        )
+                        Text(
+                            text = "Join",
+                            color = if (playlistCodeInput.length == 6) Accent else lc.textSecondary,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.liquidClickable(
+                                pressedScale = LiquidMotion.PressButton,
+                                onClick = {
+                                    if (playlistCodeInput.length == 6) {
+                                        playlistScope.launch {
+                                            com.liquidmusicglass.api.lmg.LmgSyncApi.joinPlaylist(
+                                                playlistCodeInput,
+                                                android.os.Build.MODEL ?: "Android"
+                                            )
+                                            playlistCodeInput = ""
+                                            playlistsRefresh++
+                                        }
+                                    }
+                                }
+                            )
+                        )
+                    }
                 }
             }
 
@@ -749,6 +910,7 @@ fun SettingsScreen(
 
             val autoMix by PlayerSettings.autoMix.collectAsState()
             val volumeNorm by PlayerSettings.volumeNormalization.collectAsState()
+            val autoDownloadFavs by PlayerSettings.autoDownloadFavorites.collectAsState()
             PlainCard {
                 SettingsToggleItem(
                     title = "AutoMix",
@@ -762,6 +924,14 @@ fun SettingsScreen(
                     subtitle = "Normalize volume across tracks",
                     selected = volumeNorm,
                     onSelect = { PlayerSettings.setVolumeNormalization(it) }
+                )
+                PlainDivider()
+                SettingsToggleItem(
+                    title = "Keep favourites offline",
+                    subtitle = "Download liked songs in the background so they play without a " +
+                        "connection. Uses your data and storage, and pauses while you listen.",
+                    selected = autoDownloadFavs,
+                    onSelect = { PlayerSettings.setAutoDownloadFavorites(it) }
                 )
             }
 
@@ -1176,53 +1346,6 @@ private fun SettingsActionItem(
             tint = LiquidTheme.colors.iconDefault,
             modifier = Modifier.size(20.dp)
         )
-    }
-}
-
-@Composable
-private fun VocalReductionSelector(
-    options: List<Int>,
-    selectedPercent: Int,
-    onSelect: (Int) -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        options.forEach { percent ->
-            val isSelected = selectedPercent == percent
-            val isDark = LiquidTheme.colors.isDark
-            val itemBg = if (isSelected) Accent else (if (isDark) Color(0xFF1C1C1E) else Color(0xFFE5E5EA))
-            val unselectedTextColor =
-                if (isDark) Color.White.copy(alpha = 0.45f) else Color.Black.copy(alpha = 0.45f)
-
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .height(36.dp)
-                    .background(itemBg, RoundedCornerShape(50))
-                    .clip(RoundedCornerShape(50))
-                    .liquidClickable(
-                        pressedScale = LiquidMotion.PressButton,
-                        onClick = { onSelect(percent) }
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                val textColor by animateColorAsState(
-                    targetValue = if (isSelected) Color.White else unselectedTextColor,
-                    animationSpec = tween(200),
-                    label = "vocalText"
-                )
-                Text(
-                    text = if (percent == 0) "Off" else "$percent%",
-                    color = textColor,
-                    fontSize = 13.sp,
-                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
-                )
-            }
-        }
     }
 }
 

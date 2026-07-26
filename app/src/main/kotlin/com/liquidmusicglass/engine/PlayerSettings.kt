@@ -54,7 +54,7 @@ object PlayerSettings {
     private val KEY_THEME_MODE = intPreferencesKey("theme_mode")  // 0=System 1=Dark 2=Light
     private val KEY_AUTO_MIX = booleanPreferencesKey("auto_mix")
     private val KEY_CROSSFADE_MS = intPreferencesKey("crossfade_ms")
-    private val KEY_VOCAL_REDUCTION = intPreferencesKey("vocal_reduction_percent")
+    private val KEY_AUTO_DOWNLOAD_FAVORITES = booleanPreferencesKey("auto_download_favorites")
     private val KEY_VOLUME_NORMALIZATION = booleanPreferencesKey("volume_normalization")
     private val KEY_INCREASE_CONTRAST = booleanPreferencesKey("increase_contrast")
 
@@ -85,14 +85,13 @@ object PlayerSettings {
     val crossfadeMs: StateFlow<Int> = _crossfadeMs
 
     /**
-     * Караоке-режим: насколько убрать вокал, 0..100 %. 0 — выключено.
+     * Держать избранное скачанным для игры без сети.
      *
-     * Голос сидит по центру стереобазы, поэтому гасится вычитанием центра. Это
-     * работает только для стерео и только для сведений, где вокал действительно
-     * по центру — на живых записях и старых миксах эффект слабее.
+     * По умолчанию выключено: качать музыку за спиной пользователя — это его
+     * трафик и его место на диске.
      */
-    private val _vocalReductionPercent = MutableStateFlow(0)
-    val vocalReductionPercent: StateFlow<Int> = _vocalReductionPercent
+    private val _autoDownloadFavorites = MutableStateFlow(false)
+    val autoDownloadFavorites: StateFlow<Boolean> = _autoDownloadFavorites
 
     private val _volumeNormalization = MutableStateFlow(false)
     val volumeNormalization: StateFlow<Boolean> = _volumeNormalization
@@ -122,7 +121,7 @@ object PlayerSettings {
         _themeMode.value = p[KEY_THEME_MODE] ?: 0
         _autoMix.value = p[KEY_AUTO_MIX] ?: true
         _crossfadeMs.value = p[KEY_CROSSFADE_MS] ?: DEFAULT_CROSSFADE_MS
-        _vocalReductionPercent.value = p[KEY_VOCAL_REDUCTION] ?: 0
+        _autoDownloadFavorites.value = p[KEY_AUTO_DOWNLOAD_FAVORITES] ?: false
         _volumeNormalization.value = p[KEY_VOLUME_NORMALIZATION] ?: false
         _increaseContrast.value = p[KEY_INCREASE_CONTRAST] ?: false
     }
@@ -158,11 +157,9 @@ object PlayerSettings {
         persist { it[KEY_CROSSFADE_MS] = v }
     }
 
-    /** @param percent 0 = выключить, иначе доля убираемого центра в процентах. */
-    fun setVocalReductionPercent(percent: Int) {
-        val v = percent.coerceIn(0, 100)
-        _vocalReductionPercent.value = v
-        persist { it[KEY_VOCAL_REDUCTION] = v }
+    fun setAutoDownloadFavorites(enabled: Boolean) {
+        _autoDownloadFavorites.value = enabled
+        persist { it[KEY_AUTO_DOWNLOAD_FAVORITES] = enabled }
     }
 
     fun setVolumeNormalization(enabled: Boolean) {

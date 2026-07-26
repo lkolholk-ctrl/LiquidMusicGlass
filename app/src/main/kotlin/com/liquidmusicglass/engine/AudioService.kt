@@ -460,6 +460,7 @@ class AudioService : MediaSessionService() {
             // Синхронизация с другими устройствами: состояние надо отправлять и
             // при закрытом экране, поэтому запускаем вместе с сервисом.
             com.liquidmusicglass.engine.sync.PlaybackSyncManager.start()
+            FavoritesAutoDownloader.start()
         }
 
         // ── Один плеер ──
