@@ -183,14 +183,14 @@ dependencies {
     // androidx.media3 вместо форка. Java-пакеты при этом остались androidx.media3.*,
     // поэтому оригинал в сборке рядом жить не может — и это намеренно: попытка
     // притащить его транзитивно уронит сборку на дублирующихся классах.
-    implementation("com.liquidmusicglass.media3:media3-common:1.5.1-lmg24")
-    implementation("com.liquidmusicglass.media3:media3-exoplayer:1.5.1-lmg24")
+    implementation("com.liquidmusicglass.media3:media3-common:1.5.1-lmg25")
+    implementation("com.liquidmusicglass.media3:media3-exoplayer:1.5.1-lmg25")
     // HLS — для видеоклипов Яндекса (видеохостинг отдаёт .m3u8-поток).
-    implementation("com.liquidmusicglass.media3:media3-exoplayer-hls:1.5.1-lmg24")
-    implementation("com.liquidmusicglass.media3:media3-extractor:1.5.1-lmg24")
-    implementation("com.liquidmusicglass.media3:media3-session:1.5.1-lmg24")
-    implementation("com.liquidmusicglass.media3:media3-common-ktx:1.5.1-lmg24")
-    implementation("com.liquidmusicglass.media3:media3-ui:1.5.1-lmg24")
+    implementation("com.liquidmusicglass.media3:media3-exoplayer-hls:1.5.1-lmg25")
+    implementation("com.liquidmusicglass.media3:media3-extractor:1.5.1-lmg25")
+    implementation("com.liquidmusicglass.media3:media3-session:1.5.1-lmg25")
+    implementation("com.liquidmusicglass.media3:media3-common-ktx:1.5.1-lmg25")
+    implementation("com.liquidmusicglass.media3:media3-ui:1.5.1-lmg25")
 
     implementation("androidx.mediarouter:mediarouter:1.7.0")
 
