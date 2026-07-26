@@ -1,5 +1,6 @@
 package com.liquidmusicglass.engine
 
+import android.content.Context
 import com.liquidmusicglass.data.local.db.LibraryRepository
 import com.liquidmusicglass.debug.DebugLog
 import kotlinx.coroutines.CoroutineScope
@@ -35,7 +36,11 @@ object FavoritesAutoDownloader {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var job: Job? = null
 
-    fun start() {
+    @Volatile
+    private var appContext: Context? = null
+
+    fun start(context: Context) {
+        appContext = context.applicationContext
         if (job?.isActive == true) return
         job = scope.launch {
             while (isActive) {
@@ -53,8 +58,10 @@ object FavoritesAutoDownloader {
     private suspend fun syncOnce() {
         if (!PlayerSettings.autoDownloadFavorites.value) return
         if (!MediaCacheManager.isCacheEnabled()) return
+        val context = appContext ?: return
 
-        val favorites = LibraryRepository.getAllFavoritesAsTracks()
+        val favorites = LibraryRepository.getInstance(context)
+            .getAllFavoritesAsTracks()
             .filter { it.isOnlineTrack }
         if (favorites.isEmpty()) return
 
@@ -63,13 +70,13 @@ object FavoritesAutoDownloader {
             if (job?.isActive != true) return
             // Пока человек слушает, полосу занимать нельзя: докачаем в тишине.
             if (PlayerController.isPlaying.value) return
-            if (MediaCacheManager.isFullyCached(track.id)) continue
 
             val url = PlayerController.resolveStreamUrlSync(track.id) ?: continue
-            val ok = MediaCacheManager.preCacheTrack(track.id, url, exclusive = false)
-            if (ok) downloaded++
+            // Повторный вызов для уже скачанного трека выходит быстро: писатель
+            // кэша пропускает готовые куски, поэтому отдельная проверка не нужна.
+            if (MediaCacheManager.preCacheTrack(track.id, url)) downloaded++
             delay(BETWEEN_TRACKS_DELAY_MS)
         }
-        if (downloaded > 0) DebugLog.add("Favorites: скачано $downloaded")
+        if (downloaded > 0) DebugLog.add("Favorites: докачано $downloaded")
     }
 }
