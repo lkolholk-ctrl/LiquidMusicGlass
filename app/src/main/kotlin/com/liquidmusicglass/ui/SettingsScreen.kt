@@ -361,6 +361,133 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(sectionGap))
 
             // PRELOAD NEXT TRACK
+            // LISTEN TOGETHER + CONTINUE ON THIS DEVICE
+            SectionLabel("LISTEN TOGETHER")
+
+            val syncRoom by com.liquidmusicglass.engine.sync.PlaybackSyncManager.room
+                .collectAsState()
+            val continuity by com.liquidmusicglass.engine.sync.PlaybackSyncManager.continuity
+                .collectAsState()
+            var roomCodeInput by remember { mutableStateOf("") }
+
+            LaunchedEffect(Unit) {
+                com.liquidmusicglass.engine.sync.PlaybackSyncManager.refreshContinuity()
+            }
+
+            PlainCard {
+                Column(modifier = Modifier.padding(vertical = 12.dp, horizontal = 16.dp)) {
+                    val activeRoom = syncRoom
+                    if (activeRoom != null) {
+                        Text(
+                            text = "Room ${activeRoom.code}",
+                            color = lc.textPrimary,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = if (activeRoom.memberNames.isEmpty()) "Waiting for others"
+                            else activeRoom.memberNames.joinToString(", "),
+                            color = lc.textSecondary,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                        Text(
+                            text = "Leave room",
+                            color = Accent,
+                            fontSize = 14.sp,
+                            modifier = Modifier
+                                .padding(top = 10.dp)
+                                .liquidClickable(
+                                    pressedScale = LiquidMotion.PressButton,
+                                    onClick = {
+                                        com.liquidmusicglass.engine.sync.PlaybackSyncManager
+                                            .leaveRoom()
+                                    }
+                                )
+                        )
+                    } else {
+                        Text(
+                            text = "Listen in sync with someone else: create a room and share " +
+                                "the code, or enter a code you were given.",
+                            color = lc.textSecondary,
+                            fontSize = 12.sp
+                        )
+                        Text(
+                            text = "Create a room",
+                            color = Accent,
+                            fontSize = 14.sp,
+                            modifier = Modifier
+                                .padding(top = 10.dp)
+                                .liquidClickable(
+                                    pressedScale = LiquidMotion.PressButton,
+                                    onClick = {
+                                        com.liquidmusicglass.engine.sync.PlaybackSyncManager
+                                            .createRoom()
+                                    }
+                                )
+                        )
+                        androidx.compose.material3.OutlinedTextField(
+                            value = roomCodeInput,
+                            onValueChange = { roomCodeInput = it.uppercase().take(6) },
+                            label = { Text("Room code", color = lc.textSecondary) },
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 10.dp)
+                        )
+                        Text(
+                            text = "Join",
+                            color = if (roomCodeInput.length == 6) Accent else lc.textSecondary,
+                            fontSize = 14.sp,
+                            modifier = Modifier
+                                .padding(top = 8.dp)
+                                .liquidClickable(
+                                    pressedScale = LiquidMotion.PressButton,
+                                    onClick = {
+                                        if (roomCodeInput.length == 6) {
+                                            com.liquidmusicglass.engine.sync.PlaybackSyncManager
+                                                .joinRoom(context, roomCodeInput)
+                                        }
+                                    }
+                                )
+                        )
+                    }
+
+                    val pending = continuity
+                    if (pending != null) {
+                        Text(
+                            text = "Continue from ${pending.deviceName.ifBlank { "another device" }}",
+                            color = lc.textPrimary,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(top = 16.dp)
+                        )
+                        Text(
+                            text = "${pending.title} — ${pending.artist}",
+                            color = lc.textSecondary,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                        Text(
+                            text = "Play from where you left off",
+                            color = Accent,
+                            fontSize = 14.sp,
+                            modifier = Modifier
+                                .padding(top = 8.dp)
+                                .liquidClickable(
+                                    pressedScale = LiquidMotion.PressButton,
+                                    onClick = {
+                                        com.liquidmusicglass.engine.sync.PlaybackSyncManager
+                                            .resumeContinuity(context)
+                                    }
+                                )
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(sectionGap))
+
             // SING (KARAOKE)
             SectionLabel("SING")
 

@@ -867,6 +867,9 @@ object PlayerController {
         if (lastWidgetPlaying != playing) {
             lastWidgetPlaying = playing
             refreshHomeWidget()
+            // Пауза — естественная точка «запомнить, где остановились»: именно её
+            // продолжают на другом устройстве.
+            com.liquidmusicglass.engine.sync.PlaybackSyncManager.pushStateNow()
         }
         if (!playing && _isBuffering.value) {
             _isBuffering.value = false
@@ -948,6 +951,7 @@ object PlayerController {
         if (lastWidgetTrackId != mediaId) {
             lastWidgetTrackId = mediaId
             refreshHomeWidget()
+            com.liquidmusicglass.engine.sync.PlaybackSyncManager.pushStateNow()
         }
         val currentQueue = queue
         val index = currentQueue.indexOfFirst { it.id == mediaId }

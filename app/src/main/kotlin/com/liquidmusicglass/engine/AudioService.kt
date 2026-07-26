@@ -457,6 +457,9 @@ class AudioService : MediaSessionService() {
         // Инициализация кэша (lazy, не блокирует старт)
         serviceScope.launch {
             MediaCacheManager.init(this@AudioService)
+            // Синхронизация с другими устройствами: состояние надо отправлять и
+            // при закрытом экране, поэтому запускаем вместе с сервисом.
+            com.liquidmusicglass.engine.sync.PlaybackSyncManager.start()
         }
 
         // ── Один плеер ──

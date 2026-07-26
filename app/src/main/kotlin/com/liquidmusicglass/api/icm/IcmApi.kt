@@ -151,6 +151,13 @@ class IcmApi private constructor() {
         isLenient = true
     }
 
+    /**
+     * Общий HTTP-клиент для наших же API (например, синхронизация через брокер).
+     * Отдельный клиент означал бы второй пул соединений и вторую TLS-сессию к
+     * тому же хосту — при холодном старте это лишние сотни миллисекунд.
+     */
+    internal val sharedClient: okhttp3.OkHttpClient get() = client
+
     private val client by lazy {
         // Явный Dispatcher: ограничиваем число одновременных запросов (всё идёт на
         // один хост byicloud.online). Реальный темп держит IcmRateGate, а это —
