@@ -614,6 +614,14 @@ class AudioService : MediaSessionService() {
                 // По умолчанию media3 берётся за него поздно, и 12-секундный
                 // кроссфейд успевал отработать лишь частью: к моменту готовности
                 // до конца трека оставалось меньше заданной длительности.
+                setCrossfadeConfiguration(
+                    androidx.media3.exoplayer.ExoPlayer.CrossfadeConfiguration(
+                        PlayerSettings.crossfadeMs.value.toLong() * 1_000L,
+                        androidx.media3.exoplayer.ExoPlayer.CrossfadeConfiguration.CURVE_DEFAULT,
+                        0L
+                    )
+                )
+
                 setPreloadConfiguration(
                     androidx.media3.exoplayer.ExoPlayer.PreloadConfiguration(
                         /* targetPreloadDurationUs= */ 30_000_000L
@@ -989,6 +997,24 @@ class AudioService : MediaSessionService() {
      *
      * ALL ExoPlayer calls run on Dispatchers.Main for thread safety.
      */
+    /**
+     * Параметры свода теперь принадлежат плееру, а не глобальному холдеру.
+     * Вызывать можно с любого потока — переключаемся на главный сами.
+     */
+    fun applyCrossfade(durationMs: Int) {
+        mainScope.launch {
+            if (!this@AudioService::player.isInitialized) return@launch
+            player.setCrossfadeConfiguration(
+                androidx.media3.exoplayer.ExoPlayer.CrossfadeConfiguration(
+                    /* durationUs = */ durationMs.toLong() * 1_000L,
+                    /* curveType = */
+                    androidx.media3.exoplayer.ExoPlayer.CrossfadeConfiguration.CURVE_DEFAULT,
+                    /* entryOffsetUs = */ 0L
+                )
+            )
+        }
+    }
+
     fun setQueue(mediaItems: List<MediaItem>, startIndex: Int = 0, startPositionMs: Long = 0L) {
         currentQueueItems = mediaItems.toList()
         mainScope.launch {

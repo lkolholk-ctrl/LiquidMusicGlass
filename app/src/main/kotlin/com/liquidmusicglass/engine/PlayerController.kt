@@ -862,14 +862,15 @@ object PlayerController {
         if (isLocalJucePlaybackActive) return // у локального движка свой кроссфейд
         val ms = PlayerSettings.crossfadeMs.value
         if (ms == lastAppliedCrossfadeMs) return
-        lastAppliedCrossfadeMs = ms
-        androidx.media3.exoplayer.CrossfadeConfig.setEnabled(ms > 0)
-        if (ms > 0) {
-            // curveType = -1 → кривая по умолчанию (log-in/exp-out), точка входа 0.
-            androidx.media3.exoplayer.CrossfadeConfig.applyRecipe(ms.toLong(), -1, 0L)
-        } else {
-            androidx.media3.exoplayer.CrossfadeConfig.clearRecipe()
+        val service = audioServiceRef
+        if (service == null) {
+            // Сервис ещё не поднят — не «запоминаем» применение, иначе настройка
+            // потеряется до следующего её изменения.
+            return
         }
+        lastAppliedCrossfadeMs = ms
+        // Параметры свода принадлежат плееру: сервис применит их к своему экземпляру.
+        service.applyCrossfade(ms)
         DebugLog.add("Crossfade ${if (ms > 0) "${ms}ms" else "off"}")
     }
 

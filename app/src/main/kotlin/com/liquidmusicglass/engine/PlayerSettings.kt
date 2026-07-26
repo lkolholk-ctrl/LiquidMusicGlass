@@ -45,9 +45,9 @@ object PlayerSettings {
     )
     private const val DEFAULT_CACHE_BYTES = 500L * 1024 * 1024
 
-    /** Кроссфейд: 0 = выкл, дальше шаг в секунду. Верх — как у Apple Music. */
+    /** Кроссфейд: 0 = выкл. Верх выше эпловских 12 c — по запросу на длинные своды. */
     const val MIN_CROSSFADE_MS = 1_000
-    const val MAX_CROSSFADE_MS = 12_000
+    const val MAX_CROSSFADE_MS = 18_000
     private const val DEFAULT_CROSSFADE_MS = 0
 
     private val KEY_CACHE_BYTES = longPreferencesKey("audio_cache_bytes")

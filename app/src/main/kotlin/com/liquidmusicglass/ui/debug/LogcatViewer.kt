@@ -235,6 +235,14 @@ fun LogcatScreen(onClose: () -> Unit) {
         onDispose { LogcatReader.stop() }
     }
 
+    // Подробный лог свода в media3-форке шумит несколько строк в секунду, поэтому
+    // в обычной работе он выключен. Включаем его ровно на время, пока открыт этот
+    // просмотрщик — то есть когда логи и нужны.
+    DisposableEffect(Unit) {
+        androidx.media3.exoplayer.CrossfadeConfig.setDebugLogging(true)
+        onDispose { androidx.media3.exoplayer.CrossfadeConfig.setDebugLogging(false) }
+    }
+
     var follow by remember { mutableStateOf(true) }
     var levelIdx by remember { mutableStateOf(0) }
     var query by remember { mutableStateOf("") }
