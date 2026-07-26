@@ -188,7 +188,23 @@ fun ArtistDetailScreen(
     }
 
     val topSongs = remember(artist) { artist?.topSongs.orEmpty() }
-    val albums = remember(artist) { artist?.albums.orEmpty().distinctBy { it.id } }
+
+    // Дискографию делим по типу релиза: сборники и концертные записи слушают
+    // иначе, чем студийные альбомы, и в общей куче они только мешают искать.
+    val allAlbums = remember(artist) { artist?.albums.orEmpty().distinctBy { it.id } }
+    val compilations = remember(allAlbums) {
+        allAlbums.filter { it.type?.contains("compilation", ignoreCase = true) == true }
+    }
+    val liveAlbums = remember(allAlbums) {
+        allAlbums.filter {
+            it.type?.contains("live", ignoreCase = true) == true ||
+                it.title.contains("(Live", ignoreCase = true)
+        }
+    }
+    val albums = remember(allAlbums, compilations, liveAlbums) {
+        val excluded = (compilations + liveAlbums).map { it.id }.toSet()
+        allAlbums.filterNot { it.id in excluded }
+    }
     val singles = remember(artist) { artist?.singles.orEmpty().distinctBy { it.id } }
     val appearsOn = remember(artist) { artist?.appearsOn.orEmpty().distinctBy { it.id } }
     val playlists = remember(artist) { artist?.playlists.orEmpty().distinctBy { it.id } }
@@ -252,6 +268,19 @@ fun ArtistDetailScreen(
                         }
                     }
 
+                    art?.latestRelease?.let { latest ->
+                        item { SectionHeader("Latest release", colors.textPrimary) }
+                        item {
+                            LatestReleaseCard(
+                                album = latest,
+                                textPrimary = colors.textPrimary,
+                                textSecondary = colors.textSecondary,
+                                isDark = colors.isDark,
+                                onClick = { onNavigateToAlbum(latest.id) }
+                            )
+                        }
+                    }
+
                     if (topSongs.isNotEmpty()) {
                         item { SectionHeader("Top songs", colors.textPrimary) }
                         item {
@@ -277,19 +306,6 @@ fun ArtistDetailScreen(
                         }
                     }
 
-                    art?.latestRelease?.let { latest ->
-                        item { SectionHeader("Latest release", colors.textPrimary) }
-                        item {
-                            LatestReleaseCard(
-                                album = latest,
-                                textPrimary = colors.textPrimary,
-                                textSecondary = colors.textSecondary,
-                                isDark = colors.isDark,
-                                onClick = { onNavigateToAlbum(latest.id) }
-                            )
-                        }
-                    }
-
                     if (albums.isNotEmpty()) {
                         item { SectionHeader("Albums", colors.textPrimary) }
                         item {
@@ -301,6 +317,20 @@ fun ArtistDetailScreen(
                         item { SectionHeader("Singles & EPs", colors.textPrimary) }
                         item {
                             AlbumRow(singles, colors.textPrimary, colors.textSecondary, onNavigateToAlbum)
+                        }
+                    }
+
+                    if (compilations.isNotEmpty()) {
+                        item { SectionHeader("Compilations", colors.textPrimary) }
+                        item {
+                            AlbumRow(compilations, colors.textPrimary, colors.textSecondary, onNavigateToAlbum)
+                        }
+                    }
+
+                    if (liveAlbums.isNotEmpty()) {
+                        item { SectionHeader("Live albums", colors.textPrimary) }
+                        item {
+                            AlbumRow(liveAlbums, colors.textPrimary, colors.textSecondary, onNavigateToAlbum)
                         }
                     }
 
