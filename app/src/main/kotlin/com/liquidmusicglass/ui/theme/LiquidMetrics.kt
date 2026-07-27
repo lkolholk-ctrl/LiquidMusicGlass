@@ -245,6 +245,12 @@ object LiquidSurfaces {
     /** Подложка строки, поднятой для перестановки. */
     val queueRowDragged = Color.White.copy(alpha = 0.06f)
 
+    /**
+     * Подложка примёрзшего заголовка секции. Без неё строки просвечивают сквозь
+     * заголовок, когда список уезжает под него.
+     */
+    val queueHeaderFill = Color.Black.copy(alpha = 0.28f)
+
     /** Подложка, проступающая под строкой при свайпе-удалении. */
     fun queueDestructive(accent: Color): Color = accent.copy(alpha = 0.85f)
 }

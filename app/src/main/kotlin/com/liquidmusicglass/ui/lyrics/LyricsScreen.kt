@@ -224,14 +224,13 @@ fun LyricsScreen(
     }
 
     val currentLineIndex by timeProcessor?.currentLineIndex?.collectAsState() ?: remember { mutableIntStateOf(-1) }
-    val currentLineProgress by timeProcessor?.currentLineProgress?.collectAsState() ?: remember { mutableFloatStateOf(0f) }
 
-    // ── Настройки пословной подсветки (эффект/плавность) — только для word-level ──
-    val isWordLevel = lyrics.isWordLevel
-    val wordEffect by LyricsFxController.effect.collectAsState()
-    val wordSmoothness by LyricsFxController.smoothness.collectAsState()
-    val lineEffect = if (isWordLevel) wordEffect else LyricsFxController.WordEffect.FILL
-    val sungTweenMs = if (isWordLevel) (90f + wordSmoothness * 360f).toInt() else 180
+    // Подсветка идёт целыми строками. Заливка внутри строки считалась по
+    // эвристике «миллисекунд на символ» — это была догадка, а не тайминги, и
+    // на распевах и быстром речитативе она заметно врала. Вернём посимвольную
+    // заливку, когда ICM отдаст пословные тайминги; движок под неё цел.
+    val lineEffect = LyricsFxController.WordEffect.FILL
+    val sungTweenMs = 180
 
     // Waiting считает сам LyricsTimeProcessor (сегментная модель): строка докрашена
     // ПОЛНОСТЬЮ + до следующей строки реальный разрыв > WAIT_GAP_MS. VAD выключен.
@@ -250,8 +249,9 @@ fun LyricsScreen(
     val lineMaxWidthPx = with(density) { (lyricColumnWidthDp.dp - lineHPadding * 2).toPx().toInt() }
     // В узкой split-колонке шрифт строк меньше, чтобы влезал без обрезки.
     val lineFontScale = if (splitMode) 0.66f else 1f
-    // Ширина мягкого края sweep (px) — из настройки плавности; 0 для line-level.
-    val edgeSoftPx = if (isWordLevel) (0.02f + wordSmoothness * 0.16f) * lineMaxWidthPx else 0f
+    // Мягкий край нужен движущемуся фронту заливки; при построчной подсветке
+    // фронта нет — строка загорается целиком.
+    val edgeSoftPx = 0f
 
     // Ручной скролл (drag) ставит автоследование на паузу — фиксируем момент касания.
     var userScrolledAt by remember { mutableLongStateOf(0L) }
@@ -436,10 +436,10 @@ fun LyricsScreen(
                                 Regex("""\[(M|F|D|Male|Female|Duet):?\s*""", RegexOption.IGNORE_CASE), ""
                             )
 
-                            // прогресс заливки: прошлое = залито, текущая = sweep, будущее = пусто
+                            // Построчная подсветка: активная строка горит целиком,
+                            // спетое остаётся приглушённым, будущее не залито.
                             val fillProgress = when {
-                                isPast -> 1f
-                                isCurrent -> currentLineProgress
+                                isPast || isCurrent -> 1f
                                 else -> 0f
                             }
 

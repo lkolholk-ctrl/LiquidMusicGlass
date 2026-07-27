@@ -155,14 +155,11 @@ object LyricsParser {
         durationMs: Long,
         trackId: String? = null
     ): Lyrics {
-        // ── 0. МОЯ пословная разметка (Enhanced LRC) — ВЫСШИЙ приоритет. Если есть,
-        //       используем ТОЛЬКО её и к API НЕ обращаемся (один источник за раз). ──
-        loadMyWordLyrics(context, title, artist, durationMs)?.let { mine ->
-            if (mine.lines.isNotEmpty()) {
-                if (!trackId.isNullOrBlank()) cacheLyrics(trackId, mine)
-                return mine
-            }
-        }
+        // Своя пословная разметка (Enhanced LRC) временно не используется: пока
+        // у ICM нет пословных таймингов, подсветка идёт целыми строками, а
+        // ручная разметка на паре треков давала бы поведение, отличное от всей
+        // остальной библиотеки. Загрузчик и парсер оставлены — вернём, когда
+        // пословные тайминги появятся в API.
 
         // ── ЛОКАЛЬНЫЙ трек: источник синхро-текстов — LRCLIB (только для локального) ──
         if (isLocalTrack(uri, trackId)) {

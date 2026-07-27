@@ -29,8 +29,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -99,6 +99,7 @@ import kotlin.math.abs
  * Кнопки управления: те же что в FullPlayer (Shuffle, Prev, Play/Pause, Next, Repeat).
  * Без ползунка громкости.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun QueueSheet(
     visible: Boolean,
@@ -123,6 +124,7 @@ fun QueueSheet(
     val backend by PlayerController.playbackBackend.collectAsState()
     val queueEditable = backend != PlaybackBackend.JUCE_LOCAL
     val repeatMode by PlayerController.repeatMode.collectAsState()
+    val sections by PlayerController.queueSections.collectAsState()
     val libraryRepo = remember { com.liquidmusicglass.data.local.db.LibraryRepository.getInstance(context) }
     // Flow нужно строить в remember: без него isFavoriteFlow() создавал новый
     // экземпляр на каждой рекомпозиции, а collectAsState кеширует подписку по
@@ -332,31 +334,42 @@ fun QueueSheet(
                     }
                 }
 
+                // Раскладка по секциям. Границы приходят из движка абсолютными
+                // индексами в очереди — переводим их в позиции внутри upNext.
+                val manualCount = (sections.manualEnd - (currentIndex + 1))
+                    .coerceIn(0, upNext.size)
+                val contextCount = (sections.autoStart - sections.manualEnd)
+                    .coerceIn(0, upNext.size - manualCount)
+                val waveCount = upNext.size - manualCount - contextCount
+                val sectionSpecs = listOf(
+                    QueueSectionSpec("Далее", 0, manualCount, clearable = true),
+                    QueueSectionSpec("Продолжение", manualCount, contextCount),
+                    QueueSectionSpec("Волна", manualCount + contextCount, waveCount)
+                ).filter { it.count > 0 }
+
                 LazyColumn(
                     state = listState,
                     modifier = Modifier
                         .fillMaxSize(),
                     verticalArrangement = Arrangement.spacedBy(0.dp)
                 ) {
-                    if (upNext.isNotEmpty()) {
-                        item(key = "upnext_header") {
-                            Text(
-                                text = "Up Next",
-                                color = LiquidSurfaces.onHeaderPrimary.copy(alpha = 0.75f),
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(
-                                    horizontal = LiquidMetrics.QueuePadding,
-                                    vertical = 8.dp
-                                )
+                    sectionSpecs.forEach { spec ->
+                        stickyHeader(key = "hdr_${spec.title}") {
+                            QueueSectionHeader(
+                                title = spec.title,
+                                count = spec.count,
+                                onClear = if (spec.clearable && queueEditable) {
+                                    { PlayerController.clearManualSection() }
+                                } else null
                             )
                         }
-                        itemsIndexed(
-                            upNext,
-                            key = { index, _ -> upNextKeys[index] }
-                        ) { idx, track ->
+                        items(
+                            count = spec.count,
+                            key = { i -> upNextKeys[spec.from + i] }
+                        ) { i ->
+                            val idx = spec.from + i
                             DraggableQueueRow(
-                                track = track,
+                                track = upNext[idx],
                                 rowKey = upNextKeys[idx],
                                 index = idx,
                                 upNextLastIndex = upNext.lastIndex,
@@ -368,7 +381,7 @@ fun QueueSheet(
                                     draggingKey = key
                                     dragOffsetY.value = offset
                                 },
-                                absoluteIndex = { i -> PlayerController.getCurrentIndex() + 1 + i },
+                                absoluteIndex = { j -> PlayerController.getCurrentIndex() + 1 + j },
                                 onClick = {
                                     PlayerController.playTrack(
                                         context,
@@ -420,6 +433,64 @@ fun QueueSheet(
                 }
                 } // Box (clickable queue area)
 
+            }
+        }
+    }
+}
+
+/** Одна секция очереди: заголовок и диапазон строк внутри списка предстоящего. */
+private data class QueueSectionSpec(
+    val title: String,
+    val from: Int,
+    val count: Int,
+    val clearable: Boolean = false
+)
+
+/**
+ * Заголовок секции.
+ *
+ * У Apple заголовки без счётчиков и «выталкиваются» следующей секцией. У нас
+ * счётчик справа (сразу видно, сколько ещё ждёт) и заголовок примерзает, набирая
+ * подложку, — так понятнее, где ты находишься в длинной очереди.
+ */
+@Composable
+private fun QueueSectionHeader(
+    title: String,
+    count: Int,
+    onClear: (() -> Unit)?
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(LiquidSurfaces.queueHeaderFill)
+            .padding(horizontal = LiquidMetrics.QueuePadding, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = title,
+            color = LiquidSurfaces.onHeaderPrimary.copy(alpha = 0.75f),
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.weight(1f)
+        )
+        Text(
+            text = "$count",
+            color = LiquidSurfaces.onHeaderPrimary.copy(alpha = 0.45f),
+            fontSize = 12.sp
+        )
+        if (onClear != null) {
+            Spacer(Modifier.width(10.dp))
+            Box(
+                modifier = Modifier
+                    .clip(LiquidMetrics.Pill)
+                    .clickable(onClick = onClear)
+                    .padding(horizontal = 10.dp, vertical = 3.dp)
+            ) {
+                Text(
+                    text = "Очистить",
+                    color = LiquidSurfaces.onHeaderPrimary.copy(alpha = 0.60f),
+                    fontSize = 12.sp
+                )
             }
         }
     }

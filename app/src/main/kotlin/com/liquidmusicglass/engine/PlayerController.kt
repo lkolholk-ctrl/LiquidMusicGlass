@@ -249,6 +249,48 @@ object PlayerController {
     /** Порядок очереди (id) до перемешивания — по нему восстанавливаемся. */
     private var preShuffleOrder: List<String>? = null
 
+    /**
+     * Границы секций очереди.
+     *
+     *  [currentIndex+1, manualEnd) — добавлено вручную («Играть следующим», «В очередь»)
+     *  [manualEnd, autoStart)      — остаток исходной подборки (альбом, плейлист, поиск)
+     *  [autoStart, queue.size)     — подобрано волной
+     *
+     * Держим два числа, а не список происхождений на каждый трек: поддерживать
+     * его пришлось бы в тех же девяти точках мутации очереди, но пропущенная
+     * точка сдвигала бы все секции разом, а не портила одну границу.
+     */
+    data class QueueSections(val manualEnd: Int, val autoStart: Int)
+
+    private var manualEnd = 0
+    private var autoStart = 0
+    private val _queueSections = MutableStateFlow(QueueSections(0, 0))
+    val queueSections: StateFlow<QueueSections> = _queueSections
+
+    /**
+     * Приводит границы в согласованное состояние и публикует их.
+     *
+     * Самопроверка дешёвая и намеренно грубая: если инвариант нарушен (например,
+     * фоновая дозаправка разъехалась с перестановкой), секции схлопываются в
+     * одну. Показать очередь одним списком честнее, чем разрезать её не в тех
+     * местах.
+     */
+    private fun publishSections() {
+        val lo = (currentIndex + 1).coerceIn(0, queue.size)
+        if (manualEnd < lo || autoStart < manualEnd || autoStart > queue.size) {
+            manualEnd = lo
+            autoStart = queue.size
+        }
+        _queueSections.value = QueueSections(manualEnd, autoStart)
+    }
+
+    /** Новая подборка: ручного ничего нет, волна ещё не добавляла. */
+    private fun resetSections(startIndex: Int, size: Int) {
+        manualEnd = (startIndex + 1).coerceIn(0, size)
+        autoStart = size
+        publishSections()
+    }
+
     private val _repeatMode = MutableStateFlow(0)
     val repeatMode: StateFlow<Int> = _repeatMode
 
@@ -474,6 +516,9 @@ object PlayerController {
             if (fresh.isEmpty()) return@launch
             queue = queue + fresh
             _queueFlow.value = queue
+            // Волна дописывает в хвост: autoStart уже стоит там, где начинается
+            // подобранное, двигать его не нужно — только проверить инвариант.
+            publishSections()
 
             // Анти-повтор волны: всё, что попало в очередь, регистрируем в
             // playedIds движка — иначе следующий рефилл может запросить у
@@ -505,6 +550,7 @@ object PlayerController {
     fun addTracksFromService(newTracks: List<Track>, mediaItems: List<MediaItem>) {
         queue = queue + newTracks
         _queueFlow.value = queue
+        publishSections()
         appContext?.let { prefetchAhead(it, currentIndex, depth = 3) }
         android.util.Log.d("VOIDPIXEL_MEDIA", "Sync queue from service: added ${newTracks.size} tracks, total=${queue.size}")
     }
@@ -612,6 +658,7 @@ object PlayerController {
                         queue = immutableTracks
                         _queueFlow.value = immutableTracks
                         currentIndex = startIndex
+                        resetSections(startIndex, immutableTracks.size)
 
                         _currentTrack.value = startTrack
                         _durationMs.value = startTrack.durationMs
@@ -696,6 +743,7 @@ object PlayerController {
                 queue = immutableTracks
                 _queueFlow.value = immutableTracks
                 currentIndex = startIndex
+                resetSections(startIndex, immutableTracks.size)
 
                 _currentTrack.value = startTrack
                 _durationMs.value = startTrack.durationMs
@@ -970,6 +1018,12 @@ object PlayerController {
 
         val track = currentQueue[index]
         currentIndex = index
+        // Проигранное перестаёт быть «добавленным вручную» — окно схлопывается
+        // за играющим треком, иначе секция «Далее» будет тянуться назад.
+        val lo = (currentIndex + 1).coerceIn(0, currentQueue.size)
+        manualEnd = manualEnd.coerceAtLeast(lo)
+        autoStart = autoStart.coerceAtLeast(manualEnd)
+        publishSections()
         _currentTrack.value = track
         _durationMs.value = track.durationMs
         _currentPositionMs.value = 0L
@@ -1003,7 +1057,8 @@ object PlayerController {
         queue = immutableTracks
         _queueFlow.value = immutableTracks
         currentIndex = startIndex
-        
+        resetSections(startIndex, immutableTracks.size)
+
         // Also register tracks to endlessEngine if context is global
         if (_playbackContext is PlaybackContext.Global) {
             endlessEngine.registerTracks(immutableTracks.map { it.id })
@@ -1013,16 +1068,64 @@ object PlayerController {
     fun getCurrentQueue(): List<Track> = queue
     fun getCurrentIndex(): Int = currentIndex
 
+    /** 0 — ручная секция, 1 — остаток подборки, 2 — волна. */
+    private fun sectionIndexOf(i: Int): Int = when {
+        i < manualEnd -> 0
+        i < autoStart -> 1
+        else -> 2
+    }
+
+    /**
+     * Очистить ручную секцию (кнопка в заголовке «Далее»). Играющий трек и всё
+     * остальное не трогаем.
+     */
+    fun clearManualSection() {
+        val lo = (currentIndex + 1).coerceIn(0, queue.size)
+        if (manualEnd <= lo) return
+        val count = manualEnd - lo
+        queue = queue.toMutableList().apply { subList(lo, manualEnd).clear() }
+        manualEnd = lo
+        autoStart = (autoStart - count).coerceAtLeast(lo)
+        _queueFlow.value = queue
+        publishSections()
+        mainScope.launch {
+            val player = controller ?: appContext?.let { getPlayer(it) } ?: return@launch
+            if (lo < player.mediaItemCount) {
+                player.removeMediaItems(lo, (lo + count).coerceAtMost(player.mediaItemCount))
+            }
+        }
+    }
+
+    /**
+     * «В очередь» из меню трека — в конец РУЧНОЙ секции, а не в самый хвост.
+     *
+     * В хвосте трек оказывался за остатком альбома и за всем, что подобрала
+     * волна, то есть «в очередь» на деле означало «когда-нибудь потом».
+     */
     fun addToQueue(track: Track) {
-        addTracksToQueue(listOf(track))
+        insertManual(track, (currentIndex + 1).coerceAtLeast(manualEnd))
     }
 
     /** Вставить трек СЛЕДУЮЩИМ после текущего (контекст-меню «Play next»).
      *  В отличие от [playNext], не трогает воспроизведение и не кидает в конец. */
     fun insertNext(track: Track) {
-        val idx = (currentIndex + 1).coerceIn(0, queue.size)
+        insertManual(track, currentIndex + 1)
+    }
+
+    /**
+     * Ручная вставка: трек попадает в ручную секцию, её граница едет вправе,
+     * а вместе с ней и начало волны — иначе секции разъедутся на один трек.
+     *
+     * Анти-дубль здесь намеренно не применяем (в отличие от [addTracksToQueue]):
+     * поставить руками трек, который уже стоит где-то дальше, — законное желание.
+     */
+    private fun insertManual(track: Track, at: Int) {
+        val idx = at.coerceIn(0, queue.size)
         queue = queue.toMutableList().apply { add(idx, track) }
+        if (idx <= manualEnd) manualEnd++
+        if (idx <= autoStart) autoStart++
         _queueFlow.value = queue
+        publishSections()
         mainScope.launch {
             val player = controller ?: appContext?.let { getPlayer(it) }
             if (player != null && idx <= player.mediaItemCount)
@@ -1037,10 +1140,25 @@ object PlayerController {
         if (from == to || from !in queue.indices || to !in queue.indices) return
         if (from == currentIndex) return
         val playingId = _currentTrack.value?.id
+        // Трек, перетащенный в другую секцию, должен в ней и остаться: двигаем
+        // ту границу, через которую он перешёл. Считаем ДО перестановки, пока
+        // индексы ещё соответствуют границам.
+        val fromSec = sectionIndexOf(from)
+        val toSec = sectionIndexOf(to)
+        if (fromSec != toSec) {
+            if (toSec < fromSec) {
+                if (toSec == 0) manualEnd++
+                if (toSec <= 1 && fromSec == 2) autoStart++
+            } else {
+                if (fromSec == 0) manualEnd--
+                if (fromSec <= 1 && toSec == 2) autoStart--
+            }
+        }
         queue = queue.toMutableList().apply { add(to, removeAt(from)) }
         // Текущий индекс мог сдвинуться — восстанавливаем по id играющего трека.
         queue.indexOfFirst { it.id == playingId }.takeIf { it >= 0 }?.let { currentIndex = it }
         _queueFlow.value = queue
+        publishSections()
         mainScope.launch {
             val player = controller ?: appContext?.let { getPlayer(it) }
             if (player != null && from < player.mediaItemCount && to < player.mediaItemCount) {
@@ -1053,9 +1171,12 @@ object PlayerController {
     fun removeQueueItem(index: Int) {
         if (index !in queue.indices || index == currentIndex) return
         val playingId = _currentTrack.value?.id
+        if (index < manualEnd) manualEnd--
+        if (index < autoStart) autoStart--
         queue = queue.toMutableList().apply { removeAt(index) }
         queue.indexOfFirst { it.id == playingId }.takeIf { it >= 0 }?.let { currentIndex = it }
         _queueFlow.value = queue
+        publishSections()
         mainScope.launch {
             val player = controller ?: appContext?.let { getPlayer(it) }
             if (player != null && index < player.mediaItemCount) player.removeMediaItem(index)
@@ -1822,17 +1943,34 @@ object PlayerController {
             return
         }
 
-        val newTail = if (enabled) {
+        val rank: Map<String, Int>? = if (enabled) {
             preShuffleOrder = queue.map { it.id }
-            tail.shuffled()
+            null
         } else {
             val order = preShuffleOrder ?: return
             preShuffleOrder = null
-            val rank = HashMap<String, Int>()
-            order.forEachIndexed { i, id -> if (!rank.containsKey(id)) rank[id] = i }
-            // Добавленного во время перемешивания в снимке нет — уводим в конец,
-            // сохраняя относительный порядок (sortedBy устойчива).
-            tail.sortedBy { rank[it.id] ?: Int.MAX_VALUE }
+            HashMap<String, Int>().apply {
+                order.forEachIndexed { i, id -> if (!containsKey(id)) put(id, i) }
+            }
+        }
+
+        // Каждую секцию мешаем отдельно: размеры секций не меняются, значит
+        // границы остаются верными, и добавленное вручную не растворяется среди
+        // подобранного волной.
+        val lo = head + 1
+        val mid = manualEnd.coerceIn(lo, queue.size)
+        val hi = autoStart.coerceIn(mid, queue.size)
+        val newTail = ArrayList<Track>(tail.size)
+        listOf(lo to mid, mid to hi, hi to queue.size).forEach { (a, b) ->
+            if (b <= a) return@forEach
+            val seg = queue.subList(a, b).toList()
+            newTail += if (rank == null) {
+                seg.shuffled()
+            } else {
+                // Добавленного во время перемешивания в снимке нет — уводим в
+                // конец своей секции, сохраняя относительный порядок.
+                seg.sortedBy { rank[it.id] ?: Int.MAX_VALUE }
+            }
         }
 
         queue = queue.toMutableList().apply {
