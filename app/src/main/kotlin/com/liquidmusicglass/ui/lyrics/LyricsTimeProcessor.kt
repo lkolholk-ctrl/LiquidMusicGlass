@@ -81,6 +81,13 @@ class LyricsTimeProcessor(
         /** Разрыв после полной докраски, считающийся проигрышем → Waiting. */
         const val WAIT_GAP_MS = 2000L
 
+        /**
+         * Насколько раньше начинать прокрутку к следующей строке. Примерно
+         * столько же длится сама анимация — строка успевает встать на место
+         * ровно к началу пения.
+         */
+        const val SCROLL_LEAD_MS = 500L
+
         private val STRONG_PUNCT = setOf('.', '!', '?', '…', '—', '–')
         private val WEAK_PUNCT = setOf(',', ';', ':')
 
@@ -101,6 +108,17 @@ class LyricsTimeProcessor(
 
     private val _currentLineIndex = MutableStateFlow(-1)
     val currentLineIndex: StateFlow<Int> = _currentLineIndex.asStateFlow()
+
+    /**
+     * На какую строку наводить список — с упреждением [SCROLL_LEAD_MS].
+     *
+     * Подсветка обязана идти строго по таймкодам, а прокрутка — нет: если
+     * начинать движение в тот момент, когда строку уже поют, она встанет на
+     * место с опозданием на всю анимацию. Отдельный индекс позволяет тронуться
+     * заранее и приехать вовремя.
+     */
+    private val _scrollLineIndex = MutableStateFlow(-1)
+    val scrollLineIndex: StateFlow<Int> = _scrollLineIndex.asStateFlow()
 
     /** Идёт ли сейчас инструментальный проигрыш между строками → показывать Waiting. */
     private val _isInterlude = MutableStateFlow(false)
@@ -304,6 +322,15 @@ class LyricsTimeProcessor(
         val currentLine = if (safePosition < lineFills[0].startMs) -1 else lineCursor
         _currentLineIndex.value = currentLine
 
+        // Прокрутка идёт с упреждением: считаем строку так, будто уже наступил
+        // момент на SCROLL_LEAD_MS позже.
+        val leadPos = safePosition + SCROLL_LEAD_MS
+        var scrollLine = currentLine
+        while (scrollLine + 1 < lineFills.size && leadPos >= lineFills[scrollLine + 1].startMs) {
+            scrollLine++
+        }
+        _scrollLineIndex.value = scrollLine
+
         if (currentLine < 0) {
             _currentLineProgress.value = 0f
             _isInterlude.value = false
@@ -413,6 +440,7 @@ class LyricsTimeProcessor(
         lineCursor = 0
         lastProcessedPositionMs = -1L
         _currentLineIndex.value = -1
+        _scrollLineIndex.value = -1
         _currentLineProgress.value = 0f
         _pastWords.value = emptyList()
         _currentWords.value = emptyList()

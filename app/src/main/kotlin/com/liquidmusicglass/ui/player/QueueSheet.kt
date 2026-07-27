@@ -125,6 +125,16 @@ fun QueueSheet(
     val queueEditable = backend != PlaybackBackend.JUCE_LOCAL
     val repeatMode by PlayerController.repeatMode.collectAsState()
     val sections by PlayerController.queueSections.collectAsState()
+    // Последнее удаление свайпом: трек и место, откуда он ушёл. Пока значение
+    // не пустое, внизу висит капсула «Undo». Само удаление происходит сразу —
+    // отложенное держало бы очередь плеера в расхождении с показанной.
+    var lastRemoved by remember { mutableStateOf<Pair<Track, Int>?>(null) }
+    LaunchedEffect(lastRemoved) {
+        if (lastRemoved != null) {
+            kotlinx.coroutines.delay(UNDO_TIMEOUT_MS)
+            lastRemoved = null
+        }
+    }
     val libraryRepo = remember { com.liquidmusicglass.data.local.db.LibraryRepository.getInstance(context) }
     // Flow нужно строить в remember: без него isFavoriteFlow() создавал новый
     // экземпляр на каждой рекомпозиции, а collectAsState кеширует подписку по
@@ -385,6 +395,7 @@ fun QueueSheet(
                                     dragOffsetY.value = offset
                                 },
                                 absoluteIndex = { j -> PlayerController.getCurrentIndex() + 1 + j },
+                                onRemoved = { t, at -> lastRemoved = t to at },
                                 onClick = {
                                     PlayerController.playTrack(
                                         context,
@@ -437,9 +448,47 @@ fun QueueSheet(
                 } // Box (clickable queue area)
 
             }
+
+            // Капсула отмены. У Apple удаление из очереди не отменить вовсе —
+            // промахнуться по строке легко, а вернуть трек нечем. Висит над
+            // нижним краем, чтобы не спорить с контролами плеера.
+            lastRemoved?.let { (track, at) ->
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .windowInsetsPadding(WindowInsets.navigationBars)
+                        .padding(bottom = 150.dp)
+                        .clip(LiquidMetrics.Pill)
+                        .background(LiquidSurfaces.queueHeaderFill)
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Removed",
+                        color = LiquidSurfaces.onHeaderPrimary.copy(alpha = 0.75f),
+                        fontSize = 13.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(Modifier.width(14.dp))
+                    Text(
+                        text = "Undo",
+                        color = colors.accentRed,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clickable {
+                            PlayerController.restoreToQueue(track, at)
+                            lastRemoved = null
+                        }
+                    )
+                }
+            }
         }
     }
 }
+
+/** Сколько держится капсула отмены после удаления свайпом. */
+private const val UNDO_TIMEOUT_MS = 4000L
 
 /**
  * Одна секция очереди: заголовок и диапазон строк внутри списка предстоящего.
@@ -512,6 +561,7 @@ private fun DraggableQueueRow(
     accent: Color,
     onDragStateChange: (String?, Float) -> Unit,
     absoluteIndex: (Int) -> Int,
+    onRemoved: (Track, Int) -> Unit,
     onClick: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
@@ -620,7 +670,9 @@ private fun DraggableQueueRow(
                             }
                             scope.launch {
                                 removeOffset.animateTo(target, tween(150))
-                                PlayerController.removeQueueItem(absoluteIndex(indexState.value))
+                                val at = absoluteIndex(indexState.value)
+                                PlayerController.removeQueueItem(at)
+                                onRemoved(track, at)
                                 // Узел может переиспользоваться под другой трек — возвращаем на место.
                                 removeOffset.snapTo(0f)
                             }

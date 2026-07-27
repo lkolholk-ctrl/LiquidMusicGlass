@@ -233,6 +233,9 @@ fun LyricsScreen(
     }
 
     val currentLineIndex by timeProcessor?.currentLineIndex?.collectAsState() ?: remember { mutableIntStateOf(-1) }
+    // Подсветка идёт по currentLineIndex, а наводка списка — по этому: он бежит
+    // с упреждением, чтобы строка встала на место к началу пения.
+    val scrollLineIndex by timeProcessor?.scrollLineIndex?.collectAsState() ?: remember { mutableIntStateOf(-1) }
 
     // Подсветка идёт целыми строками. Заливка внутри строки считалась по
     // эвристике «миллисекунд на символ» — это была догадка, а не тайминги, и
@@ -275,8 +278,8 @@ fun LyricsScreen(
         }
     }
 
-    LaunchedEffect(currentLineIndex, userScrolledAt) {
-        if (currentLineIndex >= 0) {
+    LaunchedEffect(scrollLineIndex, userScrolledAt) {
+        if (scrollLineIndex >= 0) {
             // Если пользователь недавно листал руками — ждём остаток паузы,
             // потом плавно возвращаемся (новый drag перезапустит эффект и ожидание).
             val sinceTouch = System.currentTimeMillis() - userScrolledAt
@@ -289,7 +292,7 @@ fun LyricsScreen(
             // lineToItem: нулевой элемент списка — распорка шапки, поэтому индекс
             // строки и индекс элемента не совпадают. Без сдвига список наводился
             // на ПРЕДЫДУЩУЮ строку, и подсвеченная всегда стояла ниже якоря.
-            val lineIndex = currentLineIndex.coerceAtMost((lyrics.lines.size - 1).coerceAtLeast(0))
+            val lineIndex = scrollLineIndex.coerceAtMost((lyrics.lines.size - 1).coerceAtLeast(0))
             val targetIndex = lineIndex + 1
             // Высоту берём у самого списка, а не у экрана: в split и с вырезами
             // экранная высота не равна видимой области, и якорь промахивается.

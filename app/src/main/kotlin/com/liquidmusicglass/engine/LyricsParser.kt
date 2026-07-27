@@ -26,7 +26,23 @@ object LyricsParser {
 
     // In-memory lyrics cache — key: trackId. Concurrent: пишется/читается с
     // разных корутин (строка лирики на Wave, LyricsSheet, полный экран).
-    private val lyricsCache = java.util.concurrent.ConcurrentHashMap<String, Lyrics>()
+    /** Сколько разобранных текстов держим в памяти. */
+    private const val LYRICS_CACHE_LIMIT = 10
+
+    /**
+     * Кэш разобранной лирики.
+     *
+     * Раньше это была неограниченная карта: за сеанс она росла на каждый
+     * открытый трек и ничего не отдавала обратно. Десяти хватает — по кругу
+     * ходят текущий трек, соседи по очереди и то, что открывали только что;
+     * вытесняется наименее давно использованное.
+     */
+    private val lyricsCache: MutableMap<String, Lyrics> = java.util.Collections.synchronizedMap(
+        object : LinkedHashMap<String, Lyrics>(16, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Lyrics>): Boolean =
+                size > LYRICS_CACHE_LIMIT
+        }
+    )
 
     fun getCachedLyrics(trackId: String?): Lyrics? {
         if (trackId.isNullOrBlank()) return null
@@ -641,6 +657,16 @@ object LyricsParser {
         return words
     }
 
+    /**
+     * Индекс строки, звучащей в [positionMs]; -1 — не звучит ничего.
+     *
+     * Раньше возвращалась просто последняя строка с таймкодом не позже позиции.
+     * После перемотки в середину длинного проигрыша это давало застрявшую строку,
+     * которую допели полминуты назад. Если конец строки размечен в LRC и до
+     * следующей строки остаётся заметный разрыв — значит, сейчас проигрыш, и
+     * подсвечивать нечего. Короткие паузы между строками не гасим: там это
+     * читалось бы как мигание.
+     */
     fun findCurrentLine(lyrics: Lyrics, positionMs: Long): Int {
         if (!lyrics.isSynced || lyrics.lines.isEmpty()) return -1
         var current = -1
@@ -651,8 +677,18 @@ object LyricsParser {
                 break
             }
         }
+        if (current < 0) return -1
+
+        val line = lyrics.lines[current]
+        if (line.endMs > line.timeMs && positionMs >= line.endMs) {
+            val nextStart = lyrics.lines.getOrNull(current + 1)?.timeMs ?: Long.MAX_VALUE
+            if (nextStart - line.endMs >= SILENT_GAP_MS) return -1
+        }
         return current
     }
+
+    /** Разрыв, начиная с которого пауза считается проигрышем, а не вдохом. */
+    private const val SILENT_GAP_MS = 2000L
 
     private fun enc(s: String): String = URLEncoder.encode(s, "UTF-8")
 }
