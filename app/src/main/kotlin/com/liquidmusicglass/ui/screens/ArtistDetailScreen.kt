@@ -243,7 +243,6 @@ fun ArtistDetailScreen(
                             genre = art?.genre,
                             imageUrl = (art?.image ?: art?.cover).toThumb(),
                             videoUrl = art?.editorialVideoUrl,
-                            listState = listState,
                             isDark = colors.isDark,
                             onPlay = {
                                 if (artistTracks.isNotEmpty()) {
@@ -488,30 +487,19 @@ private fun ArtistHeader(
     genre: String?,
     imageUrl: String?,
     videoUrl: String?,
-    listState: LazyListState,
     onPlay: () -> Unit,
     onShuffle: () -> Unit
 ) {
     val context = LocalContext.current
 
     Box(modifier = Modifier.fillMaxWidth().height(LiquidMetrics.HeaderHeight)) {
-        // Лёгкий параллакс: фон уезжает медленнее содержимого, поэтому шапка
-        // ощущается слоем, а не картинкой, приклеенной к списку.
-        val parallax by remember {
-            derivedStateOf {
-                if (listState.firstVisibleItemIndex == 0) {
-                    listState.firstVisibleItemScrollOffset * 0.4f
-                } else {
-                    0f
-                }
-            }
-        }
-
+        // Фон, имя и кнопки двигаются одним куском. Параллакс здесь пробовался и
+        // был убран: фон уезжал медленнее содержимого, и при прокрутке шапка
+        // расползалась — фотография отдельно, подписи с кнопками отдельно.
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .clipToBounds()
-                .graphicsLayer { translationY = parallax }
         ) {
             if (!videoUrl.isNullOrBlank()) {
                 val exoPlayer = remember(videoUrl) {
@@ -567,9 +555,9 @@ private fun ArtistHeader(
                 .padding(
                     start = LiquidMetrics.ScreenPadding,
                     end = LiquidMetrics.ScreenPadding,
-                    // Отступ снизу больше обычного: под именем лежит лист, который
-                    // наезжает на шапку, и текст иначе оказался бы под его краем.
-                    bottom = LiquidMetrics.SheetOverlap + 24.dp
+                    // Ровно столько, чтобы кнопки не ушли под край наезжающего
+                    // листа: больше — и блок повиснет в пустоте посреди шапки.
+                    bottom = LiquidMetrics.SheetOverlap + 8.dp
                 )
         ) {
             Text(
@@ -690,7 +678,6 @@ private fun ArtistHeaderWithSheet(
     genre: String?,
     imageUrl: String?,
     videoUrl: String?,
-    listState: LazyListState,
     isDark: Boolean,
     onPlay: () -> Unit,
     onShuffle: () -> Unit
@@ -701,7 +688,6 @@ private fun ArtistHeaderWithSheet(
             genre = genre,
             imageUrl = imageUrl,
             videoUrl = videoUrl,
-            listState = listState,
             onPlay = onPlay,
             onShuffle = onShuffle
         )
