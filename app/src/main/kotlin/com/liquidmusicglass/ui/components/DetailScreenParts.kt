@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -26,10 +27,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -58,10 +62,15 @@ fun String?.toDetailThumb(): String? = this
     ?.replace("300x300", "600x600")
 
 /**
- * Шапка подборки: обложка по центру, название, автор, строка фактов и кнопки.
+ * Шапка подборки: обложка во всю ширину, поверх неё название и кнопки.
  *
- * Кнопки стоят внутри шапки и уезжают вместе с обложкой — это один смысловой
- * блок, и разъезжаться при прокрутке им нельзя.
+ * Занимает примерно половину экрана и считается от его высоты, а не задана
+ * числом: на маленьком телефоне фиксированная высота съела бы весь первый экран,
+ * на большом — выглядела бы полоской.
+ *
+ * Снизу к ней примыкает верхушка листа контента. Она нарисована здесь же, внутри
+ * общего контейнера: если сдвигать лист отдельным элементом списка, уезжает
+ * только он, а следующие остаются на месте — между ними появляется пустая полоса.
  */
 @Composable
 fun DetailHeader(
@@ -71,80 +80,121 @@ fun DetailHeader(
     coverUrl: String?,
     isDark: Boolean,
     onPlay: () -> Unit,
-    onShuffle: () -> Unit,
-    coverSize: androidx.compose.ui.unit.Dp = 260.dp
+    onShuffle: () -> Unit
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(
-                start = LiquidMetrics.ScreenPadding,
-                end = LiquidMetrics.ScreenPadding,
-                top = 72.dp,
-                bottom = 16.dp
-            ),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        AlbumArtImage(
-            uri = null,
-            coverUrl = coverUrl,
-            contentDescription = title,
-            modifier = Modifier
-                .size(coverSize)
-                // Тень до обрезки: после clip она обрезалась бы вместе с формой.
-                .shadow(
-                    elevation = LiquidMetrics.CardElevation,
-                    shape = LiquidMetrics.CardShape,
-                    ambientColor = LiquidSurfaces.shadowTint(isDark),
-                    spotColor = LiquidSurfaces.shadowTint(isDark)
+    val screenHeight = LocalConfiguration.current.screenHeightDp.dp
+    val headerHeight = (screenHeight * 0.52f).coerceIn(360.dp, 560.dp)
+
+    Box(modifier = Modifier.fillMaxWidth()) {
+        Box(modifier = Modifier.fillMaxWidth().height(headerHeight)) {
+            Box(modifier = Modifier.fillMaxSize().clipToBounds()) {
+                AlbumArtImage(
+                    uri = null,
+                    coverUrl = coverUrl,
+                    contentDescription = title,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
                 )
-                .clip(LiquidMetrics.CardShape),
-            contentScale = ContentScale.Crop
+                // Затемнение снизу: белый текст поверх светлой обложки иначе
+                // нечитаем, а обложки бывают любые.
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                0f to Color.Transparent,
+                                0.45f to Color.Black.copy(alpha = 0.15f),
+                                1f to Color.Black.copy(alpha = 0.85f)
+                            )
+                        )
+                )
+            }
+
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .padding(
+                        start = LiquidMetrics.ScreenPadding,
+                        end = LiquidMetrics.ScreenPadding,
+                        // Ровно столько, чтобы кнопки не ушли под край листа.
+                        bottom = LiquidMetrics.SheetOverlap + 8.dp
+                    )
+            ) {
+                Text(
+                    text = title,
+                    color = LiquidSurfaces.onHeaderPrimary,
+                    fontSize = 32.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = (-1.2).sp,
+                    lineHeight = 36.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (subtitle.isNotBlank()) {
+                    Text(
+                        text = subtitle,
+                        color = LiquidSurfaces.onHeaderSecondary,
+                        fontSize = LiquidMetrics.HeaderCaption,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 6.dp)
+                    )
+                }
+                if (facts.isNotEmpty()) {
+                    Text(
+                        text = facts.joinToString(" · "),
+                        color = LiquidSurfaces.onHeaderSecondary,
+                        fontSize = LiquidMetrics.Caption,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
+
+                Spacer(Modifier.height(14.dp))
+
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    DetailActionButton(
+                        label = "Play",
+                        icon = Icons.Rounded.PlayArrow,
+                        filled = true,
+                        isDark = isDark,
+                        onPhoto = true,
+                        onClick = onPlay
+                    )
+                    DetailActionButton(
+                        label = "Shuffle",
+                        icon = Icons.Rounded.Shuffle,
+                        filled = false,
+                        isDark = isDark,
+                        onPhoto = true,
+                        onClick = onShuffle
+                    )
+                }
+            }
+        }
+
+        DetailSheetTop(isDark = isDark, modifier = Modifier.align(Alignment.BottomCenter))
+    }
+}
+
+/** Верхушка листа контента: наезжает на шапку и скруглена сверху. */
+@Composable
+fun DetailSheetTop(isDark: Boolean, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(LiquidMetrics.SheetShape)
+            .background(LiquidSurfaces.sheet(isDark))
+            .padding(top = 12.dp, bottom = 4.dp),
+        contentAlignment = Alignment.TopCenter
+    ) {
+        Box(
+            modifier = Modifier
+                .size(width = 36.dp, height = 5.dp)
+                .clip(CircleShape)
+                .background(LiquidSurfaces.grabber(isDark))
         )
-
-        Spacer(Modifier.height(20.dp))
-
-        Text(
-            text = title,
-            color = LiquidSurfaces.textPrimary(isDark),
-            fontSize = 24.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = LiquidMetrics.SectionTitleSpacing,
-            textAlign = TextAlign.Center,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis
-        )
-        if (subtitle.isNotBlank()) {
-            Text(
-                text = subtitle,
-                color = LiquidSurfaces.textSecondary(isDark),
-                fontSize = LiquidMetrics.RowTitle,
-                fontWeight = FontWeight.Medium,
-                textAlign = TextAlign.Center,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = 4.dp)
-            )
-        }
-
-        if (facts.isNotEmpty()) {
-            Text(
-                text = facts.joinToString(" · "),
-                color = LiquidSurfaces.textTertiary(isDark),
-                fontSize = LiquidMetrics.Caption,
-                modifier = Modifier.padding(top = 6.dp)
-            )
-        }
-
-        Spacer(Modifier.height(20.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            DetailActionButton("Play", Icons.Rounded.PlayArrow, filled = true, isDark = isDark, onClick = onPlay)
-            DetailActionButton("Shuffle", Icons.Rounded.Shuffle, filled = false, isDark = isDark, onClick = onShuffle)
-        }
     }
 }
 
@@ -154,14 +204,24 @@ fun RowScope.DetailActionButton(
     icon: ImageVector,
     filled: Boolean,
     isDark: Boolean,
+    onPhoto: Boolean = false,
     onClick: () -> Unit
 ) {
-    // Кнопки лежат на листе, а не поверх фотографии, поэтому заливка берётся из
-    // палитры темы: белая кнопка в светлой теме слилась бы с фоном.
-    val background =
-        if (filled) LiquidSurfaces.textPrimary(isDark) else LiquidSurfaces.card(isDark)
-    val contentColor =
-        if (filled) LiquidSurfaces.sheet(isDark) else LiquidSurfaces.textPrimary(isDark)
+    // Поверх обложки главная кнопка всегда белая: под ней может быть любой кадр,
+    // и только плотная заливка гарантирует читаемость. На листе — цвета темы,
+    // иначе белая кнопка в светлой теме слилась бы с фоном.
+    val background = when {
+        onPhoto && filled -> Color.White
+        onPhoto -> LiquidSurfaces.glassAction
+        filled -> LiquidSurfaces.textPrimary(isDark)
+        else -> LiquidSurfaces.card(isDark)
+    }
+    val contentColor = when {
+        onPhoto && filled -> Color.Black
+        onPhoto -> Color.White
+        filled -> LiquidSurfaces.sheet(isDark)
+        else -> LiquidSurfaces.textPrimary(isDark)
+    }
 
     Row(
         modifier = Modifier
@@ -315,14 +375,18 @@ fun DetailTopBar(
             modifier = Modifier
                 .size(LiquidMetrics.GlassButtonSize)
                 .clip(CircleShape)
-                .background(LiquidSurfaces.card(isDark))
+                // Пока шапка видна, кнопка лежит поверх обложки: там нужен
+                // стеклянный фон, иначе на светлом кадре её не видно.
+                .background(
+                    if (showTitle) LiquidSurfaces.card(isDark) else LiquidSurfaces.glassFill
+                )
                 .liquidClickable(pressedScale = LiquidMotion.PressButton, onClick = onBack),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
                 contentDescription = "Back",
-                tint = LiquidSurfaces.textPrimary(isDark),
+                tint = if (showTitle) LiquidSurfaces.textPrimary(isDark) else Color.White,
                 modifier = Modifier.size(20.dp)
             )
         }
