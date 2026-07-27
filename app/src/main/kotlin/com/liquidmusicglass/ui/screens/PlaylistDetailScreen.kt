@@ -2,84 +2,72 @@ package com.liquidmusicglass.ui.screens
 
 import android.net.Uri
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.windowInsetsTopHeight
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
-import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.Shuffle
-import androidx.compose.material.icons.rounded.Download
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.liquidmusicglass.ui.glass.GlassKit
+import com.liquidmusicglass.api.icm.IcmRepository
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.Track
-import com.liquidmusicglass.engine.PlaylistDownloadService
-import com.liquidmusicglass.ui.glass.AlbumArtImage
-import com.liquidmusicglass.ui.glass.liquidClickable
-import com.liquidmusicglass.ui.rememberWindowInfo
-import com.liquidmusicglass.ui.theme.LiquidMotion
+import com.liquidmusicglass.ui.components.DetailHeader
+import com.liquidmusicglass.ui.components.DetailTopBar
+import com.liquidmusicglass.ui.components.DetailTrackRow
+import com.liquidmusicglass.ui.components.formatTotalDuration
+import com.liquidmusicglass.ui.components.toDetailThumb
+import com.liquidmusicglass.ui.theme.LiquidSurfaces
 import com.liquidmusicglass.ui.theme.LiquidTheme
-import com.liquidmusicglass.api.icm.IcmRepository
 import kotlinx.coroutines.launch
 
-private val AppleRed = Color(0xFFFC3C44)
-
+/**
+ * Экран плейлиста — на тех же общих частях, что альбом.
+ *
+ * Отличие от альбома: в строках показывается обложка трека, а не номер. В
+ * плейлисте песни разные, и обложка узнаётся быстрее порядкового номера, тогда
+ * как у альбома обложка одна на всех и номер полезнее.
+ */
 @Composable
 fun PlaylistDetailScreen(
     playlistId: String,
     onBack: () -> Unit
 ) {
-    val lc = LiquidTheme.colors
     val context = LocalContext.current
+    val colors = LiquidTheme.colors
+    val isDark = colors.isDark
     val scope = rememberCoroutineScope()
 
-    var playlistInfo by remember { mutableStateOf<com.liquidmusicglass.api.icm.IcmUserPlaylistInfo?>(null) }
+    var playlistInfo by remember {
+        mutableStateOf<com.liquidmusicglass.api.icm.IcmUserPlaylistInfo?>(null)
+    }
     var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
     var isLoading by remember { mutableStateOf(false) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
 
-    // Check if this is a local playlist (PlaylistManager ID starts with "pl_")
+    // Локальные плейлисты живут в приложении, облачные — на сервере. Отличаются
+    // по префиксу идентификатора.
     val isLocalPlaylist = playlistId.startsWith("pl_")
 
     LaunchedEffect(playlistId) {
         if (playlistId.isBlank()) {
-            errorMsg = "Invalid playlist ID."
+            errorMsg = "Invalid playlist"
             return@LaunchedEffect
         }
 
@@ -87,15 +75,12 @@ fun PlaylistDetailScreen(
         errorMsg = null
 
         if (isLocalPlaylist) {
-            // Load from local PlaylistManager
             val localPlaylist = com.liquidmusicglass.engine.PlaylistManager.getById(playlistId)
             if (localPlaylist == null) {
-                errorMsg = "Playlist not found."
+                errorMsg = "Playlist not found"
                 isLoading = false
                 return@LaunchedEffect
             }
-
-            // Convert PlaylistTrack to Track using stored metadata
             tracks = localPlaylist.tracks.map { pt ->
                 Track(
                     id = pt.id,
@@ -110,440 +95,146 @@ fun PlaylistDetailScreen(
             }
             isLoading = false
         } else {
-            // Load cloud playlist info & tracks with pagination
             scope.launch {
                 val allTracks = mutableListOf<Track>()
                 var offset = 0
                 val limit = 200
                 var totalExpected: Int? = null
                 var page = 0
-                
+
                 while (true) {
                     page++
-                    val response = IcmRepository.getUserPlaylistTracks(playlistId, limit = limit, offset = offset)
+                    val response =
+                        IcmRepository.getUserPlaylistTracks(playlistId, limit = limit, offset = offset)
                     if (response == null) {
-                        if (page == 1) {
-                            errorMsg = "Failed to load cloud playlist."
-                        }
+                        if (page == 1) errorMsg = "Failed to load playlist"
                         break
                     }
-                    
+
                     if (page == 1) {
                         playlistInfo = response.playlist
                         totalExpected = response.playlist?.trackCount
                     }
-                    
+
                     val pageTracks = response.tracks.mapNotNull { tr ->
-                        val trackIdStr = tr.trackId?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                        val trackIdStr = tr.trackId?.takeIf { it.isNotBlank() }
+                            ?: return@mapNotNull null
                         val durationSec = tr.duration ?: 0L
-                        val dMs = if (durationSec < 10000L) durationSec * 1000L else durationSec
+                        // Часть источников отдаёт секунды, часть миллисекунды —
+                        // различаем по величине.
+                        val durationMs = if (durationSec < 10_000L) durationSec * 1000L else durationSec
                         Track(
                             id = trackIdStr,
                             title = tr.title.orEmpty(),
                             artist = tr.artist.orEmpty(),
                             albumName = "",
                             uri = Uri.parse("https://byicloud.online/track/$trackIdStr"),
-                            durationMs = dMs,
-                            albumId = tr.collectionId?.hashCode()?.toLong() ?: trackIdStr.hashCode().toLong(),
-                            coverUrl = tr.cover?.replace("1000x1000", "600x600")
+                            durationMs = durationMs,
+                            albumId = tr.collectionId?.hashCode()?.toLong()
+                                ?: trackIdStr.hashCode().toLong(),
+                            coverUrl = tr.cover.toDetailThumb()
                         )
                     }
-                    
+
                     allTracks.addAll(pageTracks)
-                    
-                    // Stop if we got less than limit (last page) or reached total
-                    if (response.tracks.size < limit) {
-                        break
-                    }
-                    if (totalExpected != null && allTracks.size >= totalExpected) {
-                        break
-                    }
-                    
+
+                    if (response.tracks.size < limit) break
+                    if (totalExpected != null && allTracks.size >= totalExpected) break
                     offset += limit
                 }
-                
+
                 tracks = allTracks
                 isLoading = false
             }
         }
     }
 
-    val win = rememberWindowInfo()
-    // В альбомной раскладке шапка живёт в узкой левой колонке — компактнее
-    // иконка/шрифты/отступы. Портрет (compact == false) не меняется.
-    val compact = win.useSideBySide
-
-    // Имя плейлиста нужно и в шапке, и в кнопках Play/Shuffle — считаем один раз.
-    val name = if (isLocalPlaylist) {
-        com.liquidmusicglass.engine.PlaylistManager.getById(playlistId)?.name ?: "Playlist"
-    } else {
-        playlistInfo?.name ?: "Playlist"
+    val name = remember(playlistId, playlistInfo) {
+        if (isLocalPlaylist) {
+            com.liquidmusicglass.engine.PlaylistManager.getById(playlistId)?.name ?: "Playlist"
+        } else {
+            playlistInfo?.name ?: "Playlist"
+        }
     }
 
-    // Верхняя панель (назад + скачать) — общий блок для обоих layout.
-    val headerBar: @Composable () -> Unit = {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .background(if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7), CircleShape)
-                    .clip(CircleShape)
-                    .liquidClickable(pressedScale = LiquidMotion.PressIcon) { onBack() },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    Icons.AutoMirrored.Rounded.ArrowBack,
-                    null,
-                    tint = lc.iconDefault,
-                    modifier = Modifier.size(22.dp)
-                )
-            }
+    val listState = rememberLazyListState()
+    val showTopBarTitle by remember {
+        derivedStateOf {
+            listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 320
+        }
+    }
 
-            // Download button — only show if playlist has tracks
-            if (tracks.isNotEmpty()) {
-                Box(
+    Box(modifier = Modifier.fillMaxSize().background(LiquidSurfaces.sheet(isDark))) {
+        when {
+            isLoading && tracks.isEmpty() ->
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = colors.accent, modifier = Modifier.size(32.dp))
+                }
+
+            errorMsg != null && tracks.isEmpty() ->
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        text = errorMsg.orEmpty(),
+                        color = LiquidSurfaces.textSecondary(isDark),
+                        fontSize = 14.sp
+                    )
+                }
+
+            else -> {
+                LazyColumn(
+                    state = listState,
                     modifier = Modifier
-                        .size(40.dp)
-                        .background(if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7), CircleShape)
-                        .clip(CircleShape)
-                        .liquidClickable(pressedScale = LiquidMotion.PressIcon) {
-                            val trackIds = tracks.map { it.id }
-                            val playlistName = if (isLocalPlaylist) {
-                                com.liquidmusicglass.engine.PlaylistManager.getById(playlistId)?.name ?: "Playlist"
-                            } else {
-                                playlistInfo?.name ?: "Playlist"
-                            }
-                            PlaylistDownloadService.start(context, tracks, playlistName)
-                        },
-                    contentAlignment = Alignment.Center
+                        .fillMaxSize()
+                        .widthIn(max = 640.dp)
+                        .align(Alignment.TopCenter),
+                    contentPadding = PaddingValues(bottom = 140.dp)
                 ) {
-                    Icon(
-                        Icons.Rounded.Download,
-                        contentDescription = "Download playlist",
-                        tint = AppleRed,
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-            }
-        }
-    }
-
-    // Иконка плейлиста + название + счётчик — общий блок.
-    val infoBlock: @Composable () -> Unit = {
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(if (compact) 92.dp else 120.dp)
-                    .clip(RoundedCornerShape(28.dp)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.PlaylistPlay,
-                    contentDescription = null,
-                    tint = AppleRed.copy(alpha = 0.9f),
-                    modifier = Modifier.size(if (compact) 56.dp else 72.dp)
-                )
-            }
-
-            Spacer(Modifier.height(if (compact) 10.dp else 16.dp))
-            Text(
-                name,
-                color = lc.textPrimary,
-                fontSize = if (compact) 19.sp else 24.sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "${tracks.size} tracks",
-                color = lc.textSecondary,
-                fontSize = if (compact) 13.sp else 15.sp
-            )
-        }
-    }
-
-    // Кнопки Play / Shuffle — общий блок.
-    val actionButtons: @Composable () -> Unit = {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            // Play
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .height(if (compact) 42.dp else 48.dp)
-                    .background(AppleRed, RoundedCornerShape(50))
-                    .clip(RoundedCornerShape(50))
-                    .liquidClickable(pressedScale = LiquidMotion.PressButton) {
-                        PlayerController.playFromList(
-                            context = context,
-                            tracks = tracks,
-                            startIndex = 0,
-                            autoRefillType = "playlist",
-                            autoRefillId = playlistId,
-                            autoRefillName = name
-                        )
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Rounded.PlayArrow,
-                        null,
-                        tint = Color.White,
-                        modifier = Modifier.size(22.dp)
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text("Play", color = Color.White, fontWeight = FontWeight.SemiBold)
-                }
-            }
-
-            // Shuffle
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .height(if (compact) 42.dp else 48.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(if (lc.isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7))
-                    .liquidClickable(pressedScale = LiquidMotion.PressButton) {
-                        PlayerController.playFromList(
-                            context = context,
-                            tracks = tracks.shuffled(),
-                            startIndex = 0,
-                            autoRefillType = "playlist",
-                            autoRefillId = playlistId,
-                            autoRefillName = name
-                        )
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Rounded.Shuffle,
-                        null,
-                        tint = AppleRed,
-                        modifier = Modifier.size(22.dp)
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        "Shuffle",
-                        color = lc.textPrimary,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-            }
-        }
-    }
-
-    // Список треков (плюс пустое состояние) — общий блок для обоих layout.
-    val trackItems: LazyListScope.() -> Unit = {
-        itemsIndexed(tracks, key = { _, t -> t.id }) { index, track ->
-            Row(
-                modifier = Modifier
-                    .animateItem()
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .liquidClickable {
-                        PlayerController.playFromList(
-                            context = context,
-                            tracks = tracks,
-                            startIndex = index,
-                            autoRefillType = "playlist",
-                            autoRefillId = playlistId,
-                            autoRefillName = name
-                        )
-                    }
-                    .padding(horizontal = 14.dp, vertical = if (compact) 9.dp else 12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    "${index + 1}",
-                    color = lc.textTertiary,
-                    fontSize = if (compact) 13.sp else 14.sp,
-                    modifier = Modifier.width(28.dp)
-                )
-
-                AlbumArtImage(
-                    uri = track.albumArtUri,
-                    audioFileUri = track.uri,
-                    albumId = track.albumId,
-                    coverUrl = track.coverUrl,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .size(if (compact) 38.dp else 44.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                )
-
-                Spacer(Modifier.width(12.dp))
-
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            track.title,
-                            color = lc.textPrimary,
-                            fontSize = if (compact) 13.5.sp else 15.sp,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false)
-                        )
-                        if (track.isExplicit) {
-                            Spacer(Modifier.width(6.dp))
-                            GlassKit.ExplicitBadge()
-                        }
-                        if (track.isCustom) {
-                            Spacer(Modifier.width(6.dp))
-                            GlassKit.VerifiedBadge()
-                        }
-                    }
-                    Text(
-                        track.artist,
-                        color = lc.textSecondary,
-                        fontSize = if (compact) 12.sp else 13.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-
-                if (track.durationMs > 0) {
-                    Text(
-                        text = formatDuration(track.durationMs),
-                        color = lc.textSecondary,
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(start = 8.dp)
-                    )
-                }
-            }
-            Spacer(Modifier.height(6.dp))
-        }
-
-        // Empty
-        if (tracks.isEmpty()) {
-            item {
-                Spacer(Modifier.height(40.dp))
-                Text(
-                    "No tracks in this playlist.",
-                    color = lc.textTertiary,
-                    fontSize = 16.sp,
-                    modifier = Modifier.fillMaxWidth(),
-                    textAlign = TextAlign.Center
-                )
-            }
-        }
-    }
-
-    // Загрузка/ошибка показываем в компактном виде; сплит — только когда данные
-    // готовы (широкое окно: шапка слева фикс. ширины, треки справа).
-    if (win.useSideBySide && !isLoading && errorMsg == null) {
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(lc.settingsBackground)
-        ) {
-            Column(
-                modifier = Modifier
-                    .width(360.dp)
-                    .fillMaxHeight()
-                    .verticalScroll(rememberScrollState())
-                    .windowInsetsPadding(WindowInsets.statusBars)
-                    .padding(horizontal = 20.dp)
-            ) {
-                Spacer(Modifier.height(12.dp))
-                headerBar()
-                Spacer(Modifier.height(20.dp))
-                infoBlock()
-                Spacer(Modifier.height(20.dp))
-                if (tracks.isNotEmpty()) {
-                    actionButtons()
-                }
-            }
-            LazyColumn(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-                    .windowInsetsPadding(WindowInsets.statusBars)
-                    .padding(horizontal = 20.dp),
-                contentPadding = PaddingValues(top = 12.dp, bottom = 120.dp)
-            ) {
-                trackItems()
-            }
-        }
-    } else {
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(lc.settingsBackground)
-                .padding(horizontal = 20.dp),
-            contentPadding = PaddingValues(bottom = 120.dp)
-        ) {
-            // Header
-            item {
-                Spacer(Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
-                Spacer(Modifier.height(12.dp))
-                headerBar()
-                Spacer(Modifier.height(20.dp))
-            }
-
-            if (isLoading) {
-                item {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 100.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CircularProgressIndicator(color = AppleRed)
-                    }
-                }
-            } else if (errorMsg != null) {
-                item {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 100.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = errorMsg ?: "Unknown error occurred.",
-                            color = Color.Red,
-                            fontSize = 16.sp,
-                            textAlign = TextAlign.Center
-                        )
-                    }
-                }
-            } else {
-                // Playlist icon + name
-                item {
-                    infoBlock()
-                    Spacer(Modifier.height(20.dp))
-                }
-
-                // Play / Shuffle buttons
-                if (tracks.isNotEmpty()) {
                     item {
-                        actionButtons()
-                        Spacer(Modifier.height(24.dp))
+                        DetailHeader(
+                            title = name,
+                            // Обложки у плейлиста нет — берём обложку первого трека:
+                            // пустой квадрат смотрелся бы как ошибка загрузки.
+                            subtitle = if (isLocalPlaylist) "Your playlist" else "Playlist",
+                            facts = buildList {
+                                if (tracks.isNotEmpty()) add("${tracks.size} songs")
+                                val total = tracks.sumOf { it.durationMs }
+                                if (total > 0) add(formatTotalDuration(total))
+                            },
+                            coverUrl = tracks.firstOrNull()?.coverUrl,
+                            isDark = isDark,
+                            onPlay = {
+                                if (tracks.isNotEmpty()) PlayerController.play(context, tracks, 0)
+                            },
+                            onShuffle = {
+                                if (tracks.isNotEmpty()) {
+                                    PlayerController.play(context, tracks.shuffled(), 0)
+                                }
+                            }
+                        )
+                    }
+
+                    itemsIndexed(tracks, key = { index, track -> "${track.id}-$index" }) { index, track ->
+                        DetailTrackRow(
+                            position = index + 1,
+                            title = track.title,
+                            subtitle = track.artist,
+                            durationMs = track.durationMs,
+                            // В плейлисте песни разные — обложка узнаётся быстрее номера.
+                            coverUrl = track.coverUrl,
+                            isDark = isDark,
+                            showDivider = index < tracks.lastIndex,
+                            onClick = { PlayerController.play(context, tracks, index) }
+                        )
                     }
                 }
-
-                // Tracks
-                trackItems()
             }
         }
-    }
-}
 
-private fun formatDuration(ms: Long): String {
-    val totalSeconds = ms / 1000
-    val minutes = totalSeconds / 60
-    val seconds = totalSeconds % 60
-    return "%d:%02d".format(minutes, seconds)
+        DetailTopBar(
+            title = name,
+            showTitle = showTopBarTitle,
+            isDark = isDark,
+            onBack = onBack
+        )
+    }
 }
