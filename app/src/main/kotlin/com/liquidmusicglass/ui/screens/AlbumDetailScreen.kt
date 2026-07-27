@@ -40,6 +40,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -247,6 +248,12 @@ private fun AlbumHeader(
             contentDescription = title,
             modifier = Modifier
                 .size(260.dp)
+                .shadow(
+                    elevation = LiquidMetrics.CardElevation,
+                    shape = LiquidMetrics.CardShape,
+                    ambientColor = LiquidSurfaces.shadowTint(isDark),
+                    spotColor = LiquidSurfaces.shadowTint(isDark)
+                )
                 .clip(LiquidMetrics.CardShape),
             contentScale = ContentScale.Crop
         )
@@ -330,6 +337,12 @@ private fun RowScope.AlbumActionButton(
         modifier = Modifier
             .weight(1f)
             .height(LiquidMetrics.ActionButtonHeight)
+            .shadow(
+                elevation = if (filled) LiquidMetrics.ButtonElevation else 2.dp,
+                shape = CircleShape,
+                ambientColor = LiquidSurfaces.shadowTint(isDark),
+                spotColor = LiquidSurfaces.shadowTint(isDark)
+            )
             .clip(CircleShape)
             .background(background)
             .liquidClickable(pressedScale = LiquidMotion.PressButton, onClick = onClick),

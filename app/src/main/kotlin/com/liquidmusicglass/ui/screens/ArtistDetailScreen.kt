@@ -45,6 +45,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -656,6 +657,14 @@ private fun RowScope.HeaderButton(
         modifier = Modifier
             .weight(1f)
             .height(LiquidMetrics.ActionButtonHeight)
+            .shadow(
+                // Главной кнопке тень нужнее: она белая и лежит на светлых кадрах,
+                // без отрыва от фона её край теряется.
+                elevation = if (filled) LiquidMetrics.ButtonElevation else 2.dp,
+                shape = CircleShape,
+                ambientColor = Color.Black,
+                spotColor = Color.Black
+            )
             .clip(CircleShape)
             .background(if (filled) Color.White else LiquidSurfaces.glassAction)
             .liquidClickable(pressedScale = LiquidMotion.PressButton, onClick = onClick),
@@ -895,6 +904,16 @@ private fun LatestReleaseCard(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = LiquidMetrics.ScreenPadding)
+            // Тень ставится ДО обрезки: после clip она обрезалась бы вместе с
+            // формой и не была бы видна вовсе.
+            .shadow(
+                elevation = LiquidMetrics.CardElevation,
+                shape = LiquidMetrics.CardShape,
+                // В тёмной теме чёрная тень на тёмном фоне не читается — берём
+                // подсветку посветлее, иначе карточка выглядит плоской.
+                ambientColor = LiquidSurfaces.shadowTint(isDark),
+                spotColor = LiquidSurfaces.shadowTint(isDark)
+            )
             .clip(LiquidMetrics.CardShape)
             .background(LiquidSurfaces.card(isDark))
             .liquidClickable(pressedScale = LiquidMotion.PressButton, onClick = onClick)
