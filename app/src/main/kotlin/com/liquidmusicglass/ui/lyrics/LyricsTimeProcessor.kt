@@ -167,7 +167,7 @@ class LyricsTimeProcessor(
                 buildWordLineFill(line, next)
             } else {
                 val text = line.text.replace(DUET_TAG, "").trim()
-                buildLineFill(line.timeMs, next, text, rateForLine(idx))
+                buildLineFill(line.timeMs, next, text, rateForLine(idx), line.endMs)
             }
             fills.add(fill)
         }
@@ -205,7 +205,13 @@ class LyricsTimeProcessor(
     }
 
     /** Строит таймлайн заливки одной строки ([rate] — локальный темп мс/симв). */
-    private fun buildLineFill(startMs: Long, nextStartMs: Long?, text: String, rate: Long): LineFill {
+    private fun buildLineFill(
+        startMs: Long,
+        nextStartMs: Long?,
+        text: String,
+        rate: Long,
+        realEndMs: Long = 0L
+    ): LineFill {
         val length = text.length.coerceAtLeast(1)
         // Последняя строка (нет следующей): синтетический «гэп» от темпа ЭТОГО
         // трека, а не фикс LAST_LINE_MS — финал баллады держится дольше,
@@ -240,8 +246,13 @@ class LyricsTimeProcessor(
             val segFill = fillMs * seg.first / totalChars
             Segment(charLen = seg.first, fillMs = segFill, holdMs = holds[i])
         }
-        // Точная длительность всей заливки (фактический момент «строка докрашена»).
-        val realEst = segments.sumOf { it.fillMs + it.holdMs }.coerceAtLeast(1L)
+        // Длительность заливки. Если в LRC был размечен реальный конец строки —
+        // берём его: это факт, а не оценка по числу символов. Кламп страхует от
+        // источников, где пустой таймкод стоит не там, где кончился голос.
+        val estimated = segments.sumOf { it.fillMs + it.holdMs }.coerceAtLeast(1L)
+        val realEst = if (realEndMs > startMs) {
+            (realEndMs - startMs).coerceAtMost(gap).coerceAtLeast(1L)
+        } else estimated
 
         return LineFill(
             startMs = startMs,

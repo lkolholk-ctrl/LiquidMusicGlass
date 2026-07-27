@@ -37,6 +37,8 @@ import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
@@ -68,6 +70,13 @@ import kotlin.math.min
 
 /** Насколько высоко поднимать активную строку: доля высоты экрана от верха (0.25–0.35 — верхняя треть). */
 private const val ACTIVE_LINE_TOP_BIAS = 0.28f
+
+/**
+ * Доля высоты экрана сверху, в которой тап по строке перематывает трек. Ниже
+ * строки уходят под растушёвку и почти не читаются — попадание по ним обычно
+ * промах, а цена промаха велика.
+ */
+private const val SEEK_TAP_ZONE = 0.575f
 
 /** Высота зоны заголовка со скрим-градиентом (плотная часть закрывает название+артиста). */
 private val HEADER_SCRIM_HEIGHT = 170.dp
@@ -253,6 +262,9 @@ fun LyricsScreen(
     // фронта нет — строка загорается целиком.
     val edgeSoftPx = 0f
 
+    /** Ниже этой отметки тап по строке перемотку не делает (см. обработчик тапа). */
+    val seekTapLimitPx = screenHeightPx * SEEK_TAP_ZONE
+
     // Ручной скролл (drag) ставит автоследование на паузу — фиксируем момент касания.
     var userScrolledAt by remember { mutableLongStateOf(0L) }
     LaunchedEffect(listState) {
@@ -269,6 +281,10 @@ fun LyricsScreen(
             // потом плавно возвращаемся (новый drag перезапустит эффект и ожидание).
             val sinceTouch = System.currentTimeMillis() - userScrolledAt
             if (sinceTouch < USER_SCROLL_PAUSE_MS) delay(USER_SCROLL_PAUSE_MS - sinceTouch)
+            // Возврат к автоследованию ждёт остановки списка. Раньше решал только
+            // таймер, и если он истекал посреди инерции от броска, список дёргало
+            // обратно прямо под рукой.
+            while (listState.isScrollInProgress) delay(120)
             // Поднимаем активную строку в верхнюю треть (см. ACTIVE_LINE_TOP_BIAS).
             // lineToItem: нулевой элемент списка — распорка шапки, поэтому индекс
             // строки и индекс элемента не совпадают. Без сдвига список наводился
@@ -464,9 +480,16 @@ fun LyricsScreen(
                             )
                             val unsungColor = base.copy(alpha = 0.30f * depth)
 
+                            // Где строка стоит на экране. Держим в массиве, а не в
+                            // состоянии: значение нужно только внутри обработчика
+                            // касания, а состояние вызывало бы рекомпозицию строки
+                            // на каждом кадре прокрутки.
+                            val rowTop = remember { floatArrayOf(Float.MAX_VALUE) }
+
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .onGloballyPositioned { rowTop[0] = it.positionInRoot().y }
                                     // Тап по строке = перемотка на неё (Apple Music).
                                     // Только для синхронной лирики.
                                     .then(
@@ -474,7 +497,16 @@ fun LyricsScreen(
                                         // карточка «поделиться» (Apple Music).
                                         if (lyrics.isSynced) Modifier.pointerInput(line.timeMs) {
                                             detectTapGestures(
-                                                onTap = { PlayerController.seekTo(line.timeMs) },
+                                                onTap = {
+                                                    // Нижняя часть экрана перемотку не
+                                                    // принимает: там строки едва видны
+                                                    // под растушёвкой, и попадание по
+                                                    // ним почти всегда промах, а цена
+                                                    // промаха — прыжок по треку.
+                                                    if (rowTop[0] < seekTapLimitPx) {
+                                                        PlayerController.seekTo(line.timeMs)
+                                                    }
+                                                },
                                                 onLongPress = { shareLine = cleanText }
                                             )
                                         }

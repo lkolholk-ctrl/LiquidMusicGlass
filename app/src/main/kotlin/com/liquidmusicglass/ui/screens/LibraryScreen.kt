@@ -508,7 +508,7 @@ fun LibraryScreen(
                     migration?.let { (done, total) ->
                         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp)) {
                             Text(
-                                text = "Переношу загрузки в «Загрузки»… $done/$total",
+                                text = "Moving downloads to Downloads… $done/$total",
                                 color = LiquidTheme.colors.textSecondary,
                                 fontSize = 12.sp
                             )

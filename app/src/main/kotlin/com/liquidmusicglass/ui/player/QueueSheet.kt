@@ -341,10 +341,12 @@ fun QueueSheet(
                 val contextCount = (sections.autoStart - sections.manualEnd)
                     .coerceIn(0, upNext.size - manualCount)
                 val waveCount = upNext.size - manualCount - contextCount
+                // У остатка подборки заголовка нет: он и так очевиден — это то,
+                // что играло бы дальше само по себе. Строки просто идут следом.
                 val sectionSpecs = listOf(
-                    QueueSectionSpec("Далее", 0, manualCount, clearable = true),
-                    QueueSectionSpec("Продолжение", manualCount, contextCount),
-                    QueueSectionSpec("Волна", manualCount + contextCount, waveCount)
+                    QueueSectionSpec("Up Next", 0, manualCount, clearable = true),
+                    QueueSectionSpec(null, manualCount, contextCount),
+                    QueueSectionSpec("My Wave", manualCount + contextCount, waveCount)
                 ).filter { it.count > 0 }
 
                 LazyColumn(
@@ -354,14 +356,15 @@ fun QueueSheet(
                     verticalArrangement = Arrangement.spacedBy(0.dp)
                 ) {
                     sectionSpecs.forEach { spec ->
-                        stickyHeader(key = "hdr_${spec.title}") {
-                            QueueSectionHeader(
-                                title = spec.title,
-                                count = spec.count,
-                                onClear = if (spec.clearable && queueEditable) {
-                                    { PlayerController.clearManualSection() }
-                                } else null
-                            )
+                        if (spec.title != null) {
+                            stickyHeader(key = "hdr_${spec.title}") {
+                                QueueSectionHeader(
+                                    title = spec.title,
+                                    onClear = if (spec.clearable && queueEditable) {
+                                        { PlayerController.clearManualSection() }
+                                    } else null
+                                )
+                            }
                         }
                         items(
                             count = spec.count,
@@ -401,11 +404,11 @@ fun QueueSheet(
                             // или на локальном треке — неправда, и выглядит поломкой.
                             val (icon, message) = when {
                                 repeatMode != 0 ->
-                                    Icons.Rounded.Repeat to "Повтор включён — играем по кругу"
+                                    Icons.Rounded.Repeat to "Repeat is on — playing in a loop"
                                 !queueEditable ->
-                                    Icons.Rounded.MusicNote to "Локальный трек играет отдельно"
+                                    Icons.Rounded.MusicNote to "Local track plays on its own"
                                 else ->
-                                    Icons.Rounded.Waves to "Подбираем продолжение"
+                                    Icons.Rounded.Waves to "Finding what plays next"
                             }
                             Box(
                                 modifier = Modifier.fillMaxSize(),
@@ -438,25 +441,24 @@ fun QueueSheet(
     }
 }
 
-/** Одна секция очереди: заголовок и диапазон строк внутри списка предстоящего. */
+/**
+ * Одна секция очереди: заголовок и диапазон строк внутри списка предстоящего.
+ * Заголовок может отсутствовать — тогда строки идут без разделителя.
+ */
 private data class QueueSectionSpec(
-    val title: String,
+    val title: String?,
     val from: Int,
     val count: Int,
     val clearable: Boolean = false
 )
 
 /**
- * Заголовок секции.
- *
- * У Apple заголовки без счётчиков и «выталкиваются» следующей секцией. У нас
- * счётчик справа (сразу видно, сколько ещё ждёт) и заголовок примерзает, набирая
- * подложку, — так понятнее, где ты находишься в длинной очереди.
+ * Заголовок секции. Примерзает при прокрутке, набирая подложку, — в длинной
+ * очереди так понятнее, где находишься.
  */
 @Composable
 private fun QueueSectionHeader(
     title: String,
-    count: Int,
     onClear: (() -> Unit)?
 ) {
     Row(
@@ -473,11 +475,6 @@ private fun QueueSectionHeader(
             fontWeight = FontWeight.Bold,
             modifier = Modifier.weight(1f)
         )
-        Text(
-            text = "$count",
-            color = LiquidSurfaces.onHeaderPrimary.copy(alpha = 0.45f),
-            fontSize = 12.sp
-        )
         if (onClear != null) {
             Spacer(Modifier.width(10.dp))
             Box(
@@ -487,7 +484,7 @@ private fun QueueSectionHeader(
                     .padding(horizontal = 10.dp, vertical = 3.dp)
             ) {
                 Text(
-                    text = "Очистить",
+                    text = "Clear",
                     color = LiquidSurfaces.onHeaderPrimary.copy(alpha = 0.60f),
                     fontSize = 12.sp
                 )
@@ -541,9 +538,9 @@ private fun DraggableQueueRow(
                 contentDescription = "${track.title}, ${track.artist}"
                 if (editable) {
                     customActions = listOf(
-                        CustomAccessibilityAction("Выше") { moveBy(-1); true },
-                        CustomAccessibilityAction("Ниже") { moveBy(1); true },
-                        CustomAccessibilityAction("Убрать из очереди") {
+                        CustomAccessibilityAction("Move up") { moveBy(-1); true },
+                        CustomAccessibilityAction("Move down") { moveBy(1); true },
+                        CustomAccessibilityAction("Remove from queue") {
                             PlayerController.removeQueueItem(absoluteIndex(indexState.value)); true
                         }
                     )

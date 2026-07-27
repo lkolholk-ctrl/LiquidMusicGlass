@@ -53,7 +53,12 @@ object LyricsParser {
         val timeMs: Long,    // -1 если нет таймстампа
         val text: String,
         /** Непусто → у строки есть пословные тайминги (Enhanced LRC). */
-        val words: List<LyricWord> = emptyList()
+        val words: List<LyricWord> = emptyList(),
+        /**
+         * Реальный конец строки, если он был размечен в LRC пустым таймкодом.
+         * 0 — неизвестен, длительность придётся оценивать по длине текста.
+         */
+        val endMs: Long = 0L
     )
 
     data class Lyrics(
@@ -494,6 +499,7 @@ object LyricsParser {
         var artist: String? = null
         var offsetMs = 0L
         val lyricLines = mutableListOf<LyricLine>()
+        val endMarkers = mutableListOf<Long>()
         var hasSyncedLines = false
 
         for (line in lines) {
@@ -545,6 +551,12 @@ object LyricsParser {
                         if (text.isNotBlank()) {
                             lyricLines.add(LyricLine(timeMs, text))
                             hasSyncedLines = true
+                        } else {
+                            // Таймкод без текста — это размеченный конец
+                            // предыдущей строки. Раньше такие строки просто
+                            // отбрасывались, и момент, когда голос смолк,
+                            // приходилось угадывать по длине текста.
+                            endMarkers.add(timeMs)
                         }
                     }
                 }
@@ -555,6 +567,23 @@ object LyricsParser {
 
         if (hasSyncedLines) {
             lyricLines.sortBy { it.timeMs }
+
+            // Раздаём размеченные концы строкам: строке достаётся первая метка,
+            // которая стоит после её начала и не позже начала следующей.
+            if (endMarkers.isNotEmpty()) {
+                endMarkers.sort()
+                var m = 0
+                for (i in lyricLines.indices) {
+                    val start = lyricLines[i].timeMs
+                    val limit = lyricLines.getOrNull(i + 1)?.timeMs ?: Long.MAX_VALUE
+                    while (m < endMarkers.size && endMarkers[m] <= start) m++
+                    val mark = endMarkers.getOrNull(m) ?: break
+                    if (mark <= limit) {
+                        lyricLines[i] = lyricLines[i].copy(endMs = mark)
+                        m++
+                    }
+                }
+            }
         }
 
         // Применяем [offset:] ко всем таймкодам (строки + пословные теги).
@@ -564,6 +593,7 @@ object LyricsParser {
                 if (l.timeMs < 0) continue
                 lyricLines[i] = l.copy(
                     timeMs = (l.timeMs - offsetMs).coerceAtLeast(0L),
+                    endMs = if (l.endMs > 0L) (l.endMs - offsetMs).coerceAtLeast(0L) else 0L,
                     words = l.words.map { w ->
                         w.copy(timeMs = (w.timeMs - offsetMs).coerceAtLeast(0L))
                     }
