@@ -44,6 +44,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -237,12 +238,13 @@ fun ArtistDetailScreen(
                     contentPadding = PaddingValues(bottom = 140.dp)
                 ) {
                     item {
-                        ArtistHeader(
+                        ArtistHeaderWithSheet(
                             name = art?.name.orEmpty(),
                             genre = art?.genre,
                             imageUrl = (art?.image ?: art?.cover).toThumb(),
                             videoUrl = art?.editorialVideoUrl,
                             listState = listState,
+                            isDark = colors.isDark,
                             onPlay = {
                                 if (artistTracks.isNotEmpty()) {
                                     PlayerController.play(context, artistTracks, 0)
@@ -255,8 +257,6 @@ fun ArtistDetailScreen(
                             }
                         )
                     }
-
-                    item { SheetTop(isDark = colors.isDark) }
 
                     if (playCount > 0) {
                         item {
@@ -426,6 +426,13 @@ fun ArtistDetailScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .background(
+                    if (showTopBarTitle) {
+                        LiquidSurfaces.sheet(colors.isDark)
+                    } else {
+                        Color.Transparent
+                    }
+                )
                 .windowInsetsPadding(WindowInsets.statusBars)
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -434,21 +441,31 @@ fun ArtistDetailScreen(
                 modifier = Modifier
                     .size(40.dp)
                     .clip(CircleShape)
-                    .background(Color.Black.copy(alpha = 0.35f))
+                    .background(
+                        if (showTopBarTitle) {
+                            LiquidSurfaces.card(colors.isDark)
+                        } else {
+                            LiquidSurfaces.glassFill
+                        }
+                    )
                     .liquidClickable(pressedScale = LiquidMotion.PressButton, onClick = onBack),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
                     contentDescription = "Back",
-                    tint = Color.White,
+                    tint = if (showTopBarTitle) {
+                        LiquidSurfaces.textPrimary(colors.isDark)
+                    } else {
+                        Color.White
+                    },
                     modifier = Modifier.size(22.dp)
                 )
             }
             Spacer(Modifier.width(12.dp))
             Text(
                 text = artist?.name.orEmpty(),
-                color = colors.textPrimary,
+                color = LiquidSurfaces.textPrimary(colors.isDark),
                 fontSize = 17.sp,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
@@ -493,6 +510,7 @@ private fun ArtistHeader(
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .clipToBounds()
                 .graphicsLayer { translationY = parallax }
         ) {
             if (!videoUrl.isNullOrBlank()) {
@@ -659,17 +677,52 @@ private fun PersonalStrip(
 }
 
 /**
+ * Шапка вместе с верхушкой листа.
+ *
+ * Обе части живут в одном элементе списка намеренно: если лист сдвигать
+ * отдельным элементом, уезжает только он, а следующие остаются на месте — между
+ * ними появляется пустая полоса. Здесь наезд рисуется внутри общего контейнера,
+ * поэтому части всегда держатся друг за друга.
+ */
+@Composable
+private fun ArtistHeaderWithSheet(
+    name: String,
+    genre: String?,
+    imageUrl: String?,
+    videoUrl: String?,
+    listState: LazyListState,
+    isDark: Boolean,
+    onPlay: () -> Unit,
+    onShuffle: () -> Unit
+) {
+    Box(modifier = Modifier.fillMaxWidth()) {
+        ArtistHeader(
+            name = name,
+            genre = genre,
+            imageUrl = imageUrl,
+            videoUrl = videoUrl,
+            listState = listState,
+            onPlay = onPlay,
+            onShuffle = onShuffle
+        )
+        SheetTop(
+            isDark = isDark,
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
+    }
+}
+
+/**
  * Верхушка листа контента: наезжает на шапку и скруглена сверху.
  *
  * Приём из макета — за счёт наезда шапка воспринимается подложкой, а не первым
  * элементом списка, и переход к контенту читается без разделителя.
  */
 @Composable
-private fun SheetTop(isDark: Boolean) {
+private fun SheetTop(isDark: Boolean, modifier: Modifier = Modifier) {
     Box(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
-            .offset(y = -LiquidMetrics.SheetOverlap)
             .clip(LiquidMetrics.SheetShape)
             .background(LiquidSurfaces.sheet(isDark))
             .padding(top = 12.dp, bottom = 4.dp),
