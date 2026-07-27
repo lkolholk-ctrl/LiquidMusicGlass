@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -211,6 +212,7 @@ fun ArtistDetailScreen(
     val playlists = remember(artist) { artist?.playlists.orEmpty().distinctBy { it.id } }
     val similar = remember(artist) { artist?.similarArtists.orEmpty().distinctBy { it.id } }
 
+    var showAllSongs by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     // Имя в панели показываем только когда шапка ушла: пока артист виден крупно,
     // дублировать его незачем.
@@ -283,25 +285,71 @@ fun ArtistDetailScreen(
                     }
 
                     if (topSongs.isNotEmpty()) {
-                        item { SectionHeaderThemed(colors.isDark, "Top songs") }
                         item {
-                            Column(modifier = Modifier.padding(horizontal = LiquidMetrics.ScreenPadding)) {
-                                topSongs.take(5).forEachIndexed { index, song ->
+                            SectionHeaderWithLink(
+                                isDark = colors.isDark,
+                                title = "Top songs",
+                                // Пять строк — это лишь начало списка, и без ссылки
+                                // выглядит так, будто у артиста всего пять песен.
+                                linkLabel = if (showAllSongs) "Show less" else "See all",
+                                onLinkClick = { showAllSongs = !showAllSongs }
+                            )
+                        }
+
+                        if (showAllSongs) {
+                            itemsIndexed(
+                                artistTracks.ifEmpty { topSongs.map { it.toTrack() } },
+                                key = { _, track -> "all-" + track.id }
+                            ) { index, track ->
+                                Column(
+                                    modifier = Modifier.padding(
+                                        horizontal = LiquidMetrics.ScreenPadding
+                                    )
+                                ) {
                                     TopSongRow(
                                         position = index + 1,
-                                        title = song.title,
-                                        subtitle = song.albumName ?: song.artist,
-                                        coverUrl = song.cover.toThumb(),
+                                        title = track.title,
+                                        subtitle = track.albumName.ifBlank { track.artist },
+                                        coverUrl = track.coverUrl,
                                         textPrimary = LiquidSurfaces.textPrimary(colors.isDark),
                                         textSecondary = LiquidSurfaces.textSecondary(colors.isDark),
                                         onClick = {
-                                            PlayerController.play(
-                                                context,
-                                                topSongs.map { it.toTrack() },
-                                                index
-                                            )
+                                            PlayerController.play(context, artistTracks, index)
                                         }
                                     )
+                                }
+                            }
+                        } else {
+                            item {
+                                // Колонки по пять с горизонтальной прокруткой: так за
+                                // экран влезает вдвое больше песен, чем простым списком,
+                                // и видно, что список продолжается.
+                                val songs = artistTracks.ifEmpty { topSongs.map { it.toTrack() } }
+                                LazyRow(
+                                    contentPadding = PaddingValues(
+                                        horizontal = LiquidMetrics.ScreenPadding
+                                    ),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    val pages = songs.take(25).chunked(5)
+                                    items(pages.size) { pageIndex ->
+                                        Column(modifier = Modifier.fillParentMaxWidth(0.88f)) {
+                                            pages[pageIndex].forEachIndexed { rowIndex, track ->
+                                                val position = pageIndex * 5 + rowIndex
+                                                TopSongRow(
+                                                    position = position + 1,
+                                                    title = track.title,
+                                                    subtitle = track.albumName.ifBlank { track.artist },
+                                                    coverUrl = track.coverUrl,
+                                                    textPrimary = LiquidSurfaces.textPrimary(colors.isDark),
+                                                    textSecondary = LiquidSurfaces.textSecondary(colors.isDark),
+                                                    onClick = {
+                                                        PlayerController.play(context, songs, position)
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -719,6 +767,46 @@ private fun SheetTop(isDark: Boolean, modifier: Modifier = Modifier) {
                 .size(width = 36.dp, height = 5.dp)
                 .clip(CircleShape)
                 .background(LiquidSurfaces.grabber(isDark))
+        )
+    }
+}
+
+/** Заголовок раздела со ссылкой справа — «See all» и подобные. */
+@Composable
+private fun SectionHeaderWithLink(
+    isDark: Boolean,
+    title: String,
+    linkLabel: String,
+    onLinkClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(
+                start = LiquidMetrics.ScreenPadding,
+                end = LiquidMetrics.ScreenPadding,
+                top = LiquidMetrics.SectionGap,
+                bottom = 12.dp
+            ),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = title,
+            color = LiquidSurfaces.textPrimary(isDark),
+            fontSize = LiquidMetrics.SectionTitle,
+            fontWeight = LiquidMetrics.SectionTitleWeight,
+            letterSpacing = LiquidMetrics.SectionTitleSpacing,
+            modifier = Modifier.weight(1f)
+        )
+        Text(
+            text = linkLabel,
+            color = LiquidSurfaces.textSecondary(isDark),
+            fontSize = LiquidMetrics.LinkLabel,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier
+                .clip(LiquidMetrics.Pill)
+                .liquidClickable(pressedScale = LiquidMotion.PressButton, onClick = onLinkClick)
+                .padding(horizontal = 10.dp, vertical = 4.dp)
         )
     }
 }
