@@ -33,6 +33,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -352,7 +353,18 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(sectionGap))
 
             // SLEEP TIMER
-            SectionLabel("SLEEP TIMER")
+            PlainCard {
+                SettingsActionItem(
+                    title = "Ignore Battery Optimization",
+                    subtitle = "Prevents background stutter (Doze). Recommended for music",
+                    icon = Icons.Rounded.ChevronRight,
+                    onClick = { requestIgnoreBatteryOptimizations(context) }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(sectionGap))
+
+            // ── ACCESSIBILITY ──
 
             PlainCard {
                 SleepTimerSelector(
@@ -366,6 +378,277 @@ fun SettingsScreen(
 
             // PRELOAD NEXT TRACK
             // LISTEN TOGETHER + CONTINUE ON THIS DEVICE
+            SectionLabel("AUDIO")
+
+            val crossfadeMs by PlayerSettings.crossfadeMs.collectAsState()
+            PlainCard {
+                Column(modifier = Modifier.padding(vertical = 6.dp)) {
+                    CrossfadeSelector(
+                        options = listOf(0, 4, 9, 12, 15, 18),
+                        selectedMs = crossfadeMs,
+                        onSelect = { PlayerSettings.setCrossfadeMs(it * 1000) }
+                    )
+                    Text(
+                        text = "Fade between tracks. Off plays them back to back.",
+                        color = lc.textSecondary,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(sectionGap))
+
+
+            val autoMix by PlayerSettings.autoMix.collectAsState()
+            val volumeNorm by PlayerSettings.volumeNormalization.collectAsState()
+            val autoDownloadFavs by PlayerSettings.autoDownloadFavorites.collectAsState()
+            PlainCard {
+                SettingsToggleItem(
+                    title = "AutoMix",
+                    subtitle = "Model-driven JUCE blending between tracks (local + streaming) + auto wave",
+                    selected = autoMix,
+                    onSelect = { PlayerSettings.setAutoMix(it) }
+                )
+                PlainDivider()
+                SettingsToggleItem(
+                    title = "Sound Check",
+                    subtitle = "Normalize volume across tracks",
+                    selected = volumeNorm,
+                    onSelect = { PlayerSettings.setVolumeNormalization(it) }
+                )
+                PlainDivider()
+                SettingsToggleItem(
+                    title = "Keep favourites offline",
+                    subtitle = "Download liked songs in the background so they play without a " +
+                        "connection. Uses your data and storage, and pauses while you listen.",
+                    selected = autoDownloadFavs,
+                    onSelect = { PlayerSettings.setAutoDownloadFavorites(it) }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(sectionGap))
+
+            // ── AUDIO CACHE ──
+
+            var isResettingWave by remember { mutableStateOf(false) }
+            var waveResetSuccess by remember { mutableStateOf(false) }
+
+            PlainCard {
+                SettingsActionItem(
+                    title = "Reset Wave Preferences",
+                    subtitle = if (waveResetSuccess) "Preferences reset successfully" else "Clear wave history and start fresh",
+                    icon = Icons.Rounded.ChevronRight,
+                    onClick = {
+                        if (isResettingWave) return@SettingsActionItem
+                        scope.launch {
+                            isResettingWave = true
+                            val success = IcmRepository.resetWave()
+                            isResettingWave = false
+                            if (success) {
+                                waveResetSuccess = true
+                                delay(3000)
+                                waveResetSuccess = false
+                            }
+                        }
+                    }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(sectionGap))
+
+            // THEME
+            SectionLabel("QUALITY & CACHE")
+
+            val qualityOptions = listOf(
+                "128K" to "Compressed. Fastest load, lowest data usage.",
+                "256K" to "Balanced. Standard high-quality AAC.",
+                "320K" to "Premium. Near-lossless perceptual quality."
+            )
+            var selectedQuality by remember {
+                mutableStateOf(
+                    context.getSharedPreferences("icm", Context.MODE_PRIVATE)
+                        .getString("stream_quality", "256K") ?: "256K"
+                )
+            }
+
+            PlainCard {
+                Column(modifier = Modifier.padding(vertical = 14.dp)) {
+                    val isPremium by com.liquidmusicglass.api.icm.IcmAuthRepository.isPremium.collectAsState()
+                    
+                    // Auto-fallback to 256K if premium is lost or ALAC is selected (as ALAC is deprecated due to decryption latency)
+                    androidx.compose.runtime.LaunchedEffect(isPremium, selectedQuality) {
+                        if (selectedQuality == "ALAC") {
+                            selectedQuality = "256K"
+                            context.getSharedPreferences("icm", Context.MODE_PRIVATE)
+                                .edit().putString("stream_quality", "256K").apply()
+                            com.liquidmusicglass.api.icm.IcmRepository.streamQuality = "256K"
+                        } else if (!isPremium && selectedQuality == "320K") {
+                            selectedQuality = "256K"
+                            context.getSharedPreferences("icm", Context.MODE_PRIVATE)
+                                .edit().putString("stream_quality", "256K").apply()
+                            com.liquidmusicglass.api.icm.IcmRepository.streamQuality = "256K"
+                        }
+                    }
+
+                    qualityOptions.forEach { (quality, description) ->
+                        val isSelected = selectedQuality == quality
+                        val isAvailable = isPremium || quality != "320K"
+                        
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .liquidClickable(enabled = isAvailable) {
+                                    selectedQuality = quality
+                                    context.getSharedPreferences("icm", Context.MODE_PRIVATE)
+                                        .edit().putString("stream_quality", quality).apply()
+                                    com.liquidmusicglass.api.icm.IcmRepository.streamQuality = quality
+                                    
+                                    // Sync preference to server
+                                    scope.launch {
+                                        com.liquidmusicglass.api.icm.IcmRepository.updateUserPreferences(
+                                            com.liquidmusicglass.api.icm.IcmUserPreferences(qualityPreference = quality)
+                                        )
+                                    }
+                                }
+                                .padding(horizontal = 16.dp, vertical = 12.dp)
+                                .graphicsLayer { alpha = if (isAvailable) 1f else 0.4f },
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = quality,
+                                        color = if (isSelected) Accent else lc.textPrimary,
+                                        fontSize = if (win.useSideBySide) 14.sp else 16.sp,
+                                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+                                    )
+                                    if (!isAvailable) {
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            "Premium",
+                                            color = Color(0xFF8B5CF6),
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier
+                                                .background(Color(0xFF8B5CF6).copy(alpha = 0.15f), RoundedCornerShape(4.dp))
+                                                .padding(horizontal = 4.dp, vertical = 1.dp)
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = description,
+                                    color = lc.textSecondary,
+                                    fontSize = 12.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            if (isSelected) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(20.dp)
+                                        .clip(CircleShape)
+                                        .background(Accent),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "✓",
+                                        color = Color.White,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(sectionGap))
+
+            // WAVE
+
+            val cacheBytes by PlayerSettings.audioCacheBytes.collectAsState()
+            var cacheUsed by remember { mutableStateOf(-1L) }
+            var cacheRefresh by remember { mutableStateOf(0) }
+            LaunchedEffect(cacheBytes, cacheRefresh) {
+                cacheUsed = MediaCacheManager.getCacheSizeBytes()
+            }
+            PlainCard {
+                Column(modifier = Modifier.padding(vertical = 6.dp)) {
+                    CacheSizeSelector(
+                        options = PlayerSettings.CACHE_OPTIONS_BYTES,
+                        selected = cacheBytes,
+                        onSelect = { bytes ->
+                            PlayerSettings.setAudioCacheBytes(bytes)
+                            MediaCacheManager.applyCacheSizeChange()
+                            scope.launch {
+                                delay(600)
+                                cacheRefresh++
+                            }
+                        }
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (cacheBytes <= 0L) "Cache is off"
+                            else "Currently used: ${formatBytes(cacheUsed.coerceAtLeast(0L))}",
+                            color = lc.textSecondary,
+                            fontSize = 12.sp,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            text = "Clear",
+                            color = Accent,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .liquidClickable(pressedScale = LiquidMotion.PressButton) {
+                                    scope.launch {
+                                        MediaCacheManager.clearCache()
+                                        delay(300)
+                                        cacheRefresh++
+                                    }
+                                }
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(sectionGap))
+
+            // ── BACKGROUND PLAYBACK ──
+            // Doze/оптимизация батареи душит фоновые декод-потоки и сеть стриминга
+            // (лаги/«цикличка» при погашенном экране). Исключение из оптимизации —
+            // штатное решение для музыкальных плееров.
+
+            val preloadLead by AppSettings.preloadLeadSeconds.collectAsState()
+            PlainCard {
+                Column(modifier = Modifier.padding(vertical = 6.dp)) {
+                    PreloadSelector(
+                        options = listOf(30, 45, 60, 75, 90),
+                        selectedSeconds = preloadLead,
+                        onSelect = { AppSettings.setPreloadLeadSeconds(it) }
+                    )
+                    Text(
+                        text = "How early to preload the next track before the current one ends",
+                        color = lc.textSecondary,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(sectionGap))
+
+            // STREAM QUALITY
             SectionLabel("LISTEN TOGETHER")
 
             val syncRoom by com.liquidmusicglass.engine.sync.PlaybackSyncManager.room
@@ -538,7 +821,6 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(sectionGap))
 
             // SHARED PLAYLISTS
-            SectionLabel("SHARED PLAYLISTS")
 
             var myPlaylists by remember {
                 mutableStateOf<List<com.liquidmusicglass.api.lmg.LmgSyncApi.SharedPlaylistSummary>>(
@@ -674,189 +956,7 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(sectionGap))
 
             // CROSSFADE
-            SectionLabel("CROSSFADE")
-
-            val crossfadeMs by PlayerSettings.crossfadeMs.collectAsState()
-            PlainCard {
-                Column(modifier = Modifier.padding(vertical = 6.dp)) {
-                    CrossfadeSelector(
-                        options = listOf(0, 4, 9, 12, 15, 18),
-                        selectedMs = crossfadeMs,
-                        onSelect = { PlayerSettings.setCrossfadeMs(it * 1000) }
-                    )
-                    Text(
-                        text = "Fade between tracks. Off plays them back to back.",
-                        color = lc.textSecondary,
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(sectionGap))
-
-            SectionLabel("PRELOAD NEXT TRACK")
-
-            val preloadLead by AppSettings.preloadLeadSeconds.collectAsState()
-            PlainCard {
-                Column(modifier = Modifier.padding(vertical = 6.dp)) {
-                    PreloadSelector(
-                        options = listOf(30, 45, 60, 75, 90),
-                        selectedSeconds = preloadLead,
-                        onSelect = { AppSettings.setPreloadLeadSeconds(it) }
-                    )
-                    Text(
-                        text = "How early to preload the next track before the current one ends",
-                        color = lc.textSecondary,
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(sectionGap))
-
-            // STREAM QUALITY
-            SectionLabel("STREAM QUALITY")
-
-            val qualityOptions = listOf(
-                "128K" to "Compressed. Fastest load, lowest data usage.",
-                "256K" to "Balanced. Standard high-quality AAC.",
-                "320K" to "Premium. Near-lossless perceptual quality."
-            )
-            var selectedQuality by remember {
-                mutableStateOf(
-                    context.getSharedPreferences("icm", Context.MODE_PRIVATE)
-                        .getString("stream_quality", "256K") ?: "256K"
-                )
-            }
-
-            PlainCard {
-                Column(modifier = Modifier.padding(vertical = 14.dp)) {
-                    val isPremium by com.liquidmusicglass.api.icm.IcmAuthRepository.isPremium.collectAsState()
-                    
-                    // Auto-fallback to 256K if premium is lost or ALAC is selected (as ALAC is deprecated due to decryption latency)
-                    androidx.compose.runtime.LaunchedEffect(isPremium, selectedQuality) {
-                        if (selectedQuality == "ALAC") {
-                            selectedQuality = "256K"
-                            context.getSharedPreferences("icm", Context.MODE_PRIVATE)
-                                .edit().putString("stream_quality", "256K").apply()
-                            com.liquidmusicglass.api.icm.IcmRepository.streamQuality = "256K"
-                        } else if (!isPremium && selectedQuality == "320K") {
-                            selectedQuality = "256K"
-                            context.getSharedPreferences("icm", Context.MODE_PRIVATE)
-                                .edit().putString("stream_quality", "256K").apply()
-                            com.liquidmusicglass.api.icm.IcmRepository.streamQuality = "256K"
-                        }
-                    }
-
-                    qualityOptions.forEach { (quality, description) ->
-                        val isSelected = selectedQuality == quality
-                        val isAvailable = isPremium || quality != "320K"
-                        
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .liquidClickable(enabled = isAvailable) {
-                                    selectedQuality = quality
-                                    context.getSharedPreferences("icm", Context.MODE_PRIVATE)
-                                        .edit().putString("stream_quality", quality).apply()
-                                    com.liquidmusicglass.api.icm.IcmRepository.streamQuality = quality
-                                    
-                                    // Sync preference to server
-                                    scope.launch {
-                                        com.liquidmusicglass.api.icm.IcmRepository.updateUserPreferences(
-                                            com.liquidmusicglass.api.icm.IcmUserPreferences(qualityPreference = quality)
-                                        )
-                                    }
-                                }
-                                .padding(horizontal = 16.dp, vertical = 12.dp)
-                                .graphicsLayer { alpha = if (isAvailable) 1f else 0.4f },
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        text = quality,
-                                        color = if (isSelected) Accent else lc.textPrimary,
-                                        fontSize = if (win.useSideBySide) 14.sp else 16.sp,
-                                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
-                                    )
-                                    if (!isAvailable) {
-                                        Spacer(Modifier.width(8.dp))
-                                        Text(
-                                            "Premium",
-                                            color = Color(0xFF8B5CF6),
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            modifier = Modifier
-                                                .background(Color(0xFF8B5CF6).copy(alpha = 0.15f), RoundedCornerShape(4.dp))
-                                                .padding(horizontal = 4.dp, vertical = 1.dp)
-                                        )
-                                    }
-                                }
-                                Text(
-                                    text = description,
-                                    color = lc.textSecondary,
-                                    fontSize = 12.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                            if (isSelected) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(20.dp)
-                                        .clip(CircleShape)
-                                        .background(Accent),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = "✓",
-                                        color = Color.White,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(sectionGap))
-
-            // WAVE
-            SectionLabel("WAVE")
-
-            var isResettingWave by remember { mutableStateOf(false) }
-            var waveResetSuccess by remember { mutableStateOf(false) }
-
-            PlainCard {
-                SettingsActionItem(
-                    title = "Reset Wave Preferences",
-                    subtitle = if (waveResetSuccess) "Preferences reset successfully" else "Clear wave history and start fresh",
-                    icon = Icons.Rounded.ChevronRight,
-                    onClick = {
-                        if (isResettingWave) return@SettingsActionItem
-                        scope.launch {
-                            isResettingWave = true
-                            val success = IcmRepository.resetWave()
-                            isResettingWave = false
-                            if (success) {
-                                waveResetSuccess = true
-                                delay(3000)
-                                waveResetSuccess = false
-                            }
-                        }
-                    }
-                )
-            }
-
-            Spacer(modifier = Modifier.height(sectionGap))
-
-            // THEME
-            SectionLabel("APPEARANCE")
+            SectionLabel("APPEARANCE & ACCESSIBILITY")
 
             PlainCard {
                 Row(
@@ -906,113 +1006,6 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(sectionGap))
 
             // ── AUTOMIX & SOUND ──
-            SectionLabel("AUTOMIX & SOUND")
-
-            val autoMix by PlayerSettings.autoMix.collectAsState()
-            val volumeNorm by PlayerSettings.volumeNormalization.collectAsState()
-            val autoDownloadFavs by PlayerSettings.autoDownloadFavorites.collectAsState()
-            PlainCard {
-                SettingsToggleItem(
-                    title = "AutoMix",
-                    subtitle = "Model-driven JUCE blending between tracks (local + streaming) + auto wave",
-                    selected = autoMix,
-                    onSelect = { PlayerSettings.setAutoMix(it) }
-                )
-                PlainDivider()
-                SettingsToggleItem(
-                    title = "Sound Check",
-                    subtitle = "Normalize volume across tracks",
-                    selected = volumeNorm,
-                    onSelect = { PlayerSettings.setVolumeNormalization(it) }
-                )
-                PlainDivider()
-                SettingsToggleItem(
-                    title = "Keep favourites offline",
-                    subtitle = "Download liked songs in the background so they play without a " +
-                        "connection. Uses your data and storage, and pauses while you listen.",
-                    selected = autoDownloadFavs,
-                    onSelect = { PlayerSettings.setAutoDownloadFavorites(it) }
-                )
-            }
-
-            Spacer(modifier = Modifier.height(sectionGap))
-
-            // ── AUDIO CACHE ──
-            SectionLabel("AUDIO CACHE")
-
-            val cacheBytes by PlayerSettings.audioCacheBytes.collectAsState()
-            var cacheUsed by remember { mutableStateOf(-1L) }
-            var cacheRefresh by remember { mutableStateOf(0) }
-            LaunchedEffect(cacheBytes, cacheRefresh) {
-                cacheUsed = MediaCacheManager.getCacheSizeBytes()
-            }
-            PlainCard {
-                Column(modifier = Modifier.padding(vertical = 6.dp)) {
-                    CacheSizeSelector(
-                        options = PlayerSettings.CACHE_OPTIONS_BYTES,
-                        selected = cacheBytes,
-                        onSelect = { bytes ->
-                            PlayerSettings.setAudioCacheBytes(bytes)
-                            MediaCacheManager.applyCacheSizeChange()
-                            scope.launch {
-                                delay(600)
-                                cacheRefresh++
-                            }
-                        }
-                    )
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = if (cacheBytes <= 0L) "Cache is off"
-                            else "Currently used: ${formatBytes(cacheUsed.coerceAtLeast(0L))}",
-                            color = lc.textSecondary,
-                            fontSize = 12.sp,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Text(
-                            text = "Clear",
-                            color = Accent,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(50))
-                                .liquidClickable(pressedScale = LiquidMotion.PressButton) {
-                                    scope.launch {
-                                        MediaCacheManager.clearCache()
-                                        delay(300)
-                                        cacheRefresh++
-                                    }
-                                }
-                                .padding(horizontal = 10.dp, vertical = 4.dp)
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(sectionGap))
-
-            // ── BACKGROUND PLAYBACK ──
-            // Doze/оптимизация батареи душит фоновые декод-потоки и сеть стриминга
-            // (лаги/«цикличка» при погашенном экране). Исключение из оптимизации —
-            // штатное решение для музыкальных плееров.
-            SectionLabel("BACKGROUND PLAYBACK")
-            PlainCard {
-                SettingsActionItem(
-                    title = "Ignore Battery Optimization",
-                    subtitle = "Prevents background stutter (Doze). Recommended for music",
-                    icon = Icons.Rounded.ChevronRight,
-                    onClick = { requestIgnoreBatteryOptimizations(context) }
-                )
-            }
-
-            Spacer(modifier = Modifier.height(sectionGap))
-
-            // ── ACCESSIBILITY ──
-            SectionLabel("ACCESSIBILITY")
 
             val increaseContrast by PlayerSettings.increaseContrast.collectAsState()
             PlainCard {
@@ -1141,24 +1134,37 @@ private fun formatBytes(bytes: Long): String = when {
 
 @Composable
 private fun SectionLabel(text: String) {
+    val isDark = LiquidTheme.colors.isDark
+    // Тот же заголовок, что на экранах артиста и альбома: раньше это была мелкая
+    // подпись капсом, из-за чего разделы читались как служебные пометки, а не как
+    // структура экрана.
     Text(
-        text = text,
-        color = LiquidTheme.colors.textSecondary,
-        fontSize = 12.sp,
-        fontWeight = FontWeight.SemiBold,
-        letterSpacing = 0.5.sp,
-        modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+        text = text.lowercase().replaceFirstChar { it.uppercase() },
+        color = com.liquidmusicglass.ui.theme.LiquidSurfaces.textPrimary(isDark),
+        fontSize = com.liquidmusicglass.ui.theme.LiquidMetrics.SectionTitle,
+        fontWeight = com.liquidmusicglass.ui.theme.LiquidMetrics.SectionTitleWeight,
+        letterSpacing = com.liquidmusicglass.ui.theme.LiquidMetrics.SectionTitleSpacing,
+        modifier = Modifier.padding(start = 4.dp, bottom = 12.dp)
     )
 }
 
 @Composable
 private fun PlainCard(content: @Composable ColumnScope.() -> Unit) {
     val isDark = LiquidTheme.colors.isDark
-    val cardBg = if (isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7)
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(cardBg, RoundedCornerShape(28.dp))
+            // Тень до заливки: после clip/background она обрезалась бы формой.
+            .shadow(
+                elevation = com.liquidmusicglass.ui.theme.LiquidMetrics.CardElevation,
+                shape = com.liquidmusicglass.ui.theme.LiquidMetrics.CardShape,
+                ambientColor = com.liquidmusicglass.ui.theme.LiquidSurfaces.shadowTint(isDark),
+                spotColor = com.liquidmusicglass.ui.theme.LiquidSurfaces.shadowTint(isDark)
+            )
+            .background(
+                com.liquidmusicglass.ui.theme.LiquidSurfaces.card(isDark),
+                com.liquidmusicglass.ui.theme.LiquidMetrics.CardShape
+            )
             .padding(vertical = 4.dp),
         content = content
     )
@@ -1167,7 +1173,7 @@ private fun PlainCard(content: @Composable ColumnScope.() -> Unit) {
 @Composable
 private fun PlainDivider() {
     val isDark = LiquidTheme.colors.isDark
-    val dividerColor = if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.06f)
+    val dividerColor = com.liquidmusicglass.ui.theme.LiquidSurfaces.divider(isDark)
     Box(
         modifier = Modifier
             .fillMaxWidth()

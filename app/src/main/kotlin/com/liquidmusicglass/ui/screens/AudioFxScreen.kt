@@ -118,13 +118,11 @@ fun AudioFxScreen(onBack: () -> Unit) {
 
             Box(modifier = Modifier.alpha(if (master) 1f else 0.4f)) {
                 Column {
+                    // Основное — то, ради чего сюда заходит большинство: выбрать
+                    // профиль, поднять бас, подправить тембр.
                     DeviceProfilesSection(lc, master)
                     Spacer(Modifier.height(secGap))
-                    PreampSection(lc, master)
-                    Spacer(Modifier.height(secGap))
                     EqSection(lc, master)
-                    Spacer(Modifier.height(secGap))
-                    ParametricEqSection(lc, master)
                     Spacer(Modifier.height(secGap))
                     BassSection(lc, master)
                     Spacer(Modifier.height(secGap))
@@ -133,18 +131,36 @@ fun AudioFxScreen(onBack: () -> Unit) {
                     StereoSection(lc, master)
                     Spacer(Modifier.height(secGap))
                     BalanceSection(lc, master)
+
                     Spacer(Modifier.height(secGap))
-                    MonoSection(lc, master)
-                    Spacer(Modifier.height(secGap))
-                    CompressorSection(lc, master)
-                    Spacer(Modifier.height(secGap))
-                    LimiterSection(lc, master)
-                    Spacer(Modifier.height(secGap))
-                    ReverbSection(lc, master)
-                    Spacer(Modifier.height(secGap))
-                    SaturationSection(lc, master)
-                    Spacer(Modifier.height(secGap))
-                    VuSection(lc)
+
+                    // Остальное свёрнуто под одним заголовком. Пятнадцать ползунков
+                    // сразу на экране пугают человека, которому нужно просто
+                    // «побасить»; тем, кому нужен компрессор, один тап не помеха.
+                    var advancedOpen by rememberSaveable { mutableStateOf(false) }
+                    AdvancedToggle(lc = lc, expanded = advancedOpen) {
+                        advancedOpen = !advancedOpen
+                    }
+
+                    if (advancedOpen) {
+                        Spacer(Modifier.height(secGap))
+                        ParametricEqSection(lc, master)
+                        Spacer(Modifier.height(secGap))
+                        PreampSection(lc, master)
+                        Spacer(Modifier.height(secGap))
+                        CompressorSection(lc, master)
+                        Spacer(Modifier.height(secGap))
+                        LimiterSection(lc, master)
+                        Spacer(Modifier.height(secGap))
+                        ReverbSection(lc, master)
+                        Spacer(Modifier.height(secGap))
+                        SaturationSection(lc, master)
+                        Spacer(Modifier.height(secGap))
+                        MonoSection(lc, master)
+                        Spacer(Modifier.height(secGap))
+                        VuSection(lc)
+                    }
+
                     Spacer(Modifier.height(20.dp))
                     ResetButton(lc, master)
                 }
@@ -571,6 +587,35 @@ private fun ResetButton(lc: LiquidColors, enabled: Boolean) {
 }
 
 // ── Reusable building blocks ─────────────────────────────────────────────────
+
+/** Переключатель продвинутого раздела: одна строка вместо стены ползунков. */
+@Composable
+private fun AdvancedToggle(lc: LiquidColors, expanded: Boolean, onClick: () -> Unit) {
+    val isDark = lc.isDark
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(com.liquidmusicglass.ui.theme.LiquidMetrics.CardShape)
+            .background(com.liquidmusicglass.ui.theme.LiquidSurfaces.card(isDark))
+            .clickable { onClick() }
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = "Advanced",
+            color = com.liquidmusicglass.ui.theme.LiquidSurfaces.textPrimary(isDark),
+            fontSize = 16.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.weight(1f)
+        )
+        Text(
+            text = if (expanded) "Hide" else "Show",
+            color = lc.accent,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+    }
+}
 
 @Composable
 private fun Section(title: String, lc: LiquidColors, valueText: String? = null, content: @Composable () -> Unit) {
