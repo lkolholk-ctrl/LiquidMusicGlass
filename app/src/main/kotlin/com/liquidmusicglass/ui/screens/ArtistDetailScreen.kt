@@ -359,28 +359,28 @@ fun ArtistDetailScreen(
                     if (albums.isNotEmpty()) {
                         item { SectionHeaderThemed(colors.isDark, "Albums") }
                         item {
-                            AlbumRow(albums, colors.textPrimary, colors.textSecondary, onNavigateToAlbum)
+                            AlbumRow(albums, LiquidSurfaces.textPrimary(colors.isDark), LiquidSurfaces.textSecondary(colors.isDark), colors.isDark, onNavigateToAlbum)
                         }
                     }
 
                     if (singles.isNotEmpty()) {
                         item { SectionHeaderThemed(colors.isDark, "Singles & EPs") }
                         item {
-                            AlbumRow(singles, colors.textPrimary, colors.textSecondary, onNavigateToAlbum)
+                            AlbumRow(singles, LiquidSurfaces.textPrimary(colors.isDark), LiquidSurfaces.textSecondary(colors.isDark), colors.isDark, onNavigateToAlbum)
                         }
                     }
 
                     if (compilations.isNotEmpty()) {
                         item { SectionHeaderThemed(colors.isDark, "Compilations") }
                         item {
-                            AlbumRow(compilations, colors.textPrimary, colors.textSecondary, onNavigateToAlbum)
+                            AlbumRow(compilations, LiquidSurfaces.textPrimary(colors.isDark), LiquidSurfaces.textSecondary(colors.isDark), colors.isDark, onNavigateToAlbum)
                         }
                     }
 
                     if (liveAlbums.isNotEmpty()) {
                         item { SectionHeaderThemed(colors.isDark, "Live albums") }
                         item {
-                            AlbumRow(liveAlbums, colors.textPrimary, colors.textSecondary, onNavigateToAlbum)
+                            AlbumRow(liveAlbums, LiquidSurfaces.textPrimary(colors.isDark), LiquidSurfaces.textSecondary(colors.isDark), colors.isDark, onNavigateToAlbum)
                         }
                     }
 
@@ -399,6 +399,12 @@ fun ArtistDetailScreen(
                                             contentDescription = playlist.title,
                                             modifier = Modifier
                                                 .size(160.dp)
+                                                .shadow(
+                                                    elevation = LiquidMetrics.CoverElevation,
+                                                    shape = LiquidMetrics.CardShape,
+                                                    ambientColor = LiquidSurfaces.shadowTint(colors.isDark),
+                                                    spotColor = LiquidSurfaces.shadowTint(colors.isDark)
+                                                )
                                                 .clip(LiquidMetrics.CardShape)
                                                 .liquidClickable(
                                                     pressedScale = LiquidMotion.PressButton,
@@ -462,7 +468,7 @@ fun ArtistDetailScreen(
                     if (appearsOn.isNotEmpty()) {
                         item { SectionHeaderThemed(colors.isDark, "Appears on") }
                         item {
-                            AlbumRow(appearsOn, colors.textPrimary, colors.textSecondary, onNavigateToAlbum)
+                            AlbumRow(appearsOn, LiquidSurfaces.textPrimary(colors.isDark), LiquidSurfaces.textSecondary(colors.isDark), colors.isDark, onNavigateToAlbum)
                         }
                     }
                 }
@@ -926,6 +932,12 @@ private fun LatestReleaseCard(
             contentDescription = album.title,
             modifier = Modifier
                 .size(LiquidMetrics.ReleaseCoverSize)
+                .shadow(
+                    elevation = LiquidMetrics.CoverElevation,
+                    shape = LiquidMetrics.CoverShape,
+                    ambientColor = LiquidSurfaces.shadowTint(isDark),
+                    spotColor = LiquidSurfaces.shadowTint(isDark)
+                )
                 .clip(LiquidMetrics.CoverShape),
             contentScale = ContentScale.Crop
         )
@@ -954,6 +966,7 @@ private fun AlbumRow(
     albums: List<IcmArtistAlbum>,
     textPrimary: Color,
     textSecondary: Color,
+    isDark: Boolean,
     onNavigateToAlbum: (String) -> Unit
 ) {
     LazyRow(
@@ -968,6 +981,12 @@ private fun AlbumRow(
                     contentDescription = album.title,
                     modifier = Modifier
                         .size(150.dp)
+                        .shadow(
+                            elevation = LiquidMetrics.CoverElevation,
+                            shape = LiquidMetrics.CardShape,
+                            ambientColor = LiquidSurfaces.shadowTint(isDark),
+                            spotColor = LiquidSurfaces.shadowTint(isDark)
+                        )
                         .clip(LiquidMetrics.CardShape)
                         .liquidClickable(
                             pressedScale = LiquidMotion.PressButton,
