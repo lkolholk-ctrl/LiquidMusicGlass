@@ -5,6 +5,7 @@ import android.content.Context
 import android.net.Uri
 import android.os.Build
 import android.os.SystemClock
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
@@ -457,6 +458,27 @@ object PlayerController {
      * ручной скип оставлял следующий трек без кэша, а провал сети хоронил
      * попытку без ретрая (полевой фидбек: «треки не предзагружаются вообще»).
      */
+    /** Сколько ждём докачки текущего трека, прежде чем начать предзагрузку следующих. */
+    private const val PRECACHE_WAIT_TIMEOUT_MS = 60_000L
+
+    /**
+     * Ждёт, пока буфер плеера не дотянется до конца текущего трека, но не
+     * дольше [timeoutMs]. Возвращается сразу, если плеера нет или длительность
+     * ещё не известна дольше таймаута.
+     */
+    private suspend fun awaitCurrentBuffered(timeoutMs: Long) {
+        val deadline = android.os.SystemClock.uptimeMillis() + timeoutMs
+        while (android.os.SystemClock.uptimeMillis() < deadline) {
+            val done = withContext(Dispatchers.Main) {
+                val p = controller ?: appContext?.let { getPlayer(it) } ?: return@withContext true
+                val dur = p.duration
+                dur > 0 && dur != C.TIME_UNSET && p.bufferedPosition >= dur - 1_000L
+            }
+            if (done) return
+            kotlinx.coroutines.delay(2_000L)
+        }
+    }
+
     private fun scheduleAudioPreCache(
         context: Context,
         fromIndex: Int,
@@ -466,6 +488,12 @@ object PlayerController {
         preCacheJob?.cancel()
         preCacheJob = ioScope.launch {
             kotlinx.coroutines.delay(initialDelayMs)
+            // Ждём, пока дочитается ТЕКУЩИЙ трек. Раньше единственным условием
+            // была фиксированная задержка, и на слабой сети предзагрузка
+            // следующих отбирала полосу у того, что играет прямо сейчас —
+            // конец трека начинал заикаться. Таймаут страхует от длинных
+            // треков и залипшего буфера: лучше начать позже, чем не начать.
+            awaitCurrentBuffered(PRECACHE_WAIT_TIMEOUT_MS)
             val snapshot = queue.toList()
             val lastIdx = kotlin.math.min(fromIndex + 2, snapshot.lastIndex)
             for (idx in (fromIndex + 1)..lastIdx) {

@@ -244,6 +244,12 @@ object MediaCacheManager {
         activePreCache = writer
         activePreCacheKey = key
         return try {
+            // Предзагрузка — фоновая работа: пусть планировщик отдаёт процессор
+            // воспроизведению, а не ей. Заметно на слабых телефонах, где качание
+            // следующего трека конкурирует с декодированием текущего.
+            runCatching {
+                android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
+            }
             writer.cache()
             android.util.Log.d("MediaCacheManager", "Pre-cached audio for $trackId")
             true

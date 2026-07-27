@@ -22,6 +22,9 @@ import androidx.media3.exoplayer.audio.DefaultAudioSink
 @UnstableApi
 object PlayerAudioChain {
 
+    /** Сколько раз собирался аудио-синк за жизнь процесса (см. лог в buildAudioSink). */
+    private val sinkCount = java.util.concurrent.atomic.AtomicInteger(0)
+
     fun renderersFactory(context: Context): DefaultRenderersFactory =
         object : DefaultRenderersFactory(context) {
             override fun buildAudioSink(
@@ -29,6 +32,17 @@ object PlayerAudioChain {
                 enableFloatOutput: Boolean,
                 enableAudioTrackPlaybackParameters: Boolean
             ): AudioSink {
+                // Диагностика: кроссфейд форка держит два аудио-рендерера. Если
+                // на один плеер синк собирается дважды, то и цепочка процессоров
+                // существует в двух экземплярах — а значит, два BassAudioProcessor
+                // конкурентно пишут уровни в AudioReactor, и определение
+                // «уходящего» трека по порядковому номеру в DjStreamFx считает
+                // новейшим не тот рендерер. Считаем и пишем в лог, чтобы знать
+                // наверняка, прежде чем что-то менять.
+                // Log.w, а не i/d: в релизе R8 вырезает verbose/debug/info, и
+                // диагностика молча исчезла бы именно там, где нужна.
+                val n = sinkCount.incrementAndGet()
+                android.util.Log.w("PlayerAudioChain", "buildAudioSink #$n")
                 return DefaultAudioSink.Builder(context)
                     .setAudioProcessors(
                         arrayOf(

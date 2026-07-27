@@ -16,20 +16,48 @@ import kotlin.math.sqrt
  * Обновляется из аудио-потока ([BassAudioProcessor]); читается из UI.
  */
 object AudioReactor {
+    @Volatile private var _low = 0f
+    @Volatile private var _mid = 0f
+    @Volatile private var _high = 0f
+
+    /**
+     * Когда уровни читали в последний раз.
+     *
+     * По нему [hasListeners] решает, считать ли полосы вообще. Счётчик
+     * подписчиков был бы точнее, но рассинхрон счётчика убивает пульсацию
+     * намертво и молча; отметка времени сама себя чинит — как только кто-то
+     * снова прочитает уровень, разбор возобновится со следующего же буфера.
+     */
+    @Volatile private var lastReadAt = 0L
+
     /** Низкие частоты (бас), 0..1. */
-    @Volatile
-    var low: Float = 0f
+    var low: Float
+        get() { lastReadAt = android.os.SystemClock.uptimeMillis(); return _low }
+        set(value) { _low = value }
 
     /** Средние частоты, 0..1. */
-    @Volatile
-    var mid: Float = 0f
+    var mid: Float
+        get() { lastReadAt = android.os.SystemClock.uptimeMillis(); return _mid }
+        set(value) { _mid = value }
 
     /** Высокие частоты, 0..1. */
-    @Volatile
-    var high: Float = 0f
+    var high: Float
+        get() { lastReadAt = android.os.SystemClock.uptimeMillis(); return _high }
+        set(value) { _high = value }
 
     /** Алиас баса для обратной совместимости. */
     val level: Float get() = low
+
+    /**
+     * Нужен ли кому-то разбор по полосам прямо сейчас.
+     *
+     * Раньше посэмпльный цикл с двумя фильтрами крутился всегда — и с закрытым
+     * приложением тоже, хотя результат никто не читал.
+     */
+    val hasListeners: Boolean
+        get() = android.os.SystemClock.uptimeMillis() - lastReadAt < IDLE_TIMEOUT_MS
+
+    private const val IDLE_TIMEOUT_MS = 2_000L
 
     // ── Мост для JUCE-локалки ────────────────────────────────────────────
     // Стриминг кормит уровни из BassAudioProcessor (цепочка ExoPlayer); у
@@ -75,10 +103,15 @@ class BassAudioProcessor : BaseAudioProcessor() {
         val sizeBytes = inputBuffer.remaining()
         if (sizeBytes == 0) return
 
-        // ── Анализ полос (не двигаем позицию inputBuffer) ──
         val shorts = inputBuffer.asShortBuffer()
-        val total = shorts.remaining()
         val channels = inputAudioFormat.channelCount.coerceAtLeast(1)
+
+        // Разбор по полосам нужен только пока его читают (пульсация обложки,
+        // аура, хаптика). Экран погашен или приложение свёрнуто — считать нечего,
+        // а цикл по каждому сэмплу с двумя фильтрами крутился всё равно.
+        val analyze = AudioReactor.hasListeners
+        // ── Анализ полос (не двигаем позицию inputBuffer) ──
+        val total = if (analyze) shorts.remaining() else 0
         var lo = lpLow
         var md = lpMid
         var eLow = 0.0

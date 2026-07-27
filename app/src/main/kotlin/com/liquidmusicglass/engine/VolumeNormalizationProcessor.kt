@@ -5,31 +5,43 @@ import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.audio.BaseAudioProcessor
 import androidx.media3.common.util.UnstableApi
 import java.nio.ByteBuffer
+import kotlin.math.abs
 import kotlin.math.sqrt
 
 /**
  * Нормализация громкости между треками (Sound Check / ReplayGain-стиль).
  *
- * ReplayGain-тегов у стримов нет, поэтому громкость измеряется **в реальном
- * времени**: считаем RMS PCM-буфера → медленно интегрируем в огибающую громкости
- * трека → вычисляем усиление к целевому уровню [TARGET_RMS] → плавно применяем к
- * сэмплам. Итог — тихие треки подтягиваются, громкие приглушаются, так что
- * соседние треки звучат ровно (как Sound Check у Apple).
+ * ReplayGain-тегов у стримов нет, поэтому громкость измеряется на слух: первые
+ * [MEASURE_SECONDS] секунд копим энергию сигнала и подстраиваем усиление, а
+ * дальше **фиксируем его до конца трека**.
  *
- * Огибающая и усиление сбрасываются на каждом [onFlush] (смена трека/seek), так
- * что подстройка идёт под КАЖДЫЙ трек заново.
+ * Раньше подстройка шла всё время — то есть регулятор громкости жил своей
+ * жизнью внутри трека: тихий куплет подтягивался вверх, громкий припев
+ * приглушался, и динамика записи размывалась. Ровнее звучало между треками, но
+ * хуже внутри каждого. У Apple усиление — одно число на трек, посчитанное
+ * заранее; фиксация после короткого замера даёт то же самое без их метаданных.
+ *
+ * Пики отслеживаются отдельно: усиление ограничивается так, чтобы самый громкий
+ * сэмпл замера не вышел за пределы разрядной сетки. Прежний вариант умножал и
+ * срезал всё, что вылезло, — это слышимое искажение на громких мастерах.
  *
  * Включается флагом [PlayerSettings.volumeNormalization]; при выключенном —
- * прозрачный проброс (звук без изменений). Работает с 16-бит PCM.
+ * прозрачный проброс. Работает с 16-бит PCM.
  */
 @UnstableApi
 class VolumeNormalizationProcessor : BaseAudioProcessor() {
 
-    private var loudnessEnv = 0f   // огибающая RMS трека (0..32768)
-    private var gain = 1f          // текущее сглаженное усиление
+    private var loudnessEnv = 0f       // огибающая RMS трека (0..32768)
+    private var gain = 1f              // текущее усиление
+    private var peak = 0f              // максимум модуля сэмпла за замер
+    private var framesSeen = 0L        // сколько кадров прошло с начала трека
+    private var framesToMeasure = 0L   // длительность замера в кадрах
+    private var frozen = false         // замер окончен, усиление больше не меняем
 
     override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
         return if (inputAudioFormat.encoding == C.ENCODING_PCM_16BIT) {
+            framesToMeasure = (inputAudioFormat.sampleRate.toLong() * MEASURE_SECONDS)
+                .coerceAtLeast(1L)
             inputAudioFormat
         } else {
             AudioProcessor.AudioFormat.NOT_SET
@@ -57,30 +69,43 @@ class VolumeNormalizationProcessor : BaseAudioProcessor() {
             return
         }
 
-        // ── RMS текущего буфера ──
-        var sumSq = 0.0
-        var i = 0
-        while (i < n) {
-            val s = inShorts.get(i).toInt()
-            sumSq += (s * s).toDouble()
-            i++
+        if (!frozen) {
+            // ── RMS и пик текущего буфера ──
+            var sumSq = 0.0
+            var i = 0
+            while (i < n) {
+                val s = inShorts.get(i).toInt()
+                sumSq += (s * s).toDouble()
+                val a = abs(s).toFloat()
+                if (a > peak) peak = a
+                i++
+            }
+            val rms = sqrt(sumSq / n).toFloat()
+
+            // Медленная интеграция громкости трека (только на не-тишине).
+            if (rms > NOISE_FLOOR) {
+                loudnessEnv = if (loudnessEnv <= 0f) rms
+                else loudnessEnv + ENV_COEF * (rms - loudnessEnv)
+            }
+
+            // Целевое усиление к опорному уровню, плавно.
+            val ref = if (loudnessEnv > NOISE_FLOOR) loudnessEnv else rms.coerceAtLeast(1f)
+            val targetGain = (TARGET_RMS / ref).coerceIn(MIN_GAIN, MAX_GAIN)
+            gain += GAIN_SMOOTH * (targetGain - gain)
+
+            framesSeen += n
+            if (framesSeen >= framesToMeasure) {
+                // Потолок по пику: усиливать больше нельзя, иначе срежем верхушки.
+                val headroom = if (peak > 1f) (PEAK_CEILING / peak) else MAX_GAIN
+                gain = gain.coerceAtMost(headroom).coerceIn(MIN_GAIN, MAX_GAIN)
+                frozen = true
+            }
         }
-        val rms = sqrt(sumSq / n).toFloat()
 
-        // ── Медленная интеграция громкости трека (только на не-тишине) ──
-        if (rms > NOISE_FLOOR) {
-            loudnessEnv = if (loudnessEnv <= 0f) rms
-            else loudnessEnv + ENV_COEF * (rms - loudnessEnv)
-        }
-
-        // ── Целевое усиление к опорному уровню, плавно ──
-        val ref = if (loudnessEnv > NOISE_FLOOR) loudnessEnv else rms.coerceAtLeast(1f)
-        val targetGain = (TARGET_RMS / ref).coerceIn(MIN_GAIN, MAX_GAIN)
-        gain += GAIN_SMOOTH * (targetGain - gain)
-
-        // ── Применяем к сэмплам с жёстким клипом в диапазон short ──
+        // ── Применяем к сэмплам. Клип остаётся страховкой на случай, если пик
+        //    после замера окажется выше замеренного, но в норме не срабатывает.
         val outShorts = output.asShortBuffer()
-        i = 0
+        var i = 0
         while (i < n) {
             val v = inShorts.get(i) * gain
             val clamped = when {
@@ -104,6 +129,9 @@ class VolumeNormalizationProcessor : BaseAudioProcessor() {
     private fun reset0() {
         loudnessEnv = 0f
         gain = 1f
+        peak = 0f
+        framesSeen = 0L
+        frozen = false
     }
 
     private companion object {
@@ -113,5 +141,11 @@ class VolumeNormalizationProcessor : BaseAudioProcessor() {
         const val GAIN_SMOOTH = 0.05f    // сглаживание усиления (без «пыхтения»)
         const val MIN_GAIN = 0.4f        // ≈ −8 dB (приглушить громкий мастер)
         const val MAX_GAIN = 2.5f        // ≈ +8 dB (подтянуть тихий трек)
+
+        /** Сколько секунд слушаем трек, прежде чем зафиксировать усиление. */
+        const val MEASURE_SECONDS = 20L
+
+        /** Потолок пика после усиления: чуть ниже максимума, с запасом. */
+        const val PEAK_CEILING = 32000f
     }
 }
