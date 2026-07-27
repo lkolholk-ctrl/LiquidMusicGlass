@@ -6,11 +6,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -66,17 +68,15 @@ import com.liquidmusicglass.data.local.db.AppDatabase
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.ui.glass.AlbumArtImage
 import com.liquidmusicglass.ui.glass.liquidClickable
+import com.liquidmusicglass.ui.theme.LiquidMetrics
 import com.liquidmusicglass.ui.theme.LiquidMotion
+import com.liquidmusicglass.ui.theme.LiquidSurfaces
 import com.liquidmusicglass.ui.theme.LiquidTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 
-private val AppleRed = Color(0xFFFC3C44)
-
-/** Сильные скругления — как во всём приложении. */
-private val CardShape = RoundedCornerShape(26.dp)
 
 /** Обложки каталога приходят огромными; для карточек это лишний трафик и память. */
 private fun String?.toThumb(): String? = this
@@ -219,10 +219,10 @@ fun ArtistDetailScreen(
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(colors.settingsBackground)) {
+    Box(modifier = Modifier.fillMaxSize().background(LiquidSurfaces.sheet(colors.isDark))) {
         when {
             isLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = AppleRed, modifier = Modifier.size(32.dp))
+                CircularProgressIndicator(color = colors.accent, modifier = Modifier.size(32.dp))
             }
 
             error != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -256,25 +256,27 @@ fun ArtistDetailScreen(
                         )
                     }
 
+                    item { SheetTop(isDark = colors.isDark) }
+
                     if (playCount > 0) {
                         item {
                             PersonalStrip(
                                 playCount = playCount,
                                 favouriteTrack = favouriteTrackTitle,
-                                textPrimary = colors.textPrimary,
-                                textSecondary = colors.textSecondary,
+                                textPrimary = LiquidSurfaces.textPrimary(colors.isDark),
+                                textSecondary = LiquidSurfaces.textSecondary(colors.isDark),
                                 isDark = colors.isDark
                             )
                         }
                     }
 
                     art?.latestRelease?.let { latest ->
-                        item { SectionHeader("Latest release", colors.textPrimary) }
+                        item { SectionHeaderThemed(colors.isDark, "Latest release") }
                         item {
                             LatestReleaseCard(
                                 album = latest,
-                                textPrimary = colors.textPrimary,
-                                textSecondary = colors.textSecondary,
+                                textPrimary = LiquidSurfaces.textPrimary(colors.isDark),
+                                textSecondary = LiquidSurfaces.textSecondary(colors.isDark),
                                 isDark = colors.isDark,
                                 onClick = { onNavigateToAlbum(latest.id) }
                             )
@@ -282,17 +284,17 @@ fun ArtistDetailScreen(
                     }
 
                     if (topSongs.isNotEmpty()) {
-                        item { SectionHeader("Top songs", colors.textPrimary) }
+                        item { SectionHeaderThemed(colors.isDark, "Top songs") }
                         item {
-                            Column(modifier = Modifier.padding(horizontal = 20.dp)) {
+                            Column(modifier = Modifier.padding(horizontal = LiquidMetrics.ScreenPadding)) {
                                 topSongs.take(5).forEachIndexed { index, song ->
                                     TopSongRow(
                                         position = index + 1,
                                         title = song.title,
                                         subtitle = song.albumName ?: song.artist,
                                         coverUrl = song.cover.toThumb(),
-                                        textPrimary = colors.textPrimary,
-                                        textSecondary = colors.textSecondary,
+                                        textPrimary = LiquidSurfaces.textPrimary(colors.isDark),
+                                        textSecondary = LiquidSurfaces.textSecondary(colors.isDark),
                                         onClick = {
                                             PlayerController.play(
                                                 context,
@@ -307,38 +309,38 @@ fun ArtistDetailScreen(
                     }
 
                     if (albums.isNotEmpty()) {
-                        item { SectionHeader("Albums", colors.textPrimary) }
+                        item { SectionHeaderThemed(colors.isDark, "Albums") }
                         item {
                             AlbumRow(albums, colors.textPrimary, colors.textSecondary, onNavigateToAlbum)
                         }
                     }
 
                     if (singles.isNotEmpty()) {
-                        item { SectionHeader("Singles & EPs", colors.textPrimary) }
+                        item { SectionHeaderThemed(colors.isDark, "Singles & EPs") }
                         item {
                             AlbumRow(singles, colors.textPrimary, colors.textSecondary, onNavigateToAlbum)
                         }
                     }
 
                     if (compilations.isNotEmpty()) {
-                        item { SectionHeader("Compilations", colors.textPrimary) }
+                        item { SectionHeaderThemed(colors.isDark, "Compilations") }
                         item {
                             AlbumRow(compilations, colors.textPrimary, colors.textSecondary, onNavigateToAlbum)
                         }
                     }
 
                     if (liveAlbums.isNotEmpty()) {
-                        item { SectionHeader("Live albums", colors.textPrimary) }
+                        item { SectionHeaderThemed(colors.isDark, "Live albums") }
                         item {
                             AlbumRow(liveAlbums, colors.textPrimary, colors.textSecondary, onNavigateToAlbum)
                         }
                     }
 
                     if (playlists.isNotEmpty()) {
-                        item { SectionHeader("Playlists", colors.textPrimary) }
+                        item { SectionHeaderThemed(colors.isDark, "Playlists") }
                         item {
                             LazyRow(
-                                contentPadding = PaddingValues(horizontal = 20.dp),
+                                contentPadding = PaddingValues(horizontal = LiquidMetrics.ScreenPadding),
                                 horizontalArrangement = Arrangement.spacedBy(14.dp)
                             ) {
                                 items(playlists, key = { it.id }) { playlist ->
@@ -349,7 +351,7 @@ fun ArtistDetailScreen(
                                             contentDescription = playlist.title,
                                             modifier = Modifier
                                                 .size(160.dp)
-                                                .clip(CardShape)
+                                                .clip(LiquidMetrics.CardShape)
                                                 .liquidClickable(
                                                     pressedScale = LiquidMotion.PressButton,
                                                     onClick = { onNavigateToAlbum(playlist.id) }
@@ -371,10 +373,10 @@ fun ArtistDetailScreen(
                     }
 
                     if (similar.isNotEmpty()) {
-                        item { SectionHeader("Similar artists", colors.textPrimary) }
+                        item { SectionHeaderThemed(colors.isDark, "Similar artists") }
                         item {
                             LazyRow(
-                                contentPadding = PaddingValues(horizontal = 20.dp),
+                                contentPadding = PaddingValues(horizontal = LiquidMetrics.ScreenPadding),
                                 horizontalArrangement = Arrangement.spacedBy(16.dp)
                             ) {
                                 items(similar, key = { it.id }) { other ->
@@ -410,7 +412,7 @@ fun ArtistDetailScreen(
                     }
 
                     if (appearsOn.isNotEmpty()) {
-                        item { SectionHeader("Appears on", colors.textPrimary) }
+                        item { SectionHeaderThemed(colors.isDark, "Appears on") }
                         item {
                             AlbumRow(appearsOn, colors.textPrimary, colors.textSecondary, onNavigateToAlbum)
                         }
@@ -475,7 +477,7 @@ private fun ArtistHeader(
 ) {
     val context = LocalContext.current
 
-    Box(modifier = Modifier.fillMaxWidth().height(420.dp)) {
+    Box(modifier = Modifier.fillMaxWidth().height(LiquidMetrics.HeaderHeight)) {
         // Лёгкий параллакс: фон уезжает медленнее содержимого, поэтому шапка
         // ощущается слоем, а не картинкой, приклеенной к списку.
         val parallax by remember {
@@ -544,13 +546,21 @@ private fun ArtistHeader(
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .fillMaxWidth()
-                .padding(start = 20.dp, end = 20.dp, bottom = 18.dp)
+                .padding(
+                    start = LiquidMetrics.ScreenPadding,
+                    end = LiquidMetrics.ScreenPadding,
+                    // Отступ снизу больше обычного: под именем лежит лист, который
+                    // наезжает на шапку, и текст иначе оказался бы под его краем.
+                    bottom = LiquidMetrics.SheetOverlap + 24.dp
+                )
         ) {
             Text(
                 text = name,
                 color = Color.White,
-                fontSize = 40.sp,
-                fontWeight = FontWeight.Bold,
+                fontSize = LiquidMetrics.TitleHuge,
+                fontWeight = LiquidMetrics.TitleHugeWeight,
+                letterSpacing = LiquidMetrics.TitleHugeSpacing,
+                lineHeight = 44.sp,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
@@ -573,30 +583,44 @@ private fun ArtistHeader(
     }
 }
 
+/**
+ * Кнопка действия в шапке.
+ *
+ * Главная — сплошная белая с тёмным текстом: под ней фотография, и только
+ * плотная заливка гарантирует читаемость на любом кадре. Вторая — стеклянная,
+ * чтобы не спорить с главной за внимание.
+ */
 @Composable
-private fun HeaderButton(
+private fun RowScope.HeaderButton(
     label: String,
     icon: ImageVector,
     filled: Boolean,
     onClick: () -> Unit
 ) {
+    val contentColor = if (filled) Color.Black else Color.White
     Row(
         modifier = Modifier
-            .height(44.dp)
+            .weight(1f)
+            .height(LiquidMetrics.ActionButtonHeight)
             .clip(CircleShape)
-            .background(if (filled) AppleRed else Color.White.copy(alpha = 0.18f))
-            .liquidClickable(pressedScale = LiquidMotion.PressButton, onClick = onClick)
-            .padding(horizontal = 22.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .background(if (filled) Color.White else LiquidSurfaces.glassAction)
+            .liquidClickable(pressedScale = LiquidMotion.PressButton, onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center
     ) {
         Icon(
             imageVector = icon,
             contentDescription = null,
-            tint = Color.White,
-            modifier = Modifier.size(20.dp)
+            tint = contentColor,
+            modifier = Modifier.size(18.dp)
         )
         Spacer(Modifier.width(8.dp))
-        Text(text = label, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+        Text(
+            text = label,
+            color = contentColor,
+            fontSize = LiquidMetrics.ActionLabel,
+            fontWeight = FontWeight.SemiBold
+        )
     }
 }
 
@@ -612,11 +636,9 @@ private fun PersonalStrip(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 16.dp)
-            .clip(CardShape)
-            .background(
-                if (isDark) Color.White.copy(alpha = 0.06f) else Color.Black.copy(alpha = 0.04f)
-            )
+            .padding(horizontal = LiquidMetrics.ScreenPadding, vertical = 16.dp)
+            .clip(LiquidMetrics.CardShape)
+            .background(LiquidSurfaces.card(isDark))
             .padding(horizontal = 18.dp, vertical = 16.dp)
     ) {
         Text(
@@ -636,14 +658,46 @@ private fun PersonalStrip(
     }
 }
 
+/**
+ * Верхушка листа контента: наезжает на шапку и скруглена сверху.
+ *
+ * Приём из макета — за счёт наезда шапка воспринимается подложкой, а не первым
+ * элементом списка, и переход к контенту читается без разделителя.
+ */
 @Composable
-private fun SectionHeader(title: String, textPrimary: Color) {
+private fun SheetTop(isDark: Boolean) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .offset(y = -LiquidMetrics.SheetOverlap)
+            .clip(LiquidMetrics.SheetShape)
+            .background(LiquidSurfaces.sheet(isDark))
+            .padding(top = 12.dp, bottom = 4.dp),
+        contentAlignment = Alignment.TopCenter
+    ) {
+        Box(
+            modifier = Modifier
+                .size(width = 36.dp, height = 5.dp)
+                .clip(CircleShape)
+                .background(LiquidSurfaces.grabber(isDark))
+        )
+    }
+}
+
+@Composable
+private fun SectionHeaderThemed(isDark: Boolean, title: String) {
     Text(
         text = title,
-        color = textPrimary,
-        fontSize = 22.sp,
-        fontWeight = FontWeight.Bold,
-        modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 26.dp, bottom = 12.dp)
+        color = LiquidSurfaces.textPrimary(isDark),
+        fontSize = LiquidMetrics.SectionTitle,
+        fontWeight = LiquidMetrics.SectionTitleWeight,
+        letterSpacing = LiquidMetrics.SectionTitleSpacing,
+        modifier = Modifier.padding(
+            start = LiquidMetrics.ScreenPadding,
+            end = LiquidMetrics.ScreenPadding,
+            top = LiquidMetrics.SectionGap,
+            bottom = 12.dp
+        )
     )
 }
 
@@ -675,7 +729,9 @@ private fun TopSongRow(
             uri = null,
             coverUrl = coverUrl,
             contentDescription = title,
-            modifier = Modifier.size(52.dp).clip(RoundedCornerShape(12.dp)),
+            modifier = Modifier
+                .size(LiquidMetrics.TrackCoverSize)
+                .clip(LiquidMetrics.CoverShapeSmall),
             contentScale = ContentScale.Crop
         )
         Spacer(Modifier.width(14.dp))
@@ -683,15 +739,15 @@ private fun TopSongRow(
             Text(
                 text = title,
                 color = textPrimary,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Medium,
+                fontSize = LiquidMetrics.RowTitle,
+                fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
             Text(
                 text = subtitle,
                 color = textSecondary,
-                fontSize = 12.sp,
+                fontSize = LiquidMetrics.Caption,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -711,20 +767,20 @@ private fun LatestReleaseCard(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp)
-            .clip(CardShape)
-            .background(
-                if (isDark) Color.White.copy(alpha = 0.06f) else Color.Black.copy(alpha = 0.04f)
-            )
+            .padding(horizontal = LiquidMetrics.ScreenPadding)
+            .clip(LiquidMetrics.CardShape)
+            .background(LiquidSurfaces.card(isDark))
             .liquidClickable(pressedScale = LiquidMotion.PressButton, onClick = onClick)
-            .padding(14.dp),
+            .padding(LiquidMetrics.CardPadding),
         verticalAlignment = Alignment.CenterVertically
     ) {
         AlbumArtImage(
             uri = null,
             coverUrl = album.cover.toThumb(),
             contentDescription = album.title,
-            modifier = Modifier.size(96.dp).clip(RoundedCornerShape(18.dp)),
+            modifier = Modifier
+                .size(LiquidMetrics.ReleaseCoverSize)
+                .clip(LiquidMetrics.CoverShape),
             contentScale = ContentScale.Crop
         )
         Spacer(Modifier.width(16.dp))
@@ -732,7 +788,7 @@ private fun LatestReleaseCard(
             Text(
                 text = album.title,
                 color = textPrimary,
-                fontSize = 17.sp,
+                fontSize = LiquidMetrics.CardTitle,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
@@ -755,7 +811,7 @@ private fun AlbumRow(
     onNavigateToAlbum: (String) -> Unit
 ) {
     LazyRow(
-        contentPadding = PaddingValues(horizontal = 20.dp),
+        contentPadding = PaddingValues(horizontal = LiquidMetrics.ScreenPadding),
         horizontalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         items(albums, key = { it.id }) { album ->
@@ -766,7 +822,7 @@ private fun AlbumRow(
                     contentDescription = album.title,
                     modifier = Modifier
                         .size(150.dp)
-                        .clip(CardShape)
+                        .clip(LiquidMetrics.CardShape)
                         .liquidClickable(
                             pressedScale = LiquidMotion.PressButton,
                             onClick = { onNavigateToAlbum(album.id) }

@@ -1,0 +1,157 @@
+package com.liquidmusicglass.ui.theme
+
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+
+/**
+ * Единая шкала размеров, скруглений и типографики.
+ *
+ * Смысл файла — чтобы стиль переносился на остальные экраны заменой значений
+ * здесь, а не правкой чисел по месту. Пока величины разбросаны по экранам, любая
+ * смена ритма превращается в обход всех файлов, и один-два всегда забываются.
+ */
+object LiquidMetrics {
+
+    // ── Скругления ───────────────────────────────────────────────────────────
+    /** Лист контента, наезжающий на шапку. */
+    val SheetRadius = 32.dp
+
+    /** Крупные карточки: релизы, блоки-подборки. */
+    val CardRadius = 24.dp
+
+    /** Обложки внутри карточек и строк списка. */
+    val CoverRadius = 16.dp
+
+    /** Мелкие обложки в строках треков. */
+    val CoverRadiusSmall = 13.dp
+
+    /** Кнопки-капсулы и круглые иконки. */
+    val Pill = RoundedCornerShape(50)
+
+    val SheetShape = RoundedCornerShape(topStart = SheetRadius, topEnd = SheetRadius)
+    val CardShape = RoundedCornerShape(CardRadius)
+    val CoverShape = RoundedCornerShape(CoverRadius)
+    val CoverShapeSmall = RoundedCornerShape(CoverRadiusSmall)
+
+    // ── Отступы ──────────────────────────────────────────────────────────────
+    /** Поля экрана слева и справа. */
+    val ScreenPadding = 24.dp
+
+    /** Расстояние между разделами. */
+    val SectionGap = 34.dp
+
+    /** Внутренние поля карточек. */
+    val CardPadding = 12.dp
+
+    /** Насколько лист контента наезжает на шапку. */
+    val SheetOverlap = 32.dp
+
+    /** Высота шапки экрана артиста. */
+    val HeaderHeight = 528.dp
+
+    // ── Управляющие элементы ─────────────────────────────────────────────────
+    /** Главные кнопки действий («Слушать», «Вперемешку»). */
+    val ActionButtonHeight = 52.dp
+
+    /** Круглые кнопки поверх шапки. */
+    val GlassButtonSize = 36.dp
+
+    /** Обложка в карточке свежего релиза. */
+    val ReleaseCoverSize = 72.dp
+
+    /** Обложка в строке трека. */
+    val TrackCoverSize = 52.dp
+
+    /** Отступ разделителя слева — под текстом, а не под обложкой. */
+    val DividerInset = 92.dp
+
+    // ── Типографика ──────────────────────────────────────────────────────────
+    /** Имя артиста в шапке. Плотный трекинг — иначе крупный текст выглядит рыхлым. */
+    val TitleHuge = 42.sp
+    val TitleHugeSpacing = (-1.8).sp
+    val TitleHugeWeight = FontWeight.ExtraBold
+
+    /** Заголовки разделов. */
+    val SectionTitle = 20.sp
+    val SectionTitleSpacing = (-0.6).sp
+    val SectionTitleWeight = FontWeight.Bold
+
+    /** Название трека в строке списка. */
+    val RowTitle = 16.sp
+
+    /** Название в карточке. */
+    val CardTitle = 15.5.sp
+
+    /** Подписи под названием. */
+    val Caption = 13.sp
+
+    /** Подпись в шапке (жанр). */
+    val HeaderCaption = 13.5.sp
+
+    /** Текст на кнопках действий. */
+    val ActionLabel = 16.sp
+
+    /** Ссылка «Показать все». */
+    val LinkLabel = 14.sp
+}
+
+/**
+ * Цвета для нового оформления, отдельно для светлой и тёмной темы.
+ *
+ * Шапка на экране артиста всегда тёмная — под ней стоит фотография, и светлый
+ * текст поверх неё читается в обеих темах. Меняется только лист контента.
+ */
+object LiquidSurfaces {
+
+    /** Фон листа контента под шапкой. */
+    fun sheet(isDark: Boolean): Color =
+        if (isDark) Color(0xFF0E0E10) else Color.White
+
+    /** Заливка карточек внутри листа. */
+    fun card(isDark: Boolean): Color =
+        if (isDark) Color(0xFF1B1B1E) else Color(0xFFF5F5F7)
+
+    /** Заливка карточки при нажатии. */
+    fun cardPressed(isDark: Boolean): Color =
+        if (isDark) Color(0xFF232327) else Color(0xFFEFEFF1)
+
+    /** Основной текст на листе. */
+    fun textPrimary(isDark: Boolean): Color =
+        if (isDark) Color(0xFFF2F2F5) else Color(0xFF111111)
+
+    /** Второстепенный текст: подписи, годы, счётчики. */
+    fun textSecondary(isDark: Boolean): Color =
+        if (isDark) Color(0xFF9A9AA0) else Color(0xFF8E8E93)
+
+    /** Совсем тихий текст: номера строк. */
+    fun textTertiary(isDark: Boolean): Color =
+        if (isDark) Color(0xFF6E6E76) else Color(0xFFAEAEB2)
+
+    /** Разделитель между строками. */
+    fun divider(isDark: Boolean): Color =
+        if (isDark) Color(0xFF232326) else Color(0xFFF2F2F2)
+
+    /** Круглая кнопка на листе (не поверх шапки). */
+    fun buttonSurface(isDark: Boolean): Color =
+        if (isDark) Color(0xFF232327) else Color.White
+
+    /** Полоска-ручка сверху листа. */
+    fun grabber(isDark: Boolean): Color =
+        if (isDark) Color.White.copy(alpha = 0.16f) else Color.Black.copy(alpha = 0.10f)
+
+    // ── Поверх шапки: всегда светлые элементы на тёмном фото ────────────────
+    /** Заливка стеклянных кнопок. */
+    val glassFill = Color.White.copy(alpha = 0.14f)
+
+    /** Контур стеклянных кнопок. */
+    val glassBorder = Color.White.copy(alpha = 0.15f)
+
+    /** Вторая кнопка действия поверх шапки. */
+    val glassAction = Color.White.copy(alpha = 0.14f)
+
+    val onHeaderPrimary = Color.White
+    val onHeaderSecondary = Color.White.copy(alpha = 0.70f)
+}
