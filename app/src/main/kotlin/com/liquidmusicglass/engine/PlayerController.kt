@@ -246,6 +246,9 @@ object PlayerController {
     private val _shuffleEnabled = MutableStateFlow(false)
     val shuffleEnabled: StateFlow<Boolean> = _shuffleEnabled
 
+    /** Порядок очереди (id) до перемешивания — по нему восстанавливаемся. */
+    private var preShuffleOrder: List<String>? = null
+
     private val _repeatMode = MutableStateFlow(0)
     val repeatMode: StateFlow<Int> = _repeatMode
 
@@ -1789,22 +1792,75 @@ object PlayerController {
         }
     }
 
-    fun toggleShuffle() {
-        _shuffleEnabled.value = !_shuffleEnabled.value
-        mainScope.launch {
-            getPlayer(appContext ?: return@launch)?.shuffleModeEnabled = _shuffleEnabled.value
-        }
-    }
+    fun toggleShuffle() = setShuffle(!_shuffleEnabled.value)
 
     fun setShuffle(enabled: Boolean) {
+        if (_shuffleEnabled.value == enabled) return
         _shuffleEnabled.value = enabled
+        applyShuffleToQueue(enabled)
+    }
+
+    /**
+     * Перемешивание применяем к самой очереди, а не к флагу плеера.
+     *
+     * Раньше ставили player.shuffleModeEnabled, но свой список и currentIndex
+     * оставляли в исходном порядке — а skipNext ходит именно по нашему списку.
+     * Выходило три порядка сразу: автопереход по перемешанному, кнопка «вперёд»
+     * по нашему, а экран очереди рисовал третий. Теперь источник правды один.
+     *
+     * Трогаем только хвост после играющего трека: сам он остаётся на месте, и
+     * замена участка не задевает уже подготовленный период — звук не рвётся.
+     */
+    private fun applyShuffleToQueue(enabled: Boolean) {
+        val head = currentIndex
+        val tail = if (head >= 0 && head < queue.lastIndex) {
+            queue.subList(head + 1, queue.size).toList()
+        } else emptyList()
+
+        if (tail.size < 2) {
+            preShuffleOrder = if (enabled) queue.map { it.id } else null
+            return
+        }
+
+        val newTail = if (enabled) {
+            preShuffleOrder = queue.map { it.id }
+            tail.shuffled()
+        } else {
+            val order = preShuffleOrder ?: return
+            preShuffleOrder = null
+            val rank = HashMap<String, Int>()
+            order.forEachIndexed { i, id -> if (!rank.containsKey(id)) rank[id] = i }
+            // Добавленного во время перемешивания в снимке нет — уводим в конец,
+            // сохраняя относительный порядок (sortedBy устойчива).
+            tail.sortedBy { rank[it.id] ?: Int.MAX_VALUE }
+        }
+
+        queue = queue.toMutableList().apply {
+            newTail.forEachIndexed { i, t -> set(head + 1 + i, t) }
+        }
+        _queueFlow.value = queue
+
         mainScope.launch {
-            getPlayer(appContext ?: return@launch)?.shuffleModeEnabled = enabled
+            val player = controller ?: appContext?.let { getPlayer(it) } ?: return@launch
+            // Флаг плеера держим выключенным всегда — иначе он перемешает ещё раз,
+            // уже поверх нашего порядка.
+            player.shuffleModeEnabled = false
+            val from = head + 1
+            if (from >= player.mediaItemCount) return@launch
+            val items = newTail.map { buildMediaItem(it) }
+            try {
+                player.replaceMediaItems(from, player.mediaItemCount, items)
+            } catch (e: Exception) {
+                android.util.Log.w("VOIDPIXEL_MEDIA", "[SHUFFLE] replaceMediaItems: ${e.message}")
+                player.removeMediaItems(from, player.mediaItemCount)
+                player.addMediaItems(from, items)
+            }
         }
     }
 
     fun cycleRepeatMode() {
         val next = (_repeatMode.value + 1) % 3
+        val wasOn = _repeatMode.value != 0
         _repeatMode.value = next
         mainScope.launch {
             getPlayer(appContext ?: return@launch)?.repeatMode = when (next) {
@@ -1813,6 +1869,9 @@ object PlayerController {
                 else -> Player.REPEAT_MODE_OFF
             }
         }
+        // Пока повтор был включён, дозаправка волной пропускалась — вернувшись,
+        // проверяем хвост сразу, иначе очередь кончится молча.
+        if (wasOn && next == 0) ensureWaveRefill()
     }
 
     fun setRepeatMode(mode: Int) {

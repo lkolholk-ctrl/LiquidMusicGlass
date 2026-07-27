@@ -31,9 +31,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.DragHandle
 import androidx.compose.material.icons.rounded.FastForward
 import androidx.compose.material.icons.rounded.FastRewind
@@ -45,10 +47,12 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.Shuffle
+import androidx.compose.material.icons.rounded.Waves
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -59,7 +63,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -71,16 +78,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.liquidmusicglass.engine.PlaybackBackend
 import com.liquidmusicglass.engine.PlayerController
 import com.liquidmusicglass.engine.Track
+import com.liquidmusicglass.ui.theme.LiquidMetrics
+import com.liquidmusicglass.ui.theme.LiquidSurfaces
+import com.liquidmusicglass.ui.theme.LiquidTheme
 import com.liquidmusicglass.ui.glass.AlbumArtImage
 import com.liquidmusicglass.ui.glass.AlbumColors
 import com.liquidmusicglass.ui.glass.pressScale
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlin.math.abs
-
-private val AppleRed = Color(0xFFFC3C44)
 
 /**
  * Queue overlay — открывается как LyricsScreen: fadeIn/fadeOut поверх FullPlayer.
@@ -107,6 +116,13 @@ fun QueueSheet(
     splitMode: Boolean = false
 ) {
     val context = LocalContext.current
+    val colors = LiquidTheme.colors
+    val isDark = colors.isDark
+    // Локальное воспроизведение через JUCE идёт мимо очереди ExoPlayer — там
+    // переставлять и удалять нечего, поэтому жесты в этом режиме не навешиваем.
+    val backend by PlayerController.playbackBackend.collectAsState()
+    val queueEditable = backend != PlaybackBackend.JUCE_LOCAL
+    val repeatMode by PlayerController.repeatMode.collectAsState()
     val libraryRepo = remember { com.liquidmusicglass.data.local.db.LibraryRepository.getInstance(context) }
     // Flow нужно строить в remember: без него isFavoriteFlow() создавал новый
     // экземпляр на каждой рекомпозиции, а collectAsState кеширует подписку по
@@ -144,30 +160,13 @@ fun QueueSheet(
                 }
             }
 
-            // Dark scrim for readability — раньше плоский Black α0.65 «гасил» весь
-            // цвет фона в чёрную простыню. Градиент: сверху почти прозрачный (цвет
-            // виден), книзу плотнее (под текстом очереди — читаемость). Текст белый,
-            // так что верх можно держать светлым. В split — горизонтальный, с
-            // растушёванной левой кромкой (без шва).
+            // Затемнение для читаемости: плоский Black α0.65 «гасил» весь цвет фона
+            // в чёрную простыню, поэтому градиент — сверху прозрачнее (цвет обложки
+            // виден), книзу плотнее (под текстом). Плотность зависит от темы.
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(
-                        if (splitMode)
-                            Brush.horizontalGradient(
-                                0.00f to Color.Transparent,
-                                0.14f to Color.Black.copy(alpha = 0.30f),
-                                1.00f to Color.Black.copy(alpha = 0.42f)
-                            )
-                        else
-                            Brush.verticalGradient(
-                                colorStops = arrayOf(
-                                    0.00f to Color.Black.copy(alpha = 0.18f),
-                                    0.45f to Color.Black.copy(alpha = 0.30f),
-                                    1.00f to Color.Black.copy(alpha = 0.48f)
-                                )
-                            )
-                    )
+                    .background(LiquidSurfaces.queueScrim(isDark, splitMode))
             )
 
             Column(
@@ -180,12 +179,12 @@ fun QueueSheet(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                        .padding(horizontal = LiquidMetrics.QueuePadding, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = "Queue",
-                        color = Color.White,
+                        color = LiquidSurfaces.onHeaderPrimary,
                         fontSize = 22.sp,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.weight(1f)
@@ -216,7 +215,7 @@ fun QueueSheet(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 20.dp)
+                            .padding(horizontal = LiquidMetrics.QueuePadding)
                             .padding(bottom = 12.dp)
                     ) {
                         Row(
@@ -225,7 +224,7 @@ fun QueueSheet(
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(60.dp)
+                                    .size(LiquidMetrics.QueueNowPlayingCover)
                                     .clip(RoundedCornerShape(8.dp))
                             ) {
                                 AlbumArtImage(
@@ -274,8 +273,8 @@ fun QueueSheet(
                                     imageVector = if (isFavorite) Icons.Rounded.Favorite
                                     else Icons.Rounded.FavoriteBorder,
                                     contentDescription = null,
-                                    tint = if (isFavorite) Color(0xFFFC3C44)
-                                    else Color.White.copy(alpha = 0.70f),
+                                    tint = if (isFavorite) colors.accentRed
+                                    else LiquidSurfaces.onHeaderSecondary,
                                     modifier = Modifier.size(24.dp)
                                 )
                             }
@@ -288,8 +287,23 @@ fun QueueSheet(
                 val currentIndex = PlayerController.getCurrentIndex()
 
                 // Drag-reorder: ключ таскаемой строки + её текущее смещение.
+                // Смещение держим объектом состояния и читаем только внутри
+                // graphicsLayer: раньше это было обычное значение в состоянии
+                // родителя, и каждый пиксель жеста рекомпозировал весь экран.
                 var draggingKey by remember { mutableStateOf<String?>(null) }
-                var dragOffsetY by remember { mutableStateOf(0f) }
+                val dragOffsetY = remember { mutableStateOf(0f) }
+
+                val listState = rememberLazyListState()
+                // Наводимся на начало списка при открытии и при смене трека —
+                // иначе очередь открывается там, где её оставили в прошлый раз.
+                LaunchedEffect(visible) {
+                    if (visible) listState.scrollToItem(0)
+                }
+                LaunchedEffect(currentTrack?.id) {
+                    if (visible && !listState.isScrollInProgress && draggingKey == null) {
+                        listState.animateScrollToItem(0)
+                    }
+                }
 
                 Box(
                     modifier = Modifier
@@ -300,39 +314,42 @@ fun QueueSheet(
                             onClick = onRequestControls
                         )
                 ) {
+                // Стабильные ключи по id (дубли, если плейлист содержит один трек
+                // дважды, получают суффикс #n) — иначе при перестановке узел строки
+                // пересоздаётся и жест обрывается. В remember: раньше карта и новый
+                // список строились на каждом проходе лямбды списка.
+                val upNext = remember(queue, currentIndex) {
+                    if (currentIndex >= 0 && currentIndex < queue.lastIndex) {
+                        queue.subList(currentIndex + 1, queue.size).toList()
+                    } else emptyList()
+                }
+                val upNextKeys = remember(upNext) {
+                    val seen = HashMap<String, Int>()
+                    upNext.map { t ->
+                        val n = seen.getOrDefault(t.id, 0)
+                        seen[t.id] = n + 1
+                        if (n == 0) "q_${t.id}" else "q_${t.id}#$n"
+                    }
+                }
+
                 LazyColumn(
+                    state = listState,
                     modifier = Modifier
                         .fillMaxSize(),
                     verticalArrangement = Arrangement.spacedBy(0.dp)
                 ) {
-                    // Up Next section
-                    val upNext = if (currentIndex >= 0 && currentIndex < queue.lastIndex) {
-                        queue.subList(currentIndex + 1, queue.size)
-                    } else emptyList()
-
                     if (upNext.isNotEmpty()) {
                         item(key = "upnext_header") {
                             Text(
                                 text = "Up Next",
-                                color = Color.White.copy(alpha = 0.75f),
+                                color = LiquidSurfaces.onHeaderPrimary.copy(alpha = 0.75f),
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(
-                                    horizontal = 20.dp,
+                                    horizontal = LiquidMetrics.QueuePadding,
                                     vertical = 8.dp
                                 )
                             )
-                        }
-                        // Стабильные ключи по id (дубли, если плейлист содержит
-                        // один трек дважды, получают суффикс #n) — иначе при
-                        // reorder узел строки пересоздаётся и жест обрывается.
-                        val upNextKeys = run {
-                            val seen = HashMap<String, Int>()
-                            upNext.map { t ->
-                                val n = seen.getOrDefault(t.id, 0)
-                                seen[t.id] = n + 1
-                                if (n == 0) "q_${t.id}" else "q_${t.id}#$n"
-                            }
                         }
                         itemsIndexed(
                             upNext,
@@ -345,9 +362,11 @@ fun QueueSheet(
                                 upNextLastIndex = upNext.lastIndex,
                                 draggingKey = draggingKey,
                                 dragOffsetY = dragOffsetY,
+                                editable = queueEditable,
+                                accent = colors.accentRed,
                                 onDragStateChange = { key, offset ->
                                     draggingKey = key
-                                    dragOffsetY = offset
+                                    dragOffsetY.value = offset
                                 },
                                 absoluteIndex = { i -> PlayerController.getCurrentIndex() + 1 + i },
                                 onClick = {
@@ -365,21 +384,31 @@ fun QueueSheet(
                     // есть, а список под ним был просто пустым прямоугольником.
                     if (upNext.isEmpty()) {
                         item {
+                            // Текст по обстоятельствам: «очередь пуста» на повторе
+                            // или на локальном треке — неправда, и выглядит поломкой.
+                            val (icon, message) = when {
+                                repeatMode != 0 ->
+                                    Icons.Rounded.Repeat to "Повтор включён — играем по кругу"
+                                !queueEditable ->
+                                    Icons.Rounded.MusicNote to "Локальный трек играет отдельно"
+                                else ->
+                                    Icons.Rounded.Waves to "Подбираем продолжение"
+                            }
                             Box(
                                 modifier = Modifier.fillMaxSize(),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                     Icon(
-                                        imageVector = Icons.Rounded.MusicNote,
+                                        imageVector = icon,
                                         contentDescription = null,
-                                        tint = Color.White.copy(alpha = 0.25f),
+                                        tint = LiquidSurfaces.onHeaderPrimary.copy(alpha = 0.25f),
                                         modifier = Modifier.size(48.dp)
                                     )
                                     Spacer(modifier = Modifier.height(12.dp))
                                     Text(
-                                        text = "Queue is empty",
-                                        color = Color.White.copy(alpha = 0.40f),
+                                        text = message,
+                                        color = LiquidSurfaces.onHeaderPrimary.copy(alpha = 0.40f),
                                         fontSize = 16.sp
                                     )
                                 }
@@ -410,68 +439,137 @@ private fun DraggableQueueRow(
     index: Int,
     upNextLastIndex: Int,
     draggingKey: String?,
-    dragOffsetY: Float,
+    dragOffsetY: State<Float>,
+    editable: Boolean,
+    accent: Color,
     onDragStateChange: (String?, Float) -> Unit,
     absoluteIndex: (Int) -> Int,
     onClick: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
-    val rowHeightPx = remember(density) { with(density) { 56.dp.toPx() } }
-    val removeThresholdPx = remember(density) { with(density) { 96.dp.toPx() } }
+    val rowHeightPx = remember(density) { with(density) { LiquidMetrics.QueueRowHeight.toPx() } }
+    val removeThresholdPx = remember(density) { with(density) { LiquidMetrics.QueueSwipeThreshold.toPx() } }
     val indexState = rememberUpdatedState(index)
     val lastIndexState = rememberUpdatedState(upNextLastIndex)
     val removeOffset = remember(rowKey) { Animatable(0f) }
     val isDragging = draggingKey == rowKey
 
-    Row(
+    fun moveBy(step: Int) {
+        val from = indexState.value
+        val to = (from + step).coerceIn(0, lastIndexState.value)
+        if (to != from) PlayerController.moveQueueItem(absoluteIndex(from), absoluteIndex(to))
+    }
+
+    Box(
         modifier = Modifier
             .zIndex(if (isDragging) 1f else 0f)
+            .fillMaxWidth()
+            .height(LiquidMetrics.QueueRowHeight)
+            .semantics {
+                contentDescription = "${track.title}, ${track.artist}"
+                if (editable) {
+                    customActions = listOf(
+                        CustomAccessibilityAction("Выше") { moveBy(-1); true },
+                        CustomAccessibilityAction("Ниже") { moveBy(1); true },
+                        CustomAccessibilityAction("Убрать из очереди") {
+                            PlayerController.removeQueueItem(absoluteIndex(indexState.value)); true
+                        }
+                    )
+                }
+            }
+    ) {
+        // Подложка удаления: проступает по мере утягивания строки вбок. Значение
+        // смещения читаем только в graphicsLayer, иначе каждый пиксель свайпа
+        // рекомпозировал бы строку.
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .graphicsLayer {
+                    alpha = (abs(removeOffset.value) / removeThresholdPx).coerceIn(0f, 1f)
+                }
+                .background(LiquidSurfaces.queueDestructive(accent))
+                .padding(horizontal = LiquidMetrics.QueuePadding)
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.DeleteOutline,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .size(22.dp)
+                    .graphicsLayer { alpha = if (removeOffset.value > 0f) 1f else 0f }
+            )
+            Icon(
+                imageVector = Icons.Rounded.DeleteOutline,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .size(22.dp)
+                    .graphicsLayer { alpha = if (removeOffset.value < 0f) 1f else 0f }
+            )
+        }
+
+    Row(
+        modifier = Modifier
             .graphicsLayer {
-                translationY = if (isDragging) dragOffsetY else 0f
+                translationY = if (isDragging) dragOffsetY.value else 0f
                 translationX = removeOffset.value
                 alpha = 1f - (abs(removeOffset.value) / (removeThresholdPx * 3f))
                     .coerceAtMost(0.35f)
-                shadowElevation = if (isDragging) 12f else 0f
+                shadowElevation = if (isDragging) LiquidMetrics.QueueDragElevation else 0f
+                // Подъём строки: у Apple сжатие до 0.85 за 300 мс настолько
+                // характерное, что читается как их приложение — берём едва заметное.
+                val s = if (isDragging) LiquidMetrics.QueueDragLiftScale else 1f
+                scaleX = s
+                scaleY = s
             }
-            .fillMaxWidth()
-            .height(56.dp)
+            .fillMaxSize()
             .background(
-                if (isDragging) Color.White.copy(alpha = 0.06f) else Color.Transparent
+                if (isDragging) LiquidSurfaces.queueRowDragged else Color.Transparent
             )
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = onClick
             )
-            .draggable(
-                orientation = Orientation.Horizontal,
-                state = rememberDraggableState { delta ->
-                    scope.launch { removeOffset.snapTo(removeOffset.value + delta) }
-                },
-                onDragStopped = { velocity ->
-                    val off = removeOffset.value
-                    if (abs(off) > removeThresholdPx || abs(velocity) > 3000f) {
-                        val target = if (off < 0 || (off == 0f && velocity < 0)) -1400f else 1400f
-                        scope.launch {
-                            removeOffset.animateTo(target, tween(150))
-                            PlayerController.removeQueueItem(absoluteIndex(indexState.value))
-                            // Узел может переиспользоваться под другой трек — возвращаем на место.
-                            removeOffset.snapTo(0f)
-                        }
-                    } else {
-                        scope.launch {
-                            removeOffset.animateTo(0f, spring(dampingRatio = 0.8f, stiffness = 400f))
+            .then(
+                if (!editable) Modifier else Modifier.draggable(
+                    orientation = Orientation.Horizontal,
+                    state = rememberDraggableState { delta ->
+                        scope.launch { removeOffset.snapTo(removeOffset.value + delta) }
+                    },
+                    onDragStopped = { velocity ->
+                        val off = removeOffset.value
+                        if (abs(off) > removeThresholdPx ||
+                            abs(velocity) > LiquidMetrics.QueueSwipeVelocity
+                        ) {
+                            val target = if (off < 0 || (off == 0f && velocity < 0)) {
+                                -LiquidMetrics.QueueSwipeFlyOut
+                            } else {
+                                LiquidMetrics.QueueSwipeFlyOut
+                            }
+                            scope.launch {
+                                removeOffset.animateTo(target, tween(150))
+                                PlayerController.removeQueueItem(absoluteIndex(indexState.value))
+                                // Узел может переиспользоваться под другой трек — возвращаем на место.
+                                removeOffset.snapTo(0f)
+                            }
+                        } else {
+                            scope.launch {
+                                removeOffset.animateTo(0f, spring(dampingRatio = 0.8f, stiffness = 400f))
+                            }
                         }
                     }
-                }
+                )
             )
-            .padding(horizontal = 20.dp),
+            .padding(horizontal = LiquidMetrics.QueuePadding),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
             modifier = Modifier
-                .size(44.dp)
+                .size(LiquidMetrics.QueueRowCover)
                 .clip(RoundedCornerShape(6.dp))
         ) {
             AlbumArtImage(
@@ -506,53 +604,59 @@ private fun DraggableQueueRow(
         }
 
         Spacer(modifier = Modifier.width(8.dp))
-        // Хэндл перестановки: вертикальный drag двигает трек по очереди.
+        // Хэндл перестановки: вертикальный drag двигает трек по очереди. В
+        // нередактируемом режиме место под него остаётся (иначе строки прыгают
+        // при переключении источника), но жест не навешиваем вовсе — иначе он
+        // съедал бы касание впустую.
         Box(
             modifier = Modifier
-                .size(36.dp)
-                .pointerInput(rowKey) {
-                    var myIdx = 0
-                    var acc = 0f
-                    detectDragGestures(
-                        onDragStart = {
-                            myIdx = indexState.value
-                            acc = 0f
-                            onDragStateChange(rowKey, 0f)
-                        },
-                        onDrag = { change, amount ->
-                            change.consume()
-                            acc += amount.y
-                            val steps = (acc / rowHeightPx).toInt()
-                            if (steps != 0) {
-                                val target = (myIdx + steps)
-                                    .coerceIn(0, lastIndexState.value)
-                                if (target != myIdx) {
-                                    PlayerController.moveQueueItem(
-                                        absoluteIndex(myIdx),
-                                        absoluteIndex(target)
-                                    )
-                                    acc -= (target - myIdx) * rowHeightPx
-                                    myIdx = target
-                                } else {
-                                    // упёрлись в край — не копим смещение бесконечно
-                                    acc = acc.coerceIn(-rowHeightPx, rowHeightPx)
+                .size(LiquidMetrics.QueueHandleSize)
+                .then(
+                    if (!editable) Modifier else Modifier.pointerInput(rowKey) {
+                        var myIdx = 0
+                        var acc = 0f
+                        detectDragGestures(
+                            onDragStart = {
+                                myIdx = indexState.value
+                                acc = 0f
+                                onDragStateChange(rowKey, 0f)
+                            },
+                            onDrag = { change, amount ->
+                                change.consume()
+                                acc += amount.y
+                                val steps = (acc / rowHeightPx).toInt()
+                                if (steps != 0) {
+                                    val target = (myIdx + steps)
+                                        .coerceIn(0, lastIndexState.value)
+                                    if (target != myIdx) {
+                                        PlayerController.moveQueueItem(
+                                            absoluteIndex(myIdx),
+                                            absoluteIndex(target)
+                                        )
+                                        acc -= (target - myIdx) * rowHeightPx
+                                        myIdx = target
+                                    } else {
+                                        // упёрлись в край — не копим смещение бесконечно
+                                        acc = acc.coerceIn(-rowHeightPx, rowHeightPx)
+                                    }
                                 }
-                            }
-                            onDragStateChange(rowKey, acc)
-                        },
-                        onDragEnd = { onDragStateChange(null, 0f) },
-                        onDragCancel = { onDragStateChange(null, 0f) }
-                    )
-                },
+                                onDragStateChange(rowKey, acc)
+                            },
+                            onDragEnd = { onDragStateChange(null, 0f) },
+                            onDragCancel = { onDragStateChange(null, 0f) }
+                        )
+                    }
+                ),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = Icons.Rounded.DragHandle,
                 contentDescription = null,
-                tint = Color.White.copy(alpha = 0.55f),
-                modifier = Modifier.size(20.dp)
+                tint = LiquidSurfaces.onHeaderPrimary.copy(alpha = if (editable) 0.55f else 0f),
+                modifier = Modifier.size(LiquidMetrics.QueueHandleIcon)
             )
         }
     }
+    } // Box (строка + подложка удаления)
 }
 

@@ -112,6 +112,14 @@ class EndlessPlaybackEngine(
         if (com.liquidmusicglass.engine.PlayerController.isLocalJucePlaybackActive) {
             return false
         }
+        // При включённом повторе до хвоста очереди дело не дойдёт вообще: плеер
+        // ходит по кругу. Гейта не было, и мы молча качали батчи по 30 треков,
+        // которые никогда не проиграются. На выключении повтора PlayerController
+        // дёргает ensureWaveRefill(), так что пропуск здесь ничего не ломает.
+        if (com.liquidmusicglass.engine.PlayerController.repeatMode.value != 0 && !force) {
+            android.util.Log.d("EndlessEngine", "Repeat is on — refill skipped")
+            return false
+        }
         // Дозаправка работает ВЕЗДЕ (полевой фидбек: «одно и то же по кругу —
         // не по кайфу»):
         //  - волна (Global) — продолжаем волну: личную или станцию по seed;

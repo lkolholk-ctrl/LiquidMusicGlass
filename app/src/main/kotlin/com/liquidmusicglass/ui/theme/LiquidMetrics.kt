@@ -1,6 +1,7 @@
 package com.liquidmusicglass.ui.theme
 
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -109,6 +110,41 @@ object LiquidMetrics {
 
     /** Ссылка «Показать все». */
     val LinkLabel = 14.sp
+
+    // ── Очередь ──────────────────────────────────────────────────────────────
+    /** Высота строки. По ней же считается шаг перестановки при перетаскивании. */
+    val QueueRowHeight = 56.dp
+
+    /** Обложка в строке очереди. */
+    val QueueRowCover = 44.dp
+
+    /** Обложка играющего трека в закреплённой шапке. */
+    val QueueNowPlayingCover = 60.dp
+
+    /** Ручка перестановки и её значок. */
+    val QueueHandleSize = 36.dp
+    val QueueHandleIcon = 20.dp
+
+    /** Поля строки и шапки по горизонтали. */
+    val QueuePadding = 20.dp
+
+    /** Насколько надо утянуть строку вбок, чтобы удалить. */
+    val QueueSwipeThreshold = 96.dp
+
+    /** Куда строка улетает при удалении (в пикселях, за край экрана). */
+    const val QueueSwipeFlyOut = 1400f
+
+    /** Скорость, при которой свайп срабатывает, не дотянув до порога. */
+    const val QueueSwipeVelocity = 3000f
+
+    /**
+     * Масштаб поднятой строки. У Apple 0.85 за 300 мс — сжатие настолько
+     * характерное, что читается как их приложение; берём едва заметное.
+     */
+    const val QueueDragLiftScale = 0.97f
+
+    /** Тень поднятой строки. */
+    const val QueueDragElevation = 12f
 }
 
 /**
@@ -174,4 +210,41 @@ object LiquidSurfaces {
 
     val onHeaderPrimary = Color.White
     val onHeaderSecondary = Color.White.copy(alpha = 0.70f)
+
+    // ── Очередь ─────────────────────────────────────────────────────────────
+    /**
+     * Затемнение под очередью. Очередь лежит на фоне из обложки, поэтому текст
+     * здесь светлый в обеих темах — как на шапке экрана артиста. Тема меняет не
+     * цвет текста, а плотность затемнения: в светлой фон обложки должен остаться
+     * различимым, иначе обе темы выглядят одинаково.
+     *
+     * В split-режиме градиент горизонтальный, с растушёванной левой кромкой —
+     * вертикальный давал бы видимый шов по границе половин.
+     */
+    fun queueScrim(isDark: Boolean, splitMode: Boolean): Brush {
+        val top = if (isDark) 0.18f else 0.10f
+        val mid = if (isDark) 0.30f else 0.22f
+        val bottom = if (isDark) 0.48f else 0.38f
+        return if (splitMode) {
+            Brush.horizontalGradient(
+                0.00f to Color.Transparent,
+                0.14f to Color.Black.copy(alpha = mid),
+                1.00f to Color.Black.copy(alpha = bottom)
+            )
+        } else {
+            Brush.verticalGradient(
+                colorStops = arrayOf(
+                    0.00f to Color.Black.copy(alpha = top),
+                    0.45f to Color.Black.copy(alpha = mid),
+                    1.00f to Color.Black.copy(alpha = bottom)
+                )
+            )
+        }
+    }
+
+    /** Подложка строки, поднятой для перестановки. */
+    val queueRowDragged = Color.White.copy(alpha = 0.06f)
+
+    /** Подложка, проступающая под строкой при свайпе-удалении. */
+    fun queueDestructive(accent: Color): Color = accent.copy(alpha = 0.85f)
 }
