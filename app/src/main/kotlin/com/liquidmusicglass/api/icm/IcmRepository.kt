@@ -604,13 +604,21 @@ object IcmRepository {
     /**
      * Song lyrics.
      */
-    suspend fun getLyrics(trackId: String): IcmLyricsResponse? {
+    suspend fun getLyrics(trackId: String): IcmLyricsResponse? = getLyricsResult(trackId).getOrNull()
+
+    /**
+     * То же, что [getLyrics], но с причиной неудачи. «У трека нет текста» и «не
+     * смогли спросить» — разные вещи: первое можно запомнить и больше не дёргать
+     * сеть, второе запоминать нельзя, иначе один запрос в метро оставит трек без
+     * текста до конца сеанса.
+     */
+    suspend fun getLyricsResult(trackId: String): Result<IcmLyricsResponse> {
         val result = api.getLyrics(trackId)
         result.exceptionOrNull()?.let {
             _lastException = it as? Exception
             _lastError.value = it.message
         }
-        return result.getOrNull()
+        return result
     }
 
     /**

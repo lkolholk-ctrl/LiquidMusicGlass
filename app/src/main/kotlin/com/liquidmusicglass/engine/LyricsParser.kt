@@ -110,9 +110,10 @@ object LyricsParser {
 
         try {
             // Docs: "На холодных Apple-треках первый запрос может занять до 10 секунд"
-            val response = kotlinx.coroutines.withTimeout(12_000) {
-                com.liquidmusicglass.api.icm.IcmRepository.getLyrics(trackId)
+            val outcome = kotlinx.coroutines.withTimeout(12_000) {
+                com.liquidmusicglass.api.icm.IcmRepository.getLyricsResult(trackId)
             }
+            val response = outcome.getOrNull()
             if (response != null && !response.lyrics.isNullOrBlank()) {
                 val parsed = parseLyrics(response.lyrics)
                 if (parsed.lines.isNotEmpty()) {
@@ -125,6 +126,13 @@ object LyricsParser {
                     return@withContext result
                 }
             }
+            // Негатив запоминаем ТОЛЬКО когда сервер ответил и текста у трека нет.
+            // Без этого каждое открытие шторки на инструментале стоило до 12 секунд
+            // ожидания и запроса в общую rate-limit-группу. Отказ по правам (401/403)
+            // за «нет текста» не считаем: подписка может появиться в этом же сеансе.
+            val err = outcome.exceptionOrNull() as? com.liquidmusicglass.api.icm.IcmApiException
+            val absent = response != null || err?.code == 404 || err?.errorCode == "lyrics_not_found"
+            if (absent) cacheLyrics(trackId, Lyrics.EMPTY)
             Lyrics.EMPTY
         } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
             android.util.Log.w("LyricsParser", "Lyrics fetch timeout for $trackId")
@@ -244,21 +252,31 @@ object LyricsParser {
         }
 
         // 2. Сеть: /api/get (точное совпадение) → /api/search (фолбэк по track+artist)
-        val raw = try {
-            httpGetLrcLib(buildGetUrl(artist, title, album, durationSec))
-                ?: httpGetLrcLib(buildSearchUrl(artist, title))
-        } catch (_: Exception) {
-            null
+        val primary = httpGetLrcLib(buildGetUrl(artist, title, album, durationSec))
+        val fetched = if (primary is LrcFetch.Found) primary else {
+            val fallback = httpGetLrcLib(buildSearchUrl(artist, title))
+            when {
+                fallback is LrcFetch.Found -> fallback
+                // Хоть одна попытка не дошла до сервера — мы просто не знаем,
+                // есть текст или нет, и делать вывод не имеем права.
+                primary is LrcFetch.Failed || fallback is LrcFetch.Failed -> LrcFetch.Failed
+                else -> LrcFetch.Absent
+            }
         }
 
-        if (raw.isNullOrBlank()) {
-            // нет текста / 404 / сеть недоступна → негатив в память (на сессию), на диск не пишем
-            if (!trackId.isNullOrBlank()) cacheLyrics(trackId, Lyrics.EMPTY)
-            return@withContext Lyrics.EMPTY
+        when (fetched) {
+            is LrcFetch.Found -> {
+                writeTextSafe(cacheFile, fetched.raw)     // на диск → офлайн в будущем
+                finalizeLrc(fetched.raw, title, artist, trackId)
+            }
+            LrcFetch.Absent -> {
+                // Сервер ответил, текста нет → помним на сеанс, на диск не пишем.
+                if (!trackId.isNullOrBlank()) cacheLyrics(trackId, Lyrics.EMPTY)
+                Lyrics.EMPTY
+            }
+            // Сбой связи не запоминаем: следующая попытка должна сходить в сеть.
+            LrcFetch.Failed -> Lyrics.EMPTY
         }
-
-        writeTextSafe(cacheFile, raw)             // на диск → офлайн в будущем
-        finalizeLrc(raw, title, artist, trackId)
     }
 
     /**
@@ -291,22 +309,47 @@ object LyricsParser {
         return result
     }
 
-    /** GET с User-Agent. 200 → текст LRC (synced приоритетнее plain); иначе null. */
-    private fun httpGetLrcLib(urlStr: String): String? {
-        val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = 6000
-            readTimeout = 8000
-            instanceFollowRedirects = true
-            setRequestProperty("User-Agent", USER_AGENT)
-            setRequestProperty("Accept", "application/json")
+    /**
+     * Исход запроса к LRCLIB. Раньше метод отдавал `null` и на «текста нет», и на
+     * «сеть отвалилась» — вызывающий запоминал сетевой сбой как отсутствие текста,
+     * и трек оставался немым до конца сеанса.
+     */
+    private sealed interface LrcFetch {
+        data class Found(val raw: String) : LrcFetch
+        /** Сервер ответил, текста нет: 404 или пустой результат. */
+        object Absent : LrcFetch
+        /** До сервера не дошли или он сломался — выводов не делаем. */
+        object Failed : LrcFetch
+    }
+
+    /** GET с User-Agent. 200 → текст LRC (synced приоритетнее plain). */
+    private fun httpGetLrcLib(urlStr: String): LrcFetch {
+        val conn = try {
+            (URL(urlStr).openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 6000
+                readTimeout = 8000
+                instanceFollowRedirects = true
+                setRequestProperty("User-Agent", USER_AGENT)
+                setRequestProperty("Accept", "application/json")
+            }
+        } catch (_: Exception) {
+            return LrcFetch.Failed
         }
         return try {
-            if (conn.responseCode != 200) return null
-            val body = conn.inputStream.bufferedReader().use { it.readText() }
-            extractLrcFromJson(body)
+            when (conn.responseCode) {
+                200 -> {
+                    val body = conn.inputStream.bufferedReader().use { it.readText() }
+                    extractLrcFromJson(body)?.takeIf { it.isNotBlank() }
+                        ?.let { LrcFetch.Found(it) }
+                        ?: LrcFetch.Absent
+                }
+                // 404 — «такого трека у нас нет»: это ответ, а не сбой.
+                404 -> LrcFetch.Absent
+                else -> LrcFetch.Failed
+            }
         } catch (_: Exception) {
-            null
+            LrcFetch.Failed
         } finally {
             try { conn.disconnect() } catch (_: Exception) {}
         }

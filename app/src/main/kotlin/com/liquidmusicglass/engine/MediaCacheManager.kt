@@ -32,6 +32,28 @@ import java.io.File
 @OptIn(UnstableApi::class)
 object MediaCacheManager {
 
+    // 30с на мёртвом маршруте = полминуты «висим» до ошибки и ретрая. 12/15с:
+    // живой CDN укладывается с запасом (буфер сглаживает), мёртвый детектится
+    // быстро → авто-ретрай/скип, музыка не встаёт.
+    private const val CONNECT_TIMEOUT_MS = 12_000
+    private const val READ_TIMEOUT_MS = 15_000
+    private const val PLAYBACK_USER_AGENT = "LiquidMusicGlass/1.0"
+
+    /**
+     * Единственная фабрика HTTP для воспроизведения.
+     *
+     * Раньше их было три с разными таймаутами, и настройка 12/15с в плеере была
+     * мёртвой: кэш включён по умолчанию, поток идёт через его upstream, а там
+     * стояло ровно то самое 30/30, которое комментарий в плеере объявлял
+     * неприемлемым. Держим значения в одном месте, чтобы это не повторилось.
+     */
+    fun httpDataSourceFactory(): DefaultHttpDataSource.Factory =
+        DefaultHttpDataSource.Factory()
+            .setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(CONNECT_TIMEOUT_MS)
+            .setReadTimeoutMs(READ_TIMEOUT_MS)
+            .setDefaultRequestProperties(mapOf("User-Agent" to PLAYBACK_USER_AGENT))
+
     @Volatile
     private var cache: SimpleCache? = null
 
@@ -118,13 +140,7 @@ object MediaCacheManager {
         cache = simpleCache
         currentMaxBytes = maxBytes
 
-        val httpFactory = DefaultHttpDataSource.Factory()
-            .setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(30_000)
-            .setReadTimeoutMs(30_000)
-            .setDefaultRequestProperties(mapOf(
-                "User-Agent" to "LiquidMusicGlass/1.0"
-            ))
+        val httpFactory = httpDataSourceFactory()
 
         cacheDataSourceFactory = CacheDataSource.Factory()
             .setCache(simpleCache)
@@ -185,13 +201,7 @@ object MediaCacheManager {
      */
     fun getDataSourceFactory(): androidx.media3.datasource.DataSource.Factory {
         val cf = if (isCacheEnabled()) cacheDataSourceFactory else null
-        return cf ?: DefaultHttpDataSource.Factory()
-            .setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(30_000)
-            .setReadTimeoutMs(30_000)
-            .setDefaultRequestProperties(mapOf(
-                "User-Agent" to "LiquidMusicGlass/1.0"
-            ))
+        return cf ?: httpDataSourceFactory()
     }
 
     /**
@@ -259,6 +269,30 @@ object MediaCacheManager {
             }
         } catch (_: Exception) {
             0L
+        }
+    }
+
+    /**
+     * Выбросить кэш одного трека.
+     *
+     * Нужно, когда кусок в кэше побился: повторная подготовка плеера читает тот же
+     * битый кусок и падает снова, поэтому три штатных повтора гарантированно
+     * впустую, а трек уходит в «не играет никогда». После удаления записи повтор
+     * идёт в сеть и трек оживает.
+     *
+     * Возвращает true, если запись была и её удалили.
+     */
+    fun evictTrack(trackId: String): Boolean {
+        val simpleCache = cache ?: return false
+        val key = "icm_$trackId"
+        return try {
+            if (simpleCache.getCachedSpans(key).isEmpty()) return false
+            simpleCache.removeResource(key)
+            android.util.Log.w("MediaCacheManager", "Evicted damaged cache entry for $trackId")
+            true
+        } catch (e: Exception) {
+            android.util.Log.e("MediaCacheManager", "evictTrack failed: ${e.message}")
+            false
         }
     }
 

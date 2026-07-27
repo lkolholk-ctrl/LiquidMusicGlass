@@ -76,6 +76,7 @@ import com.liquidmusicglass.engine.Track
 import com.liquidmusicglass.ui.glass.AlbumArtImage
 import com.liquidmusicglass.ui.glass.AlbumColors
 import com.liquidmusicglass.ui.glass.pressScale
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
@@ -107,11 +108,13 @@ fun QueueSheet(
 ) {
     val context = LocalContext.current
     val libraryRepo = remember { com.liquidmusicglass.data.local.db.LibraryRepository.getInstance(context) }
-    val isFavorite by if (currentTrack != null) {
-        libraryRepo.isFavoriteFlow(currentTrack.id).collectAsState(initial = false)
-    } else {
-        remember { mutableStateOf(false) }
+    // Flow нужно строить в remember: без него isFavoriteFlow() создавал новый
+    // экземпляр на каждой рекомпозиции, а collectAsState кеширует подписку по
+    // инстансу — то есть Room переподписывался буквально каждый кадр.
+    val favoriteFlow = remember(currentTrack?.id) {
+        currentTrack?.id?.let { libraryRepo.isFavoriteFlow(it) } ?: flowOf(false)
     }
+    val isFavorite by favoriteFlow.collectAsState(initial = false)
     val scope = rememberCoroutineScope()
 
     AnimatedVisibility(
@@ -357,7 +360,10 @@ fun QueueSheet(
                         }
                     }
 
-                    if (queue.isEmpty()) {
+                    // Пусто — когда впереди ничего нет, а не когда очередь пуста
+                    // целиком: на последнем треке альбома играющий трек в очереди
+                    // есть, а список под ним был просто пустым прямоугольником.
+                    if (upNext.isEmpty()) {
                         item {
                             Box(
                                 modifier = Modifier.fillMaxSize(),

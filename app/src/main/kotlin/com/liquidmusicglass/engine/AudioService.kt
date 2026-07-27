@@ -19,7 +19,6 @@ import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
-import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
@@ -136,6 +135,8 @@ class AudioService : MediaSessionService() {
 
     private var errorRetryCount = 0
     private var lastErrorTrackId: String? = null
+    /** Трек, у которого уже выбрасывали битую запись кэша — второй раз не поможет. */
+    private var evictedTrackId: String? = null
 
     // Пауза, поставленная НАМИ на временной потере фокуса (звонок/ассистент) —
     // только такую можно автоматически снимать на AUDIOFOCUS_GAIN. Пользовательскую
@@ -212,6 +213,7 @@ class AudioService : MediaSessionService() {
                 android.util.Log.d("VOIDPIXEL_MEDIA", "[STATE] READY — playWhenReady left untouched (${player.playWhenReady})")
                 errorRetryCount = 0
                 lastErrorTrackId = null
+                evictedTrackId = null
             }
 
             // WakeLock management: acquire during active playback, release when idle
@@ -330,6 +332,22 @@ class AudioService : MediaSessionService() {
                     return
                 }
                 // Пере-резолвы исчерпаны → проваливаемся в обычное восстановление/skip ниже.
+            }
+
+            // ── Битая запись в кэше ──
+            // Повторная подготовка читает тот же испорченный кусок и падает снова,
+            // поэтому три повтора ниже уходят впустую и трек скипается навсегда.
+            // Выбрасываем запись (один раз на трек) — тогда повтор идёт в сеть.
+            val isDamagedCache = when (error.errorCode) {
+                androidx.media3.common.PlaybackException.ERROR_CODE_IO_READ_POSITION_OUT_OF_RANGE,
+                androidx.media3.common.PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND,
+                androidx.media3.common.PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
+                androidx.media3.common.PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED -> true
+                else -> false
+            }
+            if (isDamagedCache && currentTrackId != null && currentTrackId != evictedTrackId) {
+                evictedTrackId = currentTrackId
+                MediaCacheManager.evictTrack(currentTrackId)
             }
 
             // ── SOFT ERROR RECOVERY: retry up to 3 times on the SAME track, do NOT auto-skip ──
@@ -576,16 +594,9 @@ class AudioService : MediaSessionService() {
     }
 
     private fun buildPlayer(): ExoPlayer {
-        val httpFactory = DefaultHttpDataSource.Factory()
-            .setAllowCrossProtocolRedirects(true)
-            // 30с на мёртвом маршруте = полминуты «висим» до ошибки и ретрая.
-            // 12/15с: живой CDN укладывается с запасом (буфер сглаживает),
-            // мёртвый детектится быстро → авто-ретрай/скип, музыка не встаёт.
-            .setConnectTimeoutMs(12_000)
-            .setReadTimeoutMs(15_000)
-            .setDefaultRequestProperties(mapOf(
-                "User-Agent" to "LiquidMusicGlass/1.0"
-            ))
+        // Таймауты и User-Agent — в MediaCacheManager: поток при включённом кэше
+        // идёт через его upstream, и раньше здешние значения просто не работали.
+        val httpFactory = MediaCacheManager.httpDataSourceFactory()
 
         val dataSourceFactory = StreamingDataSource.create(
             context = this,
