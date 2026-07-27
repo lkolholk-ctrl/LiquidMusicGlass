@@ -31,7 +31,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.TransformOrigin
@@ -65,8 +65,6 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
-/** Минимальная длина «инструментального» проигрыша между строками для показа точек ожидания. */
-private const val INSTRUMENTAL_GAP_MS = 4000L
 
 /** Насколько высоко поднимать активную строку: доля высоты экрана от верха (0.25–0.35 — верхняя треть). */
 private const val ACTIVE_LINE_TOP_BIAS = 0.28f
@@ -271,9 +269,17 @@ fun LyricsScreen(
             // потом плавно возвращаемся (новый drag перезапустит эффект и ожидание).
             val sinceTouch = System.currentTimeMillis() - userScrolledAt
             if (sinceTouch < USER_SCROLL_PAUSE_MS) delay(USER_SCROLL_PAUSE_MS - sinceTouch)
-            // Поднимаем активную строку в верхнюю треть (см. ACTIVE_LINE_TOP_BIAS)
-            val targetIndex = currentLineIndex.coerceAtMost((lyrics.lines.size - 1).coerceAtLeast(0))
-            val aboveCenterOffset = (screenHeightPx * ACTIVE_LINE_TOP_BIAS).toInt()
+            // Поднимаем активную строку в верхнюю треть (см. ACTIVE_LINE_TOP_BIAS).
+            // lineToItem: нулевой элемент списка — распорка шапки, поэтому индекс
+            // строки и индекс элемента не совпадают. Без сдвига список наводился
+            // на ПРЕДЫДУЩУЮ строку, и подсвеченная всегда стояла ниже якоря.
+            val lineIndex = currentLineIndex.coerceAtMost((lyrics.lines.size - 1).coerceAtLeast(0))
+            val targetIndex = lineIndex + 1
+            // Высоту берём у самого списка, а не у экрана: в split и с вырезами
+            // экранная высота не равна видимой области, и якорь промахивается.
+            val viewportPx = listState.layoutInfo.viewportSize.height
+                .takeIf { it > 0 }?.toFloat() ?: screenHeightPx
+            val aboveCenterOffset = (viewportPx * ACTIVE_LINE_TOP_BIAS).toInt()
             listState.animateScrollToItem(
                 index = targetIndex,
                 scrollOffset = -aboveCenterOffset
@@ -289,11 +295,16 @@ fun LyricsScreen(
     }
 
     // ── Colors ──
-    val boostedVibrant = remember(resolvedColors.vibrant) {
-        timeProcessor?.boostSaturation(resolvedColors.vibrant) ?: resolvedColors.vibrant
-    }
-    val boostedMuted = remember(resolvedColors.muted) {
-        timeProcessor?.boostSaturation(resolvedColors.muted) ?: resolvedColors.muted
+    // Фон здесь всегда из обложки, а не из темы приложения, поэтому цвет текста
+    // выбираем по яркости фона. Раньше он был белым намертво, и на светлой
+    // обложке (фон поднимается почти до максимальной яркости) выходило белое по
+    // белому — экран лирики про светлую тему не знал вовсе.
+    val lyricInk = remember(resolvedColors.vibrant) {
+        if (boostedCoverColor(resolvedColors.vibrant).luminance() > 0.55f) {
+            Color(0xFF101014)
+        } else {
+            Color.White
+        }
     }
 
     Box(
@@ -345,7 +356,7 @@ fun LyricsScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         CircularProgressIndicator(
-                            color = Color.White.copy(alpha = 0.5f),
+                            color = lyricInk.copy(alpha = 0.5f),
                             strokeWidth = 2.dp,
                             modifier = Modifier.size(24.dp)
                         )
@@ -359,7 +370,7 @@ fun LyricsScreen(
                     ) {
                         Text(
                             text = "No lyrics available",
-                            color = Color.White.copy(alpha = 0.5f),
+                            color = lyricInk.copy(alpha = 0.5f),
                             fontSize = 20.sp,
                             fontWeight = FontWeight.Medium
                         )
@@ -384,7 +395,7 @@ fun LyricsScreen(
                                         .padding(vertical = 40.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    WaitingDots(dotColor = Color.White, progress = interludeProgress)
+                                    WaitingDots(dotColor = lyricInk, progress = interludeProgress)
                                 }
                             }
                         }
@@ -396,7 +407,7 @@ fun LyricsScreen(
                             if (!lyrics.isSynced) {
                                 Text(
                                     text = line.text,
-                                    color = Color.White.copy(alpha = 0.82f),
+                                    color = lyricInk.copy(alpha = 0.82f),
                                     fontSize = 17.sp,
                                     fontWeight = FontWeight.Medium,
                                     fontFamily = AppFontFamily,
@@ -432,19 +443,19 @@ fun LyricsScreen(
                                 else -> 0f
                             }
 
-                            val base = duetColor ?: Color.White
+                            val base = duetColor ?: lyricInk
 
                             // Глубина списка: чем дальше строка от активной, тем сильнее
                             // растворяется (ближние читаемы, дальние — «туман»). До первой
                             // строки градации нет — весь текст ровный.
+                            // Считаем напрямую: раньше на КАЖДУЮ строку висел свой
+                            // animateFloatAsState, то есть десятки параллельных
+                            // анимаций на один список. Плавность перехода даёт
+                            // анимация цвета ниже, а отдельная анимация глубины
+                            // только грузила прокрутку.
                             val dist = if (currentLineIndex >= 0) abs(index - currentLineIndex) else 1
-                            val depthTarget = if (isCurrent || currentLineIndex < 0) 1f
+                            val depth = if (isCurrent || currentLineIndex < 0) 1f
                                 else (1f - 0.13f * (dist - 1)).coerceAtLeast(0.45f)
-                            val depth by animateFloatAsState(
-                                targetValue = depthTarget,
-                                animationSpec = tween(durationMillis = 450),
-                                label = "depth"
-                            )
 
                             val sungColor by animateColorAsState(
                                 targetValue = base.copy(alpha = if (isCurrent) 1f else 0.55f * depth),
@@ -497,7 +508,7 @@ fun LyricsScreen(
                                         contentAlignment = Alignment.Center
                                     ) {
                                         WaitingDots(
-                                            dotColor = duetColor ?: Color.White,
+                                            dotColor = duetColor ?: lyricInk,
                                             progress = interludeProgress
                                         )
                                     }
@@ -505,8 +516,11 @@ fun LyricsScreen(
                             }
                         }
 
-                        // Bottom spacer
-                        item { Spacer(Modifier.height(200.dp)) }
+                        // Нижняя распорка. 200dp не хватало: под лирикой лежит
+                        // растушёвка высотой 460dp, и последние строки физически
+                        // нельзя было поднять из-под неё — они дочитывались уже
+                        // в затемнении.
+                        item { Spacer(Modifier.height((configuration.screenHeightDp * 0.42f).dp)) }
                     }
                 }
             }
@@ -541,7 +555,7 @@ fun LyricsScreen(
             ) {
                 Text(
                     text = trackTitle,
-                    color = Color.White,
+                    color = lyricInk,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1
@@ -549,7 +563,7 @@ fun LyricsScreen(
                 Spacer(Modifier.height(2.dp))
                 Text(
                     text = trackArtist,
-                    color = Color.White.copy(alpha = 0.6f),
+                    color = lyricInk.copy(alpha = 0.6f),
                     fontSize = 13.sp,
                     maxLines = 1
                 )
@@ -804,183 +818,3 @@ internal fun LyricLineSweep(
     }
 }
 
-/**
- * ПОСИМВОЛЬНОЕ караоке с fluid color bleed — Apple Music style.
- *
- * Каждый символ плавно переходит от inactive к active через точный
- * horizontalGradient с colorStops на физических границах символов.
- *
- * Масштабирование активной строки: transformOrigin = (0f, 0.5f) —
- * строго от левого края, никакого horizontal jitter.
- *
- * @param text полный текст строки
- * @param words список слов с прогрессом (0f..1f)
- * @param activeColor цвет активной части
- * @param inactiveColor цвет неактивной части
- * @param fontSize размер шрифта
- * @param maxWidthPx максимальная ширина в пикселях
- * @param isActiveLine true для текущей строки (включает scale + bold)
- */
-@Composable
-private fun KaraokeLineFluid(
-    text: String,
-    words: List<LyricsTimeProcessor.WordToken>,
-    activeColor: Color,
-    inactiveColor: Color,
-    fontSize: androidx.compose.ui.unit.TextUnit,
-    maxWidthPx: Int,
-    isActiveLine: Boolean = true
-) {
-    if (text.isEmpty()) {
-        Text(
-            text = text,
-            color = inactiveColor,
-            style = TextStyle(
-                fontSize = fontSize,
-                fontWeight = FontWeight.Normal,
-                textAlign = TextAlign.Start,
-                lineHeight = 36.sp
-            ),
-            modifier = Modifier.fillMaxWidth(),
-            maxLines = 3,
-            softWrap = true
-        )
-        return
-    }
-
-    val textMeasurer = rememberTextMeasurer()
-    val density = LocalDensity.current
-
-    // Активная строка: bold + чуть крупнее; неактивная: normal
-    val fontWeight = if (isActiveLine) FontWeight.Bold else FontWeight.Normal
-    val effectiveFontSize = if (isActiveLine) fontSize * 1.04f else fontSize
-
-    val textStyle = TextStyle(
-        fontSize = effectiveFontSize,
-        fontWeight = fontWeight,
-        textAlign = TextAlign.Start,
-        lineHeight = 36.sp,
-        platformStyle = PlatformTextStyle(includeFontPadding = false)
-    )
-
-    // Измеряем полный текст
-    val layoutResult = remember(text, textStyle, maxWidthPx) {
-        textMeasurer.measure(
-            text = text,
-            style = textStyle,
-            constraints = Constraints(maxWidth = maxWidthPx)
-        )
-    }
-
-    // Карта: индекс символа → прогресс (0f..1f)
-    val charProgressMap = remember(text, words) {
-        val map = MutableList(text.length) { 0f }
-        var charIdx = 0
-        for (word in words) {
-            while (charIdx < text.length && text[charIdx] == ' ') {
-                charIdx++
-            }
-            for (i in word.text.indices) {
-                if (charIdx < text.length) {
-                    map[charIdx] = word.progress.coerceIn(0f, 1f)
-                    charIdx++
-                }
-            }
-        }
-        map
-    }
-
-    // Вычисляем colorStops на основе ТОЧНЫХ физических координат символов
-    val colorStops = remember(layoutResult, charProgressMap, activeColor, inactiveColor) {
-        val stops = mutableListOf<Pair<Float, Color>>()
-        val totalWidth = layoutResult.size.width.toFloat().coerceAtLeast(1f)
-        val fadePx = 2.5f // 2.5px fade zone для плавного bleed
-
-        for (i in text.indices) {
-            val bounds = try {
-                layoutResult.getBoundingBox(i)
-            } catch (_: Exception) {
-                continue
-            }
-
-            val charLeft = (bounds.left / totalWidth).coerceIn(0f, 1f)
-            val charRight = (bounds.right / totalWidth).coerceIn(0f, 1f)
-            val progress = charProgressMap.getOrElse(i) { 0f }
-
-            if (charRight <= charLeft) continue
-
-            // Граница внутри символа с fade zone
-            val boundary = charLeft + (charRight - charLeft) * progress
-            val fade = (fadePx / totalWidth).coerceAtMost((charRight - charLeft) * 0.25f)
-
-            when {
-                progress <= 0f -> {
-                    stops.add(charLeft to inactiveColor)
-                    stops.add(charRight to inactiveColor)
-                }
-                progress >= 1f -> {
-                    stops.add(charLeft to activeColor)
-                    stops.add(charRight to activeColor)
-                }
-                else -> {
-                    // Fluid bleed: active → fade → inactive
-                    stops.add(charLeft to activeColor)
-                    stops.add((boundary - fade).coerceAtLeast(charLeft) to activeColor)
-                    stops.add((boundary + fade).coerceAtMost(charRight) to inactiveColor)
-                    stops.add(charRight to inactiveColor)
-                }
-            }
-        }
-
-        // Сортируем, удаляем дубликаты по позиции
-        stops.sortBy { it.first }
-        val deduped = mutableListOf<Pair<Float, Color>>()
-        var lastPos = -1f
-        for (stop in stops) {
-            if (kotlin.math.abs(stop.first - lastPos) > 0.0001f) {
-                deduped.add(stop)
-                lastPos = stop.first
-            }
-        }
-        deduped.toTypedArray()
-    }
-
-    val brush = remember(colorStops) {
-        if (colorStops.size >= 2) {
-            Brush.horizontalGradient(colorStops = colorStops)
-        } else {
-            SolidColor(inactiveColor)
-        }
-    }
-
-    val canvasWidth = with(density) { layoutResult.size.width.toDp() }
-    val canvasHeight = with(density) { layoutResult.size.height.toDp() }
-
-    // Scale для активной строки: ТОЛЬКО от левого края
-    val scale by animateFloatAsState(
-        targetValue = if (isActiveLine) 1.04f else 1.0f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioNoBouncy,
-            stiffness = Spring.StiffnessLow
-        ),
-        label = "karaokeScale"
-    )
-
-    Canvas(
-        modifier = Modifier
-            .width(canvasWidth * scale)
-            .height(canvasHeight * scale)
-            .graphicsLayer {
-                this.scaleX = scale
-                this.scaleY = scale
-                // КРИТИЧЕСКИ ВАЖНО: масштабирование от левого края
-                transformOrigin = TransformOrigin(0f, 0.5f)
-            }
-    ) {
-        drawText(
-            textLayoutResult = layoutResult,
-            brush = brush,
-            topLeft = Offset.Zero
-        )
-    }
-}

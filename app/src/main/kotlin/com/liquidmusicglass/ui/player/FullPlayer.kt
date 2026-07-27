@@ -281,9 +281,17 @@ fun FullPlayer(
         userDragFraction = null
     }
 
+    // При включённом TalkBack контролы не прячем: три секунды — это меньше, чем
+    // нужно, чтобы дойти до кнопки озвучкой, и элемент исчезает под пальцем.
+    val touchExplorationOn = remember {
+        val am = context.getSystemService(android.content.Context.ACCESSIBILITY_SERVICE)
+            as? android.view.accessibility.AccessibilityManager
+        am?.isTouchExplorationEnabled == true
+    }
+
     // Авто-скрытие контролов поверх лирики/очереди: через 3 сек после показа прячем обратно
     LaunchedEffect(controlsVisible, showLyrics, showQueue) {
-        if ((showLyrics || showQueue) && controlsVisible) {
+        if ((showLyrics || showQueue) && controlsVisible && !touchExplorationOn) {
             kotlinx.coroutines.delay(3000L)
             controlsVisible = false
         }
@@ -604,22 +612,18 @@ fun FullPlayer(
             splitMode = isLandscape
         )
 
-        // ═══ Controls ═══
-        // Видны всегда, когда лирика и очередь закрыты. Когда открыты — только
-        // если controlsVisible (по тапу), и автоматически прячутся через 3 сек.
-        AnimatedVisibility(
-            visible = controlsMounted && ((!showLyrics && !showQueue) || controlsVisible),
-            enter = fadeIn(tween(250)),
-            exit = fadeOut(tween(250))
-        ) {
-        Box(modifier = Modifier.fillMaxSize()) {
-        // Подложка под контролами — только когда открыта лирика или очередь.
-        // Цвет — из палитры обложки (не чёрный), чтобы совпадал с фоном.
+        // ═══ Нижняя растушёвка под лирикой/очередью ═══
+        // Раньше жила ВНУТРИ блока контролов: контролы прятались — и текст
+        // упирался прямо в кромку экрана. Теперь слой самостоятельный, а от
+        // контролов зависит только плотность: под ними нужна подложка, без них
+        // достаточно мягкого угасания.
         if (showLyrics || showQueue) {
-            // Цвет обложки — светлее (меньше чёрного), непрозрачный книзу.
-            // dominant теперь сочный из центрального экстрактора (vivid) — тянем к
-            // чёрному чуть меньше (0.3→0.24), чтобы под контролами был цвет, не пятно.
             val scrimColor = lerp(albumColors.dominant, Color.Black, 0.24f)
+            val scrimDepth by animateFloatAsState(
+                targetValue = if (controlsVisible) 1f else 0.45f,
+                animationSpec = tween(250),
+                label = "bottomScrim"
+            )
             Box(
                 modifier = Modifier
                     // Landscape: подложка только под ЛЕВОЙ половиной (там контролы);
@@ -634,12 +638,22 @@ fun FullPlayer(
                     .background(
                         Brush.verticalGradient(
                             0.00f to Color.Transparent,
-                            0.32f to scrimColor.copy(alpha = 0.9f),
-                            1.00f to scrimColor
+                            0.32f to scrimColor.copy(alpha = 0.9f * scrimDepth),
+                            1.00f to scrimColor.copy(alpha = scrimDepth)
                         )
                     )
             )
         }
+
+        // ═══ Controls ═══
+        // Видны всегда, когда лирика и очередь закрыты. Когда открыты — только
+        // если controlsVisible (по тапу), и автоматически прячутся через 3 сек.
+        AnimatedVisibility(
+            visible = controlsMounted && ((!showLyrics && !showQueue) || controlsVisible),
+            enter = fadeIn(tween(250)),
+            exit = fadeOut(tween(250))
+        ) {
+        Box(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
                 .then(
