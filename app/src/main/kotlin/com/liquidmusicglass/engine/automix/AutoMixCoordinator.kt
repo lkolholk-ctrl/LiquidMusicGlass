@@ -104,7 +104,9 @@ object AutoMixCoordinator {
         } catch (_: Throwable) { return }
 
         val feat = try {
-            ctrl.analyzeTrackPair(curUri, nextUri, durA)
+            // Длительность B берём из каталога: иначе анализ полез бы за ней в
+            // сеть по временной ссылке (лишнее соединение, и оно может отказать).
+            ctrl.analyzeTrackPair(curUri, nextUri, durA, next.durationMs)
         } catch (_: Throwable) { return }
         if (!feat.readyForTransition) return
 

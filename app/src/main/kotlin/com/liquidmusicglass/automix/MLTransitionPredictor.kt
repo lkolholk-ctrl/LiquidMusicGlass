@@ -189,15 +189,23 @@ class MLTransitionPredictor(context: Context) {
         return buffer
     }
 
+    /**
+     * Предсказание для пары треков, или null, если фичи собрать не удалось.
+     *
+     * null означает «данных не было», а не «модель решила не сводить»: рецепт,
+     * посчитанный на тишине, тихо портит переход, поэтому вызывающий обязан в
+     * этом случае откатиться на обычный свод, а не подставлять значения по
+     * умолчанию. Причина отказа пишется в DebugLog внутри FeatureExtractor.
+     */
     fun predictPair(
         context: Context,
         trackAUri: Uri,
         trackBUri: Uri,
         trackADurationMs: Long
-    ): Prediction {
+    ): Prediction? {
         val features = FeatureExtractor.extractPairFromUri(
             context, trackAUri, trackBUri, trackADurationMs
-        )
+        ) ?: return null
 
         val bufferA = melToByteBuffer(features.melA)
         val bufferB = melToByteBuffer(features.melB)

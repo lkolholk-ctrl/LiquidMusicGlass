@@ -27,6 +27,39 @@ object FeatureExtractor {
     private const val AUX_PER_TRACK = 16  // BPM(1) + chroma(12) + energy(1) + centroid(1) + onset(1)
 
     /**
+     * Почему декод сегмента не дал звука.
+     *
+     * Раньше все эти ветки возвращали массив тишины, и молча: модель честно
+     * считала мел-спектрограмму от −80 dB и выдавала рецепт, построенный на
+     * пустоте. Внешне это выглядело как «модель запустилась, но работу не
+     * сделала» — и на стриминге происходило постоянно, потому что декодер
+     * открывал источник ЗАНОВО по временной ссылке, которая к тому моменту
+     * могла истечь.
+     *
+     * Теперь причина называется явно и доходит до вызывающего, чтобы рецепт на
+     * мусорных данных вообще не применялся.
+     */
+    enum class DecodeFailure {
+        /** `setDataSource` не открыл источник: истёкшая ссылка, нет сети, нет прав. */
+        SOURCE_UNAVAILABLE,
+
+        /** В контейнере нет аудио-дорожки (или это не медиа-файл). */
+        NO_AUDIO_TRACK,
+
+        /** Для MIME контейнера нет декодера на этом устройстве. */
+        NO_DECODER,
+
+        /** Декодер отработал, но не отдал ни одного сэмпла. */
+        EMPTY_OUTPUT
+    }
+
+    /** Итог декода сегмента: либо сэмплы, либо названная причина отказа. */
+    sealed class SegmentResult {
+        data class Success(val samples: FloatArray) : SegmentResult()
+        data class Failure(val reason: DecodeFailure, val detail: String = "") : SegmentResult()
+    }
+
+    /**
      * Результат извлечения фичей для пары треков.
      */
     data class PairFeatures(
@@ -44,21 +77,36 @@ object FeatureExtractor {
 
     /**
      * Извлечь фичи для пары треков: конец A + начало B.
+     *
+     * Возвращает null, если хотя бы один сегмент не удалось декодировать: рецепт
+     * на тишине хуже отсутствия рецепта — он тихо портит переход, тогда как
+     * отсутствие честно откатывает на обычный свод. Причина отказа уходит в
+     * DebugLog.
      */
     fun extractPairFromUri(
         context: Context,
         trackAUri: Uri,
         trackBUri: Uri,
         trackADurationMs: Long
-    ): PairFeatures {
+    ): PairFeatures? {
         // Конец трека A
-        val samplesA = decodePcmSegment(context, trackAUri, fromEnd = true, trackDurationMs = trackADurationMs)
+        val resultA = decodePcmSegment(context, trackAUri, fromEnd = true, trackDurationMs = trackADurationMs)
+        if (resultA is SegmentResult.Failure) {
+            logDecodeFailure("A", resultA)
+            return null
+        }
+        val samplesA = (resultA as SegmentResult.Success).samples
         val melA = MelSpectrogram.generate(samplesA)
         val normalizedA = normalizeFrames(melA)
         val auxA = computeAuxFeatures(samplesA)
 
         // Начало трека B
-        val samplesB = decodePcmSegment(context, trackBUri, fromEnd = false, trackDurationMs = 0L)
+        val resultB = decodePcmSegment(context, trackBUri, fromEnd = false, trackDurationMs = 0L)
+        if (resultB is SegmentResult.Failure) {
+            logDecodeFailure("B", resultB)
+            return null
+        }
+        val samplesB = (resultB as SegmentResult.Success).samples
         val melB = MelSpectrogram.generate(samplesB)
         val normalizedB = normalizeFrames(melB)
         val auxB = computeAuxFeatures(samplesB)
@@ -95,16 +143,33 @@ object FeatureExtractor {
     /**
      * Упрощённый вариант: извлечь фичи только для начала трека B
      * (для обратной совместимости, когда трек A ещё не закончился
-     * и мы анализируем заранее).
+     * и мы анализируем заранее). null — сегмент не декодировался.
      */
     fun extractSingleFromUri(
         context: Context,
         uri: Uri
-    ): Array<Array<FloatArray>> {
-        val samples = decodePcmSegment(context, uri, fromEnd = false, trackDurationMs = 0L)
+    ): Array<Array<FloatArray>>? {
+        val result = decodePcmSegment(context, uri, fromEnd = false, trackDurationMs = 0L)
+        if (result is SegmentResult.Failure) {
+            logDecodeFailure("single", result)
+            return null
+        }
+        val samples = (result as SegmentResult.Success).samples
         val melFrames = MelSpectrogram.generate(samples)
         val normalized = normalizeFrames(melFrames)
         return Array(1) { normalized }
+    }
+
+    /**
+     * Причина отказа — в DebugLog: экран диагностики на телефоне доступен, а
+     * logcat нет. Тег совпадает с остальными записями AutoMix, чтобы искать
+     * одним фильтром.
+     */
+    private fun logDecodeFailure(which: String, failure: SegmentResult.Failure) {
+        val detail = if (failure.detail.isEmpty()) "" else " (${failure.detail})"
+        com.liquidmusicglass.debug.DebugLog.add(
+            "AutoMix.decode FAIL $which: ${failure.reason}$detail"
+        )
     }
 
     // ──────────────────────────────────────
@@ -365,17 +430,22 @@ object FeatureExtractor {
         uri: Uri,
         fromEnd: Boolean,
         trackDurationMs: Long
-    ): FloatArray {
+    ): SegmentResult {
         val targetRate = MelSpectrogram.SAMPLE_RATE
         val targetSamples = MelSpectrogram.SEGMENT_DURATION_SEC * targetRate
-        val silence = FloatArray(targetSamples)
 
         val extractor = MediaExtractor()
         try {
             extractor.setDataSource(context, uri, null)
-        } catch (_: Exception) {
+        } catch (e: Exception) {
             extractor.release()
-            return silence
+            // Самая частая ветка на стриминге: временная ссылка истекла, сети нет,
+            // либо это HLS-плейлист вместо медиа. Раньше здесь молча возвращалась
+            // тишина, и модель считала фичи от неё.
+            return SegmentResult.Failure(
+                DecodeFailure.SOURCE_UNAVAILABLE,
+                "${e.javaClass.simpleName}: ${e.message ?: "нет описания"}"
+            )
         }
 
         var trackIndex = -1
@@ -394,7 +464,10 @@ object FeatureExtractor {
         val mime = format?.getString(MediaFormat.KEY_MIME)
         if (trackIndex == -1 || format == null || mime == null) {
             extractor.release()
-            return silence
+            return SegmentResult.Failure(
+                DecodeFailure.NO_AUDIO_TRACK,
+                "дорожек=${extractor.trackCount}"
+            )
         }
 
         extractor.selectTrack(trackIndex)
@@ -426,17 +499,19 @@ object FeatureExtractor {
             }
             val raw = decodeRawPcm(extractor, channels, sourceRate)
             extractor.release()
-            if (raw.isEmpty()) return silence
+            if (raw.isEmpty()) {
+                return SegmentResult.Failure(DecodeFailure.EMPTY_OUTPUT, "audio/raw, 0 сэмплов")
+            }
             val resampledRaw = if (sourceRate == targetRate) raw
                 else resampleLinear(raw, sourceRate, targetRate)
-            return fitToExactSamples(resampledRaw, targetSamples)
+            return SegmentResult.Success(fitToExactSamples(resampledRaw, targetSamples))
         }
 
         val codec = try {
             MediaCodec.createDecoderByType(mime)
-        } catch (_: Exception) {
+        } catch (e: Exception) {
             extractor.release()
-            return silence
+            return SegmentResult.Failure(DecodeFailure.NO_DECODER, "mime=$mime")
         }
 
         // Берём небольшой запас по длине (декодер может отдать чуть больше).
@@ -528,7 +603,12 @@ object FeatureExtractor {
             extractor.release()
         }
 
-        if (monoCount == 0) return silence
+        if (monoCount == 0) {
+            return SegmentResult.Failure(
+                DecodeFailure.EMPTY_OUTPUT,
+                "декодер не отдал сэмплов, mime=$mime"
+            )
+        }
 
         val decoded = mono.copyOf(monoCount)
         val resampled = if (sourceRate == targetRate) {
@@ -537,7 +617,7 @@ object FeatureExtractor {
             resampleLinear(decoded, sourceRate, targetRate)
         }
 
-        return fitToExactSamples(resampled, targetSamples)
+        return SegmentResult.Success(fitToExactSamples(resampled, targetSamples))
     }
 
     /**

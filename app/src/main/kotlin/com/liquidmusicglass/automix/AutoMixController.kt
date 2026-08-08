@@ -59,11 +59,18 @@ class AutoMixController(
 
     /**
      * Полный анализ пары треков — Pro версия.
+     *
+     * @param nextTrackDurationMs длительность B, если она известна вызывающему
+     *        (из каталога/метаданных). Передавать её стоит всегда: иначе
+     *        [estimateDuration] открывает источник ЗАНОВО — на стриминге это
+     *        лишнее сетевое соединение по временной ссылке, которая может уже
+     *        истечь, и тогда длительность всё равно неизвестна.
      */
     suspend fun analyzeTrackPair(
         currentTrackUri: Uri,
         nextTrackUri: Uri,
-        currentTrackDurationMs: Long
+        currentTrackDurationMs: Long,
+        nextTrackDurationMs: Long = 0L
     ): TrackFeatures = withContext(analysisDispatcher) {
 
         // 1. Декодируем и анализируем оба трека
@@ -71,7 +78,11 @@ class AutoMixController(
         // F7: подстановка длительности A вместо неизвестной длительности B сбивала
         // seek внутри анализа B (при durB > 60 c он прыгает на 20% трека).
         // Неизвестна — пусть будет 0: гейт длинного трека просто не сработает.
-        val nextDurationMs = estimateDuration(nextTrackUri) ?: 0L
+        val nextDurationMs = if (nextTrackDurationMs > 0L) {
+            nextTrackDurationMs
+        } else {
+            estimateDuration(nextTrackUri) ?: 0L
+        }
         val energyB = getOrAnalyze(nextTrackUri, nextDurationMs)
 
         // 2. ML предсказание (если модель доступна)
@@ -254,7 +265,10 @@ class AutoMixController(
      *   MelSpectrogram.SAMPLE_RATE (с ресэмплингом при необходимости).
      *
      * При любой ошибке возвращает короткий пустой буфер — анализ не падает,
-     * просто получит «тишину» (вызывающий код это переживает).
+     * просто получит «тишину» (вызывающий код это переживает). Но КАЖДЫЙ такой
+     * случай теперь пишется в DebugLog: молчаливая тишина здесь ровно так же
+     * портила анализ, как на ML-пути, только заметить её было нечем — энергия
+     * тихого трека и энергия неудавшегося декода выглядят одинаково.
      */
     private fun decodePcmForAnalysis(uri: Uri, durationMs: Long): FloatArray {
         val targetRate = MelSpectrogram.SAMPLE_RATE
@@ -263,8 +277,12 @@ class AutoMixController(
         val extractor = MediaExtractor()
         try {
             extractor.setDataSource(appContext, uri, null)
-        } catch (_: Exception) {
+        } catch (e: Exception) {
             extractor.release()
+            DebugLog.add(
+                "AutoMix.energy FAIL источник недоступен: " +
+                    "${e.javaClass.simpleName}: ${e.message ?: "нет описания"}"
+            )
             return fallback
         }
 
@@ -283,7 +301,9 @@ class AutoMixController(
 
         val format = inputFormat
         if (trackIndex == -1 || format == null) {
+            val trackCount = extractor.trackCount
             extractor.release()
+            DebugLog.add("AutoMix.energy FAIL нет аудио-дорожки (дорожек=$trackCount)")
             return fallback
         }
 
@@ -292,6 +312,7 @@ class AutoMixController(
         val mime = format.getString(MediaFormat.KEY_MIME)
         if (mime == null) {
             extractor.release()
+            DebugLog.add("AutoMix.energy FAIL у дорожки нет MIME")
             return fallback
         }
 
@@ -315,6 +336,7 @@ class AutoMixController(
             MediaCodec.createDecoderByType(mime)
         } catch (_: Exception) {
             extractor.release()
+            DebugLog.add("AutoMix.energy FAIL нет декодера для mime=$mime")
             return fallback
         }
 
@@ -425,7 +447,10 @@ class AutoMixController(
             extractor.release()
         }
 
-        if (monoCount == 0) return fallback
+        if (monoCount == 0) {
+            DebugLog.add("AutoMix.energy FAIL декодер не отдал сэмплов, mime=$mime")
+            return fallback
+        }
 
         val decoded = mono.copyOf(monoCount)
         return if (sourceRate == targetRate) {
