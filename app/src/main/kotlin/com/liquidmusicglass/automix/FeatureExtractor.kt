@@ -6,6 +6,7 @@ import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.net.Uri
+import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.abs
@@ -25,6 +26,19 @@ object FeatureExtractor {
 
     private const val N_CHROMA = 12
     private const val AUX_PER_TRACK = 16  // BPM(1) + chroma(12) + energy(1) + centroid(1) + onset(1)
+
+    // ── Вырезание сегмента из кэша ──
+    // Байт на секунду точно не известен (VBR, разные битрейты), поэтому считаем
+    // его от РЕАЛЬНОЙ длительности трека: bytesPerSec = contentLength / durationSec.
+    // Ориентир «типового трека» тут не годится — на 200-секундном треке он давал
+    // покрытие 0.9x, то есть куска не хватало даже на нужные 10 секунд звука.
+    private const val SEGMENT_WITH_MARGIN_SEC = 20L       // 10 c нужных + запас на VBR
+    private const val MIN_SEGMENT_BYTES = 512L * 1024L    // не меньше 512 КБ
+    private const val FALLBACK_TRACK_SEC = 240L           // если длительность неизвестна
+    // Запас на ID3-тег в начале файла: в реальном треке пользователя тег с
+    // обложкой занимал 630 КБ (≈14 c эквивалента), и без этого запаса вырезанный
+    // кусок почти целиком оказался бы тегами, а не звуком.
+    private const val MAX_ID3_BYTES = 1024L * 1024L
 
     /**
      * Почему декод сегмента не дал звука.
@@ -82,15 +96,24 @@ object FeatureExtractor {
      * на тишине хуже отсутствия рецепта — он тихо портит переход, тогда как
      * отсутствие честно откатывает на обычный свод. Причина отказа уходит в
      * DebugLog.
+     *
+     * @param trackAId,trackBId идентификаторы треков. Если заданы и трек лежит в
+     *        кэше, сегмент читается С ДИСКА — без сети, без второго соединения к
+     *        CDN и без риска, что временная ссылка истекла. Именно сетевой путь
+     *        был причиной того, что на стриминге модель считала фичи от тишины.
      */
     fun extractPairFromUri(
         context: Context,
         trackAUri: Uri,
         trackBUri: Uri,
-        trackADurationMs: Long
+        trackADurationMs: Long,
+        trackAId: String? = null,
+        trackBId: String? = null
     ): PairFeatures? {
         // Конец трека A
-        val resultA = decodePcmSegment(context, trackAUri, fromEnd = true, trackDurationMs = trackADurationMs)
+        val resultA = decodeSegmentPreferCache(
+            context, trackAId, trackAUri, fromEnd = true, trackDurationMs = trackADurationMs
+        )
         if (resultA is SegmentResult.Failure) {
             logDecodeFailure("A", resultA)
             return null
@@ -101,7 +124,9 @@ object FeatureExtractor {
         val auxA = computeAuxFeatures(samplesA)
 
         // Начало трека B
-        val resultB = decodePcmSegment(context, trackBUri, fromEnd = false, trackDurationMs = 0L)
+        val resultB = decodeSegmentPreferCache(
+            context, trackBId, trackBUri, fromEnd = false, trackDurationMs = 0L
+        )
         if (resultB is SegmentResult.Failure) {
             logDecodeFailure("B", resultB)
             return null
@@ -170,6 +195,111 @@ object FeatureExtractor {
         com.liquidmusicglass.debug.DebugLog.add(
             "AutoMix.decode FAIL $which: ${failure.reason}$detail"
         )
+    }
+
+    /**
+     * Сегмент из КЭША, если он там есть; иначе — прежний путь по URI.
+     *
+     * Порядок именно такой: кэш не может истечь, не открывает второе соединение и
+     * не делает range-запрос к чужому CDN. Префетч (preloadLeadSeconds, 30..90 c)
+     * кладёт следующий трек на диск целиком, а текущий к концу воспроизведения
+     * уже там — значит для анализа пары обычно доступны оба.
+     *
+     * Сетевой фолбэк оставлен осознанно: кэш может быть выключен пользователем
+     * (размер 0), префетч мог не успеть, LRU мог вытеснить трек. Тогда работает
+     * старый путь — с честными причинами отказа из батча 1.
+     */
+    private fun decodeSegmentPreferCache(
+        context: Context,
+        trackId: String?,
+        uri: Uri,
+        fromEnd: Boolean,
+        trackDurationMs: Long
+    ): SegmentResult {
+        if (trackId != null) {
+            val cached = decodeSegmentFromCache(context, trackId, fromEnd, trackDurationMs)
+            if (cached != null) {
+                return cached
+            }
+        }
+        return decodePcmSegment(context, uri, fromEnd, trackDurationMs)
+    }
+
+    /**
+     * Пытается взять сегмент из дискового кэша media3.
+     *
+     * @return null, если кэш недоступен или нужных байт в нём нет — это не ошибка,
+     *         а сигнал «пробуй сеть». Ошибки самого декода возвращаются как
+     *         SegmentResult.Failure.
+     */
+    private fun decodeSegmentFromCache(
+        context: Context,
+        trackId: String,
+        fromEnd: Boolean,
+        trackDurationMs: Long
+    ): SegmentResult? {
+        val cacheManager = com.liquidmusicglass.engine.MediaCacheManager
+        val contentLength = cacheManager.cachedContentLength(trackId)
+        if (contentLength <= 0L) {
+            return null // длина неизвестна — трека в кэше нет
+        }
+
+        // Сколько байт вырезать. Считаем от фактической длительности трека: на VBR
+        // и разных битрейтах это единственная честная оценка. Длительность знает
+        // только вызывающий (для хвоста A она передана; для головы B её нет —
+        // тогда берём ориентир).
+        val durationSec = if (trackDurationMs > 0L) trackDurationMs / 1000L else FALLBACK_TRACK_SEC
+        val bytesPerSec = (contentLength / durationSec.coerceAtLeast(1L)).coerceAtLeast(1L)
+
+        val position: Long
+        val length: Long
+        if (fromEnd) {
+            // ХВОСТ. Вырезаем ровно нужные секунды с конца и НЕ больше: декодер
+            // читает кусок с начала, поэтому кусок на 20 c дал бы секунды −20..−10,
+            // то есть не конец трека, а середину — ошибка ровно на длину запаса.
+            val tailBytes = (bytesPerSec * MelSpectrogram.SEGMENT_DURATION_SEC)
+                .coerceAtLeast(MIN_SEGMENT_BYTES)
+                .coerceAtMost(contentLength)
+            position = (contentLength - tailBytes).coerceAtLeast(0L)
+            length = contentLength - position
+        } else {
+            // ГОЛОВА. Здесь запас обязателен, причём большой: в начале mp3 лежит
+            // ID3-тег с обложкой, и он бывает огромным — в реальном файле
+            // пользователя 630 КБ, то есть 14 с эквивалента. Без запаса кусок
+            // почти целиком ушёл бы в теги, и до звука дело не дошло.
+            position = 0L
+            length = (bytesPerSec * SEGMENT_WITH_MARGIN_SEC + MAX_ID3_BYTES)
+                .coerceAtLeast(MIN_SEGMENT_BYTES)
+                .coerceAtMost(contentLength)
+        }
+
+        val available = cacheManager.cachedBytes(trackId, position, length)
+        if (available < length) {
+            com.liquidmusicglass.debug.DebugLog.add(
+                "AutoMix.cache MISS ${if (fromEnd) "A" else "B"} id=$trackId " +
+                    "есть=$available нужно=$length → пробуем сеть"
+            )
+            return null
+        }
+
+        val tmp = File(context.cacheDir, "automix_seg_${if (fromEnd) "a" else "b"}.bin")
+        return try {
+            if (!cacheManager.extractCachedRangeToFile(trackId, position, length, tmp)) {
+                return null
+            }
+            com.liquidmusicglass.debug.DebugLog.add(
+                "AutoMix.cache HIT ${if (fromEnd) "A" else "B"} id=$trackId байт=$length"
+            )
+            // Хвост читаем с самого начала вырезанного куска: он и есть конец трека.
+            decodePcmSegment(
+                context,
+                Uri.fromFile(tmp),
+                fromEnd = false,
+                trackDurationMs = 0L
+            )
+        } finally {
+            runCatching { tmp.delete() }
+        }
     }
 
     // ──────────────────────────────────────

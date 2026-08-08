@@ -65,12 +65,17 @@ class AutoMixController(
      *        [estimateDuration] открывает источник ЗАНОВО — на стриминге это
      *        лишнее сетевое соединение по временной ссылке, которая может уже
      *        истечь, и тогда длительность всё равно неизвестна.
+     * @param currentTrackId,nextTrackId идентификаторы треков. С ними анализ
+     *        читает сегменты из дискового кэша вместо сети — см.
+     *        FeatureExtractor.decodeSegmentPreferCache.
      */
     suspend fun analyzeTrackPair(
         currentTrackUri: Uri,
         nextTrackUri: Uri,
         currentTrackDurationMs: Long,
-        nextTrackDurationMs: Long = 0L
+        nextTrackDurationMs: Long = 0L,
+        currentTrackId: String? = null,
+        nextTrackId: String? = null
     ): TrackFeatures = withContext(analysisDispatcher) {
 
         // 1. Декодируем и анализируем оба трека
@@ -90,7 +95,10 @@ class AutoMixController(
             DebugLog.add("AutoMix.predict SKIP (model not loaded)")
             null
         } else try {
-            predictor?.predictPair(appContext, currentTrackUri, nextTrackUri, currentTrackDurationMs)
+            predictor?.predictPair(
+                appContext, currentTrackUri, nextTrackUri, currentTrackDurationMs,
+                currentTrackId, nextTrackId
+            )
         } catch (t: Throwable) {
             DebugLog.add("AutoMix.predict FAILED ${t.javaClass.simpleName}: ${t.message}")
             null

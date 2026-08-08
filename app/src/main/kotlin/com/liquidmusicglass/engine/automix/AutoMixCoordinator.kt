@@ -106,7 +106,19 @@ object AutoMixCoordinator {
         val feat = try {
             // Длительность B берём из каталога: иначе анализ полез бы за ней в
             // сеть по временной ссылке (лишнее соединение, и оно может отказать).
-            ctrl.analyzeTrackPair(curUri, nextUri, durA, next.durationMs)
+            //
+            // id передаём только для онлайн-треков: по ним анализ читает сегменты
+            // из дискового кэша (префетч уже положил их туда целиком), и сеть не
+            // нужна вовсе. У локальных файлов кэша нет — там прежний путь по URI,
+            // он и так работает с диска.
+            ctrl.analyzeTrackPair(
+                currentTrackUri = curUri,
+                nextTrackUri = nextUri,
+                currentTrackDurationMs = durA,
+                nextTrackDurationMs = next.durationMs,
+                currentTrackId = current.id.takeIf { current.isOnlineTrack },
+                nextTrackId = next.id.takeIf { next.isOnlineTrack }
+            )
         } catch (_: Throwable) { return }
         if (!feat.readyForTransition) return
 

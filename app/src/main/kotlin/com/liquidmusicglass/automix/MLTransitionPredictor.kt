@@ -201,10 +201,12 @@ class MLTransitionPredictor(context: Context) {
         context: Context,
         trackAUri: Uri,
         trackBUri: Uri,
-        trackADurationMs: Long
+        trackADurationMs: Long,
+        trackAId: String? = null,
+        trackBId: String? = null
     ): Prediction? {
         val features = FeatureExtractor.extractPairFromUri(
-            context, trackAUri, trackBUri, trackADurationMs
+            context, trackAUri, trackBUri, trackADurationMs, trackAId, trackBId
         ) ?: return null
 
         val bufferA = melToByteBuffer(features.melA)

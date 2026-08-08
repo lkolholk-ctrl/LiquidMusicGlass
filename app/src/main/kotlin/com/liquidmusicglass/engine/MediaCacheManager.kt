@@ -212,6 +212,100 @@ object MediaCacheManager {
     fun getCacheDataSourceFactory(): CacheDataSource.Factory? =
         if (isCacheEnabled()) cacheDataSourceFactory else null
 
+    // ── Чтение закэшированного аудио для анализа (AutoMix) ──
+    //
+    // Модели автомикса нужны хвост трека A и голова трека B. Раньше она открывала
+    // источник ЗАНОВО по временной ссылке — на стриминге это отваливалось (ссылка
+    // истекла, второе соединение к CDN, range-запрос по чужому URL), и декодер
+    // молча отдавал тишину. Но префетч уже кладёт трек на диск ЦЕЛИКОМ, поэтому
+    // те же байты можно взять локально и вообще без сети.
+
+    /** Ключ кэша трека — тот же, что использует плеер и префетч. */
+    fun cacheKeyFor(trackId: String): String = "icm_$trackId"
+
+    /**
+     * Сколько байт трека реально лежит в кэше начиная с [position].
+     *
+     * Нужно СПРАШИВАТЬ ДО анализа: префетч мог не успеть на слабой сети, а LRU —
+     * вытеснить трек на длинном плейлисте. Ноль означает «данных нет», и тогда
+     * рецепта быть не должно (лучше обычный свод, чем свод по тишине).
+     */
+    fun cachedBytes(trackId: String, position: Long, length: Long): Long {
+        val c = cache ?: return 0L
+        return try {
+            c.getCachedBytes(cacheKeyFor(trackId), position, length)
+        } catch (_: Throwable) {
+            0L
+        }
+    }
+
+    /** Известная кэшу полная длина ресурса, или -1 если неизвестна. */
+    fun cachedContentLength(trackId: String): Long {
+        val c = cache ?: return -1L
+        return try {
+            c.getContentMetadata(cacheKeyFor(trackId)).get(
+                androidx.media3.datasource.cache.ContentMetadata.KEY_CONTENT_LENGTH,
+                -1L
+            )
+        } catch (_: Throwable) {
+            -1L
+        }
+    }
+
+    /**
+     * Вычитывает диапазон трека ИЗ КЭША в файл, без обращения к сети.
+     *
+     * Источник создаётся через [CacheDataSource.Factory.createDataSourceForRemovingDownload]:
+     * у него upstream принудительно null, то есть уйти в сеть он физически не
+     * может — ровно то поведение, которое нужно анализу. Если нужных байт в кэше
+     * нет, чтение честно оборвётся, а не полезет докачивать.
+     *
+     * @return true, если файл записан и непустой.
+     */
+    fun extractCachedRangeToFile(
+        trackId: String,
+        position: Long,
+        length: Long,
+        dest: File
+    ): Boolean {
+        val factory = getCacheDataSourceFactory() ?: return false
+        val key = cacheKeyFor(trackId)
+        val source = factory.createDataSourceForRemovingDownload()
+        val spec = androidx.media3.datasource.DataSpec.Builder()
+            .setUri(android.net.Uri.parse("cache://$key"))
+            .setKey(key)
+            .setPosition(position)
+            .setLength(length)
+            .build()
+        var opened = false
+        return try {
+            source.open(spec)
+            opened = true
+            dest.outputStream().use { out ->
+                val buf = ByteArray(64 * 1024)
+                var total = 0L
+                while (true) {
+                    val n = source.read(buf, 0, buf.size)
+                    if (n == androidx.media3.common.C.RESULT_END_OF_INPUT) break
+                    if (n <= 0) break
+                    out.write(buf, 0, n)
+                    total += n
+                }
+                total > 0L
+            }
+        } catch (e: Throwable) {
+            android.util.Log.w(
+                "MediaCacheManager",
+                "extractCachedRange failed for $trackId: ${e.javaClass.simpleName}: ${e.message}"
+            )
+            false
+        } finally {
+            if (opened) {
+                try { source.close() } catch (_: Throwable) {}
+            }
+        }
+    }
+
     // ── Предзагрузка аудио в кэш ──
     @Volatile private var activePreCache: androidx.media3.datasource.cache.CacheWriter? = null
     @Volatile private var activePreCacheKey: String? = null
